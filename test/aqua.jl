@@ -1,3 +1,3 @@
-using Aqua, AlgebraicTemplate 
+using Aqua, CellularSheaves 
 
-Aqua.test_all(AlgebraicTemplate, ambiguities=false,)
+Aqua.test_all(CellularSheaves, ambiguities=false,)

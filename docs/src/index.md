@@ -1,7 +1,7 @@
-# AlgebraicTemplate.jl
+# CellularSheaves.jl
 
 ```@meta
-CurrentModule = AlgebraicTemplate
+CurrentModule = CellularSheaves
 ```
 
-`AlgebraicTemplate.jl` is a Julia library for...
+`CellularSheaves.jl` is a Julia library for...
