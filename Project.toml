@@ -4,3 +4,5 @@ license = "MIT"
 authors = ["Tyler Hanks <teh.hanks@gmail.com>"]
 version = "0.0.1"
 
+[compat]
+julia = "1.8"
