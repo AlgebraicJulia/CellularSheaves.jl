@@ -4,6 +4,7 @@ using Test
   include("aqua.jl")
 end
 
-@testset "Core" begin
-  include("core.jl")
+@testset "Network Sheaves" begin
+  include("network_sheaves/ADT.jl")
+  include("network_sheaves/Parser.jl")
 end

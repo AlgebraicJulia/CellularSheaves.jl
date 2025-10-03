@@ -1,13 +1,11 @@
-""" Some description of ths package
+""" CellularSheaves.jl is a Julia package for working with cellular sheaves and sheaf Laplacians.
 """
 module CellularSheaves
 
-export hello
+using Reexport
 
-""" hello(name::String)
+include("network_sheaves/NetworkSheaves.jl")
 
-Returns the string "Hello, <name>!" where `<name>` is replaced with the provided parameter
-"""
-hello(name::String) = string("Hello, ", name, "!")
+@reexport using .NetworkSheaves
 
 end
