@@ -1,12 +1,6 @@
 name = "CellularSheaves"
-uuid = "BBE41592-74B8-4681-9D9C-4481E725304D"
+uuid = "bbe41592-74b8-4681-9d9c-4481e725304d"
 license = "MIT"
-authors = ["AlgebraicJulia Developer <email@algebraicjulia.org>"]
+authors = ["Tyler Hanks <teh.hanks@gmail.com>"]
 version = "0.0.1"
 
-[deps]
-Catlab = "134e5e36-593f-5add-ad60-77f754baafbe"
-
-[compat]
-Catlab = "^0.16"
-julia = "1.6"
