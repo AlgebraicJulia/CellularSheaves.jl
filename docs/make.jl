@@ -43,6 +43,7 @@ makedocs(
     "CellularSheaves.jl"=>"index.md",
     "Examples"=>Any[
       "generated/literate_example.md",
+      "generated/cycle_graph_sheaf.md",
     ],
     "Library Reference"=>"api.md",
   ]

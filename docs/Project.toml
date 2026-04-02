@@ -1,4 +1,5 @@
 [deps]
-CellularSheaves = "BBE41592-74B8-4681-9D9C-4481E725304D"
+BlockArrays = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
+CellularSheaves = "bbe41592-74b8-4681-9d9c-4481e725304d"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
