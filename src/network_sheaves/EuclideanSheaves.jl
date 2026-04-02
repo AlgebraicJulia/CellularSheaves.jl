@@ -177,11 +177,13 @@ function energy_function(s::EuclideanSheaf)
     return energy_function(sheaf_laplacian_matrix(s))
 end
 
-function nearest_global_section(s::EuclideanSheaf, x; verbose=false)
+"""nearest_global_section_cg
+
+Iterative Krylov (CG) backend. Returns a BlockArray global section.
+"""
+function nearest_global_section_cg(s::EuclideanSheaf, x; verbose=false)
     d = coboundary_map(s)
-
     eL = LinearOperator(d) * LinearOperator(d')
-
     b = d * x
 
     y, stats = cg(eL, Array(b))
@@ -190,6 +192,67 @@ function nearest_global_section(s::EuclideanSheaf, x; verbose=false)
     end
 
     return BlockArray(x - d' * y, s.vertex_stalks)
+end
+
+"""nearest_global_section_ldl
+
+Deterministic direct backend using LDL factorization on the symmetric
+edge-space operator E = d*d'. This handles symmetric indefinite matrices
+without Tikhonov regularization. Falls back to pinv if LDL fails.
+"""
+function nearest_global_section_ldl(s::EuclideanSheaf, x; verbose=false)
+    d = coboundary_map(s)
+    E = d * d'
+    b = d * x
+
+    # Dense symmetric conversion for docs / small examples. Replace with a
+    # sparse LDL solver for larger problems if needed.
+    A = Symmetric(Array(E))
+
+    try
+        F = ldl(A)
+        y = F \ Array(b)
+        if verbose
+            println("nearest_global_section: solved with LDL factorization")
+        end
+        return BlockArray(x - d' * y, s.vertex_stalks)
+    catch err
+        if verbose
+            println("nearest_global_section: LDL failed, falling back to pinv; error=", err)
+        end
+        y = pinv(Array(A)) * Array(b)
+        return BlockArray(x - d' * y, s.vertex_stalks)
+    end
+
+end
+
+"""nearest_global_section_pinv
+
+Robust pseudoinverse backend (SVD). Deterministic but potentially expensive.
+"""
+function nearest_global_section_pinv(s::EuclideanSheaf, x; verbose=false)
+    d = coboundary_map(s)
+    E = d * d'
+    b = d * x
+
+    y = pinv(Array(E)) * Array(b)
+    return BlockArray(x - d' * y, s.vertex_stalks)
+end
+
+"""nearest_global_section
+
+Entrypoint solver. Keyword `method` selects backend: :cg (iterative), :ldl
+(direct LDL), or :pinv (SVD pseudoinverse)."""
+function nearest_global_section(s::EuclideanSheaf, x; method::Symbol=:ldl, verbose=false)
+    if method == :cg
+        return nearest_global_section_cg(s, x; verbose=verbose)
+    elseif method == :ldl
+        return nearest_global_section_ldl(s, x; verbose=verbose)
+    elseif method == :pinv
+        return nearest_global_section_pinv(s, x; verbose=verbose)
+    else
+        error("Unknown method: $(method). Valid options are :cg, :ldl, :pinv")
+    end
 end
 
 
