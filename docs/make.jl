@@ -34,7 +34,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves],
+  modules=[CellularSheaves, CellularSheaves.NetworkSheaves.SheafMorphisms],
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,
@@ -43,7 +43,7 @@ makedocs(
     "CellularSheaves.jl"=>"index.md",
     "Examples"=>Any[
       "generated/literate_example.md",
-      "generated/cycle_graph_sheaf.md",
+      "generated/sheaf_morphisms.md",
     ],
     "Library Reference"=>"api.md",
   ]
