@@ -21,7 +21,7 @@ from the structured spec.
 """
 module SheafMorphisms
 
-export SheafMorphism, ComplexMorphism, is_morphism, compose, make_sheaf_morphism_spec
+export SheafMorphism, ComplexMorphism, is_morphism, compose, make_sheaf_morphism_spec, id
 
 using LinearAlgebra
 using BlockArrays
@@ -231,6 +231,47 @@ Compose two compatible `ComplexMorphism`s `f : C*(F) -> C*(G)` and
 """
 function compose(f::ComplexMorphism, g::ComplexMorphism)
     return ComplexMorphism(g.V * f.V, g.E * f.E)
+end
+
+# ---------------------------------------------------------------------------
+# Identity morphisms
+# ---------------------------------------------------------------------------
+
+"""
+    id(::Type{SheafMorphism}, X) -> SheafMorphism
+
+Return the identity [`SheafMorphism`](@ref) on sheaf `X`.
+
+Each vertex stalk maps to itself via `Vmap[i] = i` with a square identity
+matrix, and likewise for every edge stalk.
+"""
+function id(::Type{SheafMorphism}, X)
+    vdims = vertex_stalks(X)
+    edims = collect(values(edge_stalks(X)))
+    nv = length(vdims)
+    ne = length(edims)
+    return SheafMorphism(
+        collect(1:nv),
+        collect(1:ne),
+        [Matrix{Float64}(I, vdims[i], vdims[i]) for i in 1:nv],
+        [Matrix{Float64}(I, edims[k], edims[k]) for k in 1:ne],
+    )
+end
+
+"""
+    id(::Type{ComplexMorphism}, X) -> ComplexMorphism
+
+Return the identity [`ComplexMorphism`](@ref) on sheaf `X`.
+
+`V` is the identity matrix on `C⁰(X)` (total vertex-stalk dimension) and
+`E` is the identity matrix on `C¹(X)` (total edge-stalk dimension).
+"""
+function id(::Type{ComplexMorphism}, X)
+    vdims = vertex_stalks(X)
+    edims = collect(values(edge_stalks(X)))
+    V = Matrix{Float64}(I, sum(vdims), sum(vdims))
+    E = Matrix{Float64}(I, sum(edims), sum(edims))
+    return ComplexMorphism(V, E)
 end
 
 end # module SheafMorphisms

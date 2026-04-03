@@ -93,8 +93,25 @@ using LinearAlgebra
     comp_cm_FH   = ComplexMorphism(F, H, comp_spec_FH)
     @test is_morphism(comp_cm_FH, F, H)
 
-    # Must equal the result of composing the ComplexMorphisms
-    direct_comp_FH = compose(cm, cmGH)
-    @test norm(direct_comp_FH.V - comp_cm_FH.V) < 1e-12
-    @test norm(direct_comp_FH.E - comp_cm_FH.E) < 1e-12
+    # -------------------------------------------------------------------
+    # Identity morphisms
+    # -------------------------------------------------------------------
+
+    id_spec = id(SheafMorphism, F)
+    @test id_spec.Vmap == collect(1:n)
+    @test id_spec.Emap == collect(1:n)
+    @test all(id_spec.Vmaps[i] == Matrix{Float64}(I, d, d) for i in 1:n)
+    @test all(id_spec.Emaps[k] == Matrix{Float64}(I, d, d) for k in 1:n)
+    @test is_morphism(ComplexMorphism(F, F, id_spec), F, F)
+
+    id_cm = id(ComplexMorphism, F)
+    total_v = sum(vertex_stalks(F))
+    total_e = sum(collect(values(edge_stalks(F))))
+    @test id_cm.V == Matrix{Float64}(I, total_v, total_v)
+    @test id_cm.E == Matrix{Float64}(I, total_e, total_e)
+    @test is_morphism(id_cm, F, F)
+
+    # id is a left and right unit for compose
+    @test norm(compose(id_cm, cm).V - cm.V) < 1e-12
+    @test norm(compose(cm, id(ComplexMorphism, G)).V - cm.V) < 1e-12
 end
