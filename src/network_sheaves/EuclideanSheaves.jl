@@ -241,9 +241,9 @@ end
 
 """nearest_global_section
 
-Entrypoint solver. Keyword `method` selects backend: :cg (iterative), :ldl
-(direct LDL), or :pinv (SVD pseudoinverse)."""
-function nearest_global_section(s::EuclideanSheaf, x; method::Symbol=:ldl, verbose=false)
+Entrypoint solver. Keyword `method` selects backend: :cg (iterative, default),
+:ldl (direct LDL), or :pinv (SVD pseudoinverse)."""
+function nearest_global_section(s::EuclideanSheaf, x; method::Symbol=:cg, verbose=false)
     if method == :cg
         return nearest_global_section_cg(s, x; verbose=verbose)
     elseif method == :ldl
