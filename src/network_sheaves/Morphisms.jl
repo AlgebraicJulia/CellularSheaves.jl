@@ -81,11 +81,9 @@ end
 # ---------------------------------------------------------------------------
 
 function Base.show(io::IO, spec::SheafMorphism)
-    vpreview = isempty(spec.Vmap) ? spec.Vmap : spec.Vmap[1:min(end, 10)]
-    epreview = isempty(spec.Emap) ? spec.Emap : spec.Emap[1:min(end, 10)]
     println(io, "SheafMorphism: $(length(spec.Vmap)) vertex mappings, $(length(spec.Emap)) edge mappings")
-    println(io, "  Vmap (first 10): ", vpreview)
-    println(io, "  Emap (first 10): ", epreview)
+    println(io, "  Vmap (first 10): ", spec.Vmap[1:min(length(spec.Vmap), 10)])
+    println(io, "  Emap (first 10): ", spec.Emap[1:min(length(spec.Emap), 10)])
 end
 
 # ---------------------------------------------------------------------------
