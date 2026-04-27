@@ -25,8 +25,8 @@ for i in 1:n
     add_vertex_stalk!(F, stalk_dim)
 end
 
-# Add edges to form a cycle. Each edge has a 1-dimensional edge stalk; restriction
-# maps are 1 x stalk_dim. Here we use identical maps on both endpoints for simplicity.
+# Add edges to form a cycle. Restriction maps are stalk_dim x stalk_dim identity
+# matrices, so each edge stalk also has dimension stalk_dim.
 for i in 1:n
     v1 = i
     v2 = (i % n) + 1
@@ -62,8 +62,8 @@ for i in 1:n
     add_vertex_stalk!(G, stalk_dim)
 end
 
-# Add edges to form a cycle. Each edge has a 1-dimensional edge stalk; restriction
-# maps are 1 x stalk_dim. Here we use identical maps on both endpoints for simplicity.
+# Add edges to form a cycle. Restriction maps are (stalk_dim - 1) x stalk_dim,
+# so each edge stalk has dimension stalk_dim - 1.
 for i in 1:n
     v1 = i
     v2 = (i % n) + 1
@@ -110,7 +110,7 @@ println(H)
 Vmap_GH = collect(1:n)
 Emap_GH = collect(1:n)
 Vmaps_GH = [Matrix{Float64}(I, stalk_dim, stalk_dim) for i in 1:n]
-edimsG = collect(values(edge_stalks(G)))
+edimsG = [get_edge_stalk(G, src(e), dst(e)) for e in edges(underlying_graph(G))]
 Emaps_GH = [zeros(1, edimsG[i]) for i in 1:length(edimsG)]
 for i in 1:length(edimsG)
   Emaps_GH[i][1,1] = 1.0  # project to first coordinate of G's edge stalk
@@ -123,20 +123,10 @@ is_morphism(cmGH, G, H)
 
 dH = coboundary_map(H)
 
+# ## Compose morphisms using the library's `compose` function
+# Compose the structured specs F -> G and G -> H to get a spec for F -> H.
 
-compose(f::SheafMorphism, g::SheafMorphism) = SheafMorphism(
-  [g.Vmap[i] for i in f.Vmap],
-  [g.Emap[k] for k in f.Emap],
-  [g.Vmaps[i] * f.Vmaps[g.Vmap[i]] for i in 1:length(f.Vmaps)],
-  [g.Emaps[k] * f.Emaps[g.Emap[k]] for k in 1:length(f.Emaps)],
-)
-
-compose(f::ComplexMorphism, g::ComplexMorphism) = ComplexMorphism(
-  g.V * f.V,
-  g.E * f.E,
-)
-
-composite_morphism = ComplexMorphism(F, H, compose(spec, specGH)) 
+composite_morphism = ComplexMorphism(F, H, compose(spec, specGH))
 
 # The V component is 
 

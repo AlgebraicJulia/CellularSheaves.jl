@@ -25,8 +25,10 @@ export SheafMorphism, ComplexMorphism, is_morphism, compose, make_sheaf_morphism
 
 using LinearAlgebra
 using BlockArrays
+using Graphs
 
-using ..SheafInterface: vertex_stalks, edge_stalks, coboundary_map
+using ..SheafInterface: vertex_stalks, edge_stalks, coboundary_map,
+                        underlying_graph, get_edge_stalk, get_restriction_map
 
 # ---------------------------------------------------------------------------
 # Types
@@ -79,9 +81,11 @@ end
 # ---------------------------------------------------------------------------
 
 function Base.show(io::IO, spec::SheafMorphism)
+    vpreview = isempty(spec.Vmap) ? spec.Vmap : spec.Vmap[1:min(end, 10)]
+    epreview = isempty(spec.Emap) ? spec.Emap : spec.Emap[1:min(end, 10)]
     println(io, "SheafMorphism: $(length(spec.Vmap)) vertex mappings, $(length(spec.Emap)) edge mappings")
-    println(io, "  Vmap (first 10): ", spec.Vmap[1:min(end, 10)])
-    println(io, "  Emap (first 10): ", spec.Emap[1:min(end, 10)])
+    println(io, "  Vmap (first 10): ", vpreview)
+    println(io, "  Emap (first 10): ", epreview)
 end
 
 # ---------------------------------------------------------------------------
@@ -117,7 +121,15 @@ function ComplexMorphism(F, G,
     @assert length(Vmap) == nvF "Vmap must have length equal to number of vertex stalks in F"
     @assert length(Vmaps) == nvF "Vmaps must have one matrix per source vertex stalk"
 
-    Vfull = zeros(sum(vdimsG), sum(vdimsF))
+    T = if !isempty(Vmaps) || !isempty(Emaps)
+        promote_type(
+            isempty(Vmaps) ? Float64 : mapreduce(eltype, promote_type, Vmaps),
+            isempty(Emaps) ? Float64 : mapreduce(eltype, promote_type, Emaps),
+        )
+    else
+        Float64
+    end
+    Vfull = zeros(T, sum(vdimsG), sum(vdimsF))
     V = BlockArray(Vfull, vdimsG, vdimsF)
     for i in 1:nvF
         tgt = Vmap[i]
@@ -128,14 +140,14 @@ function ComplexMorphism(F, G,
         blocks(V)[tgt, i] = A
     end
 
-    edimsF = collect(values(edge_stalks(F)))
-    edimsG = collect(values(edge_stalks(G)))
+    edimsF = [get_edge_stalk(F, src(e), dst(e)) for e in edges(underlying_graph(F))]
+    edimsG = [get_edge_stalk(G, src(e), dst(e)) for e in edges(underlying_graph(G))]
     neF = length(edimsF)
     neG = length(edimsG)
     @assert length(Emap) == neF "Emap must have length equal to number of edge stalks in F"
     @assert length(Emaps) == neF "Emaps must have one matrix per source edge stalk"
 
-    Efull = zeros(sum(edimsG), sum(edimsF))
+    Efull = zeros(T, sum(edimsG), sum(edimsF))
     E = BlockArray(Efull, edimsG, edimsF)
     for k in 1:neF
         tgt = Emap[k]
@@ -189,7 +201,7 @@ end
 
 Return `true` if the naturality square `E * dF ≈ dG * V` holds within `tol`.
 """
-function is_morphism(cm::ComplexMorphism, dF::AbstractMatrix, dG::AbstractMatrix,
+function is_morphism(cm::ComplexMorphism, dF::AbstractMatrix, dG::AbstractMatrix;
                      tol=1e-8)
     return norm(cm.E * dF - dG * cm.V) < tol
 end
@@ -200,8 +212,8 @@ end
 Convenience overload: computes `coboundary_map(F)` and `coboundary_map(G)` and
 delegates to the matrix form.
 """
-function is_morphism(cm, F, G, tol=1e-8)
-    return is_morphism(cm, coboundary_map(F), coboundary_map(G), tol)
+function is_morphism(cm, F, G; tol=1e-8)
+    return is_morphism(cm, coboundary_map(F), coboundary_map(G); tol=tol)
 end
 
 # ---------------------------------------------------------------------------
@@ -237,6 +249,15 @@ end
 # Identity morphisms
 # ---------------------------------------------------------------------------
 
+# Helper: infer element type from the first available restriction map.
+function _sheaf_scalar_type(X)
+    g = underlying_graph(X)
+    for e in edges(g)
+        return eltype(get_restriction_map(X, src(e), dst(e)))
+    end
+    return Float64
+end
+
 """
     id(::Type{SheafMorphism}, X) -> SheafMorphism
 
@@ -246,15 +267,17 @@ Each vertex stalk maps to itself via `Vmap[i] = i` with a square identity
 matrix, and likewise for every edge stalk.
 """
 function id(::Type{SheafMorphism}, X)
+    g = underlying_graph(X)
     vdims = vertex_stalks(X)
-    edims = collect(values(edge_stalks(X)))
+    edims = [get_edge_stalk(X, src(e), dst(e)) for e in edges(g)]
     nv = length(vdims)
     ne = length(edims)
+    T = _sheaf_scalar_type(X)
     return SheafMorphism(
         collect(1:nv),
         collect(1:ne),
-        [Matrix{Float64}(I, vdims[i], vdims[i]) for i in 1:nv],
-        [Matrix{Float64}(I, edims[k], edims[k]) for k in 1:ne],
+        [Matrix{T}(I, vdims[i], vdims[i]) for i in 1:nv],
+        [Matrix{T}(I, edims[k], edims[k]) for k in 1:ne],
     )
 end
 
@@ -267,10 +290,12 @@ Return the identity [`ComplexMorphism`](@ref) on sheaf `X`.
 `E` is the identity matrix on `C¹(X)` (total edge-stalk dimension).
 """
 function id(::Type{ComplexMorphism}, X)
+    g = underlying_graph(X)
     vdims = vertex_stalks(X)
-    edims = collect(values(edge_stalks(X)))
-    V = Matrix{Float64}(I, sum(vdims), sum(vdims))
-    E = Matrix{Float64}(I, sum(edims), sum(edims))
+    edims = [get_edge_stalk(X, src(e), dst(e)) for e in edges(g)]
+    T = _sheaf_scalar_type(X)
+    V = Matrix{T}(I, sum(vdims), sum(vdims))
+    E = Matrix{T}(I, sum(edims), sum(edims))
     return ComplexMorphism(V, E)
 end
 

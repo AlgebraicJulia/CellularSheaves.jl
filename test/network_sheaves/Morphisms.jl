@@ -1,6 +1,7 @@
 using Test
 using CellularSheaves
 using LinearAlgebra
+using Graphs
 
 @testset "SheafMorphism / ComplexMorphism" begin
 
@@ -77,7 +78,7 @@ using LinearAlgebra
         add_sheaf_edge!(H, v1, v2, rmH, rmH)
     end
 
-    edimsG = collect(values(edge_stalks(G)))
+    edimsG = [get_edge_stalk(G, src(e), dst(e)) for e in edges(underlying_graph(G))]
     Emaps_GH = [zeros(1, edimsG[k]) for k in 1:length(edimsG)]
     for k in 1:length(edimsG)
         Emaps_GH[k][1, 1] = 1.0

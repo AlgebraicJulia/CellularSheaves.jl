@@ -210,7 +210,7 @@ function nearest_global_section_ldl(s::EuclideanSheaf, x; verbose=false)
     A = Symmetric(Array(E))
 
     try
-        F = ldl(A)
+        F = ldlt(A)
         y = F \ Array(b)
         if verbose
             println("nearest_global_section: solved with LDL factorization")
