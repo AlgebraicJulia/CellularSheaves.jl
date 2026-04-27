@@ -123,19 +123,6 @@ is_morphism(cmGH, G, H)
 
 dH = coboundary_map(H)
 
-
-compose(f::SheafMorphism, g::SheafMorphism) = SheafMorphism(
-  [g.Vmap[i] for i in f.Vmap],
-  [g.Emap[k] for k in f.Emap],
-  [g.Vmaps[i] * f.Vmaps[g.Vmap[i]] for i in 1:length(f.Vmaps)],
-  [g.Emaps[k] * f.Emaps[g.Emap[k]] for k in 1:length(f.Emaps)],
-)
-
-compose(f::ComplexMorphism, g::ComplexMorphism) = ComplexMorphism(
-  g.V * f.V,
-  g.E * f.E,
-)
-
 composite_morphism = ComplexMorphism(F, H, compose(spec, specGH)) 
 
 # The V component is 
