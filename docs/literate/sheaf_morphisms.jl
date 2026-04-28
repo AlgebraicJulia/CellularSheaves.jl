@@ -25,8 +25,8 @@ for i in 1:n
     add_vertex_stalk!(F, stalk_dim)
 end
 
-# Add edges to form a cycle. Restriction maps are stalk_dim x stalk_dim identity
-# matrices, so each edge stalk also has dimension stalk_dim.
+# Add edges to form a cycle. Restriction maps are `stalk_dim x stalk_dim` identity
+# matrices, so each edge stalk also has dimension `stalk_dim`.
 for i in 1:n
     v1 = i
     v2 = (i % n) + 1
@@ -43,13 +43,13 @@ println("Sheaf Laplacian is a ", size(L, 1), " x ", size(L, 2), " matrix.")
 
 # Start from a random 0-cochain and project to the nearest global section
 x0 = rand(sum(vertex_stalks(F)))
-try
-    gs = nearest_global_section(F, x0)
-    println("Norm of coboundary on nearest global section: ", norm(coboundary_map(F) * gs))
-    gs
+gs = try
+    nearest_global_section(F, x0)
 catch e
     println("Could not compute nearest global section during docs build: ", e)
+    zeros(x0)
 end
+println("Norm of coboundary on nearest global section: ", norm(coboundary_map(F) * gs))
 
 # The printed zero (or tiny numerical value) above indicates `gs` is close to a true global section.
 
@@ -62,8 +62,8 @@ for i in 1:n
     add_vertex_stalk!(G, stalk_dim)
 end
 
-# Add edges to form a cycle. Restriction maps are (stalk_dim - 1) x stalk_dim,
-# so each edge stalk has dimension stalk_dim - 1.
+# Add edges to form a cycle. Restriction maps are `(stalk_dim - 1) x stalk_dim`,
+# so each edge stalk has dimension `stalk_dim` - 1.
 for i in 1:n
     v1 = i
     v2 = (i % n) + 1
@@ -89,7 +89,7 @@ dF = coboundary_map(F)
 dG = coboundary_map(G)
 
 # Build a third sheaf H on the same graph topology but with 1-dimensional edge stalks.
-# Vertex stalks match G (stalk_dim each). Edge restriction maps are 1 x stalk_dim
+# Vertex stalks match G (`stalk_dim` each). Edge restriction maps are `1 x stalk_dim`
 # projection matrices that pick the first coordinate.
 H = EuclideanSheaf{Float64}(Int[])
 for i in 1:n
@@ -106,7 +106,7 @@ end
 println(H)
 
 # Build a SheafMorphism spec from G -> H. Vertex maps are identity (3x3),
-# edge maps project G's edge stalk (size = stalk_dim - 1) to H's edge stalk (1)
+# edge maps project G's edge stalk (`size = stalk_dim - 1`) to H's edge stalk (1)
 Vmap_GH = collect(1:n)
 Emap_GH = collect(1:n)
 Vmaps_GH = [Matrix{Float64}(I, stalk_dim, stalk_dim) for i in 1:n]
