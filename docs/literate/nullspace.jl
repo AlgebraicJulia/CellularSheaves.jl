@@ -39,19 +39,11 @@ L
 
 # V is a basis for the nullspace of X
 
-ind = Int[]; b = 0
+ind = findall(i -> D[i, i] == 0, 1:18)
+U = zeros(18, length(ind))
 
-for i in 1:18
-    if D[i, i] == 0
-        push!(ind, i)
-        b += 1
-    end
-end
-
-U = zeros(18, b)
-
-for j in 1:b
+for j in eachindex(ind)
     U[ind[j], j] = 1
 end
 
-V = (P \ (L' \ U))
+V = P \ (L' \ U)
