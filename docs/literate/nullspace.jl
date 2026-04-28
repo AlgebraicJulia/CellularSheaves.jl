@@ -27,9 +27,11 @@ X = C' * C
 
 # M is an LDLt factorization of X
 #
-#   X = Pᵀ L D Lᵀ P
+# ```math
+#   X = P^\mathsf{T} L D L^\mathsf{T} P
+# ```
 #
-@time M = ldlt!(ChordalLDLt(X), RowMaximum())
+M = ldlt!(ChordalLDLt(X), RowMaximum())
 
 L = M.L # lower triangular factor
 D = M.D # diagonal factor
@@ -39,8 +41,8 @@ L
 
 # V is a basis for the nullspace of X
 
-ind = findall(i -> D[i, i] == 0, 1:18)
-U = zeros(18, length(ind))
+ind = findall(i -> D[i, i] == 0, 1:n * stalk_dim)
+U = zeros(n * stalk_dim, length(ind))
 
 for j in eachindex(ind)
     U[ind[j], j] = 1
