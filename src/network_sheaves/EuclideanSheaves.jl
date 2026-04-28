@@ -2,7 +2,7 @@
 module EuclideanSheaves
 
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_from_graph, energy_function,
-    nearest_global_section
+    nearest_global_section, edge_stalk_dimensions
 
 using Graphs
 using AutoHashEquals: @auto_hash_equals
@@ -13,7 +13,7 @@ using BlockArrays
 import Base: hash, ==, isequal
 
 using ..SheafInterface
-import ..SheafInterface: vertex_stalks, edge_stalks, coboundary_map, add_vertex_stalk!, add_sheaf_edge!, underlying_graph,
+import ..SheafInterface: vertex_stalks, edge_stalks, edge_stalk_dimensions, coboundary_map, add_vertex_stalk!, add_sheaf_edge!, underlying_graph,
     get_vertex_stalk, get_edge_stalk, get_restriction_map, sheaf_laplacian
 using ..BlockSparseArrays
 
@@ -104,6 +104,14 @@ function get_edge_stalk(s::EuclideanSheaf, v1::Int, v2::Int)
     edge_key = UnorderedPair(v1, v2)
     @assert haskey(s.edge_stalks, edge_key)
     return s.edge_stalks[edge_key]
+end
+
+"""    edge_stalk_dimensions(s::EuclideanSheaf)
+
+Return a vector of edge stalk dimensions ordered by edges in the underlying graph.
+"""
+function edge_stalk_dimensions(s::EuclideanSheaf)
+    return [get_edge_stalk(s, src(e), dst(e)) for e in edges(underlying_graph(s))]
 end
 
 """    get_restriction_map(s::EuclideanSheaf, v1::Int, v2::Int)

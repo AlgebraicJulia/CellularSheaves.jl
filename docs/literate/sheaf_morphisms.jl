@@ -110,7 +110,7 @@ println(H)
 Vmap_GH = collect(1:n)
 Emap_GH = collect(1:n)
 Vmaps_GH = [Matrix{Float64}(I, stalk_dim, stalk_dim) for i in 1:n]
-edimsG = [get_edge_stalk(G, src(e), dst(e)) for e in edges(underlying_graph(G))]
+edimsG = edge_stalk_dimensions(G)
 Emaps_GH = [zeros(1, edimsG[i]) for i in 1:length(edimsG)]
 for i in 1:length(edimsG)
   Emaps_GH[i][1,1] = 1.0  # project to first coordinate of G's edge stalk

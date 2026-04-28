@@ -78,7 +78,7 @@ using Graphs
         add_sheaf_edge!(H, v1, v2, rmH, rmH)
     end
 
-    edimsG = [get_edge_stalk(G, src(e), dst(e)) for e in edges(underlying_graph(G))]
+    edimsG = edge_stalk_dimensions(G)
     Emaps_GH = [zeros(1, edimsG[k]) for k in 1:length(edimsG)]
     for k in 1:length(edimsG)
         Emaps_GH[k][1, 1] = 1.0

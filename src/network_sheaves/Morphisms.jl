@@ -27,7 +27,7 @@ using LinearAlgebra
 using BlockArrays
 using Graphs
 
-using ..SheafInterface: vertex_stalks, edge_stalks, coboundary_map,
+using ..SheafInterface: vertex_stalks, edge_stalks, edge_stalk_dimensions, coboundary_map,
                         underlying_graph, get_edge_stalk, get_restriction_map
 
 # ---------------------------------------------------------------------------
@@ -138,8 +138,8 @@ function ComplexMorphism(F, G,
         blocks(V)[tgt, i] = A
     end
 
-    edimsF = [get_edge_stalk(F, src(e), dst(e)) for e in edges(underlying_graph(F))]
-    edimsG = [get_edge_stalk(G, src(e), dst(e)) for e in edges(underlying_graph(G))]
+    edimsF = edge_stalk_dimensions(F)
+    edimsG = edge_stalk_dimensions(G)
     neF = length(edimsF)
     neG = length(edimsG)
     @assert length(Emap) == neF "Emap must have length equal to number of edge stalks in F"
@@ -267,7 +267,7 @@ matrix, and likewise for every edge stalk.
 function id(::Type{SheafMorphism}, X)
     g = underlying_graph(X)
     vdims = vertex_stalks(X)
-    edims = [get_edge_stalk(X, src(e), dst(e)) for e in edges(g)]
+    edims = edge_stalk_dimensions(X)
     nv = length(vdims)
     ne = length(edims)
     T = _sheaf_scalar_type(X)
@@ -290,7 +290,7 @@ Return the identity [`ComplexMorphism`](@ref) on sheaf `X`.
 function id(::Type{ComplexMorphism}, X)
     g = underlying_graph(X)
     vdims = vertex_stalks(X)
-    edims = [get_edge_stalk(X, src(e), dst(e)) for e in edges(g)]
+    edims = edge_stalk_dimensions(X)
     T = _sheaf_scalar_type(X)
     V = Matrix{T}(I, sum(vdims), sum(vdims))
     E = Matrix{T}(I, sum(edims), sum(edims))
