@@ -9,6 +9,7 @@ include("PotentialSheaves.jl")
 include("ADT.jl")
 include("Parser.jl")
 include("Morphisms.jl")
+include("Pushforward.jl")
 
 @reexport using .BlockSparseArrays
 @reexport using .SheafInterface
@@ -17,5 +18,6 @@ include("Morphisms.jl")
 @reexport using .CellularSheafTerm
 @reexport using .CellularSheafParser: @cellular_sheaf
 @reexport using .SheafMorphisms
+@reexport using .Pushforward
 
 end
