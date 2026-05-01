@@ -1,6 +1,7 @@
 using CellularSheaves
 using CliqueTrees.Multifrontal
 using LinearAlgebra
+using Plots
 using SparseArrays
 
 # F is a cellular sheaf
@@ -41,11 +42,15 @@ L
 
 # V is a basis for the nullspace of X
 
-ind = findall(i -> D[i, i] == 0, 1:n * stalk_dim)
-U = zeros(n * stalk_dim, length(ind))
+ind = findall(i -> D[i, i] == 0, 1:size(D, 1))
+U = zeros(size(D, 1), length(ind))
 
 for j in eachindex(ind)
     U[ind[j], j] = 1
 end
 
 V = P \ (L' \ U)
+
+# Visualize the nullspace basis: each column of V is plotted as a separate scatter series.
+
+scatter(V, legend=false, title="Nullspace basis vectors")
