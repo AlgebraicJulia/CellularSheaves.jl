@@ -7,4 +7,5 @@ end
 @testset "Network Sheaves" begin
   include("network_sheaves/ADT.jl")
   include("network_sheaves/Parser.jl")
+  include("network_sheaves/Morphisms.jl")
 end

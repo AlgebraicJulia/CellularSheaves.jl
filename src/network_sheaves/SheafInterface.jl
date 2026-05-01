@@ -1,6 +1,6 @@
 module SheafInterface
 
-export AbstractNetworkSheaf, vertex_stalks, edge_stalks, coboundary_map, add_vertex_stalk!, add_sheaf_edge!, underlying_graph,
+export AbstractNetworkSheaf, vertex_stalks, edge_stalks, edge_stalk_dimensions, coboundary_map, add_vertex_stalk!, add_sheaf_edge!, underlying_graph,
     get_vertex_stalk, get_edge_stalk, get_restriction_map, sheaf_laplacian
 
 import Base: show
@@ -23,6 +23,10 @@ end
 
 function edge_stalks(s::AbstractNetworkSheaf)
     error("edge_stalks not implemented")
+end
+
+function edge_stalk_dimensions(s::AbstractNetworkSheaf)
+    error("edge_stalk_dimensions not implemented")
 end
 
 function underlying_graph(s::AbstractNetworkSheaf)
