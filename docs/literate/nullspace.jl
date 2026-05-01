@@ -42,7 +42,9 @@ L
 
 # V is a basis for the nullspace of X
 
-ind = findall(i -> D[i, i] == 0, 1:size(D, 1))
+max_abs_diag = maximum(i -> abs(D[i, i]), 1:size(D, 1); init=0.0)
+tol = eps(Float64) * max(1.0, max_abs_diag)
+ind = findall(i -> abs(D[i, i]) <= tol, 1:size(D, 1))
 U = zeros(size(D, 1), length(ind))
 
 for j in eachindex(ind)
