@@ -2,7 +2,7 @@
 module EuclideanSheaves
 
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_from_graph, energy_function,
-    nearest_global_section
+    nearest_global_section, edge_stalk_dimensions
 
 using Graphs
 using AutoHashEquals: @auto_hash_equals
@@ -13,7 +13,7 @@ using BlockArrays
 import Base: hash, ==, isequal
 
 using ..SheafInterface
-import ..SheafInterface: vertex_stalks, edge_stalks, coboundary_map, add_vertex_stalk!, add_sheaf_edge!, underlying_graph,
+import ..SheafInterface: vertex_stalks, edge_stalks, edge_stalk_dimensions, coboundary_map, add_vertex_stalk!, add_sheaf_edge!, underlying_graph,
     get_vertex_stalk, get_edge_stalk, get_restriction_map, sheaf_laplacian
 using ..BlockSparseArrays
 
@@ -106,6 +106,14 @@ function get_edge_stalk(s::EuclideanSheaf, v1::Int, v2::Int)
     return s.edge_stalks[edge_key]
 end
 
+"""    edge_stalk_dimensions(s::EuclideanSheaf)
+
+Return a vector of edge stalk dimensions ordered by edges in the underlying graph.
+"""
+function edge_stalk_dimensions(s::EuclideanSheaf)
+    return [get_edge_stalk(s, src(e), dst(e)) for e in edges(underlying_graph(s))]
+end
+
 """    get_restriction_map(s::EuclideanSheaf, v1::Int, v2::Int)
 
 Get the restriction map from vertex v1 to the edge (v1, v2).
@@ -177,11 +185,13 @@ function energy_function(s::EuclideanSheaf)
     return energy_function(sheaf_laplacian_matrix(s))
 end
 
-function nearest_global_section(s::EuclideanSheaf, x; verbose=false)
+"""nearest_global_section_cg
+
+Iterative Krylov (CG) backend. Returns a BlockArray global section.
+"""
+function nearest_global_section_cg(s::EuclideanSheaf, x; verbose=false)
     d = coboundary_map(s)
-
     eL = LinearOperator(d) * LinearOperator(d')
-
     b = d * x
 
     y, stats = cg(eL, Array(b))
@@ -190,6 +200,67 @@ function nearest_global_section(s::EuclideanSheaf, x; verbose=false)
     end
 
     return BlockArray(x - d' * y, s.vertex_stalks)
+end
+
+"""nearest_global_section_ldl
+
+Deterministic direct backend using LDL factorization on the symmetric
+edge-space operator E = d*d'. This handles symmetric indefinite matrices
+without Tikhonov regularization. Falls back to pinv if LDL fails.
+"""
+function nearest_global_section_ldl(s::EuclideanSheaf, x; verbose=false)
+    d = coboundary_map(s)
+    E = d * d'
+    b = d * x
+
+    # Dense symmetric conversion for docs / small examples. Replace with a
+    # sparse LDL solver for larger problems if needed.
+    A = Symmetric(Array(E))
+
+    try
+        F = ldlt(A)
+        y = F \ Array(b)
+        if verbose
+            println("nearest_global_section: solved with LDL factorization")
+        end
+        return BlockArray(x - d' * y, s.vertex_stalks)
+    catch err
+        if verbose
+            println("nearest_global_section: LDL failed, falling back to pinv; error=", err)
+        end
+        y = pinv(Array(A)) * Array(b)
+        return BlockArray(x - d' * y, s.vertex_stalks)
+    end
+
+end
+
+"""nearest_global_section_pinv
+
+Robust pseudoinverse backend (SVD). Deterministic but potentially expensive.
+"""
+function nearest_global_section_pinv(s::EuclideanSheaf, x; verbose=false)
+    d = coboundary_map(s)
+    E = d * d'
+    b = d * x
+
+    y = pinv(Array(E)) * Array(b)
+    return BlockArray(x - d' * y, s.vertex_stalks)
+end
+
+"""nearest_global_section
+
+Entrypoint solver. Keyword `method` selects backend: :cg (iterative, default),
+:ldl (direct LDL), or :pinv (SVD pseudoinverse)."""
+function nearest_global_section(s::EuclideanSheaf, x; method::Symbol=:cg, verbose=false)
+    if method == :cg
+        return nearest_global_section_cg(s, x; verbose=verbose)
+    elseif method == :ldl
+        return nearest_global_section_ldl(s, x; verbose=verbose)
+    elseif method == :pinv
+        return nearest_global_section_pinv(s, x; verbose=verbose)
+    else
+        error("Unknown method: $(method). Valid options are :cg, :ldl, :pinv")
+    end
 end
 
 
