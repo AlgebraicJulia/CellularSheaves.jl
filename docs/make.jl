@@ -44,6 +44,7 @@ makedocs(
     "Examples"=>Any[
       "generated/literate_example.md",
       "generated/sheaf_morphisms.md",
+      "generated/nullspace.md",
     ],
     "Library Reference"=>"api.md",
   ]
