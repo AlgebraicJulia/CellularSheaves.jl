@@ -69,7 +69,7 @@ end
 Return a `Vector` of fiber-section basis matrices, one per target vertex
 of `hom`.  Entry `tv` is the result of
 `fiber_section_basis(F, fiber_vertices(hom, tv), fiber_edges(hom, g, tv))`
-where `g = underlying_graph(F)`.
+where `g = underlying_graph(F)` is derived from `F` internally.
 """
 function all_fiber_bases(hom::GraphHomomorphism, F)
     g = underlying_graph(F)
