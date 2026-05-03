@@ -37,6 +37,13 @@ Fields
 struct GraphHomomorphism
     vertex_map::Vector{Int}
     n_target::Int
+
+    function GraphHomomorphism(vertex_map::Vector{Int}, n_target::Int)
+        n_target < 0 && throw(ArgumentError("n_target must be nonnegative, got $n_target"))
+        any(<(1), vertex_map) && throw(ArgumentError("vertex_map entries must be positive target vertex indices"))
+        any(>(n_target), vertex_map) && throw(ArgumentError("vertex_map entries must lie in 1:n_target"))
+        new(vertex_map, n_target)
+    end
 end
 
 """
@@ -92,16 +99,16 @@ function fiber_edges(hom::GraphHomomorphism, g::AbstractGraph, tv::Int)
 end
 
 """
-    cross_edges(hom::GraphHomomorphism, g::AbstractGraph) -> Vector{Tuple{Any,Int,Int}}
+    cross_edges(hom::GraphHomomorphism, g::AbstractGraph) -> Vector{Tuple{E,Int,Int}} where E
 
 Return all *cross edges* of `g` — edges whose endpoints lie in different fibers.
 
-Each entry is `(edge, src_target_vertex, dst_target_vertex)` where `edge` is a
-`Graphs.AbstractEdge` and `src_target_vertex`, `dst_target_vertex` are the images
-of the edge's source and destination vertices.
+Each entry is `(edge, src_target_vertex, dst_target_vertex)` where `edge` has the
+concrete edge type produced by `edges(g)`, and `src_target_vertex`,
+`dst_target_vertex` are the images of the edge's source and destination vertices.
 """
 function cross_edges(hom::GraphHomomorphism, g::AbstractGraph)
-    result = Tuple{Any,Int,Int}[]
+    result = Tuple{eltype(edges(g)),Int,Int}[]
     for e in edges(g)
         u, v = src(e), dst(e)
         pu, pv = hom.vertex_map[u], hom.vertex_map[v]

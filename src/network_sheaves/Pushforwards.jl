@@ -186,7 +186,13 @@ function pushforward_transfer_map(hom::GraphHomomorphism, F)
     F_cum  = [0; cumsum(vertex_stalks(F))]
     pf_cum = [0; cumsum(pf_stalk_dims)]
 
-    T = zeros(sum(pf_stalk_dims), sum(vertex_stalks(F)))
+    n_pf = sum(pf_stalk_dims)
+    n_F = sum(vertex_stalks(F))
+
+    # Assemble only the nonzero fiber blocks; off-fiber blocks are structurally zero.
+    I = Int[]
+    J = Int[]
+    V = Float64[]
 
     for tv in 1:hom.n_target
         fverts = fiber_vertices(hom, tv)
@@ -194,10 +200,23 @@ function pushforward_transfer_map(hom::GraphHomomorphism, F)
         f_rows = vcat([collect(F_cum[v]+1 : F_cum[v+1]) for v in fverts]...)
         B = fiber_bases[tv]
         # Project onto the fiber-basis coordinates via the pseudoinverse.
-        T[pf_cum[tv]+1 : pf_cum[tv+1], f_rows] = pinv(B)
+        P = pinv(B)
+        row_offset = pf_cum[tv]
+
+        for local_j in axes(P, 2)
+            global_j = f_rows[local_j]
+            for local_i in axes(P, 1)
+                val = P[local_i, local_j]
+                if !iszero(val)
+                    push!(I, row_offset + local_i)
+                    push!(J, global_j)
+                    push!(V, val)
+                end
+            end
+        end
     end
 
-    return T
+    return sparse(I, J, V, n_pf, n_F)
 end
 
 end # module Pushforwards
