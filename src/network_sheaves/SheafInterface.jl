@@ -193,7 +193,7 @@ Compute the coboundary map of a network sheaf.
 - `s`: The network sheaf
 
 # Returns
-- LinearOperator: The coboundary map as a linear operator
+- AbstractMatrix: The coboundary map as a matrix-like linear operator. Implementations may return a block-sparse matrix representation supporting operations such as `*` and `adjoint`.
 
 # See also
 - [`sheaf_laplacian`](@ref)
