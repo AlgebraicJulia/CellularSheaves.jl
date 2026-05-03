@@ -50,6 +50,10 @@ The rows of the returned matrix are ordered to match the concatenation of
 the vertex stalks `F(v)` for `v ∈ verts`, in the order given by `verts`.
 """
 function fiber_section_basis(F, verts::Vector{Int}, fedges::Vector{Tuple{Int,Int}})
+    # Precondition: `verts` must not contain duplicate entries.
+    # If duplicates are present, `v_idx` keeps only the last occurrence and the
+    # constructed fiber sheaf no longer matches the advertised row ordering.
+    # No check is performed here to avoid the allocation cost in tight loops.
     stalk_dims = [get_vertex_stalk(F, v) for v in verts]
     # Local vertex indices within the fiber sub-sheaf.
     v_idx = Dict(v => i for (i, v) in enumerate(verts))
