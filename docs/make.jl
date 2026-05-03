@@ -54,5 +54,7 @@ makedocs(
 deploydocs(
   target="build",
   repo="github.com/AlgebraicJulia/CellularSheaves.jl.git",
-  branch="gh-pages"
+  branch="gh-pages",
+  devbranch="main",
+  push_preview=true
 )
