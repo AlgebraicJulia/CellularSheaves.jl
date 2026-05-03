@@ -8,4 +8,5 @@ end
   include("network_sheaves/ADT.jl")
   include("network_sheaves/Parser.jl")
   include("network_sheaves/Morphisms.jl")
+  include("network_sheaves/Pushforwards.jl")
 end
