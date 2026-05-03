@@ -77,6 +77,9 @@ where `g = underlying_graph(F)` is derived from `F` internally.
 """
 function all_fiber_bases(hom::GraphHomomorphism, F)
     g = underlying_graph(F)
+    n_src = nv(g)
+    length(hom.vertex_map) == n_src || throw(ArgumentError(
+        "vertex_map has length $(length(hom.vertex_map)) but the sheaf's underlying graph has $n_src vertices"))
     return [
         fiber_section_basis(F,
                             fiber_vertices(hom, tv),
