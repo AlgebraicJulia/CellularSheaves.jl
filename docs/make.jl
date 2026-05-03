@@ -45,6 +45,7 @@ makedocs(
       "generated/literate_example.md",
       "generated/sheaf_morphisms.md",
       "generated/nullspace.md",
+      "generated/pushforward.md",
     ],
     "Library Reference"=>"api.md",
   ]

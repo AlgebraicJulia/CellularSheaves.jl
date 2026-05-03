@@ -2,7 +2,7 @@
 module EuclideanSheaves
 
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_from_graph, energy_function,
-    nearest_global_section, edge_stalk_dimensions
+    nearest_global_section, edge_stalk_dimensions, nullspace_ldlt
 
 using Graphs
 using AutoHashEquals: @auto_hash_equals
@@ -10,6 +10,8 @@ using LinearOperators
 using Krylov
 using LinearAlgebra
 using BlockArrays
+using CliqueTrees.Multifrontal
+using SparseArrays
 import Base: hash, ==, isequal
 
 using ..SheafInterface
@@ -261,6 +263,44 @@ function nearest_global_section(s::EuclideanSheaf, x; method::Symbol=:cg, verbos
     else
         error("Unknown method: $(method). Valid options are :cg, :ldl, :pinv")
     end
+end
+
+
+"""    nullspace_ldlt(X::AbstractMatrix; tol=nothing) -> Matrix
+
+Compute a basis for the nullspace of the symmetric positive-semidefinite matrix `X`
+using a sparse LDLt factorisation from `CliqueTrees.Multifrontal` (`ChordalLDLt`
+with `RowMaximum` pivoting).
+
+The factorisation is ``X = P^\\mathsf{T} L D L^\\mathsf{T} P``.  Columns of `D`
+whose absolute diagonal value is at or below `tol` (default:
+``\\varepsilon_\\text{Float64} \\times \\max(1, \\|D\\|_\\infty)``) identify null
+directions; the corresponding columns of `P^{-1} (L^\\mathsf{T})^{-1}` form the
+returned basis matrix.
+"""
+function nullspace_ldlt(X::AbstractMatrix; tol=nothing)
+    M = ldlt!(ChordalLDLt(X), RowMaximum())
+    D = M.D; L = M.L; P = M.P
+    max_abs = maximum(i -> abs(D[i, i]), 1:size(D, 1); init=0.0)
+    threshold = isnothing(tol) ? eps(Float64) * max(1.0, max_abs) : tol
+    ind = findall(i -> abs(D[i, i]) <= threshold, 1:size(D, 1))
+    U = zeros(size(D, 1), length(ind))
+    for j in eachindex(ind)
+        U[ind[j], j] = 1
+    end
+    return P \ (L' \ U)
+end
+
+"""    nullspace_ldlt(s::EuclideanSheaf; tol=nothing) -> Matrix
+
+Convenience overload: computes the sheaf Laplacian ``L = d^\\mathsf{T} d`` (where
+``d`` is the coboundary map of `s`) and delegates to `nullspace_ldlt(L)`.
+
+The returned columns form a basis for the space of *global sections* of `s`.
+"""
+function nullspace_ldlt(s::EuclideanSheaf; tol=nothing)
+    d = sparse(coboundary_map(s))
+    return nullspace_ldlt(d' * d; tol=tol)
 end
 
 
