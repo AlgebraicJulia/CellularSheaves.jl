@@ -9,4 +9,5 @@ end
   include("network_sheaves/Parser.jl")
   include("network_sheaves/Morphisms.jl")
   include("network_sheaves/Pushforwards.jl")
+  include("network_sheaves/Pushouts.jl")
 end
