@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>- · CellularSheaves.jl</title><meta name="title" content="- · CellularSheaves.jl"/><meta property="og:title" content="- · CellularSheaves.jl"/><meta property="twitter:title" content="- · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../literate_example/">Code Example</a></li><li><a class="tocitem" href="../sheaf_morphisms/">Sheaf Morphisms</a></li><li class="is-active"><a class="tocitem" href>-</a></li><li><a class="tocitem" href="../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li></ul></li><li><a class="tocitem" href="../../api/">Library Reference</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>-</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>-</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/literate/nullspace.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><pre><code class="language-julia hljs">using CellularSheaves
+using CliqueTrees.Multifrontal
+using LinearAlgebra
+using Plots
+using SparseArrays</code></pre><p>F is a cellular sheaf</p><pre><code class="language-julia hljs">n = 6; stalk_dim = 3
+
+F = EuclideanSheaf{Float64}(Int[])
+
+for i in 1:n
+    add_vertex_stalk!(F, stalk_dim)
+end
+
+for i in 1:n
+    v1 = i
+    v2 = (i % n) + 1
+    rm = Matrix{Float64}(I, stalk_dim, stalk_dim)
+    add_sheaf_edge!(F, v1, v2, rm, rm)
+end</code></pre><p>X is the Laplacian of F</p><pre><code class="language-julia hljs">C = sparse(coboundary_map(F))
+X = C&#39; * C</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">18×18 SparseArrays.SparseMatrixCSC{Float64, Int64} with 162 stored entries:
+⎡⣿⣿⣿⣀⡀⠀⠀⠸⠿⎤
+⎢⠛⢻⣿⣿⣧⣤⠀⠀⠀⎥
+⎢⠀⠈⠉⣿⣿⣿⣶⡆⠀⎥
+⎢⣀⡀⠀⠀⠸⠿⣿⣿⣿⎥
+⎣⠛⠃⠀⠀⠀⠀⠛⠛⠛⎦</code></pre><p>M is an LDLt factorization of X</p><p class="math-container">\[  X = P^\mathsf{T} L D L^\mathsf{T} P\]</p><pre><code class="language-julia hljs">M = ldlt!(ChordalLDLt(X), RowMaximum())
+
+L = M.L # lower triangular factor
+D = M.D # diagonal factor
+P = M.P # permutation
+
+L</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">18×18 FChordalTriangular{:U, :L, Float64, Int64} with 162 stored entries:
+⎡⠷⢄⠀⠀⠀⠀⠀⠀⠀⎤
+⎢⣤⣼⣷⣄⠀⠀⠀⠀⠀⎥
+⎢⠉⠉⠉⠉⢱⣄⠀⠀⠀⎥
+⎢⠛⢣⣤⣿⣿⣿⣷⣄⠀⎥
+⎣⠒⠊⠉⠛⠛⠛⠛⠛⠓⎦</code></pre><p>V is a basis for the nullspace of X</p><pre><code class="language-julia hljs">max_abs_diag = maximum(i -&gt; abs(D[i, i]), 1:size(D, 1); init=0.0)
+tol = eps(Float64) * max(1.0, max_abs_diag)
+ind = findall(i -&gt; abs(D[i, i]) &lt;= tol, 1:size(D, 1))
+U = zeros(size(D, 1), length(ind))
+
+for j in eachindex(ind)
+    U[ind[j], j] = 1
+end
+
+V = P \ (L&#39; \ U)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">18×3 Matrix{Float64}:
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0</code></pre><p>Visualize the nullspace basis: each column of V is plotted as a separate scatter series.</p><pre><code class="language-julia hljs">scatter(V, legend=false, title=&quot;Nullspace basis vectors&quot;)</code></pre><img src="e66da88d.svg" alt="Example block output"/></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../sheaf_morphisms/">« Sheaf Morphisms</a><a class="docs-footer-nextpage" href="../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Sunday 3 May 2026 20:58">Sunday 3 May 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
