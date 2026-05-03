@@ -279,8 +279,6 @@ directions; the corresponding columns of `P^{-1} (L^\\mathsf{T})^{-1}` form the
 returned basis matrix.
 """
 function nullspace_ldlt(X::AbstractMatrix; tol=nothing)
-    # Use the RowMaximum pivoting strategy for numerical stability with
-    # positive-semidefinite matrices (which arise from d'*d).
     M = ldlt!(ChordalLDLt(X), RowMaximum())
     D = M.D; L = M.L; P = M.P
     max_abs = maximum(i -> abs(D[i, i]), 1:size(D, 1); init=0.0)

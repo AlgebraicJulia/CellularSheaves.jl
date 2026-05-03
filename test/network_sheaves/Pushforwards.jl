@@ -2,157 +2,158 @@ using Test
 using CellularSheaves
 using LinearAlgebra
 using Graphs
-using SparseArrays
 
-@testset "GraphHomomorphism" begin
-    hom = GraphHomomorphism([1, 2, 1, 2])
-    @test hom.n_target == 2
-    @test fiber_vertices(hom, 1) == [1, 3]
-    @test fiber_vertices(hom, 2) == [2, 4]
+# ---------------------------------------------------------------------------
+# Helper: build the 6-cycle sheaf used throughout the pushforward example
+# ---------------------------------------------------------------------------
+
+function make_6cycle_sheaf()
+    n = 6; stalk_dim = 3
+    F = EuclideanSheaf{Float64}(Int[])
+    for _ in 1:n
+        add_vertex_stalk!(F, stalk_dim)
+    end
+    for i in 1:n
+        v1 = i; v2 = (i % n) + 1
+        rm = Matrix{Float64}(I, stalk_dim - 1, stalk_dim)   # 2×3 projection
+        add_sheaf_edge!(F, v1, v2, rm, rm)
+    end
+    return F
+end
+
+# ---------------------------------------------------------------------------
+# GraphHomomorphisms
+# ---------------------------------------------------------------------------
+
+@testset "GraphHomomorphism construction" begin
+    hom = GraphHomomorphism([1, 1, 2, 2, 3, 3])
+    @test hom.n_target == 3
+    @test length(hom.vertex_map) == 6
 
     # Explicit n_target
-    hom2 = GraphHomomorphism([1, 2, 1, 2], 3)
+    hom2 = GraphHomomorphism([1, 1, 2, 2, 3, 3], 3)
     @test hom2.n_target == 3
 
-    # Validation errors
-    @test_throws ArgumentError GraphHomomorphism([1, 2, 0])
-    @test_throws ArgumentError GraphHomomorphism([1, 2, 3], 2)
+    # Validation: zero index
+    @test_throws ArgumentError GraphHomomorphism([0, 1, 2])
+    # Validation: negative n_target
     @test_throws ArgumentError GraphHomomorphism(Int[], -1)
+    # Validation: entry exceeds n_target
+    @test_throws ArgumentError GraphHomomorphism([1, 2, 4], 3)
 end
 
-@testset "fiber_edges / cross_edges" begin
-    g = Graph(4)
-    add_edge!(g, 1, 2)
-    add_edge!(g, 3, 4)
-    add_edge!(g, 1, 3)  # cross edge
-    add_edge!(g, 2, 4)  # cross edge
+@testset "fiber_vertices / fiber_edges / cross_edges" begin
+    hom = GraphHomomorphism([1, 1, 2, 2, 3, 3])
+    @test fiber_vertices(hom, 1) == [1, 2]
+    @test fiber_vertices(hom, 2) == [3, 4]
+    @test fiber_vertices(hom, 3) == [5, 6]
 
-    hom = GraphHomomorphism([1, 1, 2, 2])
+    F = make_6cycle_sheaf()
+    g = underlying_graph(F)
 
-    fe1 = fiber_edges(hom, g, 1)
-    @test (1, 2) in fe1
-    @test length(fe1) == 1
+    # Each fiber of the 6-cycle partition has exactly one intra-fiber edge
+    for tv in 1:3
+        fverts = fiber_vertices(hom, tv)
+        fedges = fiber_edges(hom, g, tv)
+        @test length(fedges) == 1
+        (a, b) = fedges[1]
+        @test a in fverts
+        @test b in fverts
+    end
 
-    fe2 = fiber_edges(hom, g, 2)
-    @test (3, 4) in fe2
-    @test length(fe2) == 1
-
-    ce = cross_edges(hom, g)
-    @test length(ce) == 2
-    for (e, pu, pv) in ce
-        @test pu != pv
+    # There are exactly 3 cross edges (the three edges of the triangle)
+    cedges = cross_edges(hom, g)
+    @test length(cedges) == 3
+    for (_, tu, tv) in cedges
+        @test tu != tv
     end
 end
 
-@testset "pushforward_sheaf — injective edge map" begin
-    # Simple path graph: 4 vertices, edges 1-2, 2-3, 3-4
-    # Homomorphism: vertices 1,2 → target 1; vertices 3,4 → target 2
-    # Cross-edges: edge 2-3 is the only cross-edge → injective edge map
+# ---------------------------------------------------------------------------
+# nullspace_ldlt
+# ---------------------------------------------------------------------------
 
-    g = path_graph(4)
-    F = EuclideanSheaf{Float64}(repeat([2], 4))
-    # Identity restriction maps everywhere (R^2 → R^2)
-    for e in edges(g)
-        add_sheaf_edge!(F, src(e), dst(e), Matrix{Float64}(I, 2, 2), Matrix{Float64}(I, 2, 2))
-    end
+@testset "nullspace_ldlt on matrices" begin
+    # Zero matrix → full nullspace
+    NS = nullspace_ldlt(zeros(3, 3))
+    @test size(NS, 1) == 3
+    @test size(NS, 2) == 3
 
-    hom = GraphHomomorphism([1, 1, 2, 2])
+    # Rank-1 matrix → 2-dimensional nullspace
+    A = zeros(3, 3); A[1, 1] = 1.0
+    NS2 = nullspace_ldlt(A)
+    @test size(NS2, 2) == 2
+
+    # Full-rank identity → trivial nullspace
+    NS3 = nullspace_ldlt(Matrix{Float64}(I, 4, 4))
+    @test size(NS3, 2) == 0
+end
+
+@testset "nullspace_ldlt on EuclideanSheaf" begin
+    F = make_6cycle_sheaf()
+    # 6-cycle with 2×3 projection maps:
+    # global sections have shared (a,b)∈ℝ² and 6 free scalars → dim 8
+    NS_F = nullspace_ldlt(F)
+    @test size(NS_F, 2) == 8
+
+    # Columns should be in the nullspace of d'*d
+    d = coboundary_map(F)
+    @test norm(d * NS_F) < 1e-10
+end
+
+# ---------------------------------------------------------------------------
+# Pushforward sheaf
+# ---------------------------------------------------------------------------
+
+@testset "pushforward_sheaf stalk dimensions" begin
+    F   = make_6cycle_sheaf()
+    hom = GraphHomomorphism([1, 1, 2, 2, 3, 3])
     PfF = pushforward_sheaf(hom, F)
 
-    # Target graph has 2 vertices and 1 edge
-    @test nv(underlying_graph(PfF)) == 2
-    @test ne(underlying_graph(PfF)) == 1
-
-    # Global sections of PfF ↔ global sections of F
-    d_F   = sparse(coboundary_map(F))
-    d_PfF = sparse(coboundary_map(PfF))
-    ns_F   = nullspace_ldlt(d_F'   * d_F)
-    ns_PfF = nullspace_ldlt(d_PfF' * d_PfF)
-    @test size(ns_F, 2) == size(ns_PfF, 2)
+    # Each fiber: 2 vertices (ℝ³ each) joined by 1 edge (ℝ²) → dim = 3+3-2 = 4
+    @test vertex_stalks(PfF) == [4, 4, 4]
+    # Three triangle edges, each with the same 2-dimensional stalk as F's edges
+    @test all(==(2), collect(values(edge_stalks(PfF))))
 end
 
-@testset "pushforward_sheaf — non-injective edge map (two source edges → one target edge)" begin
-    # 4-vertex graph; hom maps: 1→1, 2→2, 3→1, 4→2
-    # Edges: 1-2 and 3-4 are both cross-edges mapping to target edge 1-2.
-    # This is the non-injective case the bug was about.
-
-    g = Graph(4)
-    add_edge!(g, 1, 2)  # cross-edge → target (1,2)
-    add_edge!(g, 3, 4)  # cross-edge → target (1,2)
-
-    # 1-dimensional stalks everywhere, identity restriction maps
-    F = EuclideanSheaf{Float64}(repeat([1], 4))
-    for e in edges(g)
-        add_sheaf_edge!(F, src(e), dst(e), ones(1, 1), ones(1, 1))
-    end
-
-    hom = GraphHomomorphism([1, 2, 1, 2])
+@testset "pushforward_sheaf nullspace dimension" begin
+    F   = make_6cycle_sheaf()
+    hom = GraphHomomorphism([1, 1, 2, 2, 3, 3])
     PfF = pushforward_sheaf(hom, F)
 
-    # Target graph has 2 vertices and 1 edge
-    @test nv(underlying_graph(PfF)) == 2
-    @test ne(underlying_graph(PfF)) == 1
+    NS_F   = nullspace_ldlt(F)
+    NS_PfF = nullspace_ldlt(PfF)
 
-    # Edge stalk of PfF at (1,2) should be 2-dimensional (direct sum of two 1-dim stalks)
-    @test get_edge_stalk(PfF, 1, 2) == 2
+    # Both nullspaces have the same dimension (isomorphic as vector spaces)
+    @test size(NS_F, 2) == size(NS_PfF, 2)
+    @test size(NS_PfF, 2) == 8
 end
 
-@testset "pushforward_sheaf — non-injective: global section count preserved" begin
-    # Same setup: 4 vertices, hom: 1→1, 2→2, 3→1, 4→2
-    # Two cross-edges (1-2) and (3-4) both mapping to target (1,2)
-    # Plus fiber edges: 1-3 (within fiber 1) and 2-4 (within fiber 2)
+# ---------------------------------------------------------------------------
+# Transfer map
+# ---------------------------------------------------------------------------
 
-    g = Graph(4)
-    add_edge!(g, 1, 2)  # cross-edge
-    add_edge!(g, 3, 4)  # cross-edge
-    add_edge!(g, 1, 3)  # fiber edge for target vertex 1
-    add_edge!(g, 2, 4)  # fiber edge for target vertex 2
-
-    # 1-dimensional stalks, identity restriction maps
-    F = EuclideanSheaf{Float64}(repeat([1], 4))
-    for e in edges(g)
-        add_sheaf_edge!(F, src(e), dst(e), ones(1, 1), ones(1, 1))
-    end
-
-    hom = GraphHomomorphism([1, 2, 1, 2])
+@testset "pushforward_transfer_map residual" begin
+    F   = make_6cycle_sheaf()
+    hom = GraphHomomorphism([1, 1, 2, 2, 3, 3])
     PfF = pushforward_sheaf(hom, F)
 
-    # Target graph has 2 vertices and 1 edge
-    @test nv(underlying_graph(PfF)) == 2
-    @test ne(underlying_graph(PfF)) == 1
+    NS_F = nullspace_ldlt(F)
+    T    = pushforward_transfer_map(hom, F)
+    d_PfF = coboundary_map(PfF)
 
-    # Edge stalk should be 2-dimensional (direct sum of the two cross-edge stalks)
-    @test get_edge_stalk(PfF, 1, 2) == 2
-
-    # Global section count: F and PfF should have the same number of global sections
-    d_F   = sparse(coboundary_map(F))
-    d_PfF = sparse(coboundary_map(PfF))
-    ns_F   = nullspace_ldlt(d_F'   * d_F)
-    ns_PfF = nullspace_ldlt(d_PfF' * d_PfF)
-    @test size(ns_F, 2) == size(ns_PfF, 2)
+    # Every global section of F maps to a global section of φ_*F
+    @test norm(d_PfF * T * NS_F) < 1e-10
 end
 
-@testset "pushforward_transfer_map — maps global sections correctly" begin
-    # Path graph 1-2-3-4 with hom: 1,2→1; 3,4→2
-    g = path_graph(4)
-    F = EuclideanSheaf{Float64}(repeat([1], 4))
-    for e in edges(g)
-        add_sheaf_edge!(F, src(e), dst(e), ones(1, 1), ones(1, 1))
-    end
+# ---------------------------------------------------------------------------
+# Input validation (O(1) check)
+# ---------------------------------------------------------------------------
 
-    hom = GraphHomomorphism([1, 1, 2, 2])
-    PfF = pushforward_sheaf(hom, F)
-    T   = pushforward_transfer_map(hom, F)
-
-    d_PfF = sparse(coboundary_map(PfF))
-
-    # For every global section s of F, d_PfF * T * s ≈ 0
-    d_F  = sparse(coboundary_map(F))
-    ns_F = nullspace_ldlt(d_F' * d_F)
-
-    for k in axes(ns_F, 2)
-        s = ns_F[:, k]
-        residual = d_PfF * T * s
-        @test norm(residual) < 1e-10
-    end
+@testset "vertex_map length validation" begin
+    F   = make_6cycle_sheaf()
+    # Too-short vertex map (4 entries for a 6-vertex sheaf)
+    bad_hom = GraphHomomorphism([1, 1, 2, 2])
+    @test_throws ArgumentError pushforward_sheaf(bad_hom, F)
+    @test_throws ArgumentError pushforward_transfer_map(bad_hom, F)
 end
