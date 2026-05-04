@@ -8,13 +8,15 @@ respects the graph structure.  This module provides:
 - [`fiber_vertices`](@ref) — vertices of the source graph that map to a given target vertex.
 - [`fiber_edges`](@ref) — edges within a single fiber (both endpoints in the same fiber).
 - [`cross_edges`](@ref) — edges whose endpoints lie in different fibers.
+- [`compose`](@ref) — composition of two graph homomorphisms.
+- [`graph_pushout`](@ref) — categorical pushout of a span of graph homomorphisms.
 
 For the action of a graph homomorphism on a cellular sheaf (pushforward), see
 the [`Pushforwards`](@ref) module.
 """
 module GraphHomomorphisms
 
-export GraphHomomorphism, fiber_vertices, fiber_edges, cross_edges
+export GraphHomomorphism, fiber_vertices, fiber_edges, cross_edges, compose, graph_pushout
 
 using Graphs
 
@@ -117,6 +119,78 @@ function cross_edges(hom::GraphHomomorphism, g::AbstractGraph)
         end
     end
     return result
+end
+
+# ---------------------------------------------------------------------------
+# Composition
+# ---------------------------------------------------------------------------
+
+"""
+    compose(f::GraphHomomorphism, g::GraphHomomorphism) -> GraphHomomorphism
+
+Compute the composition `g ∘ f` (apply `f` first, then `g`).
+"""
+function compose(f::GraphHomomorphism, g::GraphHomomorphism)
+    return GraphHomomorphism(g.vertex_map[f.vertex_map], g.n_target)
+end
+
+# ---------------------------------------------------------------------------
+# Pushout
+# ---------------------------------------------------------------------------
+
+"""
+    graph_pushout(φ::GraphHomomorphism, ψ::GraphHomomorphism,
+                  G::SimpleGraph, H::SimpleGraph, nK::Int)
+        -> (SimpleGraph, GraphHomomorphism, GraphHomomorphism)
+
+Compute the pushout `Q = G ⊔_K H` of the span `G <--φ-- K --ψ--> H`.
+
+`nK` is the number of vertices in `K` (i.e. `length(φ.vertex_map)`).
+
+Returns `(Q, jG, jH)` where `jG : G → Q` and `jH : H → Q` are the canonical
+graph homomorphisms satisfying `jG ∘ φ == jH ∘ ψ` (as vertex maps).
+"""
+function graph_pushout(φ::GraphHomomorphism, ψ::GraphHomomorphism,
+                       G::SimpleGraph, H::SimpleGraph, nK::Int)
+    nG, nH = nv(G), nv(H)
+    parent = collect(1:nG+nH)
+
+    function find(x)
+        while parent[x] != x
+            parent[x] = parent[parent[x]]   # path compression
+            x = parent[x]
+        end
+        return x
+    end
+
+    function union!(x, y)
+        rx, ry = find(x), find(y)
+        rx != ry && (parent[rx] = ry)
+    end
+
+    # Identify φ(k) in G with ψ(k) in H for each vertex k of K
+    for k in 1:nK
+        union!(φ.vertex_map[k], nG + ψ.vertex_map[k])
+    end
+
+    # Assign contiguous IDs 1..nQ to equivalence classes
+    roots = [find(i) for i in 1:nG+nH]
+    unique_roots = unique(roots)
+    id = Dict(r => i for (i, r) in enumerate(unique_roots))
+    component = [id[find(i)] for i in 1:nG+nH]
+
+    nQ = length(unique_roots)
+    Q = SimpleGraph(nQ)
+    for e in edges(G)
+        add_edge!(Q, component[src(e)], component[dst(e)])   # no-op for self-loops
+    end
+    for e in edges(H)
+        add_edge!(Q, component[nG + src(e)], component[nG + dst(e)])
+    end
+
+    jG = GraphHomomorphism(component[1:nG], nQ)
+    jH = GraphHomomorphism(component[nG+1:end], nQ)
+    return Q, jG, jH
 end
 
 end # module GraphHomomorphisms
