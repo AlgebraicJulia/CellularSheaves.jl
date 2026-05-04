@@ -311,8 +311,8 @@ end
 # nullspace of the original matrix.
 function ldlt_pseudoinverse_and_null(M, b; tol=nothing)
     D = M.D; Lfac = M.L; P = M.P
-    n         = size(D, 1)
-    max_abs   = maximum(i -> abs(D[i, i]), 1:n; init=0.0)
+    n = size(D, 1)
+    max_abs = maximum(i -> abs(D[i, i]), 1:n; init=0.0)
     threshold = isnothing(tol) ? eps(Float64) * max(1.0, max_abs) : tol
 
     null_idx = findall(i -> abs(D[i, i]) <= threshold, 1:n)
