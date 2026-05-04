@@ -376,12 +376,14 @@ function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVect
     L     = sheaf_laplacian_matrix(s)
     L_II  = L[I_idx, I_idx]
 
+    B_idx = isempty(boundary_verts) ? Int[] :
+        vcat([offsets[v]+1:offsets[v+1] for v in boundary_verts]...)
+
     if isempty(boundary_verts)
         b = zeros(length(I_idx))
     else
-        B_idx = vcat([offsets[v]+1:offsets[v+1] for v in boundary_verts]...)
-        x_B   = vcat([boundary[v] for v in boundary_verts]...)
-        b     = -L[I_idx, B_idx] * x_B
+        x_B = vcat([boundary[v] for v in boundary_verts]...)
+        b   = -L[I_idx, B_idx] * x_B
     end
 
     x_interior, null_interior = ldlt_pseudoinverse_and_null(
@@ -390,7 +392,6 @@ function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVect
     x        = zeros(n_total)
     x[I_idx] = x_interior
     if !isempty(boundary_verts)
-        B_idx    = vcat([offsets[v]+1:offsets[v+1] for v in boundary_verts]...)
         x[B_idx] = vcat([boundary[v] for v in boundary_verts]...)
     end
 
