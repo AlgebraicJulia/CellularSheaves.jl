@@ -11,6 +11,7 @@ include("Parser.jl")
 include("Morphisms.jl")
 include("GraphHomomorphisms.jl")
 include("Pushforwards.jl")
+include("TrajectorySheaf.jl")
 
 @reexport using .BlockSparseArrays
 @reexport using .SheafInterface
@@ -21,5 +22,6 @@ include("Pushforwards.jl")
 @reexport using .SheafMorphisms
 @reexport using .GraphHomomorphisms
 @reexport using .Pushforwards
+@reexport using .TrajectorySheaves
 
 end
