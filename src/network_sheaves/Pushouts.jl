@@ -76,7 +76,7 @@ struct SheafSpan
         ne_K = length(edge_stalk_dimensions(apex))
         nv_F = length(vertex_stalks(F))
         nv_G = length(vertex_stalks(G))
-    k_graph = underlying_graph(K)
+    k_graph = underlying_graph(apex)
     f_graph = underlying_graph(F)
     g_graph = underlying_graph(G)
 
