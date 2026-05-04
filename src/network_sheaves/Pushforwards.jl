@@ -177,7 +177,10 @@ function pushforward_sheaf(hom::GraphHomomorphism, F)
     end
 
     # Add one sheaf edge per target edge, combining multiple source edges via direct sum.
-    for ((p, q), rms) in edge_groups
+    # Iterate in a deterministic order so the pushed-forward sheaf's edge order
+    # (and any downstream coboundary/edge-stalk indexing derived from it) is stable.
+    for (p, q) in sort!(collect(keys(edge_groups)))
+        rms = edge_groups[(p, q)]
         combined_rm_p = vcat([rm[1] for rm in rms]...)
         combined_rm_q = vcat([rm[2] for rm in rms]...)
         add_sheaf_edge!(PfF, p, q, combined_rm_p, combined_rm_q)
