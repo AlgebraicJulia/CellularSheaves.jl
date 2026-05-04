@@ -60,7 +60,7 @@ function fiber_section_basis(F, verts::Vector{Int}, fedges::Vector{Tuple{Int,Int
     # When the fiber has no edges the coboundary is zero and every assignment
     # of vertex values is a global section, so the basis is the full identity.
     if isempty(fedges)
-        return I(total_dim, total_dim)
+        return I(total_dim)
     end
 
     # Local vertex indices within the fiber sub-sheaf.
