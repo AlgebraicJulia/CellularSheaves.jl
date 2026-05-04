@@ -74,10 +74,23 @@ struct SheafSpan
         ne_K = length(edge_stalk_dimensions(apex))
         nv_F = length(vertex_stalks(F))
         nv_G = length(vertex_stalks(G))
-        @assert length(left.Vmap)  == nv_K "left.Vmap must have one entry per vertex of apex"
-        @assert length(left.Emap)  == ne_K "left.Emap must have one entry per edge of apex"
-        @assert length(right.Vmap) == nv_K "right.Vmap must have one entry per vertex of apex"
-        @assert length(right.Emap) == ne_K "right.Emap must have one entry per edge of apex"
+    k_graph = underlying_graph(K)
+    f_graph = underlying_graph(F)
+    g_graph = underlying_graph(G)
+
+    if f_graph != k_graph || g_graph != k_graph
+        throw(ArgumentError("pushout_sheaf requires K, F, and G to share the same underlying graph"))
+    end
+
+    nv_k = nv(k_graph)
+    ne_k = ne(k_graph)
+    if nv(f_graph) != nv_k || nv(g_graph) != nv_k || ne(f_graph) != ne_k || ne(g_graph) != ne_k
+        throw(ArgumentError("pushout_sheaf requires K, F, and G to have matching numbers of vertices and edges"))
+    end
+
+    nv_g    = nv_k
+    ne_g    = ne_k
+    edge_list = collect(edges(k_graph))
         @assert all(1 .<= left.Vmap  .<= nv_F) "left.Vmap entries must be valid vertex indices of F"
         @assert all(1 .<= right.Vmap .<= nv_G) "right.Vmap entries must be valid vertex indices of G"
         new(left, right, apex, F, G)
