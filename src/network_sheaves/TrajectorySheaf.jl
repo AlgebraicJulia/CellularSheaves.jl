@@ -137,8 +137,9 @@ Given initial state `x0` (assigned to time step 1) and final state `xk`
 invertible and `k ≥ 1`, the boundary conditions uniquely determine the
 trajectory; the returned value is the minimum-norm particular solution.
 
-The returned `BlockVector` has `k+1` blocks: `trajectory[Block(t)]` gives the
-state ``x_{t-1}`` at time step `t-1`.
+The returned `BlockVector` has `k+1` blocks where `trajectory[Block(t)]` gives
+the state at time step `t-1` (so `Block(1)` is `x_0`, `Block(2)` is `x_1`,
+…, `Block(k+1)` is `x_k`).
 
 # Arguments
 - `tsheaf` — a `TrajectorySheaf{T}`.
