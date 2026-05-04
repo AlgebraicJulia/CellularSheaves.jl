@@ -83,6 +83,8 @@ using BlockArrays
     d2 = coboundary_map(s_two)
     for j in 1:size(nb2c, 2)
         @test norm(d2 * nb2c[:, j]) < 1e-10
+        @test isapprox(nb2c[1, j], 0.0; atol=1e-10)
+        @test isapprox(nb2c[3, j], 0.0; atol=1e-10)
     end
 
     # 9. Global section round-trip: boundary consistent with a global section
@@ -95,5 +97,8 @@ using BlockArrays
 
     # 10. Mismatched boundary vector length throws ArgumentError
     @test_throws ArgumentError harmonic_extension(s, Dict(1 => [0.0, 1.0], 5 => [4.0]))
+
+    # 11. Invalid boundary vertex index throws ArgumentError
+    @test_throws ArgumentError harmonic_extension(s, Dict(1 => [0.0], 6 => [4.0]))
 
 end

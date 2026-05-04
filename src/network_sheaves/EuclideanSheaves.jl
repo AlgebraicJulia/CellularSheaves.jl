@@ -356,11 +356,12 @@ The complete solution set is `{ x_p + null_basis * c : c ∈ Rᵏ }` where
 Throws `ArgumentError` if any boundary vector has the wrong length for its stalk.
 """
 function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVector})
+    nv_graph = nv(s.underlying_graph)
     for (v, val) in boundary
+        @argcheck 1 <= v <= nv_graph
         @argcheck length(val) == s.vertex_stalks[v]
     end
 
-    nv_graph       = nv(s.underlying_graph)
     offsets        = [0; cumsum(s.vertex_stalks)]
     boundary_verts = sort(collect(keys(boundary)))
     interior_verts = setdiff(1:nv_graph, boundary_verts)
