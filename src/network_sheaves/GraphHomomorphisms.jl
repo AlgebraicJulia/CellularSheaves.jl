@@ -155,7 +155,7 @@ function graph_pushout(φ::GraphHomomorphism, ψ::GraphHomomorphism,
     nG, nH = nv(G), nv(H)
     parent = collect(1:nG+nH)
 
-    function find(x)
+    function uf_find(x)
         while parent[x] != x
             parent[x] = parent[parent[x]]   # path compression
             x = parent[x]
@@ -163,21 +163,21 @@ function graph_pushout(φ::GraphHomomorphism, ψ::GraphHomomorphism,
         return x
     end
 
-    function union!(x, y)
-        rx, ry = find(x), find(y)
+    function uf_union!(x, y)
+        rx, ry = uf_find(x), uf_find(y)
         rx != ry && (parent[rx] = ry)
     end
 
     # Identify φ(k) in G with ψ(k) in H for each vertex k of K
     for k in 1:nK
-        union!(φ.vertex_map[k], nG + ψ.vertex_map[k])
+        uf_union!(φ.vertex_map[k], nG + ψ.vertex_map[k])
     end
 
     # Assign contiguous IDs 1..nQ to equivalence classes
-    roots = [find(i) for i in 1:nG+nH]
+    roots = [uf_find(i) for i in 1:nG+nH]
     unique_roots = unique(roots)
     id = Dict(r => i for (i, r) in enumerate(unique_roots))
-    component = [id[find(i)] for i in 1:nG+nH]
+    component = [id[uf_find(i)] for i in 1:nG+nH]
 
     nQ = length(unique_roots)
     Q = SimpleGraph(nQ)
