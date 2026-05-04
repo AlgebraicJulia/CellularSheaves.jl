@@ -50,7 +50,9 @@ A *span* of sheaf morphisms
 where `left : K → F` and `right : K → G` share the same domain `apex = K`.
 
 The inner constructor validates that the morphism index maps have the correct
-lengths relative to the apex's vertex and edge counts.
+lengths relative to the apex's vertex and edge counts, and that all `Vmap`
+entries are valid indices into the respective feet.  An `AssertionError` is
+thrown if any check fails.
 
 Fields
 ------
@@ -126,6 +128,11 @@ end
 #
 # When dimK == 0 (fmap and gmap both have 0 columns), the cokernel is all of
 # F (+) G, so p = dimF + dimG and the injections are the standard embeddings.
+#
+# Note: _cokernel_basis returns a lazy Diagonal for the trivial (dimK==0)
+# case to avoid an O(m^2) allocation there.  The conversion to dense via
+# Matrix{T}(Q') here is unavoidable for the subsequent matrix multiplications
+# that build iF and iG, so the restriction maps are always dense.
 function _cokernel_stalk(::Type{T}, dimF::Int, dimG::Int,
                           fmap::AbstractMatrix, gmap::AbstractMatrix) where T
     A  = vcat(fmap, -gmap)          # (dimF + dimG) x dimK

@@ -151,7 +151,7 @@ using Graphs
     # ------------------------------------------------------------------
     @testset "cycle_sheaf constructor" begin
         # Asymmetric sheaf: src restriction is identity, dst is scaled by 2
-        s = cycle_sheaf(n, d, (n, d, k) -> (Matrix{Float64}(I, d, d), 2.0 * Matrix{Float64}(I, d, d)))
+        s = cycle_sheaf(n, d, (nv, dim, k) -> (Matrix{Float64}(I, dim, dim), 2.0 * Matrix{Float64}(I, dim, dim)))
         @test vertex_stalks(s) == fill(d, n)
         @test edge_stalk_dimensions(s) == fill(d, n)
     end

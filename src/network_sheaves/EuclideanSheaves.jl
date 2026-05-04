@@ -131,10 +131,14 @@ function add_vertex_stalk!(s::EuclideanSheaf, stalk_size::Int)
     add_vertex!(s.underlying_graph)
 end
 
-"""   add_sheaf_edge!(s::EuclideanSheaf, v1::Int, v2::Int, rm1::Matrix{Float64}, rm2::Matrix{Float64})
+"""   add_sheaf_edge!(s::EuclideanSheaf, v1::Int, v2::Int, rm1, rm2)
 
-Add an edge between vertices v1 and v2 with restriction maps rm1 and rm2.
-rm1 is the restriction map from vertex v1 to the edge, and rm2 is the restriction map from vertex v2 to the edge.
+Add an edge between vertices `v1` and `v2` with restriction maps `rm1` and
+`rm2`.  `rm1` is the restriction map from vertex `v1` to the edge and `rm2`
+is the restriction map from vertex `v2` to the edge.
+
+Both `rm1` and `rm2` may be any `AbstractMatrix` (e.g. `Matrix`, `Diagonal`,
+`SparseMatrixCSC`); they are converted to `Matrix{T}` when stored.
 """
 function add_sheaf_edge!(s::EuclideanSheaf{T}, v1::Int, v2::Int, rm1::AbstractMatrix, rm2::AbstractMatrix) where T
     @assert v1 <= length(s.vertex_stalks) && v2 <= length(s.vertex_stalks)
