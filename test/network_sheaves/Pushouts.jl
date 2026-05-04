@@ -5,23 +5,6 @@ using Graphs
 
 @testset "pushout_sheaf" begin
 
-    # ------------------------------------------------------------------
-    # Helper: build a 3-cycle sheaf with given stalk dim and rm function
-    # ------------------------------------------------------------------
-    function cycle_sheaf(n, d, rm_fn)
-        s = EuclideanSheaf{Float64}(Int[])
-        for _ in 1:n
-            add_vertex_stalk!(s, d)
-        end
-        for i in 1:n
-            v1 = i
-            v2 = (i % n) + 1
-            rm = rm_fn(d)
-            add_sheaf_edge!(s, v1, v2, rm, rm)
-        end
-        return s
-    end
-
     n = 3
     d = 2
 
@@ -30,11 +13,12 @@ using Graphs
     # Pushout should be isomorphic to F (same stalk dims, same maps).
     # ------------------------------------------------------------------
     @testset "Identity span" begin
-        F = cycle_sheaf(n, d, d -> Matrix{Float64}(I, d, d))
+        F = constant_sheaf(cycle_graph(n), d)
         f = id(SheafMorphism, F)
         g = id(SheafMorphism, F)
 
-        P, iF, iG = pushout_sheaf(f, g, F, F, F)
+        span = SheafSpan(f, g, F, F, F)
+        P, iF, iG = pushout_sheaf(span)
 
         # Stalk dimensions should match F
         @test vertex_stalks(P) == vertex_stalks(F)
@@ -56,25 +40,16 @@ using Graphs
     end
 
     # ------------------------------------------------------------------
-    # Test 2: Pushout over the zero sheaf  F ⊕_0 G = F ⊕ G
+    # Test 2: Pushout over the zero sheaf  F (+)_0 G = F (+) G
     # K is the zero sheaf (all stalks dimension 0).
     # ------------------------------------------------------------------
     @testset "Zero span (direct sum)" begin
-        F = cycle_sheaf(n, d, d -> Matrix{Float64}(I, d, d))
-        G = cycle_sheaf(n, d, d -> Matrix{Float64}(I, d, d))
+        g_cycle = cycle_graph(n)
+        F = constant_sheaf(g_cycle, d)
+        G = constant_sheaf(g_cycle, d)
+        K = zero_sheaf(g_cycle)
 
-        # Build the zero sheaf on the same graph
-        K = EuclideanSheaf{Float64}(Int[])
-        for _ in 1:n
-            add_vertex_stalk!(K, 0)
-        end
-        g_graph = underlying_graph(F)
-        for e in edges(g_graph)
-            rm = zeros(Float64, 0, 0)
-            add_sheaf_edge!(K, src(e), dst(e), rm, rm)
-        end
-
-        # Zero morphisms K → F and K → G
+        # Zero morphisms K -> F and K -> G
         f = SheafMorphism(
             collect(1:n), collect(1:n),
             [zeros(Float64, d, 0) for _ in 1:n],
@@ -86,9 +61,10 @@ using Graphs
             [zeros(Float64, d, 0) for _ in 1:n],
         )
 
-        P, iF, iG = pushout_sheaf(f, g, K, F, G)
+        span = SheafSpan(f, g, K, F, G)
+        P, iF, iG = pushout_sheaf(span)
 
-        # Each vertex stalk of P should be F(v) ⊕ G(v) = R^(2d)
+        # Each vertex stalk of P should be F(v) (+) G(v) = R^(2d)
         @test all(vertex_stalks(P) .== 2d)
         @test all(edge_stalk_dimensions(P) .== 2d)
 
@@ -102,27 +78,27 @@ using Graphs
     # K has d-dim stalks; f and g are non-trivial morphisms.
     # ------------------------------------------------------------------
     @testset "Universal property (non-trivial span)" begin
-        # Build K, F, G all with d-dim vertex stalks and identity restriction maps
-        K = cycle_sheaf(n, d, d -> Matrix{Float64}(I, d, d))
-        F = cycle_sheaf(n, d, d -> Matrix{Float64}(I, d, d))
-        G = cycle_sheaf(n, d, d -> Matrix{Float64}(I, d, d))
+        g_cycle = cycle_graph(n)
+        K = constant_sheaf(g_cycle, d)
+        F = constant_sheaf(g_cycle, d)
+        G = constant_sheaf(g_cycle, d)
 
-        # f : K → F is the identity
+        # f : K -> F is the identity
         f = id(SheafMorphism, K)
 
-        # g : K → G — use a non-trivial vertex map (e.g. first coordinate embedding)
-        # For each vertex map K(v) → G(v), use the rotation by π/4
-        θ = π / 4
-        R = [cos(θ) -sin(θ); sin(θ) cos(θ)]
+        # g : K -> G with rotation by pi/4 at each stalk
+        theta = pi / 4
+        R = [cos(theta) -sin(theta); sin(theta) cos(theta)]
         g = SheafMorphism(
             collect(1:n), collect(1:n),
             [R for _ in 1:n],
             [R for _ in 1:n],
         )
 
-        P, iF, iG = pushout_sheaf(f, g, K, F, G)
+        span = SheafSpan(f, g, K, F, G)
+        P, iF, iG = pushout_sheaf(span)
 
-        # Both injections are valid morphisms F → P and G → P
+        # Both injections are valid morphisms F -> P and G -> P
         @test is_morphism(ComplexMorphism(F, P, iF), F, P)
         @test is_morphism(ComplexMorphism(G, P, iG), G, P)
 
@@ -141,13 +117,14 @@ using Graphs
     # Test 4: Dimension check  dim P(v) = dim F(v) + dim G(v) - rank(A_v)
     # ------------------------------------------------------------------
     @testset "Stalk dimension formula" begin
-        K = cycle_sheaf(n, d, d -> Matrix{Float64}(I, d, d))
-        F = cycle_sheaf(n, d, d -> Matrix{Float64}(I, d, d))
-        G = cycle_sheaf(n, d, d -> Matrix{Float64}(I, d, d))
+        g_cycle = cycle_graph(n)
+        K = constant_sheaf(g_cycle, d)
+        F = constant_sheaf(g_cycle, d)
+        G = constant_sheaf(g_cycle, d)
 
         f = id(SheafMorphism, K)
-        θ = π / 3
-        R = [cos(θ) -sin(θ); sin(θ) cos(θ)]
+        theta = pi / 3
+        R = [cos(theta) -sin(theta); sin(theta) cos(theta)]
         g = SheafMorphism(
             collect(1:n), collect(1:n),
             [R for _ in 1:n],
@@ -162,12 +139,21 @@ using Graphs
             @test vertex_stalks(P)[v] == expected_dim
         end
 
-        g_graph = underlying_graph(K)
-        for (k, _) in enumerate(edges(g_graph))
+        for (k, _) in enumerate(edges(g_cycle))
             A_e = vcat(f.Emaps[k], -g.Emaps[k])
             expected_dim = edge_stalk_dimensions(F)[k] + edge_stalk_dimensions(G)[k] - rank(A_e)
             @test edge_stalk_dimensions(P)[k] == expected_dim
         end
+    end
+
+    # ------------------------------------------------------------------
+    # Test 5: cycle_sheaf constructor with custom rm_pair_fn
+    # ------------------------------------------------------------------
+    @testset "cycle_sheaf constructor" begin
+        # Asymmetric sheaf: src restriction is identity, dst is scaled by 2
+        s = cycle_sheaf(n, d, (n, d, k) -> (Matrix{Float64}(I, d, d), 2.0 * Matrix{Float64}(I, d, d)))
+        @test vertex_stalks(s) == fill(d, n)
+        @test edge_stalk_dimensions(s) == fill(d, n)
     end
 
 end

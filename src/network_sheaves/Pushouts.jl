@@ -22,11 +22,11 @@ cokernel:
 - Restriction maps of `P` are induced from those of `F` and `G` simultaneously
   via the naturality conditions for `iF` and `iG`.
 
-This module provides [`pushout_sheaf`](@ref).
+This module provides [`SheafSpan`](@ref) and [`pushout_sheaf`](@ref).
 """
 module Pushouts
 
-export pushout_sheaf
+export pushout_sheaf, SheafSpan
 
 using LinearAlgebra
 using Graphs
@@ -37,19 +37,91 @@ using ..EuclideanSheaves: EuclideanSheaf
 using ..SheafMorphisms: SheafMorphism
 
 # ---------------------------------------------------------------------------
-# Cokernel helper
+# SheafSpan
+# ---------------------------------------------------------------------------
+
+"""
+    SheafSpan
+
+A *span* of sheaf morphisms
+
+    F ← K → G
+
+where `left : K → F` and `right : K → G` share the same domain `apex = K`.
+
+The inner constructor validates that the morphism index maps have the correct
+lengths relative to the apex's vertex and edge counts.
+
+Fields
+------
+- `left  :: SheafMorphism` — morphism `K → F`.
+- `right :: SheafMorphism` — morphism `K → G`.
+- `apex  :: EuclideanSheaf` — the apex sheaf `K`.
+- `F     :: EuclideanSheaf` — left foot.
+- `G     :: EuclideanSheaf` — right foot.
+"""
+struct SheafSpan
+    left::SheafMorphism
+    right::SheafMorphism
+    apex::EuclideanSheaf
+    F::EuclideanSheaf
+    G::EuclideanSheaf
+
+    function SheafSpan(left::SheafMorphism, right::SheafMorphism,
+                       apex::EuclideanSheaf, F::EuclideanSheaf,
+                       G::EuclideanSheaf)
+        nv_K = length(vertex_stalks(apex))
+        ne_K = length(edge_stalk_dimensions(apex))
+        nv_F = length(vertex_stalks(F))
+        nv_G = length(vertex_stalks(G))
+        @assert length(left.Vmap)  == nv_K "left.Vmap must have one entry per vertex of apex"
+        @assert length(left.Emap)  == ne_K "left.Emap must have one entry per edge of apex"
+        @assert length(right.Vmap) == nv_K "right.Vmap must have one entry per vertex of apex"
+        @assert length(right.Emap) == ne_K "right.Emap must have one entry per edge of apex"
+        @assert all(1 .<= left.Vmap  .<= nv_F) "left.Vmap entries must be valid vertex indices of F"
+        @assert all(1 .<= right.Vmap .<= nv_G) "right.Vmap entries must be valid vertex indices of G"
+        new(left, right, apex, F, G)
+    end
+end
+
+# ---------------------------------------------------------------------------
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 # Compute the left null space (cokernel projection basis) of `A`.
-# Returns Q :: (m × p) with orthonormal columns spanning ker(A').
-# When A has zero columns (empty map), Q = I (full space).
+# Returns an AbstractMatrix whose columns are an orthonormal basis for ker(A').
+# When A has zero columns (trivial map), returns a lazy Diagonal identity to
+# avoid materialising a dense m×m matrix.
 function _cokernel_basis(A::AbstractMatrix{T}) where T
     m, n = size(A)
     if n == 0
-        # Trivial: cokernel is the whole target space.
-        return Matrix{T}(I, m, m)
+        return Diagonal(ones(T, m))
     end
     return Matrix{T}(nullspace(A'))
+end
+
+# Compute cokernel data for a single stalk.
+#
+# Given linear maps  fmap : K -> F  and  gmap : K -> G  (both with the same
+# domain K, i.e. same number of columns), this function computes:
+#
+#   Q   -- AbstractMatrix, size (dimF+dimG) x p, orthonormal basis for the
+#          cokernel of [fmap; -gmap].
+#   iF  -- Matrix{T}, size p x dimF, injection map F -> P.
+#   iG  -- Matrix{T}, size p x dimG, injection map G -> P.
+#   p   -- Int, pushout stalk dimension = dim cokernel of [fmap; -gmap].
+#
+# When dimK == 0 (fmap and gmap both have 0 columns), the cokernel is all of
+# F (+) G, so p = dimF + dimG and the injections are the standard embeddings.
+function _cokernel_stalk(::Type{T}, dimF::Int, dimG::Int,
+                          fmap::AbstractMatrix, gmap::AbstractMatrix) where T
+    A  = vcat(fmap, -gmap)          # (dimF + dimG) x dimK
+    Q  = _cokernel_basis(A)
+    p  = size(Q, 2)                 # pushout stalk dimension
+    Qt = Matrix{T}(Q')              # ensure dense for subsequent multiplications
+    iF = Matrix{T}(Qt * vcat(Matrix{T}(I, dimF, dimF), zeros(T, dimG, dimF)))
+    iG = Matrix{T}(Qt * vcat(zeros(T, dimF, dimG), Matrix{T}(I, dimG, dimG)))
+    return Q, iF, iG, p
 end
 
 # ---------------------------------------------------------------------------
@@ -64,8 +136,8 @@ network sheaves over the shared underlying graph.
 
 Returns `(P, iF, iG)` where:
 - `P` is the pushout sheaf.
-- `iF : F → P` is the canonical injection from `F`.
-- `iG : G → P` is the canonical injection from `G`.
+- `iF : F -> P` is the canonical injection from `F`.
+- `iG : G -> P` is the canonical injection from `G`.
 
 The universal property holds: `iF ∘ f ≈ iG ∘ g` (up to numerical tolerance).
 
@@ -74,79 +146,46 @@ All three sheaves `K`, `F`, `G` must share the same underlying graph.
 function pushout_sheaf(f::SheafMorphism, g::SheafMorphism,
                        K::EuclideanSheaf{T}, F::EuclideanSheaf{T},
                        G::EuclideanSheaf{T}) where T
-    g_graph = underlying_graph(K)
-    nv_g    = nv(g_graph)
-    ne_g    = ne(g_graph)
+    g_graph   = underlying_graph(K)
+    nv_g      = nv(g_graph)
+    ne_g      = ne(g_graph)
     edge_list = collect(edges(g_graph))
 
-    vdimsK = vertex_stalks(K)
     vdimsF = vertex_stalks(F)
     vdimsG = vertex_stalks(G)
-
-    edimsK = edge_stalk_dimensions(K)
     edimsF = edge_stalk_dimensions(F)
     edimsG = edge_stalk_dimensions(G)
 
     # ------------------------------------------------------------------
     # Vertex stalks: compute cokernel at each vertex
     # ------------------------------------------------------------------
-    # Q_vertex[v]  : (dimF_v + dimG_v) × p_v  orthonormal cokernel basis
-    # iF_vertex[v] : p_v × dimF_v  injection  F(v) → P(v)
-    # iG_vertex[v] : p_v × dimG_v  injection  G(v) → P(v)
-    Q_vertex  = Vector{Matrix{T}}(undef, nv_g)
+    # Q_vertex[v]  : AbstractMatrix, (dimF_v + dimG_v) x p_v, cokernel basis
+    # iF_vertex[v] : p_v x dimF_v injection  F(v) -> P(v)
+    # iG_vertex[v] : p_v x dimG_v injection  G(v) -> P(v)
+    # p_vdims[v]   : pushout vertex stalk dimension at v
+    Q_vertex  = Vector{AbstractMatrix{T}}(undef, nv_g)
     iF_vertex = Vector{Matrix{T}}(undef, nv_g)
     iG_vertex = Vector{Matrix{T}}(undef, nv_g)
     p_vdims   = Vector{Int}(undef, nv_g)
 
     for v in 1:nv_g
-        dimK_v = vdimsK[v]
-        dimF_v = vdimsF[f.Vmap[v]]
-        dimG_v = vdimsG[g.Vmap[v]]
-
-        # A_v : K(v) → F(v) ⊕ G(v)
-        A_v = dimK_v == 0 ?
-              zeros(T, dimF_v + dimG_v, 0) :
-              vcat(f.Vmaps[v], -g.Vmaps[v])
-
-        # Q_v : orthonormal basis for cokernel of A_v
-        Q_v = _cokernel_basis(A_v)
-        p_v = size(Q_v, 2)
-
-        # Injection maps:  iF_v = Q_v' * [I; 0],  iG_v = Q_v' * [0; I]
-        iF_vertex[v] = Q_v' * vcat(Matrix{T}(I, dimF_v, dimF_v),
-                                    zeros(T, dimG_v, dimF_v))
-        iG_vertex[v] = Q_v' * vcat(zeros(T, dimF_v, dimG_v),
-                                    Matrix{T}(I, dimG_v, dimG_v))
-        Q_vertex[v]  = Q_v
-        p_vdims[v]   = p_v
+        Q_vertex[v], iF_vertex[v], iG_vertex[v], p_vdims[v] =
+            _cokernel_stalk(T, vdimsF[f.Vmap[v]], vdimsG[g.Vmap[v]],
+                            f.Vmaps[v], g.Vmaps[v])
     end
 
     # ------------------------------------------------------------------
     # Edge stalks: compute cokernel at each edge
     # ------------------------------------------------------------------
-    Q_edge  = Vector{Matrix{T}}(undef, ne_g)
+    Q_edge  = Vector{AbstractMatrix{T}}(undef, ne_g)
     iF_edge = Vector{Matrix{T}}(undef, ne_g)
     iG_edge = Vector{Matrix{T}}(undef, ne_g)
     p_edims = Vector{Int}(undef, ne_g)
 
     for k in 1:ne_g
-        dimK_e = edimsK[k]
-        dimF_e = edimsF[f.Emap[k]]
-        dimG_e = edimsG[g.Emap[k]]
-
-        A_e = dimK_e == 0 ?
-              zeros(T, dimF_e + dimG_e, 0) :
-              vcat(f.Emaps[k], -g.Emaps[k])
-
-        Q_e = _cokernel_basis(A_e)
-        p_e = size(Q_e, 2)
-
-        iF_edge[k] = Q_e' * vcat(Matrix{T}(I, dimF_e, dimF_e),
-                                   zeros(T, dimG_e, dimF_e))
-        iG_edge[k] = Q_e' * vcat(zeros(T, dimF_e, dimG_e),
-                                   Matrix{T}(I, dimG_e, dimG_e))
-        Q_edge[k]  = Q_e
-        p_edims[k] = p_e
+        Q_edge[k], iF_edge[k], iG_edge[k], p_edims[k] =
+            _cokernel_stalk(T, edimsF[f.Emap[k]], edimsG[g.Emap[k]],
+                            f.Emaps[k], g.Emaps[k])
     end
 
     # ------------------------------------------------------------------
@@ -161,19 +200,17 @@ function pushout_sheaf(f::SheafMorphism, g::SheafMorphism,
         v1 = src(e)
         v2 = dst(e)
 
-        # Restriction maps of F and G from each endpoint to the edge
-        rm_F_v1 = get_restriction_map(F, v1, v2)  # dimF_e × dimF_v1
-        rm_F_v2 = get_restriction_map(F, v2, v1)  # dimF_e × dimF_v2
-        rm_G_v1 = get_restriction_map(G, v1, v2)  # dimG_e × dimG_v1
-        rm_G_v2 = get_restriction_map(G, v2, v1)  # dimG_e × dimG_v2
+        rm_F_v1 = get_restriction_map(F, v1, v2)  # dimF_e x dimF_v1
+        rm_F_v2 = get_restriction_map(F, v2, v1)  # dimF_e x dimF_v2
+        rm_G_v1 = get_restriction_map(G, v1, v2)  # dimG_e x dimG_v1
+        rm_G_v2 = get_restriction_map(G, v2, v1)  # dimG_e x dimG_v2
 
         # Induced restriction maps of P satisfy BOTH naturality conditions:
-        #   ρ_P(v→e) ∘ iF_v = iF_e ∘ ρ_F(v→e)
-        #   ρ_P(v→e) ∘ iG_v = iG_e ∘ ρ_G(v→e)
+        #   rho_P(v->e) * iF_v = iF_e * rho_F(v->e)
+        #   rho_P(v->e) * iG_v = iG_e * rho_G(v->e)
         #
-        # Since [iF_v, iG_v] = Q_v' (orthonormal rows), the unique solution is:
-        #   ρ_P(v→e) = [iF_e ∘ ρ_F(v→e), iG_e ∘ ρ_G(v→e)] * Q_v
-        #            = [iF_e ∘ ρ_F(v→e), iG_e ∘ ρ_G(v→e)] * pinv([iF_v, iG_v])
+        # Since [iF_v | iG_v] = Q_v' has orthonormal rows, the unique solution is:
+        #   rho_P(v->e) = [iF_e * rho_F(v->e), iG_e * rho_G(v->e)] * Q_v
         rm_P_v1 = Matrix{T}(hcat(iF_edge[k] * rm_F_v1, iG_edge[k] * rm_G_v1) *
                              Q_vertex[v1])
         rm_P_v2 = Matrix{T}(hcat(iF_edge[k] * rm_F_v2, iG_edge[k] * rm_G_v2) *
@@ -183,7 +220,7 @@ function pushout_sheaf(f::SheafMorphism, g::SheafMorphism,
     end
 
     # ------------------------------------------------------------------
-    # Return injection morphisms iF : F → P  and  iG : G → P
+    # Return injection morphisms iF : F -> P  and  iG : G -> P
     # ------------------------------------------------------------------
     iF_morph = SheafMorphism(collect(1:nv_g), collect(1:ne_g),
                              iF_vertex, iF_edge)
@@ -191,6 +228,15 @@ function pushout_sheaf(f::SheafMorphism, g::SheafMorphism,
                              iG_vertex, iG_edge)
 
     return (P, iF_morph, iG_morph)
+end
+
+"""
+    pushout_sheaf(span::SheafSpan) -> (EuclideanSheaf, SheafMorphism, SheafMorphism)
+
+Convenience overload: compute the pushout of a [`SheafSpan`](@ref).
+"""
+function pushout_sheaf(span::SheafSpan)
+    return pushout_sheaf(span.left, span.right, span.apex, span.F, span.G)
 end
 
 end # module Pushouts
