@@ -16,14 +16,18 @@ using Plots
 #
 # We define a generalized function to visualize nullspace basis vectors using a spy plot
 # to show the sparsity structure of the nullspace basis matrix. Columns are sorted by
-# the number of nonzero elements to reveal structure.
+# the number of nonzero elements to reveal structure. Horizontal lines mark agent boundaries.
 
 function plot_nullspace_basis(V, n, stalk_dim; title="Nullspace basis vectors")
     nnz_per_col = vec(sum(abs.(V) .> 1e-10, dims=1))
     sorted_idx = sortperm(nnz_per_col)
     V_sorted = V[:, sorted_idx]
-    spy(V_sorted, title=title, xlabel="Basis vector index", ylabel="Stalk component (agent × coordinate)",
+    p = spy(V_sorted, title=title, xlabel="Basis vector index", ylabel="Stalk component (agent × coordinate)",
         markersize=6, legend=false)
+    for i in 1:n-1
+        hline!(p, [i*stalk_dim + 0.5], color=:gray, label="", linewidth=0.5, alpha=0.5)
+    end
+    p
 end
 
 # # Example 1: Identity Restriction Maps
