@@ -62,8 +62,9 @@ Construct the inner path-graph sheaf for a `TrajectorySheaf`.
 
 The state dimension `d` equals the total dimension of the 0-cochain space of
 `F` (i.e. `sum(vertex_stalks(F))`).  The returned sheaf has `k+1` vertices,
-each with stalk ``\\mathbb{R}^d``, connected by `k` directed edges.  For edge
-``(t, t+1)``:
+each with stalk ``\\mathbb{R}^d``, connected by `k` edges with an induced
+orientation in the coboundary map. For each edge between vertices `t` and
+`t+1`, using the induced orientation ``t \\to t+1``:
 
 - The restriction map from vertex `t`   is ``A``    (dynamics matrix).
 - The restriction map from vertex `t+1` is ``I_d``  (identity).
@@ -133,9 +134,13 @@ harmonic extension.
 
 Given initial state `x0` (assigned to time step 1) and final state `xk`
 (assigned to time step `k+1`), returns the minimum-energy 0-cochain of
-`tsheaf.sheaf` with those boundary values.  When the dynamics matrix `A` is
-invertible and `k ≥ 1`, the boundary conditions uniquely determine the
-trajectory; the returned value is the minimum-norm particular solution.
+`tsheaf.sheaf` with those boundary values. If the boundary data are
+consistent with the dynamics over `k` steps (that is, `xk ≈ A^k * x0`),
+this coincides with the exact trajectory determined by those endpoints.
+If the boundary data are inconsistent, there is no exact trajectory with
+those endpoints; in that case the returned value is the harmonic
+minimum-energy / least-squares 0-cochain and generally will not satisfy
+`x[t+1] = A * x[t]` exactly at every step.
 
 The returned `BlockVector` has `k+1` blocks where `trajectory[Block(t)]` gives
 the state at time step `t-1` (so `Block(1)` is `x_0`, `Block(2)` is `x_1`,
