@@ -11,4 +11,5 @@ end
   include("network_sheaves/Pushforwards.jl")
   include("network_sheaves/HarmonicExtension.jl")
   include("network_sheaves/TrajectorySheaf.jl")
+  include("network_sheaves/GraphHomomorphisms.jl")
 end

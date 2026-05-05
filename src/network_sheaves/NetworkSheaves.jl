@@ -8,8 +8,8 @@ include("EuclideanSheaves.jl")
 include("PotentialSheaves.jl")
 include("ADT.jl")
 include("Parser.jl")
-include("Morphisms.jl")
 include("GraphHomomorphisms.jl")
+include("Morphisms.jl")
 include("Pushforwards.jl")
 include("TrajectorySheaf.jl")
 
@@ -19,8 +19,8 @@ include("TrajectorySheaf.jl")
 @reexport using .PotentialSheaves
 @reexport using .CellularSheafTerm
 @reexport using .CellularSheafParser: @cellular_sheaf
-@reexport using .SheafMorphisms
 @reexport using .GraphHomomorphisms
+@reexport using .SheafMorphisms
 @reexport using .Pushforwards
 @reexport using .TrajectorySheaves
 
