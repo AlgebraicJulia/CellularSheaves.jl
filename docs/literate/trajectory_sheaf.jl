@@ -102,26 +102,21 @@ function classical_colocation(A::Matrix{Float64}, x0, xk, d::Int, k::Int)
     n_int = k - 1
     M = zeros(k * d, n_int * d)
     b = zeros(k * d)
-    # The constraint for edge (t, t+1) is  A*x_t - x_{t+1} = 0,
-    # matching the coboundary convention  d[edge,(t)] = +rm1 = +A
-    # and  d[edge,(t+1)] = -rm2 = -I.
     for t in 0:k-1
         rows = t*d+1 : (t+1)*d
-        # Coefficient of x_{t+1} is -I.
         if t + 1 <= k - 1   # x_{t+1} is interior
             M[rows, t*d+1:(t+1)*d] .-= I(d)
         else                # x_k is boundary: move -I*xk to RHS → b += xk
             b[rows] .+= xk
         end
-        # Coefficient of x_t is +A.
         if t >= 1           # x_t is interior
             M[rows, (t-1)*d+1:t*d] .+= A
         else                # x_0 is boundary: move +A*x0 to RHS → b -= A*x0
             b[rows] .-= A * x0
         end
     end
-    q_int = M \ b   # QR least-squares solve
-    traj  = hcat(x0, reshape(q_int, d, n_int), xk)   # d × (k+1)
+    q_int = M \ b
+    traj  = hcat(x0, reshape(q_int, d, n_int), xk)
     return traj, M
 end
 
