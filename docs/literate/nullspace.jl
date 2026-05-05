@@ -15,7 +15,7 @@ using Plots
 # ## Visualization Helper Function
 #
 # We define a generalized function to visualize nullspace basis vectors for any sheaf with 3D stalks.
-# This function creates three orthogonal projections arranged in a 2×2 grid with a legend.
+# This function creates a 3D scatter plot with each basis vector shown in a distinct color.
 
 function plot_nullspace_basis(V, n, stalk_dim; title="Nullspace basis vectors")
     num_basis_vectors = size(V, 2)
@@ -27,13 +27,9 @@ function plot_nullspace_basis(V, n, stalk_dim; title="Nullspace basis vectors")
     y_coords = V[2:stalk_dim:end, :]  # second row in each stalk_dim-sized block
     z_coords = V[3:stalk_dim:end, :]  # third row in each stalk_dim-sized block
 
-    # Create three projection subplots
-    p1 = scatter(legend=false, xlabel="x", ylabel="y", title="x vs y projection",
-        markersize=8, markerstrokewidth=1.5)
-    p2 = scatter(legend=false, xlabel="y", ylabel="z", title="y vs z projection",
-        markersize=8, markerstrokewidth=1.5)
-    p3 = scatter(legend=false, xlabel="x", ylabel="z", title="x vs z projection",
-        markersize=8, markerstrokewidth=1.5)
+    # Create 3D scatter plot
+    p = scatter(legend=true, xlabel="x", ylabel="y", zlabel="z", title=title,
+        markersize=8, markerstrokewidth=0.5, camera=(45, 30))
 
     # Plot each basis vector with color coding
     for b in 1:num_basis_vectors
@@ -41,26 +37,11 @@ function plot_nullspace_basis(V, n, stalk_dim; title="Nullspace basis vectors")
         y_vals = y_coords[:, b]
         z_vals = z_coords[:, b]
 
-        scatter!(p1, x_vals, y_vals, color=colors[b], label="basis $b",
-            markersize=6, markerstrokewidth=0.5)
-
-        scatter!(p2, y_vals, z_vals, color=colors[b], label="basis $b",
-            markersize=6, markerstrokewidth=0.5)
-
-        scatter!(p3, x_vals, z_vals, color=colors[b], label="basis $b",
+        scatter!(p, x_vals, y_vals, z_vals, color=colors[b], label="basis $b",
             markersize=6, markerstrokewidth=0.5)
     end
 
-    # Build a legend subplot
-    p4 = plot(; showaxis=false, grid=false, legend=:inside, border=:none, title=title)
-    for b in 1:num_basis_vectors
-        scatter!(p4, [], []; color=colors[b], label="basis $b",
-            markersize=6, markerstrokewidth=0.5)
-    end
-
-    # Arrange the three projections in a 2×2 grid layout with the legend in the bottom-right cell
-    plot_grid = @layout [a b; c d]
-    plot(p1, p2, p3, p4, layout=plot_grid, size=(900, 800))
+    p
 end
 
 # # Example 1: Identity Restriction Maps
@@ -137,8 +118,7 @@ end
 # Add edges with partial restriction maps: only x and y are constrained
 for i in 1:n
     v1 = i
-    v2 = (i % n) + 1
-    # Restriction map that selects only x and y components
+    v2 = (i % n) + 1 # Restriction map that selects only x and y components
     rm = [1.0 0.0 0.0; 0.0 1.0 0.0]
     add_sheaf_edge!(F2, v1, v2, rm, rm)
 end
