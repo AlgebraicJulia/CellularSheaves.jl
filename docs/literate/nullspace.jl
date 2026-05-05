@@ -9,10 +9,8 @@
 # nullspace is fundamental to understanding the harmonic analysis and signal processing on cellular sheaves.
 
 using CellularSheaves
-using CliqueTrees.Multifrontal
 using LinearAlgebra
 using Plots
-using SparseArrays
 
 # ## Building the Sheaf
 #
@@ -38,50 +36,21 @@ for i in 1:n
     add_sheaf_edge!(F, v1, v2, rm, rm)
 end
 
-# ## Computing the Laplacian
+# ## Computing the Nullspace of the Laplacian
 #
-# The Laplacian of a sheaf is derived from the coboundary map. We first compute the coboundary operator,
-# then form the Laplacian as the Gram matrix X = C^T * C. The Laplacian is a symmetric positive
-# semidefinite matrix whose nullspace corresponds to global sections.
+# We call [`nullspace_ldlt`](@ref) directly on the sheaf. Internally it forms the
+# Laplacian ``X = d^\mathsf{T} d`` from the coboundary map ``d``, factorises it as
+# ``X = P^\mathsf{T} L D L^\mathsf{T} P`` via a sparse Chordal LDLt decomposition,
+# and returns a basis for the nullspace from the zero-diagonal entries of ``D``.
+# The nullspace of the Laplacian is exactly the space of *global sections* of the sheaf.
 
-C = sparse(coboundary_map(F))
-X = C' * C
-
-# ## Computing the Nullspace via LDLt Factorization
-#
-# We use a Chordal LDLt factorization to efficiently compute the nullspace. This factorization
-# decomposes the Laplacian as 
-# ```math
-# X = P^T * L * D * L^T * P
-# ```
-# where L is lower triangular, D is diagonal,
-# and P is a permutation. The nullspace corresponds to the zero entries on the diagonal of D.
-
-M = ldlt!(ChordalLDLt(X), RowMaximum())
-
-L = M.L # lower triangular factor
-D = M.D # diagonal factor
-P = M.P # permutation
-
-# Identify the indices where D has (numerically) zero diagonal entries. These correspond to the
-# nullspace directions. We construct a basis for the nullspace by back-solving the factorization.
-
-max_abs_diag = maximum(i -> abs(D[i, i]), 1:size(D, 1); init=0.0)
-tol = eps(Float64) * max(1.0, max_abs_diag)
-ind = findall(i -> abs(D[i, i]) <= tol, 1:size(D, 1))
-U = zeros(size(D, 1), length(ind))
-
-for j in eachindex(ind)
-    U[ind[j], j] = 1
-end
-
-V = P \ (L' \ U)
+V = nullspace_ldlt(F)
 
 # ## Visualizing the Nullspace Basis
 #
 # Each column of V is a basis vector in the nullspace. We visualize all basis vectors simultaneously
 # using three orthogonal projections (x vs y, y vs z, x vs z) arranged in a grid. Each basis vector
-# is displayed in a distinct color, with agent indices shown as annotated markers.
+# is displayed in a distinct color.
 
 num_basis_vectors = size(V, 2)
 colors = palette(:tab10, num_basis_vectors)
