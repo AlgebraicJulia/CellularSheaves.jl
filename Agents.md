@@ -145,6 +145,7 @@ We are working off the work of researchers such as Hansen, Ghrist, Curry, Riess,
 ## What to Avoid
 
 - **Do not add Catlab.jl** as a dependency for combinatorial graph operations.
+- **Do not add this repo** as a dependency for the test suite. This breaks the CI.
 - **Do not use dense solvers** (`ldlt(Symmetric(Matrix(A)))`) where the sparse
   `ChordalLDLt` path applies.
 - **Do not write a single large issue** covering multiple independent features.
@@ -153,3 +154,8 @@ We are working off the work of researchers such as Hansen, Ghrist, Curry, Riess,
   `docs/issues/` in the repository so they persist across sessions.
 - **Do not leave the Out of Scope section empty.** Bounding the work is as important
   as specifying it.
+- **Do not put line comments inside of function definitions in literate examples.**
+  This breaks the literate pipeline. These comments should be above the function definition
+  or be expressed as end of line comments.
+- **Do not use Java style getters and setters.** Prefer idiomatic julia names that do
+  not contain the substrings get or set.
