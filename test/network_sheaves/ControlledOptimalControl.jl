@@ -126,10 +126,7 @@ using SparseArrays
         xk1 = [1.0]
 
         p1 = (k1 + 1) * n + k1 * m
-        H1 = spzeros(p1, p1)
-        for i in 1:p1
-            H1[i, i] = 1.0
-        end
+        H1 = Matrix{Float64}(I, p1, p1)
         f1 = zeros(p1)
 
         z_opt1, α_opt1, z_p1, N1 = optimal_control_trajectory(ts1, x1, xk1, H1, f1)
@@ -180,7 +177,7 @@ using SparseArrays
         p3 = (k3 + 1) * n3 + k3 * m3
 
         # H = 0 (zero Hessian) with non-zero f creates an unbounded problem.
-        H_zero = spzeros(Float64, p3, p3)
+        H_zero = zeros(Float64, p3, p3)
         f_nonzero = ones(Float64, p3)
 
         @test_throws ArgumentError optimal_control_trajectory(ts3, [0.0], [1.0], H_zero, f_nonzero)

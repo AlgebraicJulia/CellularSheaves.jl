@@ -234,8 +234,8 @@ function continuous_to_discrete_zoh(Ac::AbstractMatrix{T},
 
     # Build the (n+m)×(n+m) augmented matrix M = h*[Ac Bc; 0 0]
     M = zeros(T, n + m, n + m)
-    M[1:n, 1:n]     .= h .* Ac
-    M[1:n, n+1:n+m] .= h .* Bc
+    M[1:n, 1:n]     = h * Ac
+    M[1:n, n+1:n+m] = h * Bc
     # Bottom block remains zero
 
     E  = exp(M)
