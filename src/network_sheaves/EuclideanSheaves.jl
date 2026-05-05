@@ -2,7 +2,8 @@
 module EuclideanSheaves
 
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_from_graph, energy_function,
-    nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension
+    nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
+    zero_sheaf, constant_sheaf, cycle_sheaf
 
 using ArgCheck: @argcheck
 using Graphs
@@ -176,24 +177,74 @@ function add_vertex_stalk!(s::EuclideanSheaf, stalk_size::Int)
     add_vertex!(s.underlying_graph)
 end
 
-"""   add_sheaf_edge!(s::EuclideanSheaf, v1::Int, v2::Int, rm1::Matrix{Float64}, rm2::Matrix{Float64})
+"""   add_sheaf_edge!(s::EuclideanSheaf, v1::Int, v2::Int, rm1, rm2)
 
-Add an edge between vertices v1 and v2 with restriction maps rm1 and rm2.
-rm1 is the restriction map from vertex v1 to the edge, and rm2 is the restriction map from vertex v2 to the edge.
+Add an edge between vertices `v1` and `v2` with restriction maps `rm1` and
+`rm2`.  `rm1` is the restriction map from vertex `v1` to the edge and `rm2`
+is the restriction map from vertex `v2` to the edge.
+
+Both `rm1` and `rm2` may be any `AbstractMatrix` (e.g. `Matrix`, `Diagonal`,
+`SparseMatrixCSC`); they are converted to `Matrix{T}` when stored.
 """
-function add_sheaf_edge!(s::EuclideanSheaf{T}, v1::Int, v2::Int, rm1::Matrix{T}, rm2::Matrix{T}) where T
+function add_sheaf_edge!(s::EuclideanSheaf{T}, v1::Int, v2::Int, rm1::AbstractMatrix, rm2::AbstractMatrix) where T
     @assert v1 <= length(s.vertex_stalks) && v2 <= length(s.vertex_stalks)
-    @assert size(rm1)[1] == size(rm2)[1]
-    @assert size(rm1)[2] == s.vertex_stalks[v1]
-    @assert size(rm2)[2] == s.vertex_stalks[v2]
+    @assert size(rm1, 1) == size(rm2, 1)
+    @assert size(rm1, 2) == s.vertex_stalks[v1]
+    @assert size(rm2, 2) == s.vertex_stalks[v2]
 
-    stalk_size = size(rm1)[1]
+    stalk_size = size(rm1, 1)
     add_edge!(s.underlying_graph, v1, v2)
     edge_key = UnorderedPair(v1, v2)
     s.edge_stalks[edge_key] = stalk_size
-    s.restriction_maps[v1=>v2] = rm1
-    s.restriction_maps[v2=>v1] = rm2
+    s.restriction_maps[v1=>v2] = Matrix{T}(rm1)
+    s.restriction_maps[v2=>v1] = Matrix{T}(rm2)
     return ne(s.underlying_graph)
+end
+
+"""    zero_sheaf(g::Graph) -> EuclideanSheaf{Float64}
+
+Construct the *zero sheaf* on graph `g`: all vertex and edge stalks are
+0-dimensional (i.e. the trivial bundle).
+"""
+function zero_sheaf(g::Graph)
+    s = EuclideanSheaf{Float64}(zeros(Int, nv(g)))
+    for e in edges(g)
+        rm = zeros(Float64, 0, 0)
+        add_sheaf_edge!(s, src(e), dst(e), rm, rm)
+    end
+    return s
+end
+
+"""    constant_sheaf(g::Graph, d::Int=1) -> EuclideanSheaf{Float64}
+
+Construct the *constant sheaf* ``\\underline{\\mathbb{R}^d}`` on graph `g`:
+each vertex and edge stalk is ``\\mathbb{R}^d`` and every restriction map is
+the ``d\\times d`` identity.
+"""
+function constant_sheaf(g::Graph, d::Int=1)
+    s = EuclideanSheaf{Float64}(fill(d, nv(g)))
+    rm = Matrix{Float64}(I, d, d)
+    for e in edges(g)
+        add_sheaf_edge!(s, src(e), dst(e), rm, rm)
+    end
+    return s
+end
+
+"""    cycle_sheaf(n::Int, stalk_dim::Int, rm_pair_fn::Function) -> EuclideanSheaf{Float64}
+
+Construct an `EuclideanSheaf` on the `n`-vertex cycle graph where each vertex
+stalk has dimension `stalk_dim`.  For edge `k` (in graph iteration order) the
+pair of restriction maps `(rm_src, rm_dst)` is produced by calling
+`rm_pair_fn(n, stalk_dim, k)`.
+"""
+function cycle_sheaf(n::Int, stalk_dim::Int, rm_pair_fn::Function)
+    g = cycle_graph(n)
+    s = EuclideanSheaf{Float64}(fill(stalk_dim, n))
+    for (k, e) in enumerate(edges(g))
+        rm1, rm2 = rm_pair_fn(n, stalk_dim, k)
+        add_sheaf_edge!(s, src(e), dst(e), rm1, rm2)
+    end
+    return s
 end
 
 function coboundary_map(s::EuclideanSheaf{T}) where T
