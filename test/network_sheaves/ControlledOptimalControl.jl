@@ -144,13 +144,13 @@ using SparseArrays
 
         # Wrong Q size
         @test_throws ArgumentError lqr_objective(ts, zeros(2, 2), Ru; Qf=Qf)
-        # Non-symmetric Q (n=1 is always symmetric, so use a 2x2 system)
-        F_sym = EuclideanSheaf{Float64}(fill(2, 1))
-        Ac_sym = zeros(2, 2); Bc_sym = reshape([1.0, 0.0], 2, 1)
-        ts_sym = ControlledTrajectorySheaf(F_sym, Ac_sym, Bc_sym, h, 2)
+        # Non-symmetric Q (n=1 is always symmetric, so use a 2-state system)
+        F2_test = EuclideanSheaf{Float64}(fill(2, 1))
+        Ac2_test = zeros(2, 2); Bc2_test = reshape([1.0, 0.0], 2, 1)
+        ts2_test = ControlledTrajectorySheaf(F2_test, Ac2_test, Bc2_test, h, 2)
         Q_asym = [1.0 0.5; 0.0 1.0]   # 2×2 but asymmetric
-        Ru_sym = Matrix{Float64}(I, 1, 1)
-        @test_throws ArgumentError lqr_objective(ts_sym, Q_asym, Ru_sym)
+        Ru_1x1 = Matrix{Float64}(I, 1, 1)
+        @test_throws ArgumentError lqr_objective(ts2_test, Q_asym, Ru_1x1)
         # Wrong Ru size
         @test_throws ArgumentError lqr_objective(ts, Q, zeros(2, 2); Qf=Qf)
         # Non-symmetric Ru (need m >= 2: MIMO system)
@@ -160,9 +160,9 @@ using SparseArrays
         @test_throws ArgumentError lqr_objective(ts_mimo, Q, Ru_asym)
         # Wrong Qf size
         @test_throws ArgumentError lqr_objective(ts, Q, Ru; Qf=zeros(2, 2))
-        # Non-symmetric Qf (use same ts_sym)
+        # Non-symmetric Qf (use same 2-state system)
         Qf_asym = [1.0 0.3; 0.0 1.0]
-        @test_throws ArgumentError lqr_objective(ts_sym, Matrix{Float64}(I, 2, 2), Ru_sym; Qf=Qf_asym)
+        @test_throws ArgumentError lqr_objective(ts2_test, Matrix{Float64}(I, 2, 2), Ru_1x1; Qf=Qf_asym)
         # Non-PD Ru
         Ru_sing = zeros(m, m)
         @test_throws ArgumentError lqr_objective(ts, Q, Ru_sing)
@@ -281,13 +281,13 @@ using SparseArrays
         # k=1, h=0.1 gives Ad≈I+h*Ac, Bd≈h*Bc (small h)
         ts_infeas = ControlledTrajectorySheaf(F2, Ac2, Bc2, 0.1, 1)
         # Only 1 control dof, but 2 state constraints. The system IS reachable
-        # for compatible endpoints. For k=1, position AND velocity at t=2 are
-        # both prescribed but only u1 is free → overdetermined → infeasible if
-        # the two constraints conflict.
+        # for compatible endpoints. For k=1, position AND velocity at x_{k+1} are
+        # both prescribed but only u1 is free → overdetermined → infeasible for
+        # a generic xk1 where the two constraints conflict.
         # Ad*x1 + Bd*u1 = xk1 with n=2, m=1, k=1 is a 2-eq 1-unknown system.
         # For a generic xk1 this will be infeasible.
         x1_inf  = [0.0, 0.0]
-        xk1_inf = [1.0, 1.0]   # overdetermined: pick conflicting target
+        xk1_inf = [1.0, 1.0]   # overdetermined: conflicting target
         @test_throws ArgumentError feasible_control_trajectory_basis(ts_infeas, x1_inf, xk1_inf)
     end
 

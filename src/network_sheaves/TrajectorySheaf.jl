@@ -233,12 +233,12 @@ function continuous_to_discrete_zoh(Ac::AbstractMatrix{T},
     @argcheck size(Bc, 1) == n "Bc must have $n rows (same as Ac), got $(size(Bc, 1))"
 
     # Promote to a floating-point type that can represent both T and h exactly.
-    Tf = float(promote_type(T, typeof(h)))
+    FloatT = float(promote_type(T, typeof(h)))
 
     # Build the (n+m)×(n+m) augmented matrix M = h*[Ac Bc; 0 0]
-    M = zeros(Tf, n + m, n + m)
-    M[1:n, 1:n]     = Tf(h) * Ac
-    M[1:n, n+1:n+m] = Tf(h) * Bc
+    M = zeros(FloatT, n + m, n + m)
+    M[1:n, 1:n]     = FloatT(h) * Ac
+    M[1:n, n+1:n+m] = FloatT(h) * Bc
     # Bottom block remains zero
 
     E  = exp(M)
@@ -513,16 +513,17 @@ function feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
 
     # Check that the endpoints are reachable: a feasible trajectory must satisfy
     # the discrete dynamics, i.e. the coboundary residual must be zero.
+    x_p_vec  = Array(x_p_internal)
     d_mat    = sparse(coboundary_map(ts.sheaf))
-    residual = norm(d_mat * Array(x_p_internal))
-    if residual > sqrt(eps(T)) * (1 + norm(Array(x_p_internal)))
+    residual = norm(d_mat * x_p_vec)
+    if residual > sqrt(eps(T)) * (1 + norm(x_p_vec))
         throw(ArgumentError(
             "Endpoint states are not mutually reachable under the controlled dynamics " *
             "(coboundary residual = $(residual)).  Check that x1 and xk1 are connected " *
             "by a valid k-step trajectory."))
     end
 
-    z_p        = _internal_to_public(Array(x_p_internal), n, m, k)
+    z_p        = _internal_to_public(x_p_vec, n, m, k)
     null_basis = _internal_to_public_matrix(null_internal, n, m, k)
 
     return z_p, null_basis
