@@ -88,9 +88,9 @@ colors = palette(:tab10, num_basis_vectors)
 
 # Extract coordinate components for each agent
 # Coordinates are strided in V with period stalk_dim
-x_coords = V[1:stalk_dim:end, :]  # rows ≡ 1 mod 3
-y_coords = V[2:stalk_dim:end, :]  # rows ≡ 2 mod 3
-z_coords = V[3:stalk_dim:end, :]  # rows ≡ 0 mod 3
+x_coords = V[1:stalk_dim:end, :]  # first row in each stalk_dim-sized block
+y_coords = V[2:stalk_dim:end, :]  # second row in each stalk_dim-sized block
+z_coords = V[3:stalk_dim:end, :]  # third row in each stalk_dim-sized block
 
 # Create three projection subplots
 p1 = scatter(legend=false, xlabel="x", ylabel="y", title="x vs y projection",
