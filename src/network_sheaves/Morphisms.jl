@@ -21,11 +21,13 @@ from the structured spec.
 """
 module SheafMorphisms
 
-export SheafMorphism, ComplexMorphism, is_morphism, compose, make_sheaf_morphism_spec, id
+export SheafMorphism, ComplexMorphism, is_morphism, make_sheaf_morphism_spec, id
 
 using LinearAlgebra
 using BlockArrays
 using Graphs
+
+import ..GraphHomomorphisms: compose
 
 using ..SheafInterface: vertex_stalks, edge_stalks, edge_stalk_dimensions, coboundary_map,
                         underlying_graph, get_edge_stalk, get_restriction_map

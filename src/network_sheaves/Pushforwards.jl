@@ -55,6 +55,14 @@ function fiber_section_basis(F, verts::Vector{Int}, fedges::Vector{Tuple{Int,Int
     # constructed fiber sheaf no longer matches the advertised row ordering.
     # No check is performed here to avoid the allocation cost in tight loops.
     stalk_dims = [get_vertex_stalk(F, v) for v in verts]
+    total_dim = sum(stalk_dims; init=0)
+
+    # When the fiber has no edges the coboundary is zero and every assignment
+    # of vertex values is a global section, so the basis is the full identity.
+    if isempty(fedges)
+        return I(total_dim)
+    end
+
     # Local vertex indices within the fiber sub-sheaf.
     v_idx = Dict(v => i for (i, v) in enumerate(verts))
     Fib = EuclideanSheaf{Float64}(stalk_dims)
@@ -103,14 +111,16 @@ along the graph homomorphism `hom : G → H`.
 ``\\varphi^{-1}(v)``; a basis for this space is computed via
 [`fiber_section_basis`](@ref) (which calls [`nullspace_ldlt`](@ref)).
 
-**Edge stalks and restriction maps.** For each *cross edge* ``e = (u, w)``
-(with ``\\varphi(u) = p``, ``\\varphi(w) = q``, ``p \\neq q``) the edge stalk of
-``\\varphi_* F`` at ``(p,q)`` equals the edge stalk of `F` at `e`.  The
-restriction map from ``(\\varphi_* F)(p)`` to the edge stalk is obtained by
-composing `F`'s restriction map at `u` with the fiber-basis embedding matrix:
-``\\rho_{p \\to e} = F_{u \\to e} \\cdot B_p[\\text{rows of }u, :]``
-where ``B_p`` is the fiber-basis matrix whose columns are expressed in the
-concatenated stalk space of ``\\varphi^{-1}(p)``.
+**Edge stalks and restriction maps.** For each target edge ``(p, q)``, all
+source cross-edges mapping to ``(p, q)`` contribute to a single combined edge
+stalk via direct sum.  That is, if cross-edges ``e_1, e_2, \\ldots`` all satisfy
+``\\varphi(\\text{src}(e_i)) = p`` and ``\\varphi(\\text{dst}(e_i)) = q``, the
+edge stalk of ``\\varphi_* F`` at ``(p, q)`` is
+``F(e_1) \\oplus F(e_2) \\oplus \\cdots``, and the restriction maps are the
+vertical concatenations of the per-edge pushforward restriction maps.
+
+This ensures correctness when the edge map induced by `hom` is not injective
+(multiple source edges mapping to the same target edge pair).
 """
 function pushforward_sheaf(hom::GraphHomomorphism, F)
     g   = underlying_graph(F)
@@ -122,6 +132,10 @@ function pushforward_sheaf(hom::GraphHomomorphism, F)
     # The stalk dimension at target vertex tv equals the nullspace dimension.
     pf_stalk_dims = [size(fiber_bases[tv], 2) for tv in 1:hom.n_target]
     PfF = EuclideanSheaf{Float64}(pf_stalk_dims)
+
+    # Group cross-edges by their canonical target edge pair (min, max) to handle
+    # non-injective edge maps (multiple source edges → same target edge).
+    edge_groups = Dict{Tuple{Int,Int}, Vector{Tuple{Matrix{Float64},Matrix{Float64}}}}()
 
     for (e, tri_u, tri_v) in cross_edges(hom, g)
         u, v = src(e), dst(e)
@@ -150,7 +164,26 @@ function pushforward_sheaf(hom::GraphHomomorphism, F)
         rm_pf_u = rm_u * fiber_bases[tri_u][offset_u+1 : offset_u+d_u, :]
         rm_pf_v = rm_v * fiber_bases[tri_v][offset_v+1 : offset_v+d_v, :]
 
-        add_sheaf_edge!(PfF, tri_u, tri_v, rm_pf_u, rm_pf_v)
+        # Use canonical key (min, max) and store maps in (tri_u, tri_v) orientation.
+        key = (min(tri_u, tri_v), max(tri_u, tri_v))
+        if !haskey(edge_groups, key)
+            edge_groups[key] = Tuple{Matrix{Float64},Matrix{Float64}}[]
+        end
+        if key == (tri_u, tri_v)
+            push!(edge_groups[key], (rm_pf_u, rm_pf_v))
+        else
+            push!(edge_groups[key], (rm_pf_v, rm_pf_u))
+        end
+    end
+
+    # Add one sheaf edge per target edge, combining multiple source edges via direct sum.
+    # Iterate in a deterministic order so the pushed-forward sheaf's edge order
+    # (and any downstream coboundary/edge-stalk indexing derived from it) is stable.
+    for (p, q) in sort!(collect(keys(edge_groups)))
+        rms = edge_groups[(p, q)]
+        combined_rm_p = vcat([rm[1] for rm in rms]...)
+        combined_rm_q = vcat([rm[2] for rm in rms]...)
+        add_sheaf_edge!(PfF, p, q, combined_rm_p, combined_rm_q)
     end
 
     return PfF

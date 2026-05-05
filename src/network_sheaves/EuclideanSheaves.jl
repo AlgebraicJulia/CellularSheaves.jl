@@ -2,9 +2,10 @@
 module EuclideanSheaves
 
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_from_graph, energy_function,
-    nearest_global_section, edge_stalk_dimensions, nullspace_ldlt,
+    nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
     zero_sheaf, constant_sheaf, cycle_sheaf
 
+using ArgCheck: @argcheck
 using Graphs
 using AutoHashEquals: @auto_hash_equals
 using LinearOperators
@@ -13,6 +14,7 @@ using LinearAlgebra
 using BlockArrays
 using CliqueTrees.Multifrontal
 using SparseArrays
+using DocStringExtensions
 import Base: hash, ==, isequal
 
 using ..SheafInterface
@@ -86,14 +88,58 @@ function sheaf_from_graph(g::Graph, stalk_dim::Int, rm1_generator::Function, rm2
     return s
 end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Get the vertex stalks of a Euclidean sheaf.
+
+# Arguments
+- `s`: The Euclidean sheaf
+
+# Returns
+- Vector{Int}: Dimensions of each vertex stalk
+
+# See also
+- [`edge_stalks`](@ref)
+- [`AbstractNetworkSheaf`](@ref)
+"""
 function vertex_stalks(s::EuclideanSheaf)
     return s.vertex_stalks
 end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Get the edge stalks of a Euclidean sheaf.
+
+# Arguments
+- `s`: The Euclidean sheaf
+
+# Returns
+- Dict{UnorderedPair{Int}, Int}: Mapping from edge (as unordered vertex pair) to stalk dimension
+
+# See also
+- [`vertex_stalks`](@ref)
+- [`AbstractNetworkSheaf`](@ref)
+"""
 function edge_stalks(s::EuclideanSheaf)
     return s.edge_stalks
 end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Get the underlying graph of a Euclidean sheaf.
+
+# Arguments
+- `s`: The Euclidean sheaf
+
+# Returns
+- Graphs.SimpleGraph: The graph on which the sheaf is defined
+
+# See also
+- [`AbstractNetworkSheaf`](@ref)
+"""
 function underlying_graph(s::EuclideanSheaf)
     return s.underlying_graph
 end
@@ -352,6 +398,104 @@ The returned columns form a basis for the space of *global sections* of `s`.
 function nullspace_ldlt(s::EuclideanSheaf; tol=nothing)
     d = sparse(coboundary_map(s))
     return nullspace_ldlt(d' * d; tol=tol)
+end
+
+# Private helper: given a ChordalLDLt factorization `M` of a symmetric
+# positive-semidefinite matrix and a right-hand side `b`, return both the
+# minimum-norm particular solution `x_p` satisfying `M * x_p ≈ b` (in the
+# pseudoinverse sense) and a matrix `null_vecs` whose columns span the
+# nullspace of the original matrix.
+function ldlt_pseudoinverse_and_null(M, b; tol=nothing)
+    D = M.D; Lfac = M.L; P = M.P
+    n = size(D, 1)
+    max_abs = maximum(i -> abs(D[i, i]), 1:n; init=0.0)
+    threshold = isnothing(tol) ? eps(Float64) * max(1.0, max_abs) : tol
+
+    null_idx = findall(i -> abs(D[i, i]) <= threshold, 1:n)
+
+    # Null basis — identical to nullspace_ldlt
+    U = zeros(n, length(null_idx))
+    for j in eachindex(null_idx)
+        U[null_idx[j], j] = 1.0
+    end
+    null_vecs = P \ (Lfac' \ U)
+
+    # Particular solution via pseudoinverse: suppress null directions in D
+    c = P' \ b          # permute rhs
+    z = Lfac \ c        # forward solve
+    w = zeros(n)
+    for i in setdiff(1:n, null_idx)
+        w[i] = z[i] / D[i, i]  # D⁺ on free directions only
+    end
+    x_p = P \ (Lfac' \ w)  # back solve + undo permutation
+
+    return x_p, null_vecs
+end
+
+"""
+    harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVector})
+        -> (BlockVector, Matrix)
+
+Compute the harmonic extension of `boundary` over the interior vertices of `s`.
+
+`boundary` maps each boundary vertex index to a vector of length `s.vertex_stalks[v]`.
+
+Returns `(x_p, null_basis)` where:
+- `x_p` is the minimum-norm particular solution as a `BlockArray` over `s.vertex_stalks`
+- `null_basis` is a matrix whose columns span the solution's indeterminate directions,
+  embedded in the full cochain space (zero at boundary dofs). Has 0 columns when the
+  boundary conditions uniquely determine the harmonic extension.
+
+The complete solution set is `{ x_p + null_basis * c : c ∈ Rᵏ }` where
+`k = size(null_basis, 2)`.
+
+Throws `ArgumentError` if any boundary vector has the wrong length for its stalk.
+"""
+function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVector})
+    nv_graph = nv(s.underlying_graph)
+    for (v, val) in boundary
+        @argcheck 1 <= v <= nv_graph
+        @argcheck length(val) == s.vertex_stalks[v]
+    end
+
+    offsets        = [0; cumsum(s.vertex_stalks)]
+    boundary_verts = sort(collect(keys(boundary)))
+    interior_verts = setdiff(1:nv_graph, boundary_verts)
+    n_total        = sum(s.vertex_stalks)
+
+    # Short-circuit: no interior dofs — nothing to solve
+    if isempty(interior_verts)
+        x_p = BlockArray(vcat([boundary[v] for v in 1:nv_graph]...), s.vertex_stalks)
+        return x_p, zeros(n_total, 0)
+    end
+
+    I_idx = vcat([offsets[v]+1:offsets[v+1] for v in interior_verts]...)
+    L     = sheaf_laplacian_matrix(s)
+    L_II  = L[I_idx, I_idx]
+
+    B_idx = isempty(boundary_verts) ? Int[] :
+        vcat([offsets[v]+1:offsets[v+1] for v in boundary_verts]...)
+
+    if isempty(boundary_verts)
+        b = zeros(length(I_idx))
+    else
+        x_B = vcat([boundary[v] for v in boundary_verts]...)
+        b   = -L[I_idx, B_idx] * x_B
+    end
+
+    x_interior, null_interior = ldlt_pseudoinverse_and_null(
+        ldlt!(ChordalLDLt(L_II), RowMaximum()), b)
+
+    x        = zeros(n_total)
+    x[I_idx] = x_interior
+    if !isempty(boundary_verts)
+        x[B_idx] = vcat([boundary[v] for v in boundary_verts]...)
+    end
+
+    null_basis          = zeros(n_total, size(null_interior, 2))
+    null_basis[I_idx,:] = null_interior
+
+    return BlockArray(x, s.vertex_stalks), null_basis
 end
 
 
