@@ -43,9 +43,11 @@ Specific guidance:
 
 ## Solver Preferences
 
-For any linear system involving a sparse symmetric positive (semi)definite matrix,
-use the `ChordalLDLt` path from `CliqueTrees.Multifrontal` — **not** base Julia's
-`ldlt(Symmetric(Matrix(A)))`. The latter converts to dense and is significantly slower.
+For linear systems involving a sparse symmetric positive (semi)definite matrix,
+prefer the `ChordalLDLt` path from `CliqueTrees.Multifrontal` rather than base Julia's
+`ldlt(Symmetric(Matrix(A)))`, since the latter converts to dense and is often significantly slower.
+Small examples may still use the dense path where that behavior already exists, but new sparse-system
+code should generally avoid densifying the matrix unless there is a clear reason to do so.
 
 The factorization convention is `X = P' * L * D * L' * P`. To solve `X * v = b`:
 
@@ -64,7 +66,7 @@ M   = ldlt!(ChordalLDLt(A), RowMaximum())
 x   = ldlt_solve(M, b)
 ```
 
-This pattern mirrors `nullspace_ldlt` in `EuclideanSheaves.jl` (lines 314–337),
+This pattern mirrors `nullspace_ldlt` in `EuclideanSheaves.jl`,
 which is the authoritative reference for LDLt usage in this codebase.
 
 ## Code Conventions
@@ -75,10 +77,10 @@ which is the authoritative reference for LDLt usage in this codebase.
 - **`@argcheck`** (from ArgCheck.jl, already a dependency) for input validation at
   public function boundaries.
 - **`BlockArray`** (from BlockArrays.jl) for returning cochains; partition by
-  `s.vertex_stalks`.
+  `vertex_stalks(s)`.
 - Vertex `v`'s slice in a cochain vector `x`:
   ```julia
-  offsets = [0; cumsum(s.vertex_stalks)]
+  offsets = [0; cumsum(vertex_stalks(s))]
   x[offsets[v]+1 : offsets[v+1]]
   ```
 - New exported functions go in `SheafInterface.jl` (abstract declaration) and their
@@ -137,7 +139,7 @@ proposing an implementation. When multiple implementations are possible (e.g. di
 solver backends), briefly name the trade-off and recommend one rather than implementing
 all of them.
 
-We are working off the work of researchers such as Hansen, Ghrist, Curry, Riess, Hanks, and Fairbanks, so explicitly refer to their papers in your references section and use nomenclature from their papers.
+We are working off the work of researchers such as Hansen, Ghrist, Curry, Riess, Hanks, and Fairbanks, so explicitly cite relevant papers where appropriate and use nomenclature from their papers.
 
 
 ## What to Avoid
