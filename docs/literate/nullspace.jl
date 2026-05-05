@@ -16,14 +16,17 @@ using Plots
 #
 # We define a generalized function to visualize nullspace basis vectors using a spy plot
 # to show the sparsity structure of the nullspace basis matrix. Columns are sorted by
-# the number of nonzero elements to reveal structure. Horizontal lines mark agent boundaries.
+# the number of nonzero elements, with ties broken by the row index of the first nonzero.
+# Horizontal lines mark agent boundaries.
 
 function plot_nullspace_basis(V, n, stalk_dim; title="Nullspace basis vectors")
     nnz_per_col = vec(sum(abs.(V) .> 1e-10, dims=1))
-    sorted_idx = sortperm(nnz_per_col)
+    first_nnz = [findfirst(abs.(V[:, i]) .> 1e-10) for i in 1:size(V, 2)]
+    first_nnz = [isnothing(x) ? size(V, 1) + 1 : x for x in first_nnz]
+    sorted_idx = sortperm(collect(zip(nnz_per_col, first_nnz)))
     V_sorted = V[:, sorted_idx]
     p = spy(V_sorted, title=title, xlabel="Basis vector index", ylabel="Stalk component (agent × coordinate)",
-        markersize=6, legend=false)
+        markersize=6, legend=false, size=(1000, 600))
     for i in 1:n-1
         hline!(p, [i*stalk_dim + 0.5], color=:gray, label="", linewidth=0.5, alpha=0.5)
     end
