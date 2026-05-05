@@ -283,6 +283,31 @@ sparsity_plot
 # interior-interior block of the Laplacian.  This equality establishes
 # that the classical QR solve and the sheaf Cholesky solve are two numerical
 # paths to the same linear system.
+#
+# We verify this numerically: the relative difference
+# ``\|M^\top M - L_{II}\|_\infty / \|L_{II}\|_\infty`` should be at most
+# ``\sqrt{\varepsilon_{\text{mach}}} \approx 10^{-8}``.
+
+function interior_laplacian(ts::TrajectorySheaf, d::Int, k::Int)
+    L = Matrix(get_laplacian(ts))
+    int_idx = d+1 : k*d
+    return L[int_idx, int_idx]
+end
+
+L_II_euler = interior_laplacian(ts_euler, d, k)
+L_II_exact = interior_laplacian(ts_exact, d, k)
+
+MtM_euler = M_euler' * M_euler
+MtM_exact = M_exact' * M_exact
+
+rel_err_euler = norm(MtM_euler - L_II_euler, Inf) / norm(L_II_euler, Inf)
+rel_err_exact = norm(MtM_exact - L_II_exact, Inf) / norm(L_II_exact, Inf)
+
+println("‖M'M - L_II‖_∞ / ‖L_II‖_∞  (Euler A): ", rel_err_euler)
+println("‖M'M - L_II‖_∞ / ‖L_II‖_∞  (Exact A): ", rel_err_exact)
+
+@assert rel_err_euler ≤ sqrt(eps())   "M'M ≠ L_II for Euler A (rel err = $rel_err_euler)"
+@assert rel_err_exact ≤ sqrt(eps())   "M'M ≠ L_II for Exact A (rel err = $rel_err_exact)"
 
 spy_M_euler = spy(sparse(M_euler); title="M (classical, Euler A)", marker=(:circle, 4),
                   legend=false, xlabel="column (interior vertex)", ylabel="row (edge)")
@@ -304,15 +329,6 @@ classical_spy
 #   is a well-known source of numerical instability; the sheaf Laplacian
 #   approach is therefore potentially less stable than classical QR for
 #   ill-conditioned problems.
-
-function interior_laplacian(ts::TrajectorySheaf, d::Int, k::Int)
-    L = Matrix(get_laplacian(ts))
-    int_idx = d+1 : k*d       # interior vertex block indices
-    return L[int_idx, int_idx]
-end
-
-L_II_euler = interior_laplacian(ts_euler, d, k)
-L_II_exact = interior_laplacian(ts_exact, d, k)
 
 κ_M_euler   = cond(M_euler)
 κ_M_exact   = cond(M_exact)
