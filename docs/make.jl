@@ -46,6 +46,7 @@ makedocs(
       "generated/sheaf_morphisms.md",
       "generated/nullspace.md",
       "generated/pushforward.md",
+      "generated/trajectory_sheaf.md",
     ],
     "Library Reference"=>"api.md",
   ]
