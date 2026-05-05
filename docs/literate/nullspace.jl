@@ -52,7 +52,7 @@ X = C' * C
 # We use a Chordal LDLt factorization to efficiently compute the nullspace. This factorization
 # decomposes the Laplacian as 
 # ```math
-# X = P^T * L * D * L^T * P, 
+# X = P^T * L * D * L^T * P
 # ```
 # where L is lower triangular, D is diagonal,
 # and P is a permutation. The nullspace corresponds to the zero entries on the diagonal of D.
