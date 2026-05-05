@@ -70,7 +70,10 @@ jobs:
 
       # Build documentation using the cached (or freshly built) sysimage.
       # Deploydocs is invoked inside docs/make.jl via the GITHUB_TOKEN secret.
+      # Skip fork-based pull requests because their GITHUB_TOKEN typically
+      # cannot push preview docs to gh-pages.
       - name: Build and deploy docs
+        if: github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: julia --sysimage=sysimage.so --project=docs docs/make.jl
