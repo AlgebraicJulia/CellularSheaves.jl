@@ -15,19 +15,19 @@ end</code></pre><pre class="documenter-example-output"><code class="nohighlight 
 </code></pre><p>Let&#39;s compute a global section of this sheaf. We start with a random 0-cochain:</p><pre><code class="language-julia hljs">x0 = rand(sum(vertex_stalks(sheaf)))
 
 global_section = nearest_global_section(sheaf, x0)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3-blocked 12-element BlockVector{Float64}:
- 0.44068126598644686
- 0.5414132723203726 
- 0.2685148536075225 
- 0.2540363542576971 
+ 0.12044724107815996
+ 0.7995301297875115 
+ 0.5947214516014296 
+ 0.7867311141352058 
  ───────────────────
- 0.29076585042059844
- 0.29141408234410493
- 0.7758236814308743 
- 0.4184302691733709 
+ 0.3255419965889266 
+ 0.41056871808736106
+ 0.5466119273321333 
+ 0.389626696090663  
  ───────────────────
- 0.7091961195939693 
- 0.10456880295761806
- 0.6345617874716473 
- 0.10427686190126562</code></pre><p>Now we can check that this is indeed a global section by verifying that the coboundary map applied to it is zero.</p><pre><code class="language-julia hljs">d = coboundary_map(sheaf)
+ 0.7151686926795896 
+ 0.9318733944430314 
+ 0.6994688427997354 
+ 0.4326236203681768 </code></pre><p>Now we can check that this is indeed a global section by verifying that the coboundary map applied to it is zero.</p><pre><code class="language-julia hljs">d = coboundary_map(sheaf)
 
-norm(d * global_section)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">0.0</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../">« CellularSheaves.jl</a><a class="docs-footer-nextpage" href="../sheaf_morphisms/">Sheaf Morphisms »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 5 May 2026 12:25">Tuesday 5 May 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+norm(d * global_section)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">0.0</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../">« CellularSheaves.jl</a><a class="docs-footer-nextpage" href="../sheaf_morphisms/">Sheaf Morphisms »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 5 May 2026 12:35">Tuesday 5 May 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
