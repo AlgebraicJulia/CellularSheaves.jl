@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Computing the Nullspace of the Sheaf Laplacian · CellularSheaves.jl</title><meta name="title" content="Computing the Nullspace of the Sheaf Laplacian · CellularSheaves.jl"/><meta property="og:title" content="Computing the Nullspace of the Sheaf Laplacian · CellularSheaves.jl"/><meta property="twitter:title" content="Computing the Nullspace of the Sheaf Laplacian · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../literate_example/">Code Example</a></li><li><a class="tocitem" href="../sheaf_morphisms/">Sheaf Morphisms</a></li><li class="is-active"><a class="tocitem" href>Computing the Nullspace of the Sheaf Laplacian</a><ul class="internal"><li><a class="tocitem" href="#Introduction"><span>Introduction</span></a></li><li><a class="tocitem" href="#Building-the-Sheaf"><span>Building the Sheaf</span></a></li><li><a class="tocitem" href="#Computing-the-Laplacian"><span>Computing the Laplacian</span></a></li><li><a class="tocitem" href="#Computing-the-Nullspace-via-LDLt-Factorization"><span>Computing the Nullspace via LDLt Factorization</span></a></li><li><a class="tocitem" href="#Visualizing-the-Nullspace-Basis"><span>Visualizing the Nullspace Basis</span></a></li></ul></li><li><a class="tocitem" href="../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li><li><a class="tocitem" href="../trajectory_sheaf/">Spring Oscillator: Four Colocation Methods Compared</a></li></ul></li><li><a class="tocitem" href="../../api/">Library Reference</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Computing the Nullspace of the Sheaf Laplacian</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Computing the Nullspace of the Sheaf Laplacian</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/literate/nullspace.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Computing-the-Nullspace-of-the-Sheaf-Laplacian"><a class="docs-heading-anchor" href="#Computing-the-Nullspace-of-the-Sheaf-Laplacian">Computing the Nullspace of the Sheaf Laplacian</a><a id="Computing-the-Nullspace-of-the-Sheaf-Laplacian-1"></a><a class="docs-heading-anchor-permalink" href="#Computing-the-Nullspace-of-the-Sheaf-Laplacian" title="Permalink"></a></h1><h2 id="Introduction"><a class="docs-heading-anchor" href="#Introduction">Introduction</a><a id="Introduction-1"></a><a class="docs-heading-anchor-permalink" href="#Introduction" title="Permalink"></a></h2><p>This example demonstrates how to compute and visualize the nullspace of the Laplacian operator for a circular cellular sheaf. We construct a system of 6 agents, each with 3-dimensional stalks, arranged in a cycle topology. The nullspace of the Laplacian contains the global sections–-the solutions that are preserved by the sheaf Laplacian operator. Understanding the structure of this nullspace is fundamental to understanding the harmonic analysis and signal processing on cellular sheaves.</p><pre><code class="language-julia hljs">using CellularSheaves
+using CliqueTrees.Multifrontal
+using LinearAlgebra
+using Plots
+using SparseArrays</code></pre><h2 id="Building-the-Sheaf"><a class="docs-heading-anchor" href="#Building-the-Sheaf">Building the Sheaf</a><a id="Building-the-Sheaf-1"></a><a class="docs-heading-anchor-permalink" href="#Building-the-Sheaf" title="Permalink"></a></h2><p>We start by creating a Euclidean sheaf with 6 vertices (agents), each equipped with a 3-dimensional vector space as its stalk. The stalks represent local data or state at each agent.</p><pre><code class="language-julia hljs">n = 6
+stalk_dim = 3
+
+F = EuclideanSheaf{Float64}(Int[])
+
+for i in 1:n
+    add_vertex_stalk!(F, stalk_dim)
+end</code></pre><p>Next, we add edges connecting the agents in a cycle. Each edge is equipped with the identity restriction map, meaning that sections on adjacent agents must have the same value where they overlap.</p><pre><code class="language-julia hljs">for i in 1:n
+    v1 = i
+    v2 = (i % n) + 1
+    rm = Matrix{Float64}(I, stalk_dim, stalk_dim)
+    add_sheaf_edge!(F, v1, v2, rm, rm)
+end</code></pre><h2 id="Computing-the-Laplacian"><a class="docs-heading-anchor" href="#Computing-the-Laplacian">Computing the Laplacian</a><a id="Computing-the-Laplacian-1"></a><a class="docs-heading-anchor-permalink" href="#Computing-the-Laplacian" title="Permalink"></a></h2><p>The Laplacian of a sheaf is derived from the coboundary map. We first compute the coboundary operator, then form the Laplacian as the Gram matrix X = C^T * C. The Laplacian is a symmetric positive semidefinite matrix whose nullspace corresponds to global sections.</p><pre><code class="language-julia hljs">C = sparse(coboundary_map(F))
+X = C&#39; * C</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">18×18 SparseArrays.SparseMatrixCSC{Float64, Int64} with 162 stored entries:
+⎡⣿⣿⣿⣀⡀⠀⠀⠸⠿⎤
+⎢⠛⢻⣿⣿⣧⣤⠀⠀⠀⎥
+⎢⠀⠈⠉⣿⣿⣿⣶⡆⠀⎥
+⎢⣀⡀⠀⠀⠸⠿⣿⣿⣿⎥
+⎣⠛⠃⠀⠀⠀⠀⠛⠛⠛⎦</code></pre><h2 id="Computing-the-Nullspace-via-LDLt-Factorization"><a class="docs-heading-anchor" href="#Computing-the-Nullspace-via-LDLt-Factorization">Computing the Nullspace via LDLt Factorization</a><a id="Computing-the-Nullspace-via-LDLt-Factorization-1"></a><a class="docs-heading-anchor-permalink" href="#Computing-the-Nullspace-via-LDLt-Factorization" title="Permalink"></a></h2><p>We use a Chordal LDLt factorization to efficiently compute the nullspace. This factorization decomposes the Laplacian as</p><p class="math-container">\[X = P^T * L * D * L^T * P\]</p><p>where L is lower triangular, D is diagonal, and P is a permutation. The nullspace corresponds to the zero entries on the diagonal of D.</p><pre><code class="language-julia hljs">M = ldlt!(ChordalLDLt(X), RowMaximum())
+
+L = M.L # lower triangular factor
+D = M.D # diagonal factor
+P = M.P # permutation</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">18×18 FPermutation{Int64}:
+ 0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0
+ 0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0
+ 0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1
+ 0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0
+ 0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0
+ 0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0
+ 0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0
+ 0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0  0
+ 0  0  0  0  0  0  0  0  0  0  0  0  0  0  1  0  0  0
+ 0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+ 0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0
+ 0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0
+ 0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+ 1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+ 0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0
+ 0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0
+ 0  0  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0
+ 0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0</code></pre><p>Identify the indices where D has (numerically) zero diagonal entries. These correspond to the nullspace directions. We construct a basis for the nullspace by back-solving the factorization.</p><pre><code class="language-julia hljs">max_abs_diag = maximum(i -&gt; abs(D[i, i]), 1:size(D, 1); init=0.0)
+tol = eps(Float64) * max(1.0, max_abs_diag)
+ind = findall(i -&gt; abs(D[i, i]) &lt;= tol, 1:size(D, 1))
+U = zeros(size(D, 1), length(ind))
+
+for j in eachindex(ind)
+    U[ind[j], j] = 1
+end
+
+V = P \ (L&#39; \ U)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">18×3 Matrix{Float64}:
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0
+ 1.0  0.0  0.0
+ 0.0  1.0  0.0
+ 0.0  0.0  1.0</code></pre><h2 id="Visualizing-the-Nullspace-Basis"><a class="docs-heading-anchor" href="#Visualizing-the-Nullspace-Basis">Visualizing the Nullspace Basis</a><a id="Visualizing-the-Nullspace-Basis-1"></a><a class="docs-heading-anchor-permalink" href="#Visualizing-the-Nullspace-Basis" title="Permalink"></a></h2><p>Each column of V is a basis vector in the nullspace. We visualize all basis vectors simultaneously using three orthogonal projections (x vs y, y vs z, x vs z) arranged in a grid. Each basis vector is displayed in a distinct color, with agent indices shown as annotated markers.</p><pre><code class="language-julia hljs">num_basis_vectors = size(V, 2)
+colors = palette(:tab10, num_basis_vectors)</code></pre><img src='data:image/svg+xml;utf-8,<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+ "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1"
+     width="75mm" height="25mm"
+     viewBox="0 0 3 1" preserveAspectRatio="none"
+     shape-rendering="crispEdges" stroke="none">
+<rect width=".96" height=".96" x="0" y="0" fill="%231F77B4" />
+<rect width=".96" height=".96" x="1" y="0" fill="%23905F84" />
+<rect width=".96" height=".96" x="2" y="0" fill="%2317BECF" />
+</svg>'/><p>Extract coordinate components for each agent Coordinates are strided in V with period stalk_dim</p><pre><code class="language-julia hljs">x_coords = V[1:stalk_dim:end, :]  # first row in each stalk_dim-sized block
+y_coords = V[2:stalk_dim:end, :]  # second row in each stalk_dim-sized block
+z_coords = V[3:stalk_dim:end, :]  # third row in each stalk_dim-sized block</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">6×3 Matrix{Float64}:
+ 0.0  0.0  1.0
+ 0.0  0.0  1.0
+ 0.0  0.0  1.0
+ 0.0  0.0  1.0
+ 0.0  0.0  1.0
+ 0.0  0.0  1.0</code></pre><p>Create three projection subplots</p><pre><code class="language-julia hljs">p1 = scatter(legend=false, xlabel=&quot;x&quot;, ylabel=&quot;y&quot;, title=&quot;x vs y projection&quot;,
+    markersize=8, markerstrokewidth=1.5)
+p2 = scatter(legend=false, xlabel=&quot;y&quot;, ylabel=&quot;z&quot;, title=&quot;y vs z projection&quot;,
+    markersize=8, markerstrokewidth=1.5)
+p3 = scatter(legend=false, xlabel=&quot;x&quot;, ylabel=&quot;z&quot;, title=&quot;x vs z projection&quot;,
+    markersize=8, markerstrokewidth=1.5)</code></pre><img src="67218dd3.svg" alt="Example block output"/><p>Plot each basis vector with color coding</p><pre><code class="language-julia hljs">for b in 1:num_basis_vectors
+    x_vals = x_coords[:, b]
+    y_vals = y_coords[:, b]
+    z_vals = z_coords[:, b]
+
+    scatter!(p1, x_vals, y_vals, color=colors[b], label=&quot;basis $b&quot;,
+        markersize=6, markerstrokewidth=0.5)
+
+    scatter!(p2, y_vals, z_vals, color=colors[b], label=&quot;basis $b&quot;,
+        markersize=6, markerstrokewidth=0.5)
+
+    scatter!(p3, x_vals, z_vals, color=colors[b], label=&quot;basis $b&quot;,
+        markersize=6, markerstrokewidth=0.5)
+end</code></pre><p>Arrange the three projections in a 2×2 grid layout, leaving the bottom-right cell empty</p><pre><code class="language-julia hljs">plot_grid = @layout [a b; c d]
+plot(p1, p2, p3, plot(), layout=plot_grid, size=(900, 800))</code></pre><img src="fa80f02e.svg" alt="Example block output"/></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../sheaf_morphisms/">« Sheaf Morphisms</a><a class="docs-footer-nextpage" href="../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 5 May 2026 18:17">Tuesday 5 May 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
