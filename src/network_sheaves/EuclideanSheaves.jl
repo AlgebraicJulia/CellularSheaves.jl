@@ -13,6 +13,7 @@ using LinearAlgebra
 using BlockArrays
 using CliqueTrees.Multifrontal
 using SparseArrays
+using DocStringExtensions
 import Base: hash, ==, isequal
 
 using ..SheafInterface
@@ -86,14 +87,58 @@ function sheaf_from_graph(g::Graph, stalk_dim::Int, rm1_generator::Function, rm2
     return s
 end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Get the vertex stalks of a Euclidean sheaf.
+
+# Arguments
+- `s`: The Euclidean sheaf
+
+# Returns
+- Vector{Int}: Dimensions of each vertex stalk
+
+# See also
+- [`edge_stalks`](@ref)
+- [`AbstractNetworkSheaf`](@ref)
+"""
 function vertex_stalks(s::EuclideanSheaf)
     return s.vertex_stalks
 end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Get the edge stalks of a Euclidean sheaf.
+
+# Arguments
+- `s`: The Euclidean sheaf
+
+# Returns
+- Dict{UnorderedPair{Int}, Int}: Mapping from edge (as unordered vertex pair) to stalk dimension
+
+# See also
+- [`vertex_stalks`](@ref)
+- [`AbstractNetworkSheaf`](@ref)
+"""
 function edge_stalks(s::EuclideanSheaf)
     return s.edge_stalks
 end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Get the underlying graph of a Euclidean sheaf.
+
+# Arguments
+- `s`: The Euclidean sheaf
+
+# Returns
+- Graphs.SimpleGraph: The graph on which the sheaf is defined
+
+# See also
+- [`AbstractNetworkSheaf`](@ref)
+"""
 function underlying_graph(s::EuclideanSheaf)
     return s.underlying_graph
 end
