@@ -14,30 +14,16 @@ using Plots
 
 # ## Visualization Helper Function
 #
-# We define a generalized function to visualize nullspace basis vectors for any sheaf with 3D stalks.
-# This function creates a 3D scatter plot with each basis vector shown in a distinct color.
+# We define a generalized function to visualize nullspace basis vectors using a spy plot
+# to show the sparsity structure of the nullspace basis matrix. Columns are sorted by
+# the number of nonzero elements to reveal structure.
 
 function plot_nullspace_basis(V, n, stalk_dim; title="Nullspace basis vectors")
-    num_basis_vectors = size(V, 2)
-    colors = palette(:tab10, num_basis_vectors)
-
-    x_coords = V[1:stalk_dim:end, :]  # first row in each stalk_dim-sized block
-    y_coords = V[2:stalk_dim:end, :]  # second row in each stalk_dim-sized block
-    z_coords = V[3:stalk_dim:end, :]  # third row in each stalk_dim-sized block
-
-    p = scatter(legend=true, xlabel="x", ylabel="y", zlabel="z", title=title,
-        markersize=8, markerstrokewidth=0.5, camera=(45, 30))
-
-    for b in 1:num_basis_vectors
-        x_vals = x_coords[:, b]
-        y_vals = y_coords[:, b]
-        z_vals = z_coords[:, b]
-
-        scatter!(p, x_vals, y_vals, z_vals, color=colors[b], label="basis $b",
-            markersize=6, markerstrokewidth=0.5)
-    end
-
-    p
+    nnz_per_col = vec(sum(abs.(V) .> 1e-10, dims=1))
+    sorted_idx = sortperm(nnz_per_col)
+    V_sorted = V[:, sorted_idx]
+    spy(V_sorted, title=title, xlabel="Basis vector index", ylabel="Stalk component (agent × coordinate)",
+        markersize=6, legend=false)
 end
 
 # # Example 1: Identity Restriction Maps
