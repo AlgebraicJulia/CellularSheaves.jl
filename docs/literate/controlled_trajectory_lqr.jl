@@ -45,7 +45,7 @@ k = 8       # number of time steps
 # ``q_{t+1} = A_d q_t + B_d u_t`` as a path-graph sheaf.  Its global sections
 # are exactly the feasible sampled state-control trajectories.
 
-F  = EuclideanSheaf{Float64}(fill(2, 1))   # base sheaf: 2-dimensional stalk
+F  = EuclideanSheaf{Float64}(fill(2, 1))   # base sheaf: one vertex with a 2-dimensional stalk
 ts = ControlledTrajectorySheaf(F, Ac, Bc, h, k)
 
 println("State dimension n = ", ts.state_dim)
