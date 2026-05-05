@@ -29,8 +29,8 @@ state-control trajectories.
 
 - [`continuous_to_discrete_zoh`](@ref) — discretize a continuous-time LTI
   system using the zero-order-hold block-exponential formula.
-- [`ControlledTrajectorySheaf`](@ref) — struct holding the sheaf and system data.
-- [`build_controlled_trajectory_sheaf`](@ref) — construct the path-graph sheaf.
+- [`ControlledTrajectorySheaf`](@ref) — struct and constructor; builds the
+  inner path-graph sheaf eagerly.
 - [`feasible_control_trajectory_basis`](@ref) — return a particular feasible
   trajectory and a null-space basis for endpoint-preserving perturbations.
 """
@@ -38,7 +38,7 @@ module TrajectorySheaves
 
 export TrajectorySheaf, build_trajectory_sheaf, colocation_trajectory,
     continuous_to_discrete_zoh, ControlledTrajectorySheaf,
-    build_controlled_trajectory_sheaf, feasible_control_trajectory_basis,
+    feasible_control_trajectory_basis,
     lqr_objective, optimal_control_trajectory
 
 using ArgCheck: @argcheck
@@ -289,21 +289,22 @@ struct ControlledTrajectorySheaf{T}
 end
 
 # ---------------------------------------------------------------------------
-# Construction helpers
+# Construction
 # ---------------------------------------------------------------------------
 
 """
-    build_controlled_trajectory_sheaf(F::EuclideanSheaf{T},
-                                      Ac::AbstractMatrix{T},
-                                      Bc::AbstractMatrix{T},
-                                      h::Real,
-                                      k::Int) where T
-        -> EuclideanSheaf{T}
+    ControlledTrajectorySheaf(F::EuclideanSheaf{T},
+                              Ac::AbstractMatrix{T},
+                              Bc::AbstractMatrix{T},
+                              h::Real,
+                              k::Int) where T
+        -> ControlledTrajectorySheaf{T}
 
-Construct the path-graph sheaf for a `ControlledTrajectorySheaf`.
+Construct a `ControlledTrajectorySheaf` from a base sheaf `F`, continuous-time
+system matrices `(Ac, Bc)`, sample period `h`, and number of steps `k`.
 
 The state dimension `n` is the total 0-cochain dimension of `F`
-(i.e. `sum(vertex_stalks(F))`).  The returned sheaf has `k+2` vertices:
+(i.e. `sum(vertex_stalks(F))`).  The inner sheaf has `k+2` vertices:
 
 - vertex 1: stalk ``\\mathbb{R}^n`` (dummy initial state),
 - vertices ``2, \\ldots, k+1``: stalk ``\\mathbb{R}^{n+m}`` (state and control),
@@ -320,14 +321,15 @@ The ``k+1`` edges enforce the zero-order-hold discrete dynamics:
 - `ArgumentError` if `k < 1`.
 - `ArgumentError` if `h <= 0`.
 - `ArgumentError` if `Ac` is not square.
-- `ArgumentError` if `size(Bc, 1) ≠ n`.
+- `ArgumentError` if `size(Bc, 1) ≠ sum(vertex_stalks(F))`.
 """
-function build_controlled_trajectory_sheaf(F::EuclideanSheaf{T},
-                                            Ac::AbstractMatrix{T},
-                                            Bc::AbstractMatrix{T},
-                                            h::Real,
-                                            k::Int) where T
+function ControlledTrajectorySheaf(F::EuclideanSheaf{T},
+                                    Ac::AbstractMatrix{T},
+                                    Bc::AbstractMatrix{T},
+                                    h::Real,
+                                    k::Int) where T
     n = sum(vertex_stalks(F))
+    m = size(Bc, 2)
 
     @argcheck k >= 1 "k must be at least 1, got $k"
     @argcheck h > 0 "h must be positive, got $h"
@@ -335,30 +337,17 @@ function build_controlled_trajectory_sheaf(F::EuclideanSheaf{T},
     @argcheck size(Bc, 1) == n "Bc must have $n rows (same state dimension as F), got $(size(Bc, 1))"
 
     Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
-    return _build_sheaf_from_discrete(F, Ad, Bd, k)
-end
 
-# Private helper: build the inner EuclideanSheaf from already-discretized (Ad, Bd).
-# Called by both build_controlled_trajectory_sheaf and the ControlledTrajectorySheaf
-# constructor to avoid recomputing the matrix exponential.
-function _build_sheaf_from_discrete(F::EuclideanSheaf{T},
-                                     Ad::AbstractMatrix{T},
-                                     Bd::AbstractMatrix{T},
-                                     k::Int) where T
-    n = sum(vertex_stalks(F))
-    m = size(Bd, 2)
-
-    # vertex stalks: [n, n+m, n+m, ..., n+m, n]  (k+2 vertices total)
+    # Build inner sheaf
     stalks = [n; fill(n + m, k); n]
     sheaf  = EuclideanSheaf{T}(stalks)
 
     In  = Matrix{T}(I, n, n)
     In0 = hcat(In, zeros(T, n, m))   # [I_n | 0_{n×m}] — projects out state
-    AB  = hcat(Matrix{T}(Ad), Matrix{T}(Bd))  # [A_d | B_d]
+    AB  = hcat(Ad, Bd)               # [A_d | B_d] — concatenate discrete matrices
 
     # Dummy initial edge (1, 2):
     #   ρ_{1→e} = I_n,   ρ_{2→e} = [I_n | 0]
-    #   coboundary: I_n * x₁_dummy - [I_n 0] * (x₁, u₁) = x₁_dummy - x₁_traj = 0
     add_sheaf_edge!(sheaf, 1, 2, In, In0)
 
     # Dynamics edges (t+1, t+2) for t = 1, …, k-1:
@@ -371,39 +360,6 @@ function _build_sheaf_from_discrete(F::EuclideanSheaf{T},
     #   ρ_{k+1→e} = [A_d | B_d],  ρ_{k+2→e} = I_n
     add_sheaf_edge!(sheaf, k + 1, k + 2, AB, In)
 
-    return sheaf
-end
-
-"""
-    ControlledTrajectorySheaf(F::EuclideanSheaf{T},
-                              Ac::AbstractMatrix{T},
-                              Bc::AbstractMatrix{T},
-                              h::Real,
-                              k::Int) where T
-        -> ControlledTrajectorySheaf{T}
-
-Construct a `ControlledTrajectorySheaf` from a base sheaf `F`, continuous-time
-system matrices `(Ac, Bc)`, sample period `h`, and number of steps `k`.
-
-The inner `sheaf` is built eagerly by [`build_controlled_trajectory_sheaf`](@ref).
-
-# Throws
-- `ArgumentError` if `k < 1`.
-- `ArgumentError` if `h <= 0`.
-- `ArgumentError` if `Ac` is not square.
-- `ArgumentError` if `size(Bc, 1) ≠ sum(vertex_stalks(F))`.
-"""
-function ControlledTrajectorySheaf(F::EuclideanSheaf{T},
-                                    Ac::AbstractMatrix{T},
-                                    Bc::AbstractMatrix{T},
-                                    h::Real,
-                                    k::Int) where T
-    n = sum(vertex_stalks(F))
-    m = size(Bc, 2)
-    # Validate and discretize once; reuse Ad, Bd for both the sheaf and the struct.
-    @argcheck k >= 1 "k must be at least 1, got $k"
-    Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
-    sheaf  = _build_sheaf_from_discrete(F, Ad, Bd, k)
     return ControlledTrajectorySheaf{T}(k, T(h), Ac, Bc, Ad, Bd, sheaf, n, m)
 end
 
