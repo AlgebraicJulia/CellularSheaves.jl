@@ -383,7 +383,7 @@ function ControlledTrajectorySheaf(F::EuclideanSheaf{T},
     n = sum(vertex_stalks(F))
     m = size(Bc, 2)
     Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
-    sheaf  = build_controlled_trajectory_sheaf(F, Ac, Bc, h, k)
+    sheaf  = build_controlled_trajectory_sheaf(F, Ad, Bd, k)
     return ControlledTrajectorySheaf{T}(k, T(h), Ac, Bc, Ad, Bd, sheaf, n, m)
 end
 
@@ -475,8 +475,8 @@ The complete feasible set is `{ z_p + null_basis * α : α ∈ Rᵈ }`.
 - `ArgumentError` if `length(xk1) ≠ ts.state_dim`.
 """
 function feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
-                                            x1::AbstractVector{T},
-                                            xk1::AbstractVector{T}) where T
+                                            x1::AbstractVector,
+                                            xk1::AbstractVector) where T
     n = ts.state_dim
     m = ts.control_dim
     k = ts.k
