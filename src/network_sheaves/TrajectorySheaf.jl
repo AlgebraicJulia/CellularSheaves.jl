@@ -38,14 +38,18 @@ module TrajectorySheaves
 
 export TrajectorySheaf, build_trajectory_sheaf, colocation_trajectory,
     continuous_to_discrete_zoh, ControlledTrajectorySheaf,
-    feasible_control_trajectory_basis
+    feasible_control_trajectory_basis,
+    lqr_objective, optimal_control_trajectory
 
 using ArgCheck: @argcheck
 using LinearAlgebra
 using BlockArrays
+using SparseArrays
+using CliqueTrees.Multifrontal
 
-using ..EuclideanSheaves: EuclideanSheaf, add_sheaf_edge!, harmonic_extension
-using ..SheafInterface: vertex_stalks
+using ..EuclideanSheaves: EuclideanSheaf, add_sheaf_edge!, harmonic_extension,
+    ldlt_pseudoinverse_and_null
+using ..SheafInterface: vertex_stalks, coboundary_map
 
 # ---------------------------------------------------------------------------
 # Struct
@@ -460,10 +464,267 @@ function feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
 
     x_p_internal, null_internal = harmonic_extension(ts.sheaf, boundary)
 
-    z_p        = _internal_to_public(Array(x_p_internal), n, m, k)
+    # Check that the endpoints are reachable: a feasible trajectory must satisfy
+    # the discrete dynamics, i.e. the coboundary residual must be zero.
+    x_p_vec  = Array(x_p_internal)
+    d_mat    = sparse(coboundary_map(ts.sheaf))
+    residual = norm(d_mat * x_p_vec)
+    if residual > sqrt(eps(T)) * (1 + norm(x_p_vec))
+        throw(ArgumentError(
+            "Endpoint states are not mutually reachable under the controlled dynamics " *
+            "(coboundary residual = $(residual)).  Check that x1 and xk1 are connected " *
+            "by a valid k-step trajectory."))
+    end
+
+    z_p        = _internal_to_public(x_p_vec, n, m, k)
     null_basis = _internal_to_public_matrix(null_internal, n, m, k)
 
     return z_p, null_basis
+end
+
+# ---------------------------------------------------------------------------
+# LQR / LQT objective assembly
+# ---------------------------------------------------------------------------
+
+"""
+    lqr_objective(ts::ControlledTrajectorySheaf{T},
+                  Q::AbstractMatrix{T},
+                  Ru::AbstractMatrix{T};
+                  Qf::Union{Nothing,AbstractMatrix{T}}=nothing,
+                  x_ref::Union{Nothing,AbstractMatrix{T}}=nothing,
+                  u_ref::Union{Nothing,AbstractMatrix{T}}=nothing) where T
+        -> (H::SparseMatrixCSC{T,Int}, f::Vector{T}, c::T)
+
+Assemble the quadratic objective
+
+```math
+\\tfrac{1}{2} z^\\top H z + f^\\top z + c
+```
+
+for the controlled sampled trajectory
+
+```math
+z = (x_1, x_2, \\dots, x_{k+1}, u_1, u_2, \\dots, u_k).
+```
+
+The stagewise cost is
+
+```math
+J(z) =
+\\tfrac{1}{2} \\sum_{t=1}^{k}
+\\Bigl((x_t - \\bar{x}_t)^\\top Q (x_t - \\bar{x}_t)
+     + (u_t - \\bar{u}_t)^\\top R_u (u_t - \\bar{u}_t)\\Bigr)
++
+\\tfrac{1}{2} (x_{k+1} - \\bar{x}_{k+1})^\\top Q_f (x_{k+1} - \\bar{x}_{k+1}).
+```
+
+The assembled `H` is sparse and block-diagonal: `k` copies of `Q` on the
+running state blocks, `Qf` on the terminal state block, and `k` copies of `Ru`
+on the control blocks.
+
+# Arguments
+- `ts`    — a `ControlledTrajectorySheaf{T}`.
+- `Q`     — ``n \\times n`` running state weight, positive semidefinite.
+- `Ru`    — ``m \\times m`` control weight, symmetric positive definite.
+- `Qf`    — ``n \\times n`` terminal state weight (defaults to `Q` when `nothing`).
+- `x_ref` — ``n \\times (k+1)`` reference state trajectory (defaults to zeros).
+- `u_ref` — ``m \\times k`` reference control trajectory (defaults to zeros).
+
+# Throws
+- `ArgumentError` if `Q` is not ``n \\times n``.
+- `ArgumentError` if `Qf` (when provided) is not ``n \\times n``.
+- `ArgumentError` if `Ru` is not ``m \\times m`` or is not symmetric positive definite.
+- `ArgumentError` if `x_ref` (when provided) is not ``n \\times (k+1)``.
+- `ArgumentError` if `u_ref` (when provided) is not ``m \\times k``.
+"""
+function lqr_objective(ts::ControlledTrajectorySheaf{T},
+                       Q::AbstractMatrix{T},
+                       Ru::AbstractMatrix{T};
+                       Qf::Union{Nothing,AbstractMatrix{T}}=nothing,
+                       x_ref::Union{Nothing,AbstractMatrix{T}}=nothing,
+                       u_ref::Union{Nothing,AbstractMatrix{T}}=nothing) where T
+    n = ts.state_dim
+    m = ts.control_dim
+    k = ts.k
+
+    @argcheck size(Q, 1) == size(Q, 2) == n "Q must be $n×$n, got $(size(Q))"
+    @argcheck issymmetric(Q) "Q must be symmetric"
+    @argcheck size(Ru, 1) == size(Ru, 2) == m "Ru must be $m×$m, got $(size(Ru))"
+    @argcheck issymmetric(Ru) "Ru must be symmetric"
+    @argcheck isposdef(Ru) "Ru must be positive definite"
+
+    Qf_use = if isnothing(Qf)
+        Q
+    else
+        @argcheck size(Qf, 1) == size(Qf, 2) == n "Qf must be $n×$n, got $(size(Qf))"
+        @argcheck issymmetric(Qf) "Qf must be symmetric"
+        Qf
+    end
+
+    if !isnothing(x_ref)
+        @argcheck size(x_ref, 1) == n && size(x_ref, 2) == k + 1 "x_ref must be $n×$(k+1), got $(size(x_ref))"
+    end
+    if !isnothing(u_ref)
+        @argcheck size(u_ref, 1) == m && size(u_ref, 2) == k "u_ref must be $m×$k, got $(size(u_ref))"
+    end
+
+    n_z = (k + 1) * n + k * m
+
+    rows = Int[]
+    cols = Int[]
+    vals = T[]
+
+    function add_block!(row_off::Int, col_off::Int, B::AbstractMatrix{T})
+        nr, nc = size(B)
+        for j in 1:nc, i in 1:nr
+            if !iszero(B[i, j])
+                push!(rows, row_off + i)
+                push!(cols, col_off + j)
+                push!(vals, B[i, j])
+            end
+        end
+    end
+
+    Q_mat = Matrix{T}(Q)
+    for t in 1:k
+        off = (t - 1) * n
+        add_block!(off, off, Q_mat)
+    end
+
+    Qf_mat = Matrix{T}(Qf_use)
+    off_qf = k * n
+    add_block!(off_qf, off_qf, Qf_mat)
+
+    Ru_mat = Matrix{T}(Ru)
+    for t in 1:k
+        off = (k + 1) * n + (t - 1) * m
+        add_block!(off, off, Ru_mat)
+    end
+
+    H = sparse(rows, cols, vals, n_z, n_z)
+
+    z_ref = zeros(T, n_z)
+    if !isnothing(x_ref)
+        for t in 1:k+1
+            z_ref[(t-1)*n+1 : t*n] .= x_ref[:, t]
+        end
+    end
+    if !isnothing(u_ref)
+        for t in 1:k
+            z_ref[(k+1)*n+(t-1)*m+1 : (k+1)*n+t*m] .= u_ref[:, t]
+        end
+    end
+
+    f = -(H * z_ref)
+    c = T(0.5) * dot(z_ref, H * z_ref)
+
+    return H, f, c
+end
+
+# ---------------------------------------------------------------------------
+# Optimal control trajectory
+# ---------------------------------------------------------------------------
+
+"""
+    optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
+                               x1::AbstractVector{T},
+                               xk1::AbstractVector{T},
+                               H::AbstractMatrix{T},
+                               f::AbstractVector{T}=zeros(T, size(H, 1))) where T
+        -> (z_opt::BlockVector, α_opt::Vector{T}, z_p::BlockVector, null_basis::AbstractMatrix{T})
+
+Compute the minimum-cost feasible trajectory for the convex quadratic objective
+
+```math
+\\tfrac{1}{2} z^\\top H z + f^\\top z
+```
+
+subject to fixed initial state `x1` and terminal state `xk1`.
+
+The feasible set is the affine space ``\\{z_p + N\\alpha : \\alpha \\in \\mathbb{R}^r\\}``
+from [`feasible_control_trajectory_basis`](@ref), and the optimizer satisfies the
+reduced first-order conditions
+
+```math
+(N^\\top H N)\\, \\alpha^\\star = -N^\\top (H z_p + f).
+```
+
+When the reduced Hessian ``N^\\top H N`` is singular, the minimum-norm optimizer
+is returned (using the pseudoinverse).  If the reduced problem is unbounded below
+(i.e. the right-hand side has a component outside the range of the reduced Hessian),
+an `ArgumentError` is thrown.
+
+# Arguments
+- `ts`  — a `ControlledTrajectorySheaf{T}`.
+- `x1`  — initial state vector of length `ts.state_dim`.
+- `xk1` — terminal state vector of length `ts.state_dim`.
+- `H`   — ``p \\times p`` positive-semidefinite Hessian matrix, where
+  ``p = (k+1) \\cdot n + k \\cdot m``.
+- `f`   — ``p``-vector of linear objective coefficients (defaults to zero).
+
+# Returns
+- `z_opt`      — optimal trajectory as a `BlockVector` with `k+1` state blocks
+  followed by `k` control blocks.
+- `α_opt`      — optimal reduced coordinate vector.
+- `z_p`        — particular feasible trajectory as a `BlockVector`.
+- `null_basis` — null-basis matrix `N` (columns span endpoint-preserving perturbations).
+
+# Throws
+- `ArgumentError` if `size(H)` is not `p × p`.
+- `ArgumentError` if `length(f)` is not `p`.
+- `ArgumentError` if the reduced quadratic problem is unbounded below.
+"""
+function optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
+                                    x1::AbstractVector,
+                                    xk1::AbstractVector,
+                                    H::AbstractMatrix{T},
+                                    f::AbstractVector{T}=zeros(T, size(H, 1))) where T
+    n = ts.state_dim
+    m = ts.control_dim
+    k = ts.k
+    p = (k + 1) * n + k * m
+
+    @argcheck size(H, 1) == size(H, 2) == p "H must be $p×$p, got $(size(H))"
+    @argcheck length(f) == p "f must have length $p, got $(length(f))"
+
+    q_p, null_basis = feasible_control_trajectory_basis(ts, x1, xk1)
+
+    block_sizes = [fill(n, k + 1); fill(m, k)]
+
+    if size(null_basis, 2) == 0
+        z_p_block   = BlockArray(q_p, block_sizes)
+        z_opt_block = BlockArray(copy(q_p), block_sizes)
+        return z_opt_block, T[], z_p_block, null_basis
+    end
+
+    N    = null_basis
+    HN   = H * N
+    Rred = Symmetric(N' * HN)
+    rred = N' * (H * q_p + f)
+
+    Rred_sparse = sparse(Rred)
+    M_ldlt      = ldlt!(ChordalLDLt(Rred_sparse), RowMaximum())
+    α_opt, null_red = ldlt_pseudoinverse_and_null(M_ldlt, -rred)
+
+    if size(null_red, 2) > 0
+        out_of_range = norm(null_red' * rred)
+        tol = eps(T) * max(one(T), norm(rred))
+        # Scale by sqrt(dim) so the check is dimension-independent (each of the
+        # dim null directions contributes at most tol in expectation).
+        scaled_tol = tol * sqrt(T(size(null_red, 2)))
+        if out_of_range > scaled_tol
+            throw(ArgumentError(
+                "The reduced quadratic problem is unbounded below: the reduced " *
+                "linear term has a component (norm $(out_of_range)) outside the " *
+                "range of the reduced Hessian."))
+        end
+    end
+
+    z_opt       = q_p + N * α_opt
+    z_p_block   = BlockArray(q_p, block_sizes)
+    z_opt_block = BlockArray(z_opt, block_sizes)
+
+    return z_opt_block, α_opt, z_p_block, null_basis
 end
 
 end # TrajectorySheaves
