@@ -13,5 +13,6 @@ end
   include("network_sheaves/HarmonicExtension.jl")
   include("network_sheaves/TrajectorySheaf.jl")
   include("network_sheaves/ControlledTrajectorySheaf.jl")
+  include("network_sheaves/ControlledOptimalControl.jl")
   include("network_sheaves/GraphHomomorphisms.jl")
 end

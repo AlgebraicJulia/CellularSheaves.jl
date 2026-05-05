@@ -232,15 +232,18 @@ function continuous_to_discrete_zoh(Ac::AbstractMatrix{T},
     @argcheck size(Ac, 1) == size(Ac, 2) "Ac must be square, got size $(size(Ac))"
     @argcheck size(Bc, 1) == n "Bc must have $n rows (same as Ac), got $(size(Bc, 1))"
 
+    # Promote to a floating-point type that can represent both T and h exactly.
+    FloatT = float(promote_type(T, typeof(h)))
+
     # Build the (n+m)×(n+m) augmented matrix M = h*[Ac Bc; 0 0]
-    M = zeros(T, n + m, n + m)
-    M[1:n, 1:n]     .= h .* Ac
-    M[1:n, n+1:n+m] .= h .* Bc
+    M = zeros(FloatT, n + m, n + m)
+    M[1:n, 1:n]     = FloatT(h) * Ac
+    M[1:n, n+1:n+m] = FloatT(h) * Bc
     # Bottom block remains zero
 
     E  = exp(M)
-    Ad = E[1:n, 1:n]
-    Bd = E[1:n, n+1:n+m]
+    Ad = Matrix{T}(E[1:n, 1:n])
+    Bd = Matrix{T}(E[1:n, n+1:n+m])
     return Ad, Bd
 end
 
@@ -547,6 +550,7 @@ function lqr_objective(ts::ControlledTrajectorySheaf{T},
     m = ts.control_dim
     k = ts.k
 
+    # Validation
     @argcheck size(Q, 1) == size(Q, 2) == n "Q must be $n×$n, got $(size(Q))"
     @argcheck issymmetric(Q) "Q must be symmetric"
     @argcheck size(Ru, 1) == size(Ru, 2) == m "Ru must be $m×$m, got $(size(Ru))"
@@ -568,8 +572,14 @@ function lqr_objective(ts::ControlledTrajectorySheaf{T},
         @argcheck size(u_ref, 1) == m && size(u_ref, 2) == k "u_ref must be $m×$k, got $(size(u_ref))"
     end
 
+    # Total dimension: (k+1)*n + k*m
     n_z = (k + 1) * n + k * m
 
+    # Build block-diagonal H as a sparse matrix.
+    # Layout: [x₁, ..., x_k, x_{k+1}, u₁, ..., u_k]
+    #   indices for xₜ (t=1..k):   (t-1)*n+1 : t*n
+    #   indices for x_{k+1}:        k*n+1 : (k+1)*n
+    #   indices for uₜ (t=1..k):   (k+1)*n+(t-1)*m+1 : (k+1)*n+t*m
     rows = Int[]
     cols = Int[]
     vals = T[]
@@ -585,16 +595,19 @@ function lqr_objective(ts::ControlledTrajectorySheaf{T},
         end
     end
 
+    # Running state blocks Q (t = 1..k)
     Q_mat = Matrix{T}(Q)
     for t in 1:k
         off = (t - 1) * n
         add_block!(off, off, Q_mat)
     end
 
+    # Terminal state block Qf
     Qf_mat = Matrix{T}(Qf_use)
     off_qf = k * n
     add_block!(off_qf, off_qf, Qf_mat)
 
+    # Control blocks Ru (t = 1..k)
     Ru_mat = Matrix{T}(Ru)
     for t in 1:k
         off = (k + 1) * n + (t - 1) * m
@@ -603,6 +616,7 @@ function lqr_objective(ts::ControlledTrajectorySheaf{T},
 
     H = sparse(rows, cols, vals, n_z, n_z)
 
+    # Reference trajectory vector z̄
     z_ref = zeros(T, n_z)
     if !isnothing(x_ref)
         for t in 1:k+1
@@ -615,6 +629,7 @@ function lqr_objective(ts::ControlledTrajectorySheaf{T},
         end
     end
 
+    # f = -H * z̄, c = 0.5 * z̄' * H * z̄
     f = -(H * z_ref)
     c = T(0.5) * dot(z_ref, H * z_ref)
 
@@ -663,11 +678,11 @@ an `ArgumentError` is thrown.
 - `f`   — ``p``-vector of linear objective coefficients (defaults to zero).
 
 # Returns
-- `z_opt`      — optimal trajectory as a `BlockVector` with `k+1` state blocks
+- `z_opt`       — optimal trajectory as a `BlockVector` with `k+1` state blocks
   followed by `k` control blocks.
-- `α_opt`      — optimal reduced coordinate vector.
-- `z_p`        — particular feasible trajectory as a `BlockVector`.
-- `null_basis` — null-basis matrix `N` (columns span endpoint-preserving perturbations).
+- `α_opt`       — optimal reduced coordinate vector.
+- `z_p`         — particular feasible trajectory as a `BlockVector`.
+- `null_basis`  — null-basis matrix `N` (columns span endpoint-preserving perturbations).
 
 # Throws
 - `ArgumentError` if `size(H)` is not `p × p`.
@@ -687,32 +702,38 @@ function optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
     @argcheck size(H, 1) == size(H, 2) == p "H must be $p×$p, got $(size(H))"
     @argcheck length(f) == p "f must have length $p, got $(length(f))"
 
+    # Step 1: Obtain the particular solution and null basis.
     q_p, null_basis = feasible_control_trajectory_basis(ts, x1, xk1)
 
+    # Block partition: k+1 state blocks of size n, then k control blocks of size m
     block_sizes = [fill(n, k + 1); fill(m, k)]
 
+    # Short-circuit: feasible trajectory is unique.
     if size(null_basis, 2) == 0
         z_p_block   = BlockArray(q_p, block_sizes)
         z_opt_block = BlockArray(copy(q_p), block_sizes)
         return z_opt_block, T[], z_p_block, null_basis
     end
 
+    # Step 2: Reduced quadratic program.
+    # Rred = N' * H * N  (symmetric PSD)
+    # rred = N' * (H * q_p + f)
     N    = null_basis
     HN   = H * N
     Rred = Symmetric(N' * HN)
     rred = N' * (H * q_p + f)
 
+    # Step 3: Solve using ChordalLDLt pseudoinverse.
     Rred_sparse = sparse(Rred)
     M_ldlt      = ldlt!(ChordalLDLt(Rred_sparse), RowMaximum())
     α_opt, null_red = ldlt_pseudoinverse_and_null(M_ldlt, -rred)
 
+    # Check bounded: rred must lie in the range of Rred.
+    # Equivalently, rred must be orthogonal to the null space of Rred.
     if size(null_red, 2) > 0
         out_of_range = norm(null_red' * rred)
         tol = eps(T) * max(one(T), norm(rred))
-        # Scale by sqrt(dim) so the check is dimension-independent (each of the
-        # dim null directions contributes at most tol in expectation).
-        scaled_tol = tol * sqrt(T(size(null_red, 2)))
-        if out_of_range > scaled_tol
+        if out_of_range > tol * sqrt(T(size(null_red, 2)))
             throw(ArgumentError(
                 "The reduced quadratic problem is unbounded below: the reduced " *
                 "linear term has a component (norm $(out_of_range)) outside the " *
@@ -720,7 +741,8 @@ function optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
         end
     end
 
-    z_opt       = q_p + N * α_opt
+    # Step 4: Reconstruct optimal trajectory.
+    z_opt    = q_p + N * α_opt
     z_p_block   = BlockArray(q_p, block_sizes)
     z_opt_block = BlockArray(z_opt, block_sizes)
 
