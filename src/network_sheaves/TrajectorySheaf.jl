@@ -337,7 +337,7 @@ function ControlledTrajectorySheaf(F::EuclideanSheaf{T},
 
     In  = Matrix{T}(I, n, n)
     In0 = hcat(In, zeros(T, n, m))   # [I_n | 0_{n×m}] — projects out state
-    AB  = hcat(Ad, Bd)               # [A_d | B_d]
+    AB  = hcat(Ad, Bd)               # [A_d | B_d] — concatenate discrete matrices
 
     # Dummy initial edge (1, 2):
     #   ρ_{1→e} = I_n,   ρ_{2→e} = [I_n | 0]
