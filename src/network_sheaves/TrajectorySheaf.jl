@@ -49,7 +49,7 @@ using CliqueTrees.Multifrontal
 
 using ..EuclideanSheaves: EuclideanSheaf, add_sheaf_edge!, harmonic_extension,
     ldlt_pseudoinverse_and_null
-using ..SheafInterface: vertex_stalks
+using ..SheafInterface: vertex_stalks, coboundary_map
 
 # ---------------------------------------------------------------------------
 # Struct
@@ -232,15 +232,18 @@ function continuous_to_discrete_zoh(Ac::AbstractMatrix{T},
     @argcheck size(Ac, 1) == size(Ac, 2) "Ac must be square, got size $(size(Ac))"
     @argcheck size(Bc, 1) == n "Bc must have $n rows (same as Ac), got $(size(Bc, 1))"
 
+    # Promote to a floating-point type that can represent both T and h exactly.
+    Tf = float(promote_type(T, typeof(h)))
+
     # Build the (n+m)×(n+m) augmented matrix M = h*[Ac Bc; 0 0]
-    M = zeros(T, n + m, n + m)
-    M[1:n, 1:n]     = h * Ac
-    M[1:n, n+1:n+m] = h * Bc
+    M = zeros(Tf, n + m, n + m)
+    M[1:n, 1:n]     = Tf(h) * Ac
+    M[1:n, n+1:n+m] = Tf(h) * Bc
     # Bottom block remains zero
 
     E  = exp(M)
-    Ad = E[1:n, 1:n]
-    Bd = E[1:n, n+1:n+m]
+    Ad = Matrix{T}(E[1:n, 1:n])
+    Bd = Matrix{T}(E[1:n, n+1:n+m])
     return Ad, Bd
 end
 
@@ -325,7 +328,6 @@ function build_controlled_trajectory_sheaf(F::EuclideanSheaf{T},
                                             h::Real,
                                             k::Int) where T
     n = sum(vertex_stalks(F))
-    m = size(Bc, 2)
 
     @argcheck k >= 1 "k must be at least 1, got $k"
     @argcheck h > 0 "h must be positive, got $h"
@@ -333,6 +335,18 @@ function build_controlled_trajectory_sheaf(F::EuclideanSheaf{T},
     @argcheck size(Bc, 1) == n "Bc must have $n rows (same state dimension as F), got $(size(Bc, 1))"
 
     Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
+    return _build_sheaf_from_discrete(F, Ad, Bd, k)
+end
+
+# Private helper: build the inner EuclideanSheaf from already-discretized (Ad, Bd).
+# Called by both build_controlled_trajectory_sheaf and the ControlledTrajectorySheaf
+# constructor to avoid recomputing the matrix exponential.
+function _build_sheaf_from_discrete(F::EuclideanSheaf{T},
+                                     Ad::AbstractMatrix{T},
+                                     Bd::AbstractMatrix{T},
+                                     k::Int) where T
+    n = sum(vertex_stalks(F))
+    m = size(Bd, 2)
 
     # vertex stalks: [n, n+m, n+m, ..., n+m, n]  (k+2 vertices total)
     stalks = [n; fill(n + m, k); n]
@@ -386,8 +400,10 @@ function ControlledTrajectorySheaf(F::EuclideanSheaf{T},
                                     k::Int) where T
     n = sum(vertex_stalks(F))
     m = size(Bc, 2)
+    # Validate and discretize once; reuse Ad, Bd for both the sheaf and the struct.
+    @argcheck k >= 1 "k must be at least 1, got $k"
     Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
-    sheaf  = build_controlled_trajectory_sheaf(F, Ac, Bc, h, k)
+    sheaf  = _build_sheaf_from_discrete(F, Ad, Bd, k)
     return ControlledTrajectorySheaf{T}(k, T(h), Ac, Bc, Ad, Bd, sheaf, n, m)
 end
 
@@ -495,6 +511,17 @@ function feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
 
     x_p_internal, null_internal = harmonic_extension(ts.sheaf, boundary)
 
+    # Check that the endpoints are reachable: a feasible trajectory must satisfy
+    # the discrete dynamics, i.e. the coboundary residual must be zero.
+    d_mat    = sparse(coboundary_map(ts.sheaf))
+    residual = norm(d_mat * Array(x_p_internal))
+    if residual > sqrt(eps(T)) * (1 + norm(Array(x_p_internal)))
+        throw(ArgumentError(
+            "Endpoint states are not mutually reachable under the controlled dynamics " *
+            "(coboundary residual = $(residual)).  Check that x1 and xk1 are connected " *
+            "by a valid k-step trajectory."))
+    end
+
     z_p        = _internal_to_public(Array(x_p_internal), n, m, k)
     null_basis = _internal_to_public_matrix(null_internal, n, m, k)
 
@@ -568,6 +595,7 @@ function lqr_objective(ts::ControlledTrajectorySheaf{T},
 
     # Validation
     @argcheck size(Q, 1) == size(Q, 2) == n "Q must be $n×$n, got $(size(Q))"
+    @argcheck issymmetric(Q) "Q must be symmetric"
     @argcheck size(Ru, 1) == size(Ru, 2) == m "Ru must be $m×$m, got $(size(Ru))"
     @argcheck issymmetric(Ru) "Ru must be symmetric"
     @argcheck isposdef(Ru) "Ru must be positive definite"
@@ -576,6 +604,7 @@ function lqr_objective(ts::ControlledTrajectorySheaf{T},
         Q
     else
         @argcheck size(Qf, 1) == size(Qf, 2) == n "Qf must be $n×$n, got $(size(Qf))"
+        @argcheck issymmetric(Qf) "Qf must be symmetric"
         Qf
     end
 
@@ -746,8 +775,8 @@ function optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
     # Equivalently, rred must be orthogonal to the null space of Rred.
     if size(null_red, 2) > 0
         out_of_range = norm(null_red' * rred)
-        tol = eps(T) * max(1.0, norm(rred))
-        if out_of_range > tol * sqrt(size(null_red, 2))
+        tol = eps(T) * max(one(T), norm(rred))
+        if out_of_range > tol * sqrt(T(size(null_red, 2)))
             throw(ArgumentError(
                 "The reduced quadratic problem is unbounded below: the reduced " *
                 "linear term has a component (norm $(out_of_range)) outside the " *

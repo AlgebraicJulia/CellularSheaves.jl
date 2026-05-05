@@ -144,13 +144,25 @@ using SparseArrays
 
         # Wrong Q size
         @test_throws ArgumentError lqr_objective(ts, zeros(2, 2), Ru; Qf=Qf)
+        # Non-symmetric Q (n=1 is always symmetric, so use a 2x2 system)
+        F_sym = EuclideanSheaf{Float64}(fill(2, 1))
+        Ac_sym = zeros(2, 2); Bc_sym = reshape([1.0, 0.0], 2, 1)
+        ts_sym = ControlledTrajectorySheaf(F_sym, Ac_sym, Bc_sym, h, 2)
+        Q_asym = [1.0 0.5; 0.0 1.0]   # 2×2 but asymmetric
+        Ru_sym = Matrix{Float64}(I, 1, 1)
+        @test_throws ArgumentError lqr_objective(ts_sym, Q_asym, Ru_sym)
         # Wrong Ru size
         @test_throws ArgumentError lqr_objective(ts, Q, zeros(2, 2); Qf=Qf)
+        # Non-symmetric Ru (need m >= 2: MIMO system)
+        Bc_mimo = reshape([1.0, 1.0], 1, 2)  # 1 state, 2 controls
+        ts_mimo = ControlledTrajectorySheaf(F1, Ac_int, Bc_mimo, h, 2)
+        Ru_asym = [1.0 0.5; 0.0 1.0]   # 2×2 but asymmetric
+        @test_throws ArgumentError lqr_objective(ts_mimo, Q, Ru_asym)
         # Wrong Qf size
         @test_throws ArgumentError lqr_objective(ts, Q, Ru; Qf=zeros(2, 2))
-        # Non-symmetric Ru
-        Ru_asym = [1.0 0.5; 0.0 1.0]
-        @test_throws ArgumentError lqr_objective(ts, zeros(2, 2), Ru_asym)
+        # Non-symmetric Qf (use same ts_sym)
+        Qf_asym = [1.0 0.3; 0.0 1.0]
+        @test_throws ArgumentError lqr_objective(ts_sym, Matrix{Float64}(I, 2, 2), Ru_sym; Qf=Qf_asym)
         # Non-PD Ru
         Ru_sing = zeros(m, m)
         @test_throws ArgumentError lqr_objective(ts, Q, Ru_sing)
@@ -251,6 +263,32 @@ using SparseArrays
             ut  = Array(z_opt2[Block(k2 + 1 + t)])
             @test norm(Ad2 * xt + Bd2 * ut - xt1) < 1e-10
         end
+    end
+
+    # -----------------------------------------------------------------------
+    # Additional: infeasible endpoint pair throws ArgumentError
+    # -----------------------------------------------------------------------
+    @testset "infeasible endpoints throw ArgumentError" begin
+        # The scalar integrator can reach any x_{k+1} given x_1, so use a system
+        # with a terminal velocity constraint that cannot be satisfied.
+        # Double integrator with k=1 step: x_{k+1} must satisfy
+        # x2 = Ad*x1 + Bd*u1. With k=1 there is 1 control dof (u1), so
+        # x_pos can be anything but x_vel is constrained.
+        # Force an impossible velocity at the terminal state by using k=1
+        # and asking for x_vel change that is impossible in 1 step.
+        Ac2 = [0.0 1.0; 0.0 0.0]; Bc2 = reshape([0.0, 1.0], 2, 1)
+        F2  = EuclideanSheaf{Float64}(fill(2, 1))
+        # k=1, h=0.1 gives Ad≈I+h*Ac, Bd≈h*Bc (small h)
+        ts_infeas = ControlledTrajectorySheaf(F2, Ac2, Bc2, 0.1, 1)
+        # Only 1 control dof, but 2 state constraints. The system IS reachable
+        # for compatible endpoints. For k=1, position AND velocity at t=2 are
+        # both prescribed but only u1 is free → overdetermined → infeasible if
+        # the two constraints conflict.
+        # Ad*x1 + Bd*u1 = xk1 with n=2, m=1, k=1 is a 2-eq 1-unknown system.
+        # For a generic xk1 this will be infeasible.
+        x1_inf  = [0.0, 0.0]
+        xk1_inf = [1.0, 1.0]   # overdetermined: pick conflicting target
+        @test_throws ArgumentError feasible_control_trajectory_basis(ts_infeas, x1_inf, xk1_inf)
     end
 
 end
