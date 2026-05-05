@@ -47,6 +47,7 @@ makedocs(
       "generated/nullspace.md",
       "generated/pushforward.md",
       "generated/trajectory_sheaf.md",
+      "generated/controlled_trajectory_lqr.md",
     ],
     "Library Reference"=>"api.md",
   ]
