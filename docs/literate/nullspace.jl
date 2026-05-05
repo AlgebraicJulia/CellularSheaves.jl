@@ -21,17 +21,13 @@ function plot_nullspace_basis(V, n, stalk_dim; title="Nullspace basis vectors")
     num_basis_vectors = size(V, 2)
     colors = palette(:tab10, num_basis_vectors)
 
-    # Extract coordinate components for each agent
-    # Coordinates are strided in V with period stalk_dim
     x_coords = V[1:stalk_dim:end, :]  # first row in each stalk_dim-sized block
     y_coords = V[2:stalk_dim:end, :]  # second row in each stalk_dim-sized block
     z_coords = V[3:stalk_dim:end, :]  # third row in each stalk_dim-sized block
 
-    # Create 3D scatter plot
     p = scatter(legend=true, xlabel="x", ylabel="y", zlabel="z", title=title,
         markersize=8, markerstrokewidth=0.5, camera=(45, 30))
 
-    # Plot each basis vector with color coding
     for b in 1:num_basis_vectors
         x_vals = x_coords[:, b]
         y_vals = y_coords[:, b]
