@@ -116,6 +116,13 @@ for b in 1:num_basis_vectors
         markersize=6, markerstrokewidth=0.5)
 end
 
-# Arrange the three projections in a 2×2 grid layout, leaving the bottom-right cell empty
+# Build a legend-only subplot for the bottom-right cell of the 2×2 grid
+p4 = plot(; showaxis=false, grid=false, legend=:inside, border=:none, title="Legend")
+for b in 1:num_basis_vectors
+    scatter!(p4, [], []; color=colors[b], label="basis $b",
+        markersize=6, markerstrokewidth=0.5)
+end
+
+# Arrange the three projections in a 2×2 grid layout with the legend in the bottom-right cell
 plot_grid = @layout [a b; c d]
-plot(p1, p2, p3, plot(), layout=plot_grid, size=(900, 800))
+plot(p1, p2, p3, p4, layout=plot_grid, size=(900, 800))
