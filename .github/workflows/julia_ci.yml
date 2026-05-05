@@ -39,6 +39,8 @@ jobs:
   CI:
     if: github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.action == 'test')
     uses: AlgebraicJulia/.github/.github/workflows/julia_ci.yml@main
+    with:
+      docs: false  # Documentation is built and deployed by docs.yml with caching
     secrets: inherit
   CompatHelper:
     if: github.event_name == 'schedule'

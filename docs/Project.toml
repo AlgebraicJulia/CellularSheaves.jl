@@ -1,8 +1,10 @@
 [deps]
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 BlockArrays = "8e7c35d0-a365-5155-bbbb-fb81a777f24e"
 CellularSheaves = "bbe41592-74b8-4681-9d9c-4481e725304d"
 CliqueTrees = "60701a23-6482-424a-84db-faee86b9b1f8"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
+PackageCompiler = "9b87118b-4619-50d2-8e1e-99f35a4d4d9d"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"

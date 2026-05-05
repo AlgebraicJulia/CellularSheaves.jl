@@ -1,0 +1,76 @@
+name: Documentation
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+  statuses: write
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      # Prevents GR (Plots backend) from trying to open a display window.
+      GKSwstype: nul
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+
+      - name: Install Graphviz
+        uses: ts-graphviz/setup-graphviz@v2
+        with:
+          ubuntu-skip-apt-update: "true"
+
+      # Cache the Julia depot (packages, artifacts, compiled cache).
+      # The key includes all three Project.toml files so the cache is
+      # automatically invalidated whenever any dependency set changes.
+      - name: Cache Julia depot
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.julia/packages
+            ~/.julia/artifacts
+            ~/.julia/compiled
+            ~/.julia/registries
+          key: julia-docs-${{ runner.os }}-${{ hashFiles('Project.toml', 'docs/Project.toml', 'test/Project.toml') }}
+          restore-keys: |
+            julia-docs-${{ runner.os }}-
+
+      # Cache the precompiled system image so that heavy packages such as
+      # Plots.jl and Documenter.jl are only compiled once per dependency change.
+      - name: Cache sysimage
+        id: cache-sysimage
+        uses: actions/cache@v4
+        with:
+          path: sysimage.so
+          key: sysimage-${{ runner.os }}-${{ hashFiles('Project.toml', 'docs/Project.toml', 'test/Project.toml') }}
+
+      # Install Julia dependencies for the docs project.  This step is
+      # required even on a sysimage cache hit so that the current
+      # development version of CellularSheaves is properly linked.
+      - name: Install docs dependencies
+        run: julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+
+      # Build the system image only when the cache was missed (i.e. on the
+      # first run after a dependency change).  CellularSheaves itself is
+      # intentionally excluded from the sysimage so that source-code changes
+      # do not require a sysimage rebuild.
+      - name: Build sysimage
+        if: steps.cache-sysimage.outputs.cache-hit != 'true'
+        run: julia --project=docs docs/make_sysimage.jl
+
+      # Build documentation using the cached (or freshly built) sysimage.
+      # Deploydocs is invoked inside docs/make.jl via the GITHUB_TOKEN secret.
+      - name: Build and deploy docs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: julia --sysimage=sysimage.so --project=docs docs/make.jl

@@ -23,6 +23,9 @@ deps/src/
 # environment.
 Manifest.toml
 
+# Precompiled system image built by docs/make_sysimage.jl for the CI documentation workflow
+sysimage.so
+
 # Misc. System Files
 .DS_Store
 .vscode
