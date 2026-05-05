@@ -17,12 +17,8 @@ using PackageCompiler
 
 create_sysimage(
     [
-        # CellularSheaves direct dependencies (Project.toml)
-        "ArgCheck", "AutoHashEquals", "BlockArrays", "CliqueTrees",
-        "DocStringExtensions", "ForwardDiff", "Graphs", "Krylov",
-        "LinearOperators", "MLStyle", "Reexport",
-        # Test dependencies (test/Project.toml)
-        "Aqua",
+        # CellularSheaves and its transitive deps are included automatically
+        "CellularSheaves",
         # Documentation dependencies (docs/Project.toml)
         "Documenter", "Literate", "Plots",
     ],
