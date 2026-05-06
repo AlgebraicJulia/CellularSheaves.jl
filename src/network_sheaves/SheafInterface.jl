@@ -216,7 +216,7 @@ Compute the sheaf Laplacian of a network sheaf.
 
 # See also
 - [`coboundary_map`](@ref)
-- [`sheaf_laplacian_matrix`](@ref)
+- `sheaf_laplacian_matrix` — computes the matrix representation of the sheaf Laplacian
 """
 function sheaf_laplacian(s::AbstractNetworkSheaf)
     error("laplacian not implemented")

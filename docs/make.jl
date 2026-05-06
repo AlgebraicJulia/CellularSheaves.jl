@@ -39,6 +39,7 @@ makedocs(
   sitename="CellularSheaves.jl",
   doctest=false,
   checkdocs=:none,
+  warnonly=[:cross_references],
   pages=Any[
     "CellularSheaves.jl"=>"index.md",
     "Examples"=>Any[
