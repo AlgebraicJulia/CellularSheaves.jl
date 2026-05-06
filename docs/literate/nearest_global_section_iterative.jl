@@ -62,8 +62,21 @@ end
 
 # ## Comparison with the Direct Method
 #
-# For reference, the deterministic LDLt backend always succeeds:
+# For reference, `method=:ldl` uses a deterministic direct backend and is
+# typically faster on small-to-medium sheaves.  Internally it may fall back
+# to a pseudoinverse if the LDL factorization fails, and in rare edge cases
+# either path can still throw, so we guard this call as well.
 
-gs_ldl = nearest_global_section(s, x0; method=:ldl)
-d = coboundary_map(s)
-println("‖d · gs_ldl‖ = ", norm(d * gs_ldl))
+gs_ldl = try
+    nearest_global_section(s, x0; method=:ldl)
+catch e
+    println("Direct LDL backend failed: ", e)
+    nothing
+end
+
+if gs_ldl !== nothing
+    d = coboundary_map(s)
+    println("‖d · gs_ldl‖ = ", norm(d * gs_ldl))
+else
+    println("No global section returned by the direct solver.")
+end
