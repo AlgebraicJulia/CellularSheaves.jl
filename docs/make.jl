@@ -49,6 +49,7 @@ makedocs(
       "generated/pushforward.md",
       "generated/trajectory_sheaf.md",
       "generated/controlled_trajectory_lqr.md",
+      "generated/nearest_global_section_iterative.md",
     ],
     "Library Reference"=>"api.md",
   ]
