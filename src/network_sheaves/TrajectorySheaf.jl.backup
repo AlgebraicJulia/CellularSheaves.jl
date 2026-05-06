@@ -1,0 +1,917 @@
+"""
+Module for trajectory-valued sheaves encoding linear dynamical system state
+evolution, together with colocation boundary-value solvers via harmonic
+extension.
+
+This module provides two trajectory-sheaf constructions:
+
+**Autonomous (`TrajectorySheaf`)**
+
+A `TrajectorySheaf` wraps an `EuclideanSheaf` on a path graph of length `k+1`
+whose restriction maps encode the autonomous discrete-time dynamics
+``x_{t+1} = A x_t``.  Global sections of the inner sheaf correspond exactly
+to valid `k`-step trajectories.
+
+- [`TrajectorySheaf`](@ref) — struct holding `k`, `A`, and the inner sheaf.
+- [`build_trajectory_sheaf`](@ref) — construct the path-graph sheaf for given
+  `F`, `A`, and `k`.
+- [`colocation_trajectory`](@ref) — solve the two-point boundary-value problem
+  ``x_0 = x_{\\text{given}}``, ``x_k = x_{\\text{given}}`` via harmonic
+  extension.
+
+**Controlled (`ControlledTrajectorySheaf`)**
+
+A `ControlledTrajectorySheaf` wraps an `EuclideanSheaf` on a path graph of
+length `k+2` whose restriction maps encode the zero-order-hold discretization
+of the continuous-time LTI system ``\\dot{x}(t) = A_c x(t) + B_c u(t)``.
+Global sections of the inner sheaf correspond exactly to feasible sampled
+state-control trajectories.
+
+- [`continuous_to_discrete_zoh`](@ref) — discretize a continuous-time LTI
+  system using the zero-order-hold block-exponential formula.
+- [`ControlledTrajectorySheaf`](@ref) — struct and constructor; builds the
+  inner path-graph sheaf eagerly.
+- [`feasible_control_trajectory_basis`](@ref) — return a particular feasible
+  trajectory and a null-space basis for endpoint-preserving perturbations.
+"""
+module TrajectorySheaves
+
+export TrajectorySheaf, build_trajectory_sheaf, colocation_trajectory,
+    continuous_to_discrete_zoh, ControlledTrajectorySheaf,
+    feasible_control_trajectory_basis,
+    lqr_objective, optimal_control_trajectory,
+    controlled_vehicle_platoon_with_herding
+
+using ArgCheck: @argcheck
+using LinearAlgebra
+using BlockArrays
+using SparseArrays
+using CliqueTrees.Multifrontal
+
+using ..EuclideanSheaves: EuclideanSheaf, add_sheaf_edge!, harmonic_extension,
+    ldlt_pseudoinverse_and_null
+using ..SheafInterface: vertex_stalks, coboundary_map
+
+# ---------------------------------------------------------------------------
+# Struct
+# ---------------------------------------------------------------------------
+
+"""
+    TrajectorySheaf{T}
+
+A trajectory-valued sheaf encoding `k` steps of the discrete-time linear
+dynamics ``x_{t+1} = A x_t``.
+
+Fields:
+- `k  :: Int`                  — number of time steps.
+- `A  :: AbstractMatrix{T}`    — state-transition matrix (``d \\times d``).
+- `sheaf :: EuclideanSheaf{T}` — inner path-graph sheaf; its global sections
+  are exactly the valid trajectories ``[x_0, x_1, \\ldots, x_k]``.
+"""
+struct TrajectorySheaf{T}
+    k::Int
+    A::AbstractMatrix{T}
+    sheaf::EuclideanSheaf{T}
+end
+
+# ---------------------------------------------------------------------------
+# Construction helpers
+# ---------------------------------------------------------------------------
+
+"""
+    build_trajectory_sheaf(F::EuclideanSheaf{T}, A::AbstractMatrix{T}, k::Int)
+        -> EuclideanSheaf{T}
+
+Construct the inner path-graph sheaf for a `TrajectorySheaf`.
+
+The state dimension `d` equals the total dimension of the 0-cochain space of
+`F` (i.e. `sum(vertex_stalks(F))`).  The returned sheaf has `k+1` vertices,
+each with stalk ``\\mathbb{R}^d``, connected by `k` edges with an induced
+orientation in the coboundary map. For each edge between vertices `t` and
+`t+1`, using the induced orientation ``t \\to t+1``:
+
+- The restriction map from vertex `t`   is ``A``    (dynamics matrix).
+- The restriction map from vertex `t+1` is ``I_d``  (identity).
+
+A 0-cochain ``[x_0, \\ldots, x_k]`` is a global section iff
+``A x_t - x_{t+1} = 0``, i.e. ``x_{t+1} = A x_t`` (forward dynamics),
+
+# Arguments
+- `F` — base `EuclideanSheaf` whose total 0-cochain dimension gives `d`.
+- `A` — ``d \\times d`` state-transition matrix.
+- `k` — number of time steps (must be ≥ 1).
+
+# Throws
+- `ArgumentError` if `k < 1`.
+- `ArgumentError` if `A` is not square.
+- `ArgumentError` if `size(A, 1) ≠ d`.
+"""
+function build_trajectory_sheaf(F::EuclideanSheaf{T}, A::AbstractMatrix{T}, k::Int) where T
+    d = sum(vertex_stalks(F))
+
+    @argcheck k >= 1 "k must be at least 1, got $k"
+    @argcheck size(A, 1) == size(A, 2) "A must be a square matrix, got size $(size(A))"
+    @argcheck size(A, 1) == d "A must be $d×$d (total 0-cochain dimension of F), got $(size(A, 1))×$(size(A, 2))"
+
+    sheaf = EuclideanSheaf{T}(fill(d, k + 1))
+    Id = Matrix{T}(I, d, d)
+    Am = Matrix{T}(A)
+    for t in 1:k
+        # Edge (t, t+1):
+        #   restriction from xₜ   → edge stalk: A   (so d_e x = A*x_t - I*x_{t+1})
+        #   restriction from xₜ₊₁ → edge stalk: I
+        # A 0-cochain is a global section iff A * x_t - I * x_{t+1} = 0,
+        # i.e. x_{t+1} = A * x_t (forward dynamics).
+        add_sheaf_edge!(sheaf, t, t + 1, Am, Id)
+    end
+    return sheaf
+end
+
+"""
+    TrajectorySheaf(F::EuclideanSheaf{T}, A::AbstractMatrix{T}, k::Int)
+        -> TrajectorySheaf{T}
+
+Construct a `TrajectorySheaf` from a base sheaf `F`, dynamics matrix `A`, and
+number of steps `k`.
+
+The inner `sheaf` is built eagerly by [`build_trajectory_sheaf`](@ref).
+
+# Throws
+- `ArgumentError` if `k < 1`.
+- `ArgumentError` if `A` is not square or has the wrong size relative to `F`.
+"""
+function TrajectorySheaf(F::EuclideanSheaf{T}, A::AbstractMatrix{T}, k::Int) where T
+    sheaf = build_trajectory_sheaf(F, A, k)
+    return TrajectorySheaf{T}(k, A, sheaf)
+end
+
+# ---------------------------------------------------------------------------
+# Colocation
+# ---------------------------------------------------------------------------
+
+"""
+    colocation_trajectory(tsheaf::TrajectorySheaf{T}, x0, xk)
+        -> BlockVector
+
+Solve the two-point boundary-value problem for the trajectory sheaf by
+harmonic extension.
+
+Given initial state `x0` (assigned to time step 1) and final state `xk`
+(assigned to time step `k+1`), returns the minimum-energy 0-cochain of
+`tsheaf.sheaf` with those boundary values. If the boundary data are
+consistent with the dynamics over `k` steps (that is, `xk ≈ A^k * x0`),
+this coincides with the exact trajectory determined by those endpoints.
+If the boundary data are inconsistent, there is no exact trajectory with
+those endpoints; in that case the returned value is the harmonic
+minimum-energy / least-squares 0-cochain and generally will not satisfy
+`x[t+1] = A * x[t]` exactly at every step.
+
+The returned `BlockVector` has `k+1` blocks where `trajectory[Block(t)]` gives
+the state at time step `t-1` (so `Block(1)` is `x_0`, `Block(2)` is `x_1`,
+…, `Block(k+1)` is `x_k`).
+
+# Arguments
+- `tsheaf` — a `TrajectorySheaf{T}`.
+- `x0`     — initial state vector of length `d = size(tsheaf.A, 1)`.
+- `xk`     — final state vector of length `d`.
+
+# Throws
+- `ArgumentError` if `length(x0) ≠ d` or `length(xk) ≠ d`.
+"""
+function colocation_trajectory(tsheaf::TrajectorySheaf{T}, x0, xk) where T
+    d = size(tsheaf.A, 1)
+    @argcheck length(x0) == d "x0 must have length $d, got $(length(x0))"
+    @argcheck length(xk) == d "xk must have length $d, got $(length(xk))"
+
+    boundary = Dict{Int,Vector{T}}(
+        1          => convert(Vector{T}, x0),
+        tsheaf.k + 1 => convert(Vector{T}, xk),
+    )
+    x_p, _null_basis = harmonic_extension(tsheaf.sheaf, boundary)
+    return x_p
+end
+
+# ---------------------------------------------------------------------------
+# Zero-order-hold discretization
+# ---------------------------------------------------------------------------
+
+"""
+    continuous_to_discrete_zoh(Ac::AbstractMatrix{T},
+                               Bc::AbstractMatrix{T},
+                               h::Real) where T
+        -> (Ad::Matrix{T}, Bd::Matrix{T})
+
+Discretize the continuous-time LTI system `ẋ(t) = Ac*x(t) + Bc*u(t)` using
+zero-order hold on a uniform step size `h`.
+
+The returned matrices satisfy `x[k+1] = Ad*x[k] + Bd*u[k]`.
+
+The computation uses the block-matrix exponential identity
+
+```math
+\\exp\\!\\left(h \\begin{bmatrix} A_c & B_c \\\\ 0 & 0 \\end{bmatrix}\\right)
+=
+\\begin{bmatrix} A_d & B_d \\\\ 0 & I_m \\end{bmatrix}.
+```
+
+# Arguments
+- `Ac` — ``n \\times n`` continuous-time state matrix.
+- `Bc` — ``n \\times m`` continuous-time input matrix.
+- `h`  — sample period (must be positive).
+
+# Throws
+- `ArgumentError` if `h <= 0`.
+- `ArgumentError` if `Ac` is not square.
+- `ArgumentError` if `size(Bc, 1) ≠ size(Ac, 1)`.
+"""
+function continuous_to_discrete_zoh(Ac::AbstractMatrix{T},
+                                     Bc::AbstractMatrix{T},
+                                     h::Real) where T
+    n = size(Ac, 1)
+    m = size(Bc, 2)
+    @argcheck h > 0 "h must be positive, got $h"
+    @argcheck size(Ac, 1) == size(Ac, 2) "Ac must be square, got size $(size(Ac))"
+    @argcheck size(Bc, 1) == n "Bc must have $n rows (same as Ac), got $(size(Bc, 1))"
+
+    # Promote to a floating-point type that can represent both T and h exactly.
+    FloatT = float(promote_type(T, typeof(h)))
+
+    # Build the (n+m)×(n+m) augmented matrix M = h*[Ac Bc; 0 0]
+    M = zeros(FloatT, n + m, n + m)
+    M[1:n, 1:n]     = FloatT(h) * Ac
+    M[1:n, n+1:n+m] = FloatT(h) * Bc
+    # Bottom block remains zero
+
+    E  = exp(M)
+    Ad = Matrix{T}(E[1:n, 1:n])
+    Bd = Matrix{T}(E[1:n, n+1:n+m])
+    return Ad, Bd
+end
+
+# ---------------------------------------------------------------------------
+# ControlledTrajectorySheaf struct
+# ---------------------------------------------------------------------------
+
+"""
+    ControlledTrajectorySheaf{T}
+
+Trajectory sheaf for the zero-order-hold discretization of the continuous-time
+controlled system `ẋ(t) = Ac*x(t) + Bc*u(t)`.
+
+The inner sheaf is defined on a path graph with `k+2` vertices:
+- vertex 1 is a dummy initial vertex storing only `x₁`,
+- vertices `2, …, k+1` store `(xₜ, uₜ)` for `t = 1, …, k`,
+- vertex `k+2` stores only `x_{k+1}`.
+
+Global sections of `sheaf` correspond exactly to feasible sampled state-control
+trajectories of the discretized system.
+
+Fields:
+- `k          :: Int`                  — number of time steps.
+- `h          :: T`                    — sample period.
+- `Ac         :: AbstractMatrix{T}`    — continuous-time state matrix.
+- `Bc         :: AbstractMatrix{T}`    — continuous-time input matrix.
+- `Ad         :: Matrix{T}`            — discrete-time state matrix.
+- `Bd         :: Matrix{T}`            — discrete-time input matrix.
+- `sheaf      :: EuclideanSheaf{T}`    — inner path-graph sheaf.
+- `state_dim  :: Int`                  — state dimension `n`.
+- `control_dim :: Int`                 — control dimension `m`.
+"""
+struct ControlledTrajectorySheaf{T}
+    k::Int
+    h::T
+    Ac::AbstractMatrix{T}
+    Bc::AbstractMatrix{T}
+    Ad::Matrix{T}
+    Bd::Matrix{T}
+    sheaf::EuclideanSheaf{T}
+    state_dim::Int
+    control_dim::Int
+end
+
+# ---------------------------------------------------------------------------
+# Construction
+# ---------------------------------------------------------------------------
+
+"""
+    ControlledTrajectorySheaf(F::EuclideanSheaf{T},
+                              Ac::AbstractMatrix{T},
+                              Bc::AbstractMatrix{T},
+                              h::Real,
+                              k::Int) where T
+        -> ControlledTrajectorySheaf{T}
+
+Construct a `ControlledTrajectorySheaf` from a base sheaf `F`, continuous-time
+system matrices `(Ac, Bc)`, sample period `h`, and number of steps `k`.
+
+The state dimension `n` is the total 0-cochain dimension of `F`
+(i.e. `sum(vertex_stalks(F))`).  The inner sheaf has `k+2` vertices:
+
+- vertex 1: stalk ``\\mathbb{R}^n`` (dummy initial state),
+- vertices ``2, \\ldots, k+1``: stalk ``\\mathbb{R}^{n+m}`` (state and control),
+- vertex ``k+2``: stalk ``\\mathbb{R}^n`` (terminal state).
+
+The ``k+1`` edges enforce the zero-order-hold discrete dynamics:
+
+- dummy initial edge ``(1,2)``: ``x_1^{\\mathrm{dummy}} = x_1^{\\mathrm{traj}}``,
+- dynamics edges ``(t+1, t+2)`` for ``t = 1, \\ldots, k-1``:
+  ``A_d x_t + B_d u_t = x_{t+1}``,
+- final dynamics edge ``(k+1, k+2)``: ``A_d x_k + B_d u_k = x_{k+1}``.
+
+# Throws
+- `ArgumentError` if `k < 1`.
+- `ArgumentError` if `h <= 0`.
+- `ArgumentError` if `Ac` is not square.
+- `ArgumentError` if `size(Bc, 1) ≠ sum(vertex_stalks(F))`.
+"""
+function ControlledTrajectorySheaf(F::EuclideanSheaf{T},
+                                    Ac::AbstractMatrix{T},
+                                    Bc::AbstractMatrix{T},
+                                    h::Real,
+                                    k::Int) where T
+    n = sum(vertex_stalks(F))
+    m = size(Bc, 2)
+
+    @argcheck k >= 1 "k must be at least 1, got $k"
+    @argcheck h > 0 "h must be positive, got $h"
+    @argcheck size(Ac, 1) == size(Ac, 2) "Ac must be square, got size $(size(Ac))"
+    @argcheck size(Bc, 1) == n "Bc must have $n rows (same state dimension as F), got $(size(Bc, 1))"
+
+    Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
+
+    # Build inner sheaf
+    stalks = [n; fill(n + m, k); n]
+    sheaf  = EuclideanSheaf{T}(stalks)
+
+    In  = Matrix{T}(I, n, n)
+    In0 = hcat(In, zeros(T, n, m))   # [I_n | 0_{n×m}] — projects out state
+    AB  = hcat(Ad, Bd)               # [A_d | B_d] — concatenate discrete matrices
+
+    # Dummy initial edge (1, 2):
+    #   ρ_{1→e} = I_n,   ρ_{2→e} = [I_n | 0]
+    add_sheaf_edge!(sheaf, 1, 2, In, In0)
+
+    # Dynamics edges (t+1, t+2) for t = 1, …, k-1:
+    #   ρ_{t+1→e} = [A_d | B_d],  ρ_{t+2→e} = [I_n | 0]
+    for t in 1:k-1
+        add_sheaf_edge!(sheaf, t + 1, t + 2, AB, In0)
+    end
+
+    # Final dynamics edge (k+1, k+2):
+    #   ρ_{k+1→e} = [A_d | B_d],  ρ_{k+2→e} = I_n
+    add_sheaf_edge!(sheaf, k + 1, k + 2, AB, In)
+
+    return ControlledTrajectorySheaf{T}(k, T(h), Ac, Bc, Ad, Bd, sheaf, n, m)
+end
+
+# ---------------------------------------------------------------------------
+# Coordinate extraction
+# ---------------------------------------------------------------------------
+
+# Extract the public trajectory vector z = (x₁, …, x_{k+1}, u₁, …, u_k)
+# from the internal 0-cochain of the controlled sheaf.
+#
+# Internal layout (0-indexed block offsets):
+#   Block 1        : x₁ (n entries, dummy vertex)
+#   Block t+1      : (xₜ, uₜ)  for t = 1, …, k  (n+m entries each)
+#   Block k+2      : x_{k+1}   (n entries, terminal vertex)
+#
+# Public layout: (k+1)*n + k*m entries
+#   Indices 1 : (k+1)*n                → states  x₁, x₂, …, x_{k+1}
+#   Indices (k+1)*n+1 : (k+1)*n + k*m → controls u₁, u₂, …, u_k
+function _internal_to_public(x_int::AbstractVector{T}, n::Int, m::Int, k::Int) where T
+    z = Vector{T}(undef, (k + 1) * n + k * m)
+
+    # x₁ from Block 1 (indices 1:n in internal)
+    z[1:n] .= x_int[1:n]
+
+    # xₜ for t = 2, …, k from Block t+1 (first n entries)
+    for t in 2:k
+        int_start = n + (t - 1) * (n + m) + 1
+        pub_start = (t - 1) * n + 1
+        z[pub_start:pub_start+n-1] .= x_int[int_start:int_start+n-1]
+    end
+
+    # x_{k+1} from Block k+2
+    int_start = n + k * (n + m) + 1
+    z[k*n+1:(k+1)*n] .= x_int[int_start:int_start+n-1]
+
+    # uₜ for t = 1, …, k from Block t+1 (last m entries)
+    for t in 1:k
+        int_start = n + (t - 1) * (n + m) + n + 1
+        pub_start = (k + 1) * n + (t - 1) * m + 1
+        z[pub_start:pub_start+m-1] .= x_int[int_start:int_start+m-1]
+    end
+
+    return z
+end
+
+# Apply _internal_to_public column-wise to a matrix.
+function _internal_to_public_matrix(N_int::AbstractMatrix{T}, n::Int, m::Int, k::Int) where T
+    n_pub  = (k + 1) * n + k * m
+    n_cols = size(N_int, 2)
+    N_pub  = Matrix{T}(undef, n_pub, n_cols)
+    for j in 1:n_cols
+        N_pub[:, j] = _internal_to_public(view(N_int, :, j), n, m, k)
+    end
+    return N_pub
+end
+
+# ---------------------------------------------------------------------------
+# Feasible trajectory basis
+# ---------------------------------------------------------------------------
+
+"""
+    feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
+                                      x1::AbstractVector{T},
+                                      xk1::AbstractVector{T}) where T
+        -> (z_p::Vector{T}, null_basis::Matrix{T})
+
+Return one feasible trajectory hitting the endpoint states together with a basis
+matrix whose columns span all feasible perturbations that preserve those
+endpoint states.
+
+The boundary conditions fix vertex 1 to the initial state `x1` and vertex
+`k+2` to the terminal state `xk1` of the inner sheaf.  The particular solution
+and each null-basis column are then converted to the **public trajectory
+coordinates**
+
+```math
+z = (x_1, x_2, \\dots, x_{k+1}, u_1, u_2, \\dots, u_k).
+```
+
+The complete feasible set is `{ z_p + null_basis * α : α ∈ Rᵈ }`.
+
+# Arguments
+- `ts`  — a `ControlledTrajectorySheaf{T}`.
+- `x1`  — initial state vector of length `ts.state_dim`.
+- `xk1` — terminal state vector of length `ts.state_dim`.
+
+# Throws
+- `ArgumentError` if `length(x1) ≠ ts.state_dim`.
+- `ArgumentError` if `length(xk1) ≠ ts.state_dim`.
+"""
+function feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
+                                            x1::AbstractVector,
+                                            xk1::AbstractVector) where T
+    n = ts.state_dim
+    m = ts.control_dim
+    k = ts.k
+
+    @argcheck length(x1) == n "x1 must have length $n, got $(length(x1))"
+    @argcheck length(xk1) == n "xk1 must have length $n, got $(length(xk1))"
+
+    boundary = Dict{Int,Vector{T}}(
+        1       => convert(Vector{T}, x1),
+        k + 2   => convert(Vector{T}, xk1),
+    )
+
+    x_p_internal, null_internal = harmonic_extension(ts.sheaf, boundary)
+
+    # Check that the endpoints are reachable: a feasible trajectory must satisfy
+    # the discrete dynamics, i.e. the coboundary residual must be zero.
+    x_p_vec  = Array(x_p_internal)
+    d_mat    = sparse(coboundary_map(ts.sheaf))
+    residual = norm(d_mat * x_p_vec)
+    if residual > sqrt(eps(T)) * (1 + norm(x_p_vec))
+        throw(ArgumentError(
+            "Endpoint states are not mutually reachable under the controlled dynamics " *
+            "(coboundary residual = $(residual)).  Check that x1 and xk1 are connected " *
+            "by a valid k-step trajectory."))
+    end
+
+    z_p        = _internal_to_public(x_p_vec, n, m, k)
+    null_basis = _internal_to_public_matrix(null_internal, n, m, k)
+
+    return z_p, null_basis
+end
+
+# ---------------------------------------------------------------------------
+# LQR / LQT objective assembly
+# ---------------------------------------------------------------------------
+
+"""
+    lqr_objective(ts::ControlledTrajectorySheaf{T},
+                  Q::AbstractMatrix{T},
+                  Ru::AbstractMatrix{T};
+                  Qf::Union{Nothing,AbstractMatrix{T}}=nothing,
+                  x_ref::Union{Nothing,AbstractMatrix{T}}=nothing,
+                  u_ref::Union{Nothing,AbstractMatrix{T}}=nothing) where T
+        -> (H::SparseMatrixCSC{T,Int}, f::Vector{T}, c::T)
+
+Assemble the quadratic objective
+
+```math
+\\tfrac{1}{2} z^\\top H z + f^\\top z + c
+```
+
+for the controlled sampled trajectory
+
+```math
+z = (x_1, x_2, \\dots, x_{k+1}, u_1, u_2, \\dots, u_k).
+```
+
+The stagewise cost is
+
+```math
+J(z) =
+\\tfrac{1}{2} \\sum_{t=1}^{k}
+\\Bigl((x_t - \\bar{x}_t)^\\top Q (x_t - \\bar{x}_t)
+     + (u_t - \\bar{u}_t)^\\top R_u (u_t - \\bar{u}_t)\\Bigr)
++
+\\tfrac{1}{2} (x_{k+1} - \\bar{x}_{k+1})^\\top Q_f (x_{k+1} - \\bar{x}_{k+1}).
+```
+
+The assembled `H` is sparse and block-diagonal: `k` copies of `Q` on the
+running state blocks, `Qf` on the terminal state block, and `k` copies of `Ru`
+on the control blocks.
+
+# Arguments
+- `ts`    — a `ControlledTrajectorySheaf{T}`.
+- `Q`     — ``n \\times n`` running state weight, positive semidefinite.
+- `Ru`    — ``m \\times m`` control weight, symmetric positive definite.
+- `Qf`    — ``n \\times n`` terminal state weight (defaults to `Q` when `nothing`).
+- `x_ref` — ``n \\times (k+1)`` reference state trajectory (defaults to zeros).
+- `u_ref` — ``m \\times k`` reference control trajectory (defaults to zeros).
+
+# Throws
+- `ArgumentError` if `Q` is not ``n \\times n``.
+- `ArgumentError` if `Qf` (when provided) is not ``n \\times n``.
+- `ArgumentError` if `Ru` is not ``m \\times m`` or is not symmetric positive definite.
+- `ArgumentError` if `x_ref` (when provided) is not ``n \\times (k+1)``.
+- `ArgumentError` if `u_ref` (when provided) is not ``m \\times k``.
+"""
+function lqr_objective(ts::ControlledTrajectorySheaf{T},
+                       Q::AbstractMatrix{T},
+                       Ru::AbstractMatrix{T};
+                       Qf::Union{Nothing,AbstractMatrix{T}}=nothing,
+                       x_ref::Union{Nothing,AbstractMatrix{T}}=nothing,
+                       u_ref::Union{Nothing,AbstractMatrix{T}}=nothing) where T
+    n = ts.state_dim
+    m = ts.control_dim
+    k = ts.k
+
+    # Validation
+    @argcheck size(Q, 1) == size(Q, 2) == n "Q must be $n×$n, got $(size(Q))"
+    @argcheck issymmetric(Q) "Q must be symmetric"
+    @argcheck size(Ru, 1) == size(Ru, 2) == m "Ru must be $m×$m, got $(size(Ru))"
+    @argcheck issymmetric(Ru) "Ru must be symmetric"
+    @argcheck isposdef(Ru) "Ru must be positive definite"
+
+    Qf_use = if isnothing(Qf)
+        Q
+    else
+        @argcheck size(Qf, 1) == size(Qf, 2) == n "Qf must be $n×$n, got $(size(Qf))"
+        @argcheck issymmetric(Qf) "Qf must be symmetric"
+        Qf
+    end
+
+    if !isnothing(x_ref)
+        @argcheck size(x_ref, 1) == n && size(x_ref, 2) == k + 1 "x_ref must be $n×$(k+1), got $(size(x_ref))"
+    end
+    if !isnothing(u_ref)
+        @argcheck size(u_ref, 1) == m && size(u_ref, 2) == k "u_ref must be $m×$k, got $(size(u_ref))"
+    end
+
+    # Total dimension: (k+1)*n + k*m
+    n_z = (k + 1) * n + k * m
+
+    # Build block-diagonal H as a sparse matrix.
+    # Layout: [x₁, ..., x_k, x_{k+1}, u₁, ..., u_k]
+    #   indices for xₜ (t=1..k):   (t-1)*n+1 : t*n
+    #   indices for x_{k+1}:        k*n+1 : (k+1)*n
+    #   indices for uₜ (t=1..k):   (k+1)*n+(t-1)*m+1 : (k+1)*n+t*m
+    rows = Int[]
+    cols = Int[]
+    vals = T[]
+
+    function add_block!(row_off::Int, col_off::Int, B::AbstractMatrix{T})
+        nr, nc = size(B)
+        for j in 1:nc, i in 1:nr
+            if !iszero(B[i, j])
+                push!(rows, row_off + i)
+                push!(cols, col_off + j)
+                push!(vals, B[i, j])
+            end
+        end
+    end
+
+    # Running state blocks Q (t = 1..k)
+    Q_mat = Matrix{T}(Q)
+    for t in 1:k
+        off = (t - 1) * n
+        add_block!(off, off, Q_mat)
+    end
+
+    # Terminal state block Qf
+    Qf_mat = Matrix{T}(Qf_use)
+    off_qf = k * n
+    add_block!(off_qf, off_qf, Qf_mat)
+
+    # Control blocks Ru (t = 1..k)
+    Ru_mat = Matrix{T}(Ru)
+    for t in 1:k
+        off = (k + 1) * n + (t - 1) * m
+        add_block!(off, off, Ru_mat)
+    end
+
+    H = sparse(rows, cols, vals, n_z, n_z)
+
+    # Reference trajectory vector z̄
+    z_ref = zeros(T, n_z)
+    if !isnothing(x_ref)
+        for t in 1:k+1
+            z_ref[(t-1)*n+1 : t*n] .= x_ref[:, t]
+        end
+    end
+    if !isnothing(u_ref)
+        for t in 1:k
+            z_ref[(k+1)*n+(t-1)*m+1 : (k+1)*n+t*m] .= u_ref[:, t]
+        end
+    end
+
+    # f = -H * z̄, c = 0.5 * z̄' * H * z̄
+    f = -(H * z_ref)
+    c = T(0.5) * dot(z_ref, H * z_ref)
+
+    return H, f, c
+end
+
+# ---------------------------------------------------------------------------
+# Optimal control trajectory
+# ---------------------------------------------------------------------------
+
+"""
+    optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
+                               x1::AbstractVector{T},
+                               xk1::AbstractVector{T},
+                               H::AbstractMatrix{T},
+                               f::AbstractVector{T}=zeros(T, size(H, 1))) where T
+        -> (z_opt::BlockVector, α_opt::Vector{T}, z_p::BlockVector, null_basis::AbstractMatrix{T})
+
+Compute the minimum-cost feasible trajectory for the convex quadratic objective
+
+```math
+\\tfrac{1}{2} z^\\top H z + f^\\top z
+```
+
+subject to fixed initial state `x1` and terminal state `xk1`.
+
+The feasible set is the affine space ``\\{z_p + N\\alpha : \\alpha \\in \\mathbb{R}^r\\}``
+from [`feasible_control_trajectory_basis`](@ref), and the optimizer satisfies the
+reduced first-order conditions
+
+```math
+(N^\\top H N)\\, \\alpha^\\star = -N^\\top (H z_p + f).
+```
+
+When the reduced Hessian ``N^\\top H N`` is singular, the minimum-norm optimizer
+is returned (using the pseudoinverse).  If the reduced problem is unbounded below
+(i.e. the right-hand side has a component outside the range of the reduced Hessian),
+an `ArgumentError` is thrown.
+
+# Arguments
+- `ts`  — a `ControlledTrajectorySheaf{T}`.
+- `x1`  — initial state vector of length `ts.state_dim`.
+- `xk1` — terminal state vector of length `ts.state_dim`.
+- `H`   — ``p \\times p`` positive-semidefinite Hessian matrix, where
+  ``p = (k+1) \\cdot n + k \\cdot m``.
+- `f`   — ``p``-vector of linear objective coefficients (defaults to zero).
+
+# Returns
+- `z_opt`       — optimal trajectory as a `BlockVector` with `k+1` state blocks
+  followed by `k` control blocks.
+- `α_opt`       — optimal reduced coordinate vector.
+- `z_p`         — particular feasible trajectory as a `BlockVector`.
+- `null_basis`  — null-basis matrix `N` (columns span endpoint-preserving perturbations).
+
+# Throws
+- `ArgumentError` if `size(H)` is not `p × p`.
+- `ArgumentError` if `length(f)` is not `p`.
+- `ArgumentError` if the reduced quadratic problem is unbounded below.
+"""
+function optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
+                                    x1::AbstractVector,
+                                    xk1::AbstractVector,
+                                    H::AbstractMatrix{T},
+                                    f::AbstractVector{T}=zeros(T, size(H, 1))) where T
+    n = ts.state_dim
+    m = ts.control_dim
+    k = ts.k
+    p = (k + 1) * n + k * m
+
+    @argcheck size(H, 1) == size(H, 2) == p "H must be $p×$p, got $(size(H))"
+    @argcheck length(f) == p "f must have length $p, got $(length(f))"
+
+    # Step 1: Obtain the particular solution and null basis.
+    q_p, null_basis = feasible_control_trajectory_basis(ts, x1, xk1)
+
+    # Block partition: k+1 state blocks of size n, then k control blocks of size m
+    block_sizes = [fill(n, k + 1); fill(m, k)]
+
+    # Short-circuit: feasible trajectory is unique.
+    if size(null_basis, 2) == 0
+        z_p_block   = BlockArray(q_p, block_sizes)
+        z_opt_block = BlockArray(copy(q_p), block_sizes)
+        return z_opt_block, T[], z_p_block, null_basis
+    end
+
+    # Step 2: Reduced quadratic program.
+    # Rred = N' * H * N  (symmetric PSD)
+    # rred = N' * (H * q_p + f)
+    N    = null_basis
+    HN   = H * N
+    Rred = Symmetric(N' * HN)
+    rred = N' * (H * q_p + f)
+
+    # Step 3: Solve using ChordalLDLt pseudoinverse.
+    Rred_sparse = sparse(Rred)
+    M_ldlt      = ldlt!(ChordalLDLt(Rred_sparse), RowMaximum())
+    α_opt, null_red = ldlt_pseudoinverse_and_null(M_ldlt, -rred)
+
+    # Check bounded: rred must lie in the range of Rred.
+    # Equivalently, rred must be orthogonal to the null space of Rred.
+    if size(null_red, 2) > 0
+        out_of_range = norm(null_red' * rred)
+        tol = eps(T) * max(one(T), norm(rred))
+        if out_of_range > tol * sqrt(T(size(null_red, 2)))
+            throw(ArgumentError(
+                "The reduced quadratic problem is unbounded below: the reduced " *
+                "linear term has a component (norm $(out_of_range)) outside the " *
+                "range of the reduced Hessian."))
+        end
+    end
+
+    # Step 4: Reconstruct optimal trajectory.
+    z_opt    = q_p + N * α_opt
+    z_p_block   = BlockArray(q_p, block_sizes)
+    z_opt_block = BlockArray(z_opt, block_sizes)
+
+    return z_opt_block, α_opt, z_p_block, null_basis
+end
+
+"""
+    controlled_vehicle_platoon_with_herding(
+        Ac::AbstractMatrix{T},
+        Bc::AbstractMatrix{T},
+        h::Real,
+        k::Int,
+        herding_gain::Real;
+        k_herding::Real = herding_gain
+    ) -> ControlledTrajectorySheaf{T}
+
+Construct a ControlledTrajectorySheaf for a vehicle platoon where herding behavior
+emerges from the sheaf Laplacian rather than being explicitly encoded in the dynamics.
+
+The resulting sheaf is defined on a ladder graph with:
+- Two parallel paths (backbones) representing each vehicle's state trajectory over time
+- Each backbone has k+1 vertices for states x₁ through x_{k+1}
+- Rungs connect corresponding time steps between vehicles
+- Herding gain controls the strength of attraction between vehicles
+
+# Arguments
+- `Ac`: n×n continuous-time state matrix for each vehicle's individual dynamics
+- `Bc`: n×m continuous-time input matrix for each vehicle
+- `h`: sample period for discretization
+- `k`: number of time steps in the trajectory
+- `herding_gain`: positive scalar controlling herding strength (default: 1.0)
+- `k_herding`: alternative parameter name for herding_gain (for backward compatibility)
+
+# Returns
+- `ControlledTrajectorySheaf{T}` representing the herding vehicle platoon system
+
+# Notes
+The herding behavior emerges from the sheaf structure:
+- When herding_gain = 0, vehicles evolve independently (decoupled)
+- When herding_gain > 0, vehicles are attracted to each other with force
+  proportional to their separation
+- The sheaf Laplacian automatically generates the appropriate coupling terms
+"""
+function controlled_vehicle_platoon_with_herding(
+    Ac::AbstractMatrix{T},
+    Bc::AbstractMatrix{T},
+    h::Real,
+    k::Int,
+    herding_gain::Real;
+    k_herding::Real = herding_gain
+) where T
+    # Use herding_gain (with fallback to k_herding for backward compatibility)
+    γ = herding_gain
+    
+    # Discretize the continuous-time system
+    Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
+    n = size(Ac, 1)  # state dimension
+    m = size(Bc, 2)  # control dimension
+    
+    # Construct ladder graph sheaf following ControlledTrajectorySheaf pattern
+    # We'll create a sheaf with 2*(k+2) vertices:
+    #   Vertices 1 to k+2: vehicle 1 trajectory (following CTL pattern)
+    #   Vertices k+3 to 2(k+2): vehicle 2 trajectory
+    
+    # Stalks following CTL pattern:
+    #   Vertex 1: x₁⁽¹⁾ (n-dimensional, dummy initial)
+    #   Vertices 2 to k+1: (xₜ⁽¹⁾, uₜ⁽¹⁾) ((n+m)-dimensional)
+    #   Vertex k+2: x_{k+1}⁽¹⁾ (n-dimensional, terminal)
+    #   Similarly for vehicle 2
+    
+    stalks = vcat(
+        [n],                           # v1: x₁⁽¹⁾ (dummy initial)
+        fill(n+m, k),                  # v2 to v_{k+1}: (xₜ⁽¹⁾, uₜ⁽¹⁾)
+        [n],                           # v_{k+2}: x_{k+1}⁽¹⁾ (terminal)
+        [n],                           # v_{k+3}: x₁⁽²⁾ (dummy initial)
+        fill(n+m, k),                  # v_{k+4} to v_{2k+3}: (xₜ⁽²⁾, uₜ⁽²⁾)
+        [n]                            # v_{2k+4}: x_{k+1}⁽²⁾ (terminal)
+    )
+    
+    sheaf = EuclideanSheaf{T}(stalks)
+    
+    # Helper functions for vertex indexing
+    v1_state(t) = t                          # 1-indexed: v1_state(1)=1, v1_state(k+1)=k+1
+    v1_ctrl(t) = 1 + t                       # Control vertices for vehicle 1 (after state)
+    v2_state(t) = (k+2) + t                  # v2_state(1) = k+3
+    v2_ctrl(t) = (k+2) + t                   # Control vertices for vehicle 2
+    
+    # Backbone edges for vehicle 1 (following CTL pattern)
+    # Edge (1,2): connects x₁⁽¹⁾ dummy to (x₁⁽¹⁾, u₁⁽¹⁾)
+    add_sheaf_edge!(sheaf, 1, 2, 
+        Matrix{T}(I, n, n),                           # ρ_{1→e} = I_n
+        hcat(Matrix{T}(I, n, n), zeros(T, n, m))      # ρ_{2→e} = [I_n | 0_{n×m}] projects to state
+    )
+    
+    # Dynamics edges for vehicle 1: (t+1, t+2) for t=1..k-1
+    for t in 1:k-1
+        add_sheaf_edge!(sheaf, 1+t, 1+t+1, 
+            hcat(Ad, Bd),                           # ρ_{t+1→e} = [A_d | B_d]
+            hcat(Matrix{T}(I, n, n), zeros(T, n, m)) # ρ_{t+2→e} = [I_n | 0_{n×m}]
+        )
+    end
+    
+    # Final dynamics edge for vehicle 1: (k+1, k+2)
+    add_sheaf_edge!(sheaf, k+1, k+2, 
+        hcat(Ad, Bd),                           # ρ_{k+1→e} = [A_d | B_d]
+        Matrix{T}(I, n, n)                      # ρ_{k+2→e} = I_n
+    )
+    
+    # Repeat for vehicle 2 (shifted by k+2)
+    # Edge (k+2, k+3): connects x₁⁽²⁾ dummy to (x₁⁽²⁾, u₁⁽²⁾)
+    add_sheaf_edge!(sheaf, k+2, k+3, 
+        Matrix{T}(I, n, n),                           # ρ_{k+2→e} = I_n
+        hcat(Matrix{T}(I, n, n), zeros(T, n, m))      # ρ_{k+3→e} = [I_n | 0_{n×m}]
+    )
+    
+    for t in 1:k-1
+        add_sheaf_edge!(sheaf, (k+2)+t, (k+2)+t+1, 
+            hcat(Ad, Bd),                           # ρ→e = [A_d | B_d]
+            hcat(Matrix{T}(I, n, n), zeros(T, n, m)) # ρ→e = [I_n | 0_{n×m}]
+        )
+    end
+    
+    add_sheaf_edge!(sheaf, 2(k+2)-1, 2(k+2), 
+        hcat(Ad, Bd),                           # ρ→e = [A_d | B_d]
+        Matrix{T}(I, n, n)                      # ρ→e = I_n
+    )
+    
+    # Rung edges (herding coupling) at each time step
+    # For each t=1..k+1: connect vehicle 1 state to vehicle 2 state at time t
+    println("Starting rung edge loop, k+1 = ", k+1)
+    for t in 1:k+1
+        println("Processing t = $t")
+        if t == 1
+            # Initial state: x₁ for both vehicles
+            # Vehicle 1: vertex 1 (x₁⁽¹⁾, n-dim, dummy initial)
+            # Vehicle 2: vertex (k+2)+1 (x₁⁽²⁾, n-dim, dummy initial) - after first vehicle's k+2 vertices
+            v1 = 1
+            v2 = (k+2) + 1
+            ρ1 = Matrix{T}(I, n, n)                           # I_n
+            ρ2 = -γ * Matrix{T}(I, n, n)                      # -γ*I_n
+        elseif t == k+1
+            # Final state: x_{k+1} for both vehicles
+            # Vehicle 1: vertex (k+2) (x_{k+1}⁽¹⁾, n-dim, terminal)
+            # Vehicle 2: vertex 2*(k+2) (x_{k+1}⁽²⁾, n-dim, terminal)
+            v1 = k + 2
+            v2 = 2*(k+2)
+            ρ1 = Matrix{T}(I, n, n)                           # I_n
+            ρ2 = -γ * Matrix{T}(I, n, n)                      # -γ*I_n
+        else
+            # Intermediate state: xₜ for both vehicles (1 < t < k+1)
+            # Vehicle 1: vertex t+1 ((xₜ⁽¹⁾, uₜ⁽¹⁾), (n+m)-dim)
+            #   We want the state portion: first n components
+            # Vehicle 2: vertex (k+2)+t ((xₜ⁽²⁾, uₜ⁽²⁾), (n+m)-dim)
+            #   We want the state portion: first n components
+            v1 = t + 1
+            v2 = (k+2) + t
+            ρ1 = hcat(Matrix{T}(I, n, n), zeros(T, n, m))   # [I_n | 0_{n×m}] - selects state
+            ρ2 = -γ * hcat(Matrix{T}(I, n, n), zeros(T, n, m)) # -γ*[I_n | 0_{n×m}] - selects state
+        end
+        
+        # Add the rung edge for herding coupling at time step t
+        add_sheaf_edge!(sheaf, v1, v2, ρ1, ρ2)
+    end
+        
+        # Add the rung edge for herding coupling at time step t
+        add_sheaf_edge!(sheaf, v1, v2, ρ1, ρ2)
+    end
+    
+    return ControlledTrajectorySheaf{T}(k, T(h), Ac, Bc, Ad, Bd, sheaf, n, m)
+end
+end # TrajectorySheaves
