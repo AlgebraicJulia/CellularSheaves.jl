@@ -89,6 +89,19 @@ which is the authoritative reference for LDLt usage in this codebase.
 - New test files go in `test/network_sheaves/` and are included from `test/runtests.jl`.
 - Do not add the package under test to the test dependencies `test/Project.toml`. This breaks the CI.
 
+## Documentation Structure Conformance
+
+When updating the docs, make them conform to the package's current module structure.
+
+- Keep the `makedocs(modules=...)` list in `docs/make.jl` aligned with the modules and
+  submodules whose docstrings are referenced from the documentation.
+- In `docs/src/api.md`, include a separate `@autodocs` block for every documented
+  module or submodule. Do not assume a parent module's autodocs block is enough.
+- Prefer this "one autodocs block per module" pattern whenever modules are added,
+  renamed, or reorganized; otherwise Documenter cross-references can fail to resolve.
+- When adding a new module that should appear in the docs, update `docs/make.jl` and
+  `docs/src/api.md` in the same change.
+
 ## Feature Request Format
 
 Feature requests are stored as numbered markdown files in `docs/issues/`. When drafting
