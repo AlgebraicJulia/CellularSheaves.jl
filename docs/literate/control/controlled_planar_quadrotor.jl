@@ -57,6 +57,7 @@ using CellularSheaves
 using LinearAlgebra
 using BlockArrays
 using Plots
+using SparseArrays
 
 # ## Step 1: Physical parameters and hover linearization
 
@@ -93,9 +94,6 @@ k = 12      # number of time steps (0.6 s total horizon)
 F  = EuclideanSheaf{Float64}(fill(6, 1))   # one vertex, 6D stalk
 ts = ControlledTrajectorySheaf(F, Ac, Bc, h, k)
 
-println("Ad =\n", round.(ts.Ad; digits=4))
-println("Bd =\n", round.(ts.Bd; digits=4))
-
 # ## Step 3: Fix endpoint states
 #
 # We execute a short lateral manoeuvre: move 0.5 m in the ``y``-direction while
@@ -119,6 +117,19 @@ Qf = Diagonal([10.0, 10.0, 20.0, 1.0, 1.0, 1.0]) # heavier terminal penalty
 
 H, f, _ = lqr_objective(ts, Matrix(Q), Ru; Qf=Matrix(Qf))
 
+# Visualize the block-diagonal cost Hessian H.
+# State weights Q (×k running blocks, Qf on terminal) and control weight Ru
+# (×k blocks) are placed on the block diagonal.  The non-uniform Q/Qf
+# weighting (heavier roll penalty) is visible in alternating stripe intensities
+# on the state-block diagonal.
+
+p_H = heatmap(Matrix(H);
+    color=:viridis, colorbar=true,
+    title="Cost Hessian H ($(size(H,1))×$(size(H,2)))",
+    xlabel="trajectory index", ylabel="trajectory index",
+    yflip=true, aspect_ratio=:equal, size=(550, 480))
+p_H
+
 # ## Step 5: Solve for the optimal trajectory
 
 z_opt, α_opt, z_p, null_basis = optimal_control_trajectory(ts, x1, xk1, H, f)
@@ -126,9 +137,7 @@ z_opt, α_opt, z_p, null_basis = optimal_control_trajectory(ts, x1, xk1, H, f)
 println("Free parameters r = ", size(null_basis, 2))
 println("All entries finite: ", all(isfinite, Array(z_opt)))
 
-# ## Step 6: Plot the state and control trajectories
-#
-# The six state components and two control inputs are plotted separately.
+# ## Step 6: State and control time-series
 
 times_state   = h .* (0:k)
 times_control = h .* (0:k-1)
@@ -155,8 +164,69 @@ p_ctrl = plot(times_control, u1_traj;
 plot!(p_ctrl, times_control, u2_traj;
     lw=2, marker=:square, linestyle=:dash, label="u₂(t)")
 
-quadrotor_plot = plot(p_state, p_ctrl; layout=(2, 1), size=(700, 500))
-quadrotor_plot
+quadrotor_ts_plot = plot(p_state, p_ctrl; layout=(2, 1), size=(700, 500))
+quadrotor_ts_plot
+
+# ## Step 7: Trajectory in the physical plane and pitch angle
+#
+# The vehicle follows a curved arc in the ``(y, z)``-plane as it accelerates
+# laterally.  Roll couples lateral and vertical motion: to move in the
+# ``y``-direction, the vehicle first tilts (positive ``\phi``), which redirects
+# thrust horizontally.
+#
+# Two panels are shown:
+# - **Left** — the spatial trajectory ``(y(t), z(t))`` in the vertical plane,
+#   with time encoded as marker size (small at start, large at end).
+# - **Right** — the roll angle ``\phi(t)`` as a function of time, showing the
+#   pitch-up / pitch-down manoeuvre.
+
+t_idx  = 1:k+1
+t_norm = range(0.0, 1.0; length=k+1)
+
+p_plane = scatter(y_traj, z_traj;
+    marker_z=t_norm, color=:plasma, colorbar=true,
+    label="", xlabel="y (m)", ylabel="z (m)",
+    title="Trajectory in the (y,z)-plane",
+    markerstrokewidth=0, markersize=7)
+plot!(p_plane, y_traj, z_traj; lw=1.5, color=:gray, label="")
+scatter!(p_plane, [y_traj[1]], [z_traj[1]]; color=:green, markersize=10,
+    label="start", markershape=:star5)
+scatter!(p_plane, [y_traj[end]], [z_traj[end]]; color=:red, markersize=10,
+    label="end", markershape=:star5)
+
+p_phi = plot(times_state, phi_traj;
+    lw=2, color=:orange, marker=:circle, label="φ(t)",
+    xlabel="time (s)", ylabel="roll angle (rad)",
+    title="Roll angle vs time")
+
+quadrotor_traj_plot = plot(p_plane, p_phi; layout=(1, 2), size=(850, 370))
+quadrotor_traj_plot
+
+# ## Step 8: Animated trajectory (physical plane on a loop)
+#
+# Each frame adds one more time step to the path in the ``(y, z)``-plane.
+
+phi_min = minimum(phi_traj)
+phi_max = maximum(phi_traj)
+phi_pad = max(abs(phi_min), abs(phi_max)) * 0.3
+
+anim = @animate for i in 1:k+1
+    p1 = plot(y_traj[1:i], z_traj[1:i];
+        lw=2, color=:royalblue, label="",
+        xlabel="y (m)", ylabel="z (m)",
+        title="Quadrotor trajectory  (t = $(round(times_state[i]; digits=2)) s)",
+        xlims=(-0.05, 0.6), ylims=(-0.015, 0.015))
+    scatter!(p1, [y_traj[i]], [z_traj[i]];
+        color=:red, markersize=9, markershape=:circle, label="")
+    p2 = plot(times_state[1:i], phi_traj[1:i];
+        lw=2, color=:orange, marker=:circle, label="φ(t)",
+        xlabel="time (s)", ylabel="roll (rad)",
+        title="Roll angle",
+        xlims=(0, k * h), ylims=(phi_min - phi_pad, phi_max + phi_pad))
+    plot(p1, p2; layout=(1, 2), size=(850, 370))
+end
+quadrotor_anim = gif(anim; fps=6)
+quadrotor_anim
 
 # ## Verification
 

@@ -50,7 +50,6 @@ makedocs(
       "generated/pushforward.md",
       "generated/trajectory_sheaf.md",
       "Control Examples"=>Any[
-        "generated/control/controlled_trajectory_lqr.md",
         "generated/control/controlled_double_integrator.md",
         "generated/control/controlled_vehicle_platoon.md",
         "generated/control/controlled_planar_quadrotor.md",

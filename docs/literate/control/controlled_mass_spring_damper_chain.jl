@@ -17,13 +17,12 @@
 #                u₁            u₂
 # ```
 #
-# With per-mass state ``x_i = [x_i, \dot{x}_i]^\top`` stacked in the order
-# imposed by the two-vertex base sheaf,
+# With per-mass state ``x_i = [x_i, \dot{x}_i]^\top`` stacked as
 # ``x = [x_1, \dot{x}_1, x_2, \dot{x}_2]^\top``,
 # and control ``u = [u_1, u_2]^\top``, Newton's second law gives
+# ``\dot{x} = A_c x + B_c u`` with
 #
 # ```math
-# \dot{x} = A_c x + B_c u, \qquad
 # A_c = \begin{bmatrix}
 #   0   & 1    & 0  & 0  \\
 #   -2k & -2c  & k  & c  \\
@@ -34,10 +33,33 @@
 # B_c = \begin{bmatrix} 0 & 0 \\ 1 & 0 \\ 0 & 0 \\ 0 & 1 \end{bmatrix}.
 # ```
 #
-# The ``2 \times 2`` diagonal blocks of ``A_c`` are the per-mass integrators;
-# the off-diagonal blocks encode the spring-damper coupling between adjacent
-# masses and mirror the structure of the graph Laplacian of the path
-# graph ``1 - 2``.
+# ### Why the diagonal blocks are different
+#
+# Mass 1 is attached to **both** the fixed wall and mass 2, giving three
+# force contributions to its velocity equation:
+#
+# ```math
+# \ddot{x}_1 = \underbrace{-k x_1 - c \dot{x}_1}_{\text{wall spring/damper}}
+#            + \underbrace{k(x_2 - x_1) + c(\dot{x}_2 - \dot{x}_1)}_{\text{inter-mass coupling}}
+#            + u_1
+#            = -2k x_1 - 2c \dot{x}_1 + k x_2 + c \dot{x}_2 + u_1.
+# ```
+#
+# Mass 2 is attached only to mass 1 (free right end), so it has two contributions:
+#
+# ```math
+# \ddot{x}_2 = \underbrace{k(x_1 - x_2) + c(\dot{x}_1 - \dot{x}_2)}_{\text{inter-mass coupling}}
+#            + u_2
+#            = k x_1 + c \dot{x}_1 - k x_2 - c \dot{x}_2 + u_2.
+# ```
+#
+# The coefficients ``(-2k, -2c)`` in mass 1's row versus ``(-k, -c)`` in mass 2's
+# row reflect this asymmetry: mass 1 is "grounded" at the wall, while mass 2 is free.
+# The coupling submatrix for positions is the **grounded Laplacian**
+# ``\hat{L} = \begin{bmatrix} 2k & -k \\ -k & k \end{bmatrix}``, which equals the
+# standard path-graph Laplacian ``k \begin{bmatrix} 1 & -1 \\ -1 & 1 \end{bmatrix}``
+# plus a diagonal "anchor" term ``k \operatorname{diag}(1, 0)`` for the wall attachment.
+# The off-diagonal coupling blocks are symmetric by Newton's third law.
 #
 # **References:**
 # - Olfati-Saber, R. & Murray, R. M. (2004). "Consensus Problems in Networks of
@@ -51,19 +73,13 @@ using CellularSheaves
 using LinearAlgebra
 using BlockArrays
 using Plots
+using SparseArrays
 
 # ## Step 1: Physical parameters and continuous-time model
 
 k_spring = 1.0   # spring constant  (N/m)
 c_damp   = 0.2   # damper coefficient (N·s/m)
 mass     = 1.0   # mass of each particle (kg)
-
-# State ordering: [x₁, ẋ₁, x₂, ẋ₂] — matches the two-vertex EuclideanSheaf
-# layout (stalk of vertex 1 followed by stalk of vertex 2).
-#
-# Equations of motion:
-# - Mass 1: ẍ₁ = -2k x₁ - 2c ẋ₁ + k x₂ + c ẋ₂ + u₁
-# - Mass 2: ẍ₂ =  k x₁  + c ẋ₁  - k x₂ - c ẋ₂ + u₂
 
 Ac = [0.0          1.0         0.0          0.0;
       -2k_spring  -2c_damp     k_spring     c_damp;
@@ -77,6 +93,13 @@ Bc = [0.0          0.0;
 
 println("State dimension  n = ", size(Ac, 1))
 println("Control dimension m = ", size(Bc, 2))
+
+# Verify the grounded-Laplacian structure of the position coupling:
+# The 2×2 submatrix of Ac extracted from (velocity rows, position columns) is
+# the grounded Laplacian  L̂ = k_spring * [2 -1; -1 1].
+L_hat = Ac[[2, 4], [1, 3]]
+println("Position coupling (grounded Laplacian):\n", L_hat)
+@assert L_hat ≈ k_spring .* [2.0 -1.0; -1.0 1.0] "Grounded-Laplacian structure does not match expected pattern"
 
 # ## Step 2: Build the ControlledTrajectorySheaf
 #
@@ -111,6 +134,19 @@ Ru = Matrix{Float64}(I, m_dim, m_dim)
 Qf = 5.0 * Matrix{Float64}(I, n, n)
 
 H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
+
+# Visualize the block-diagonal structure of H.
+# The state trajectory has (k+1) blocks of size 4 and k control blocks of
+# size 2, giving H of size ((k+1)*4 + k*2) × ((k+1)*4 + k*2) = 64×64.
+# The upper-left square carries the state weights Q (×k) and Qf (terminal);
+# the lower-right square carries the control weights Ru (×k).
+
+p_H = heatmap(Matrix(H);
+    color=:viridis, colorbar=true,
+    title="Cost Hessian H ($(size(H,1))×$(size(H,2)))",
+    xlabel="trajectory index", ylabel="trajectory index",
+    yflip=true, aspect_ratio=:equal, size=(550, 480))
+p_H
 
 # ## Step 5: Solve for the optimal trajectory
 
@@ -168,9 +204,11 @@ println("All endpoint and dynamics constraints satisfied.")
 #
 # - The **state dimension** (4) exceeds the single-agent double integrator (2),
 #   demonstrating that the same API scales to coupled mechanical systems.
-# - The **block structure of ``A_c``** is the graph Laplacian of the spring
-#   network: ``A_c^{22} = -k L_G + c L_G`` where ``L_G`` is the combinatorial
-#   Laplacian of the path graph ``1 - 2``.
+# - The **coupling submatrix** of ``A_c`` is the **grounded Laplacian**
+#   ``\hat{L} = k L_G + k \operatorname{diag}(1, 0)``, where ``L_G`` is the
+#   combinatorial Laplacian of the path graph ``1 - 2``.  The extra diagonal
+#   entry arises from the wall attachment of mass 1; without it the submatrix
+#   would be the standard Laplacian.
 # - The **two-vertex base sheaf** mirrors the physical coupling topology,
 #   making the connection between mechanical networks and sheaf networks explicit.
 #

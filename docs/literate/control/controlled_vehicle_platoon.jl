@@ -43,6 +43,7 @@ using CellularSheaves
 using LinearAlgebra
 using BlockArrays
 using Plots
+using SparseArrays
 
 # ## Step 1: Define the stacked continuous-time model
 #
@@ -95,6 +96,17 @@ Ru = Matrix{Float64}(I, m, m)
 Qf = 10.0 * Matrix{Float64}(I, n, n)
 
 H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
+
+# Visualize the block-diagonal structure of H.
+# The ordering is [x₁, …, x_{k+1}, u₁, …, u_k]; each state block has size 4
+# (two vehicles × 2 DOF) and each control block has size 2.
+
+p_H = heatmap(Matrix(H);
+    color=:viridis, colorbar=true,
+    title="Cost Hessian H ($(size(H,1))×$(size(H,2)))",
+    xlabel="trajectory index", ylabel="trajectory index",
+    yflip=true, aspect_ratio=:equal, size=(500, 450))
+p_H
 
 # ## Step 5: Solve for the optimal trajectory
 

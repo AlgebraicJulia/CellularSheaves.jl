@@ -1,5 +1,13 @@
 # # Optimal Control via the Feasible Trajectory Affine Space
 #
+# > **Note:** This file is archived (underscore-prefixed, so excluded from the
+# > documentation build).  Its content — including the reduced-gradient
+# > verification and the sheaf boundary-value-problem interpretation — has been
+# > merged into
+# > `controlled_double_integrator.jl`, which is the canonical first example in
+# > the four-part controlled-trajectory progression.
+# > This file is retained only for reference.
+#
 # This example demonstrates convex quadratic optimal control over the **feasible
 # trajectory affine space** of a controlled linear system.  We use the double
 # integrator

@@ -39,13 +39,16 @@
 # the rest of the progression.
 #
 # **References:**
-# - Anderson & Moore (1990), *Optimal Control: Linear Quadratic Methods*, Ch. 1.
-# - Lewis, Vrabie & Syrmos (2012), *Optimal Control*, 3rd ed., Ch. 3.
+# - Anderson, B. D. O. & Moore, J. B. (1990). *Optimal Control: Linear Quadratic
+#   Methods*. Prentice-Hall.
+# - Lewis, F. L., Vrabie, D. L., & Syrmos, V. L. (2012). *Optimal Control*, 3rd ed.
+#   John Wiley & Sons. ISBN 978-0-470-63349-6.
 
 using CellularSheaves
 using LinearAlgebra
 using BlockArrays
 using Plots
+using SparseArrays
 
 # ## Step 1: Define the continuous-time model
 #
@@ -70,8 +73,6 @@ ts = ControlledTrajectorySheaf(F, Ac, Bc, h, k)
 println("State dimension  n = ", ts.state_dim)
 println("Control dimension m = ", ts.control_dim)
 println("Steps             k = ", ts.k)
-println("Ad = ", ts.Ad)
-println("Bd = ", ts.Bd)
 
 # ## Step 3: Fix endpoint states
 #
@@ -107,12 +108,25 @@ println("Free parameters      r = ", r)
 #   \bigl( x_t^\top Q\, x_t + u_t^\top R_u\, u_t \bigr)
 #   + \tfrac{1}{2}\, x_{k+1}^\top Q_f\, x_{k+1}.
 # ```
+#
+# The assembled cost Hessian ``H`` is block-diagonal: ``k`` copies of ``Q``
+# on the running state blocks, ``Q_f`` on the terminal block, and ``k`` copies
+# of ``R_u`` on the control blocks.
 
 Q  = Matrix{Float64}(I, n, n)
 Ru = Matrix{Float64}(I, m, m)
 Qf = 10.0 * Matrix{Float64}(I, n, n)   # heavier terminal penalty
 
 H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
+# Rows/columns are ordered: [x₁, x₂, …, x_{k+1}, u₁, …, u_k].
+# The state blocks (left upper) carry Q and Qf; the control blocks (lower right) carry Ru.
+
+p_H = heatmap(Matrix(H);
+    color=:viridis, colorbar=true,
+    title="Cost Hessian H ($(size(H,1))×$(size(H,2)))",
+    xlabel="trajectory index", ylabel="trajectory index",
+    yflip=true, aspect_ratio=:equal, size=(500, 450))
+p_H
 
 # ## Step 6: Solve for the optimal feasible trajectory
 #
@@ -126,6 +140,15 @@ H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
 
 z_opt, α_opt, z_p_block, null_basis =
     optimal_control_trajectory(ts, x1, xk1, H, f)
+
+# Verify first-order optimality: the reduced gradient should vanish at α*.
+Rred = null_basis' * H * null_basis
+rred = null_basis' * (H * Array(z_p_block) + f)
+println("Optimality residual ‖Rred α* + rred‖ = ", norm(Rred * α_opt + rred))
+
+# Verify that z_opt lies in the feasible affine space.
+println("Affine-space error ‖z_opt − (z_p + N α*)‖ = ",
+        norm(Array(z_opt) - (Array(z_p_block) + null_basis * α_opt)))
 
 # ## Step 7: Plot the optimal trajectory
 #
@@ -170,6 +193,21 @@ for t in 1:k
 end
 println("All endpoint and dynamics constraints satisfied.")
 
+# ## Relationship to the sheaf boundary-value problem
+#
+# The particular solution `z_p` is the **harmonic extension** of the boundary
+# data ``(x_1, x_{k+1})`` to the full trajectory space.  It minimises the
+# sheaf Laplacian energy (i.e., the squared coboundary ``\|dz\|^2``).
+#
+# The null-basis columns ``N_j`` are the *global sections of the controlled
+# sheaf* after zeroing the two boundary vertices — exactly the
+# endpoint-preserving degrees of freedom.
+#
+# The optimal trajectory lives in the affine space ``z_p + N\alpha^*``, where
+# ``\alpha^*`` minimises the LQR cost restricted to that affine space.  The two
+# viewpoints — sheaf / harmonic-extension and quadratic / LQR — combine cleanly
+# because the feasible set is a finite-dimensional affine subspace.
+#
 # ## What this example establishes
 #
 # The double integrator illustrates the complete pipeline in its simplest form.
