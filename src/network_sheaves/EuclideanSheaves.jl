@@ -3,7 +3,7 @@ module EuclideanSheaves
 
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_from_graph, energy_function,
     nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
-    zero_sheaf, constant_sheaf, cycle_sheaf
+    ldlt_pseudoinverse_and_null, zero_sheaf, constant_sheaf, cycle_sheaf
 
 using ArgCheck: @argcheck
 using Graphs
