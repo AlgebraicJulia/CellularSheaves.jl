@@ -49,7 +49,8 @@ using CliqueTrees.Multifrontal
 
 using ..EuclideanSheaves: EuclideanSheaf, add_sheaf_edge!, harmonic_extension,
     ldlt_pseudoinverse_and_null
-using ..SheafInterface: vertex_stalks, coboundary_map, nullspace_trajectory_family
+using ..SheafInterface: vertex_stalks, coboundary_map
+import ..SheafInterface: nullspace_trajectory_family
 
 # ---------------------------------------------------------------------------
 # Struct

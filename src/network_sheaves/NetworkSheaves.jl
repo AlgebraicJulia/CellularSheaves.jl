@@ -13,7 +13,6 @@ include("Morphisms.jl")
 include("Pushforwards.jl")
 include("Pushouts.jl")
 include("TrajectorySheaf.jl")
-include("HerdingPlatoon.jl")
 
 @reexport using .BlockSparseArrays
 @reexport using .SheafInterface
@@ -26,6 +25,5 @@ include("HerdingPlatoon.jl")
 @reexport using .Pushforwards
 @reexport using .Pushouts
 @reexport using .TrajectorySheaves
-@reexport using .HerdingPlatoon
 
 end
