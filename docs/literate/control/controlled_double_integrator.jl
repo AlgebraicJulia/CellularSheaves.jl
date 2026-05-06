@@ -1,0 +1,179 @@
+# # Controlled Trajectory Examples: 1 — Double Integrator
+#
+# This is the **first example** in a four-part progression of controlled-trajectory
+# benchmarks built with `CellularSheaves.jl`:
+#
+# 1. **Double integrator** (this page) — the canonical first LQR system.
+# 2. **Vehicle platoon** — same control story in a multi-agent / path-graph setting.
+# 3. **Planar quadrotor** — a more realistic multi-input robotic system.
+# 4. **Mass-spring-damper chain** — graph-coupled mechanical system bridging
+#    toward later consensus and network examples.
+#
+# Each example follows the same conceptual pipeline:
+#
+# ```math
+# (A_c, B_c)
+# \;\longrightarrow\;
+# (A_d, B_d)
+# \;\longrightarrow\;
+# \mathcal{T}(x_1, x_{k+1})
+# \;\longrightarrow\;
+# \min_{z \in \mathcal{T}(x_1, x_{k+1})} J(z).
+# ```
+#
+# ## Physical system
+#
+# A unit point mass moves along a line.  The state is position and velocity;
+# the control input is acceleration:
+#
+# ```math
+# x = \begin{bmatrix} p \\ \dot{p} \end{bmatrix}, \qquad u = a,
+# \qquad
+# A_c = \begin{bmatrix} 0 & 1 \\ 0 & 0 \end{bmatrix},
+# \qquad
+# B_c = \begin{bmatrix} 0 \\ 1 \end{bmatrix}.
+# ```
+#
+# Despite its simplicity this system exhibits every feature of the
+# controlled-trajectory workflow and serves as the natural reference point for
+# the rest of the progression.
+#
+# **References:**
+# - Anderson & Moore (1990), *Optimal Control: Linear Quadratic Methods*, Ch. 1.
+# - Lewis, Vrabie & Syrmos (2012), *Optimal Control*, 3rd ed., Ch. 3.
+
+using CellularSheaves
+using LinearAlgebra
+using BlockArrays
+using Plots
+
+# ## Step 1: Define the continuous-time model
+#
+# The double integrator in standard state-space form.
+
+Ac = [0.0  1.0;
+      0.0  0.0]
+Bc = reshape([0.0, 1.0], 2, 1)
+
+# ## Step 2: Discretize with zero-order hold
+#
+# A [`ControlledTrajectorySheaf`](@ref) wraps the ZOH discretization
+# ``x_{t+1} = A_d x_t + B_d u_t`` as a path-graph sheaf.  Its global
+# sections are exactly the feasible sampled state-control trajectories.
+
+h = 0.25   # sample period (seconds)
+k = 8      # number of time steps
+
+F  = EuclideanSheaf{Float64}(fill(2, 1))   # base sheaf: one vertex, 2D stalk
+ts = ControlledTrajectorySheaf(F, Ac, Bc, h, k)
+
+println("State dimension  n = ", ts.state_dim)
+println("Control dimension m = ", ts.control_dim)
+println("Steps             k = ", ts.k)
+println("Ad = ", ts.Ad)
+println("Bd = ", ts.Bd)
+
+# ## Step 3: Fix endpoint states
+#
+# We start at rest and aim to reach a target position with zero velocity.
+
+x1  = [0.0, 0.0]   # initial state:  position 0, velocity 0
+xk1 = [1.0, 0.0]   # terminal state: position 1, velocity 0
+
+# ## Step 4: Build the feasible trajectory affine space
+#
+# [`feasible_control_trajectory_basis`](@ref) returns:
+# - `z_p` — a particular feasible trajectory (the harmonic extension of the
+#   boundary data);
+# - `N`   — columns spanning all endpoint-preserving perturbations.
+#
+# Any feasible trajectory satisfies ``z = z_p + N \alpha`` for some
+# ``\alpha \in \mathbb{R}^r``.
+
+z_p_raw, N = feasible_control_trajectory_basis(ts, x1, xk1)
+
+n = ts.state_dim
+m = ts.control_dim
+r = size(N, 2)
+println("Trajectory dimension p = ", (k+1)*n + k*m)
+println("Free parameters      r = ", r)
+
+# ## Step 5: Assemble the LQR objective
+#
+# We minimize the quadratic running cost
+#
+# ```math
+# J(z) = \tfrac{1}{2} \sum_{t=1}^{k}
+#   \bigl( x_t^\top Q\, x_t + u_t^\top R_u\, u_t \bigr)
+#   + \tfrac{1}{2}\, x_{k+1}^\top Q_f\, x_{k+1}.
+# ```
+
+Q  = Matrix{Float64}(I, n, n)
+Ru = Matrix{Float64}(I, m, m)
+Qf = 10.0 * Matrix{Float64}(I, n, n)   # heavier terminal penalty
+
+H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
+
+# ## Step 6: Solve for the optimal feasible trajectory
+#
+# [`optimal_control_trajectory`](@ref) restricts the quadratic objective to
+# the feasible affine space and solves the reduced quadratic programme
+#
+# ```math
+# \min_{\alpha} \tfrac{1}{2}\, \alpha^\top (N^\top H N)\, \alpha
+#   + \alpha^\top N^\top (H z_p + f).
+# ```
+
+z_opt, α_opt, z_p_block, null_basis =
+    optimal_control_trajectory(ts, x1, xk1, H, f)
+
+# ## Step 7: Plot the optimal trajectory
+#
+# State blocks: `z_opt[Block(t)]` for `t = 1, …, k+1`.
+# Control blocks: `z_opt[Block(k+1+t)]` for `t = 1, …, k`.
+
+times_state   = h .* (0:k)
+times_control = h .* (0:k-1)
+
+positions  = [Array(z_opt[Block(t)])[1] for t in 1:k+1]
+velocities = [Array(z_opt[Block(t)])[2] for t in 1:k+1]
+controls   = [Array(z_opt[Block(k+1+t)])[1] for t in 1:k]
+
+p_pos = plot(times_state, positions;
+    lw=2, marker=:circle, label="position p(t)",
+    xlabel="time (s)", ylabel="p, ṗ",
+    title="Double integrator: optimal state trajectory")
+plot!(p_pos, times_state, velocities;
+    lw=2, marker=:square, linestyle=:dash, label="velocity ṗ(t)")
+
+p_ctrl = plot(times_control, controls;
+    lw=2, marker=:diamond, color=:red, label="control u(t)",
+    xlabel="time (s)", ylabel="u",
+    title="Double integrator: optimal control input")
+
+di_plot = plot(p_pos, p_ctrl; layout=(2, 1), size=(700, 500))
+di_plot
+
+# ## Verification
+#
+# Check that both endpoint conditions are satisfied and that the discrete
+# dynamics ``x_{t+1} = A_d x_t + B_d u_t`` hold at every step.
+
+@assert Array(z_opt[Block(1)])     ≈ x1  "Initial state not satisfied"
+@assert Array(z_opt[Block(k + 1)]) ≈ xk1 "Terminal state not satisfied"
+
+for t in 1:k
+    xt  = Array(z_opt[Block(t)])
+    xt1 = Array(z_opt[Block(t + 1)])
+    ut  = Array(z_opt[Block(k + 1 + t)])
+    @assert norm(ts.Ad * xt + ts.Bd * ut - xt1) < 1e-10 "Dynamics violated at step $t"
+end
+println("All endpoint and dynamics constraints satisfied.")
+
+# ## What this example establishes
+#
+# The double integrator illustrates the complete pipeline in its simplest form.
+# The next example, **Vehicle Platoon**, keeps the same control story but
+# scales to a multi-agent setting by stacking two double integrators on a
+# two-vertex base sheaf, making the connection to network-structured problems
+# explicit for the first time.

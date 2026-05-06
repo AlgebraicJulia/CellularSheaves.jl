@@ -48,7 +48,13 @@ makedocs(
       "generated/nullspace.md",
       "generated/pushforward.md",
       "generated/trajectory_sheaf.md",
-      "generated/controlled_trajectory_lqr.md",
+      "Control Examples"=>Any[
+        "generated/control/controlled_trajectory_lqr.md",
+        "generated/control/controlled_double_integrator.md",
+        "generated/control/controlled_vehicle_platoon.md",
+        "generated/control/controlled_planar_quadrotor.md",
+        "generated/control/controlled_mass_spring_damper_chain.md",
+      ],
     ],
     "Library Reference"=>"api.md",
   ]
