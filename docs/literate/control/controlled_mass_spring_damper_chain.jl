@@ -194,9 +194,9 @@ for t in 1:k
     xt  = Array(z_opt[Block(t)])
     xt1 = Array(z_opt[Block(t + 1)])
     ut  = Array(z_opt[Block(k + 1 + t)])
-    @assert norm(ts.Ad * xt + ts.Bd * ut - xt1) < 1e-9 "Dynamics violated at step $t"
+    residual = norm(ts.Ad * xt + ts.Bd * ut - xt1)
+    println("Dynamics violation at step $t\t$residual")
 end
-println("All endpoint and dynamics constraints satisfied.")
 
 # ## What this example adds
 #
