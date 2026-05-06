@@ -91,11 +91,12 @@ Pkg.add("CellularSheaves")
 
 Then explore the Examples section, which includes:
 
-- **[Code Example](@ref)**: constructing a sheaf with the `@cellular_sheaf` DSL and computing the nearest global section.
+- **[Code Example](@ref)**: constructing a sheaf with the `@cellular_sheaf` DSL and computing the nearest global section via the direct LDLt method.
 - **[Computing the Nullspace of the Sheaf Laplacian](@ref)**: visualizing the nullspace of the sheaf Laplacian for fully and partially constrained sheaves.
 - **[Sheaf Morphisms](generated/sheaf_morphisms.md)**: building morphisms between sheaves and verifying the naturality condition.
 - **[Pushforward of a Sheaf along a Graph Homomorphism](@ref)**: computing the pushforward sheaf along a graph homomorphism and verifying the global-section isomorphism.
 - **[Spring Oscillator: Four Colocation Methods Compared](@ref)**: solving a spring-oscillator BVP with four methods (classical QR vs. sheaf harmonic extension, Euler vs. exact dynamics).
+- **[Nearest Global Section: Iterative Method](@ref)**: using the conjugate-gradient backend for `nearest_global_section`, with graceful error handling for convergence failures.
 
 ## References
 

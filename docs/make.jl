@@ -46,6 +46,7 @@ makedocs(
       "generated/literate_example.md",
       "generated/sheaf_morphisms.md",
       "generated/nullspace.md",
+      "generated/nearest_global_section_iterative.md",
       "generated/pushforward.md",
       "generated/trajectory_sheaf.md",
       "Control Examples"=>Any[
@@ -53,8 +54,8 @@ makedocs(
         "generated/control/controlled_double_integrator.md",
         "generated/control/controlled_vehicle_platoon.md",
         "generated/control/controlled_planar_quadrotor.md",
-        "generated/control/controlled_mass_spring_damper_chain.md",
-      ],
+        "generated/control/controlled_mass_spring_damper_chain.md"
+      ]
     ],
     "Library Reference"=>"api.md",
   ]
