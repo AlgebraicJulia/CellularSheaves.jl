@@ -99,7 +99,7 @@ println("Control dimension m = ", size(Bc, 2))
 # so the (velocity rows, position columns) block of Ac equals -L̂.
 L_hat = Ac[[2, 4], [1, 3]]
 println("Position coupling block (should equal -L̂):\n", L_hat)
-
+# 
 L̂_expected = k_spring .* [2.0 -1.0; -1.0 1.0]
 @assert L_hat ≈ -L̂_expected "Grounded-Laplacian structure does not match expected pattern (sign convention)"
 
