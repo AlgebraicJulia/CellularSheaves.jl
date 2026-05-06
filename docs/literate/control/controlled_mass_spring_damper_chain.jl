@@ -95,11 +95,13 @@ println("State dimension  n = ", size(Ac, 1))
 println("Control dimension m = ", size(Bc, 2))
 
 # Verify the grounded-Laplacian structure of the position coupling:
-# The 2×2 submatrix of Ac extracted from (velocity rows, position columns) is
-# the grounded Laplacian  L̂ = k_spring * [2 -1; -1 1].
+# In the second-order form, the acceleration contains the term -L̂ * x,
+# so the (velocity rows, position columns) block of Ac equals -L̂.
 L_hat = Ac[[2, 4], [1, 3]]
-println("Position coupling (grounded Laplacian):\n", L_hat)
-@assert L_hat ≈ k_spring .* [2.0 -1.0; -1.0 1.0] "Grounded-Laplacian structure does not match expected pattern"
+println("Position coupling block (should equal -L̂):\n", L_hat)
+
+L̂_expected = k_spring .* [2.0 -1.0; -1.0 1.0]
+@assert L_hat ≈ -L̂_expected "Grounded-Laplacian structure does not match expected pattern (sign convention)"
 
 # ## Step 2: Build the ControlledTrajectorySheaf
 #
