@@ -22,6 +22,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: julia-actions/setup-julia@v2
+        id: julia-setup
         with:
           version: "1"
 
@@ -41,9 +42,9 @@ jobs:
             ~/.julia/artifacts
             ~/.julia/compiled
             ~/.julia/registries
-          key: julia-docs-${{ runner.os }}-${{ hashFiles('Project.toml', 'docs/Project.toml', 'test/Project.toml') }}
+          key: julia-docs-${{ runner.os }}-${{ steps.julia-setup.outputs.julia-version }}-${{ hashFiles('Project.toml', 'docs/Project.toml', 'test/Project.toml') }}
           restore-keys: |
-            julia-docs-${{ runner.os }}-
+            julia-docs-${{ runner.os }}-${{ steps.julia-setup.outputs.julia-version }}-
 
       # Cache the precompiled system image so that heavy packages such as
       # Plots.jl and Documenter.jl are only compiled once per dependency change.
@@ -52,7 +53,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: sysimage.so
-          key: sysimage-${{ runner.os }}-${{ hashFiles('Project.toml', 'docs/Project.toml', 'test/Project.toml') }}
+          key: sysimage-${{ runner.os }}-${{ steps.julia-setup.outputs.julia-version }}-${{ hashFiles('Project.toml', 'docs/Project.toml', 'test/Project.toml', 'docs/make_sysimage.jl') }}
 
       # Install Julia dependencies for the docs project.  This step is
       # required even on a sysimage cache hit so that the current
