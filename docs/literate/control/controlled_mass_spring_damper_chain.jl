@@ -40,10 +40,12 @@
 # graph ``1 - 2``.
 #
 # **References:**
-# - Riess & Hansen (2022), "Multidimensional Persistence Module Classification
-#   via Lattice-Theoretic Measures", *Foundations of Computational Mathematics*.
-# - Hanks, Riess, Hale, Dixon & Fairbanks (2022), "Consensus on Euclidean
-#   Sheaves", in preparation.
+# - Olfati-Saber, R. & Murray, R. M. (2004). "Consensus Problems in Networks of
+#   Agents with Switching Topology and Time-Delays." *IEEE Transactions on
+#   Automatic Control*, 49(9), 1520–1533.
+#   [DOI:10.1109/TAC.2004.834113](https://doi.org/10.1109/TAC.2004.834113)
+# - Lewis, F. L., Vrabie, D. L., & Syrmos, V. L. (2012). *Optimal Control*, 3rd ed.
+#   John Wiley & Sons. ISBN 978-0-470-63349-6.
 
 using CellularSheaves
 using LinearAlgebra
