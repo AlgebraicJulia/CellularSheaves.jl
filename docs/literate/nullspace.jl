@@ -23,7 +23,7 @@ function plot_nullspace_basis(V, n, stalk_dim; title="Nullspace basis vectors")
     nnz_per_col = vec(sum(abs.(V) .> 1e-10, dims=1))
     first_nnz = [findfirst(abs.(V[:, i]) .> 1e-10) for i in 1:size(V, 2)]
     first_nnz = [isnothing(x) ? size(V, 1) + 1 : x for x in first_nnz]
-    sorted_idx = sortperm(collect(zip(nnz_per_col, first_nnz)))
+    sorted_idx = sortperm(collect(zip(size(V,2) .- nnz_per_col, first_nnz)))
     V_sorted = V[:, sorted_idx]
     p = spy(V_sorted, title=title, xlabel="Basis vector index", ylabel="Stalk component (agent × coordinate)",
         markersize=6, legend=false, size=(1000, 600))
@@ -118,8 +118,8 @@ V2 = nullspace_ldlt(F2)
 
 # ## Visualizing the Extended Nullspace
 #
-# With partial constraints, the nullspace is now 6-dimensional. We can see this in the visualization:
+# With partial constraints, the nullspace is now 8-dimensional. We can see this in the visualization:
 # the basis vectors are more spread out, and we see additional degrees of freedom particularly in
 # the z-component projections (y vs z and x vs z).
 
-plot_nullspace_basis(V2, n, stalk_dim; title="Example 2: 6D Nullspace (z unconstrained)")
+plot_nullspace_basis(V2, n, stalk_dim; title="Example 2: 8D Nullspace (z unconstrained)")
