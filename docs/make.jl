@@ -46,6 +46,7 @@ makedocs(
       "generated/sheaf_morphisms.md",
       "generated/nullspace.md",
       "generated/pushforward.md",
+      "generated/sheaf_laplacian_benchmarks.md",
     ],
     "Library Reference"=>"api.md",
   ]

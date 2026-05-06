@@ -1,7 +1,8 @@
 # Module for network sheaves valued in Euclidean spaces with linear restriction maps
 module EuclideanSheaves
 
-export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_from_graph, energy_function,
+export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_laplacian_matrix_direct,
+    restricted_laplacian_blocks, sheaf_from_graph, energy_function,
     nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension
 
 using ArgCheck: @argcheck
@@ -179,6 +180,171 @@ function sheaf_laplacian_matrix(s::EuclideanSheaf)
     return B' * B
 end
 
+"""    sheaf_laplacian_matrix_direct(s::EuclideanSheaf) -> SparseMatrixCSC
+
+Assemble the sheaf Laplacian ``L = d^\\mathsf{T} d`` directly from the restriction
+maps of `s`, **without forming the coboundary matrix** ``d``.
+
+For each edge ``e = (u, v)`` the following block contributions are accumulated:
+
+```
+L_{u,u} += ρ_{u→e}^T ρ_{u→e}
+L_{v,v} += ρ_{v→e}^T ρ_{v→e}
+L_{u,v} += -ρ_{u→e}^T ρ_{v→e}
+L_{v,u} += -ρ_{v→e}^T ρ_{u→e}
+```
+
+This avoids constructing the ``(\\sum d_e) \\times (\\sum d_v)`` coboundary matrix
+and the subsequent matrix multiply, saving both time and memory for large sheaves.
+The result is numerically identical to `sheaf_laplacian_matrix`.
+"""
+function sheaf_laplacian_matrix_direct(s::EuclideanSheaf{T}) where T
+    n_total = sum(s.vertex_stalks)
+    offsets = [0; cumsum(s.vertex_stalks)]
+
+    II = Int[]
+    JJ = Int[]
+    VV = T[]
+
+    for e in edges(s.underlying_graph)
+        u, v = src(e), dst(e)
+        ρ_u = s.restriction_maps[u => v]   # d_e × d_u
+        ρ_v = s.restriction_maps[v => u]   # d_e × d_v
+        du  = s.vertex_stalks[u]
+        dv  = s.vertex_stalks[v]
+        ou  = offsets[u]
+        ov  = offsets[v]
+
+        # Diagonal block for u: ρ_u' * ρ_u
+        Duu = ρ_u' * ρ_u
+        for j in 1:du, i in 1:du
+            push!(II, ou + i); push!(JJ, ou + j); push!(VV, Duu[i, j])
+        end
+
+        # Diagonal block for v: ρ_v' * ρ_v
+        Dvv = ρ_v' * ρ_v
+        for j in 1:dv, i in 1:dv
+            push!(II, ov + i); push!(JJ, ov + j); push!(VV, Dvv[i, j])
+        end
+
+        # Off-diagonal blocks: -ρ_u' * ρ_v  and its transpose -ρ_v' * ρ_u
+        Duv = -(ρ_u' * ρ_v)
+        for j in 1:dv, i in 1:du
+            push!(II, ou + i); push!(JJ, ov + j); push!(VV,  Duv[i, j])
+            push!(II, ov + j); push!(JJ, ou + i); push!(VV,  Duv[i, j])
+        end
+    end
+
+    return sparse(II, JJ, VV, n_total, n_total)
+end
+
+"""    restricted_laplacian_blocks(s::EuclideanSheaf,
+                                interior::AbstractVector{Int},
+                                boundary::AbstractVector{Int})
+        -> (L_II::SparseMatrixCSC, L_IB::SparseMatrixCSC)
+
+Compute the interior-interior and interior-boundary blocks of the sheaf Laplacian
+**without assembling the full Laplacian**.
+
+`interior` and `boundary` are disjoint vectors of vertex indices (any order).
+Only edges with at least one interior endpoint contribute.
+
+- `L_II` is the ``(\\sum_{v \\in I} d_v) \\times (\\sum_{v \\in I} d_v)``
+  symmetric positive-semidefinite block.
+- `L_IB` is the ``(\\sum_{v \\in I} d_v) \\times (\\sum_{v \\in B} d_v)``
+  interior-boundary coupling block.
+
+The DOF ordering within each block follows the order of `interior` / `boundary`.
+Edges entirely within the boundary subgraph are skipped, so assembly cost is
+``O(|E_I| \\cdot d_{\\max}^2)`` where ``E_I`` is the set of edges with at least one
+interior endpoint.
+"""
+function restricted_laplacian_blocks(s::EuclideanSheaf{T},
+                                      interior::AbstractVector{Int},
+                                      boundary::AbstractVector{Int}) where T
+    interior_pos = Dict(v => i for (i, v) in enumerate(interior))
+    boundary_pos = Dict(v => i for (i, v) in enumerate(boundary))
+
+    n_I = isempty(interior) ? 0 : sum(s.vertex_stalks[v] for v in interior)
+    n_B = isempty(boundary) ? 0 : sum(s.vertex_stalks[v] for v in boundary)
+
+    I_offsets = isempty(interior) ? Int[] : [0; cumsum([s.vertex_stalks[v] for v in interior])]
+    B_offsets = isempty(boundary) ? Int[] : [0; cumsum([s.vertex_stalks[v] for v in boundary])]
+
+    II_rows = Int[]; II_cols = Int[]; II_vals = T[]
+    IB_rows = Int[]; IB_cols = Int[]; IB_vals = T[]
+
+    for e in edges(s.underlying_graph)
+        u, v = src(e), dst(e)
+
+        u_pos_I = get(interior_pos, u, 0)
+        v_pos_I = get(interior_pos, v, 0)
+        u_pos_B = get(boundary_pos, u, 0)
+        v_pos_B = get(boundary_pos, v, 0)
+
+        # Skip edges entirely in the boundary subgraph
+        (u_pos_I == 0 && v_pos_I == 0) && continue
+
+        ρ_u = s.restriction_maps[u => v]   # d_e × d_u
+        ρ_v = s.restriction_maps[v => u]   # d_e × d_v
+        du  = s.vertex_stalks[u]
+        dv  = s.vertex_stalks[v]
+
+        # Diagonal block L_II[u,u] += ρ_u' * ρ_u
+        if u_pos_I > 0
+            i_u = I_offsets[u_pos_I]
+            Duu = ρ_u' * ρ_u
+            for j in 1:du, i in 1:du
+                push!(II_rows, i_u + i); push!(II_cols, i_u + j); push!(II_vals, Duu[i, j])
+            end
+        end
+
+        # Diagonal block L_II[v,v] += ρ_v' * ρ_v
+        if v_pos_I > 0
+            i_v = I_offsets[v_pos_I]
+            Dvv = ρ_v' * ρ_v
+            for j in 1:dv, i in 1:dv
+                push!(II_rows, i_v + i); push!(II_cols, i_v + j); push!(II_vals, Dvv[i, j])
+            end
+        end
+
+        # Off-diagonal L_II[u,v] and L_II[v,u] when both endpoints are interior
+        if u_pos_I > 0 && v_pos_I > 0
+            i_u = I_offsets[u_pos_I]
+            i_v = I_offsets[v_pos_I]
+            Duv = -(ρ_u' * ρ_v)
+            for j in 1:dv, i in 1:du
+                push!(II_rows, i_u + i); push!(II_cols, i_v + j); push!(II_vals,  Duv[i, j])
+                push!(II_rows, i_v + j); push!(II_cols, i_u + i); push!(II_vals,  Duv[i, j])
+            end
+        end
+
+        # L_IB[u, v] += -ρ_u' * ρ_v  when u ∈ I, v ∈ B
+        if u_pos_I > 0 && v_pos_B > 0
+            i_u = I_offsets[u_pos_I]
+            b_v = B_offsets[v_pos_B]
+            Duv_IB = -(ρ_u' * ρ_v)
+            for j in 1:dv, i in 1:du
+                push!(IB_rows, i_u + i); push!(IB_cols, b_v + j); push!(IB_vals, Duv_IB[i, j])
+            end
+        end
+
+        # L_IB[v, u] += -ρ_v' * ρ_u  when v ∈ I, u ∈ B
+        if v_pos_I > 0 && u_pos_B > 0
+            i_v = I_offsets[v_pos_I]
+            b_u = B_offsets[u_pos_B]
+            Dvu_IB = -(ρ_v' * ρ_u)
+            for j in 1:du, i in 1:dv
+                push!(IB_rows, i_v + i); push!(IB_cols, b_u + j); push!(IB_vals, Dvu_IB[i, j])
+            end
+        end
+    end
+
+    L_II = sparse(II_rows, II_cols, II_vals, n_I, n_I)
+    L_IB = sparse(IB_rows, IB_cols, IB_vals, n_I, n_B)
+    return L_II, L_IB
+end
+
 
 function energy_function(L::AbstractMatrix)
     return x -> 0.5 * x' * (L * x)
@@ -300,8 +466,7 @@ Convenience overload: computes the sheaf Laplacian ``L = d^\\mathsf{T} d`` (wher
 The returned columns form a basis for the space of *global sections* of `s`.
 """
 function nullspace_ldlt(s::EuclideanSheaf; tol=nothing)
-    d = sparse(coboundary_map(s))
-    return nullspace_ldlt(d' * d; tol=tol)
+    return nullspace_ldlt(sheaf_laplacian_matrix_direct(s); tol=tol)
 end
 
 # Private helper: given a ChordalLDLt factorization `M` of a symmetric
@@ -374,17 +539,18 @@ function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVect
     end
 
     I_idx = vcat([offsets[v]+1:offsets[v+1] for v in interior_verts]...)
-    L     = sheaf_laplacian_matrix(s)
-    L_II  = L[I_idx, I_idx]
 
     B_idx = isempty(boundary_verts) ? Int[] :
         vcat([offsets[v]+1:offsets[v+1] for v in boundary_verts]...)
+
+    # Assemble L_II and L_IB directly without materialising the full Laplacian
+    L_II, L_IB = restricted_laplacian_blocks(s, interior_verts, boundary_verts)
 
     if isempty(boundary_verts)
         b = zeros(length(I_idx))
     else
         x_B = vcat([boundary[v] for v in boundary_verts]...)
-        b   = -L[I_idx, B_idx] * x_B
+        b   = -L_IB * x_B
     end
 
     x_interior, null_interior = ldlt_pseudoinverse_and_null(
