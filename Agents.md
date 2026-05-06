@@ -101,6 +101,8 @@ When updating the docs, make them conform to the package's current module struct
   renamed, or reorganized; otherwise Documenter cross-references can fail to resolve.
 - When adding a new module that should appear in the docs, update `docs/make.jl` and
   `docs/src/api.md` in the same change.
+- When you run the docs build, make sure that there are no missing cross references.
+  Missing cross references will produce warnings in `docs/make.jl` rather than failing the build.
 
 ## Feature Request Format
 
