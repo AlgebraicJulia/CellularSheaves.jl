@@ -1,7 +1,7 @@
 module SheafInterface
 
 export AbstractNetworkSheaf, vertex_stalks, edge_stalks, edge_stalk_dimensions, coboundary_map, add_vertex_stalk!, add_sheaf_edge!, underlying_graph,
-    get_vertex_stalk, get_edge_stalk, get_restriction_map, sheaf_laplacian
+    get_vertex_stalk, get_edge_stalk, get_restriction_map, sheaf_laplacian, nullspace_trajectory_family
 
 import Base: show
 using DocStringExtensions
@@ -220,6 +220,24 @@ Compute the sheaf Laplacian of a network sheaf.
 """
 function sheaf_laplacian(s::AbstractNetworkSheaf)
     error("laplacian not implemented")
+end
+
+"""
+    $(TYPEDSIGNATURES)
+
+Construct a basis-indexed family of feasible controlled trajectories from an
+affine feasible-space parameterization.
+
+# Arguments
+- `ts`: controlled trajectory object
+- `z_p`: particular feasible trajectory in public coordinates
+- `null_basis`: matrix whose columns span endpoint-preserving feasible perturbations
+
+# Returns
+- Vector of trajectory objects, one (or two, if signed) per basis column.
+"""
+function nullspace_trajectory_family(ts, z_p, null_basis; amplitude=1, include_negative=false)
+    error("nullspace_trajectory_family not implemented")
 end
 
 function Base.show(io::IO, s::AbstractNetworkSheaf)
