@@ -270,6 +270,15 @@ function sheaf_laplacian(s::EuclideanSheaf)
     return x -> B' * (B * x)
 end
 
+"""
+    sheaf_laplacian_matrix(s::EuclideanSheaf) -> AbstractMatrix
+
+Compute the sheaf Laplacian `L = dᵀd` as a sparse matrix, where `d` is the coboundary map.
+
+The result is symmetric positive semidefinite. Use [`nullspace_ldlt`](@ref) to find the
+space of global sections (kernel of `L`), or [`nearest_global_section`](@ref) to project
+a cochain to the nearest global section.
+"""
 function sheaf_laplacian_matrix(s::EuclideanSheaf)
     B = coboundary_map(s)
     return B' * B

@@ -34,7 +34,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.NetworkSheaves.EuclideanSheaves, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.TrajectorySheaves],
+  modules=[CellularSheaves, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.TrajectorySheaves],
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,

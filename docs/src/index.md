@@ -52,7 +52,7 @@ A *global section* of ``\mathcal{F}`` is a 0-cochain ``x \in C^0(\mathcal{F})`` 
 
 Equivalently, ``x \in \ker(d) = \ker(L_{\mathcal{F}})``. The space of global sections ``H^0(\mathcal{F}) = \ker(L_{\mathcal{F}})`` captures all globally consistent assignments. Its dimension is the *zeroth sheaf cohomology* ``h^0(\mathcal{F})``.
 
-Use [`nullspace_ldlt`](@ref CellularSheaves.NetworkSheaves.EuclideanSheaves.nullspace_ldlt) to compute a basis for ``H^0(\mathcal{F})`` via sparse LDLt factorization, and [`nearest_global_section`](@ref CellularSheaves.NetworkSheaves.EuclideanSheaves.nearest_global_section) to project any 0-cochain to the closest global section in the L² sense.
+Use [`nullspace_ldlt`](@ref) to compute a basis for ``H^0(\mathcal{F})`` via sparse LDLt factorization, and [`nearest_global_section`](@ref) to project any 0-cochain to the closest global section in the L² sense.
 
 ### Harmonic Extension
 
@@ -64,7 +64,7 @@ L_{II}\, x_I = -L_{IB}\, x_B,
 
 where ``L_{II}`` and ``L_{IB}`` are the corresponding blocks of the sheaf Laplacian. The solution ``x_I`` minimizes the sheaf energy over all 0-cochains agreeing with ``x_B`` on ``B``.
 
-If ``L_{II}`` is singular (i.e. the boundary conditions do not uniquely determine the interior values), [`harmonic_extension`](@ref CellularSheaves.NetworkSheaves.EuclideanSheaves.harmonic_extension) returns both a minimum-norm particular solution and a basis for the null space of ``L_{II}``.
+If ``L_{II}`` is singular (i.e. the boundary conditions do not uniquely determine the interior values), [`harmonic_extension`](@ref) returns both a minimum-norm particular solution and a basis for the null space of ``L_{II}``.
 
 ### Dynamics and Control
 
