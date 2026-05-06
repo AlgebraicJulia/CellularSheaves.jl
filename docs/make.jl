@@ -34,7 +34,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.TrajectorySheaves],
+  modules=[CellularSheaves],
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,
@@ -56,7 +56,26 @@ makedocs(
         "generated/control/controlled_mass_spring_damper_chain.md"
       ]
     ],
-    "Library Reference"=>"api.md",
+    "Feature Guides"=>Any[
+      "features/core_sheaf_workflows.md",
+      "features/morphisms_and_pushforwards.md",
+      "features/trajectory_and_control.md",
+    ],
+    "API Reference"=>Any[
+      "api/index.md",
+      "api/network_sheaves.md",
+      "api/sheaf_interface.md",
+      "api/euclidean_sheaves.md",
+      "api/graph_homomorphisms.md",
+      "api/sheaf_morphisms.md",
+      "api/pushforwards.md",
+      "api/pushouts.md",
+      "api/trajectory_sheaves.md",
+      "api/dsl.md",
+      "api/block_sparse_arrays.md",
+      "api/potential_sheaves.md",
+      "api/herding_platoon.md",
+    ],
   ]
 )
 

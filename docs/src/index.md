@@ -98,6 +98,15 @@ Then explore the Examples section, which includes:
 - **[Spring Oscillator: Four Colocation Methods Compared](@ref)**: solving a spring-oscillator BVP with four methods (classical QR vs. sheaf harmonic extension, Euler vs. exact dynamics).
 - **[Nearest Global Section: Iterative Method](@ref)**: using the conjugate-gradient backend for `nearest_global_section`, with graceful error handling for convergence failures.
 
+## Documentation Map
+
+- **Feature Guides** focus on externally facing workflows:
+  - [Core Sheaf Workflows](features/core_sheaf_workflows.md)
+  - [Morphisms and Pushforwards](features/morphisms_and_pushforwards.md)
+  - [Trajectory and Control](features/trajectory_and_control.md)
+- **API Reference** is split into module-oriented pages:
+  - [API Reference Index](api/index.md)
+
 ## References
 
 The following papers provide the mathematical and computational foundations of this library:
