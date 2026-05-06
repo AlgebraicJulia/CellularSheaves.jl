@@ -25,11 +25,5 @@ Modules = [CellularSheaves.NetworkSheaves.SheafMorphisms]
 ## Trajectory Sheaves
 
 ```@autodocs
-Modules = [CellularSheaves.NetworkSheaves.TrajectorySheaves, CellularSheaves.NetworkSheaves.TrajectorySheaves.ControlledTrajectorySheaf]
-```
-
-## Control
-
-```@autodocs
-Modules = [CellularSheaves.NetworkSheaves.TrajectorySheaves.ControlledTrajectorySheaf]
+Modules = [CellularSheaves.NetworkSheaves.TrajectorySheaves]
 ```
