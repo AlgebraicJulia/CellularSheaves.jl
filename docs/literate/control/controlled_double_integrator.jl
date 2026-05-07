@@ -49,7 +49,7 @@ using LinearAlgebra
 using BlockArrays
 using Plots
 using SparseArrays
-
+using CellularSheaves.TrajectorySheaves
 # Import the API extension that provides `nullspace_trajectory_family`.
 using CellularSheaves.TrajectorySheaves: nullspace_trajectory_family
 
@@ -166,6 +166,7 @@ println("Affine-space error ‖z_opt − (z_p + N α*)‖ = ",
 # not generally optimal; the optimizer chooses a linear combination of these
 # directions.
 
+# Use the null basis directly (the QR factor is not needed for this call)
 family = nullspace_trajectory_family(ts, Array(z_p_block), null_basis; amplitude=1.0)
 max_family = 8
 if length(family) > max_family
