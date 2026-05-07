@@ -1,9 +1,7 @@
 # Sheaf Morphisms
 
-Primary symbols:
+The Sheaf Morphisms module defines the core morphism types and constructors used throughout the package. Below are the primary symbols, automatically generated from the module's exported interface.
 
-- `SheafMorphism`
-- `ComplexMorphism`
-- `is_morphism`
-- `make_sheaf_morphism_spec`
-- `id`
+```@autodocs
+Modules = [CellularSheaves.NetworkSheaves.SheafMorphisms]
+```

@@ -47,7 +47,7 @@ gs = try
     nearest_global_section(F, x0)
 catch e
     println("Could not compute nearest global section during docs build: ", e)
-    zeros(x0)
+    zeros(length(x0))
 end
 println("Norm of coboundary on nearest global section: ", norm(coboundary_map(F) * gs))
 

@@ -16,7 +16,7 @@ This module provides:
   ``T : C^0(F) \\to C^0(\\varphi_* F)`` that sends every global section of F to
   the corresponding global section of ``\\varphi_* F``.
 
-See the [`GraphHomomorphisms`](@ref) module for the underlying combinatorial
+See the [`CellularSheaves.NetworkSheaves.GraphHomomorphisms`](@ref) module for the underlying combinatorial
 representation of graph homomorphisms.
 """
 module Pushforwards

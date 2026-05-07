@@ -50,6 +50,9 @@ using BlockArrays
 using Plots
 using SparseArrays
 
+# Import the API extension that provides `nullspace_trajectory_family`.
+using CellularSheaves.TrajectorySheaves: nullspace_trajectory_family
+
 # ## Step 1: Define the continuous-time model
 #
 # The double integrator in standard state-space form.
