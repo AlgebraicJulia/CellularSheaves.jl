@@ -181,7 +181,7 @@ p_ctrl = plot(times_control, controls;
 di_plot = plot(p_pos, p_ctrl; layout=(2, 1), size=(700, 500))
 di_plot
 
-# ## Step 9: Spy plot of the nullspace basis matrix
+# ## Step 8: Spy plot of the nullspace basis matrix
 #
 # The nullspace basis `null_basis` (size p × r) spans the feasible
 # perturbations around the optimal trajectory. A spy plot gives a quick visual
@@ -222,15 +222,12 @@ println("All endpoint and dynamics constraints satisfied.")
 # viewpoints — sheaf / harmonic-extension and quadratic / LQR — combine cleanly
 # because the feasible set is a finite-dimensional affine subspace.
 #
-# ## What this example establishes
-#
-# The double integrator illustrates the complete pipeline in its simplest form.
-# The next example, **Vehicle Platoon**, keeps the same control story but
-# scales to a multi-agent setting by stacking two double integrators on a
-# two-vertex base sheaf, making the connection to network-structured problems
-# explicit for the first time.
-
 # ## Step 9: Visualize the nullspace as a trajectory family
+#
+# The spy plot in Step 8 revealed which rows of `null_basis` are non-zero,
+# showing the sparsity structure of the feasible perturbations.  Step 9 brings
+# those abstract columns to life: each one becomes a concrete state-control
+# trajectory that starts and ends at the prescribed boundary conditions.
 #
 # Each nullspace basis vector gives one endpoint-preserving control mode.
 # We visualize the family members
@@ -239,14 +236,11 @@ println("All endpoint and dynamics constraints satisfied.")
 # z^{(j)} = z_p + n_j
 # ```
 #
-# where `n_j` is the `j`-th basis column. These trajectories are feasible but
-# not generally optimal; the optimizer chooses a linear combination of these
-# directions.
+# where `n_j` is the `j`-th basis column scaled by `amplitude`.  These
+# trajectories are feasible but not generally optimal; the optimizer chooses a
+# linear combination of these directions that minimises the LQR cost.
 
 family = nullspace_trajectory_family(ts, Array(z_p_block), null_basis; amplitude=3.0)
-# family = qr(Matrix(family)).Q  # orthogonalize for better visualization
-# println("Nullspace family has $(length(family)) trajectories.")
-# family
 
 # Plot the trajectories as perturbations of the optimal trajectory.
 
@@ -280,3 +274,16 @@ plot!(p_family_ctrl, times_control, controls; lw=3, color=:black, label="optimal
 
 family_plot = plot(p_family_state, p_family_ctrl; layout=(2, 1), size=(800, 560))
 family_plot
+
+# ## What this example establishes
+#
+# The double integrator illustrates the complete pipeline in its simplest form.
+# Steps 8 and 9 together reveal two complementary views of the feasible
+# subspace: the spy plot (Step 8) shows the algebraic sparsity structure of the
+# null-basis matrix, while the trajectory family (Step 9) shows what those
+# basis directions look like as physical state-control trajectories.
+#
+# The next example, **Vehicle Platoon**, keeps the same control story but
+# scales to a multi-agent setting by stacking two double integrators on a
+# two-vertex base sheaf, making the connection to network-structured problems
+# explicit for the first time.
