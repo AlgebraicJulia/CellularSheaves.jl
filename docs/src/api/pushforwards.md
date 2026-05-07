@@ -1,8 +1,9 @@
 # Pushforwards
 
-Primary symbols:
+The Pushforward module provides tools for moving sheaves across graph
+homomorphisms, computing transfer maps, and constructing fiber‑basis
+representations.  The most frequently used functions are documented below.
 
-- `fiber_section_basis`
-- `all_fiber_bases`
-- `pushforward_sheaf`
-- `pushforward_transfer_map`
+```@autodocs
+Modules = [CellularSheaves.NetworkSheaves.Pushforwards]
+```

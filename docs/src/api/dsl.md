@@ -1,20 +1,10 @@
 # Cellular Sheaf DSL
 
-## Expression Terms
+The DSL provides a macro and associated types for constructing cellular sheaves in a declarative manner. Below are the primary symbols exported by the parser module.
 
-Primary symbols:
+using CellularSheaves
+using CellularSheaves.NetworkSheaves
 
-- `CellularSheafExpr`
-- `Declaration`
-- `UntypedDeclaration`
-- `TypedDeclaration`
-- `RestrictionMap`
-- `VertexStalk`
-- `Product`
-- `Equation`
-
-## Parser and Macro
-
-Primary symbol:
-
-- `@cellular_sheaf`
+```@autodocs
+Modules = [CellularSheaves.NetworkSheaves.CellularSheafParser]
+```

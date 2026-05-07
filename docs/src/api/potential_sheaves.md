@@ -1,6 +1,7 @@
 # Potential Sheaves
 
-Primary symbols:
+The PotentialSheaves module provides specialized sheaf constructions for modeling potentials on graphs. Below are the primary exported symbols.
 
-- `PotentialSheaf`
-- `get_edge_potential`
+```@autodocs
+Modules = [CellularSheaves.NetworkSheaves.PotentialSheaves]
+```
