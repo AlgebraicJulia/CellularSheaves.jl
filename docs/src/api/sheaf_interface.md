@@ -66,3 +66,9 @@ add_sheaf_edge!(F, 1, 2, [1], [1])
 ```
 
 See the [Core Sheaf Workflows](@ref) guide.
+
+## API Reference
+
+```@autodocs
+Modules = [CellularSheaves.SheafInterface]
+```
