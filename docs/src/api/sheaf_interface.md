@@ -15,14 +15,16 @@ walk‑through, see the tutorial pages linked from the navigation bar.
 abstract type AbstractNetworkSheaf end
 ```
 
-Represents a sheaf defined on a graph.  It stores:
+Represents a sheaf defined on a graph.
 
-* a `SimpleGraph` underlying structure,
-* a vector of vertex‑stalk dimensions,
-* a dictionary mapping unordered vertex pairs to edge‑stalk dimensions,
-* restriction maps (`Matrix` objects) for each incident vertex–edge pair.
+Conceptually, a network sheaf consists of:
 
-Concrete subtypes must implement the methods listed below.
+* an underlying graph,
+* vertex and edge stalk dimensions,
+* restriction maps for each incident vertex–edge pair.
+
+Concrete subtypes must provide access to this structure through the methods listed
+below, but they are not required to use any particular internal representation.
 
 ## Public API
 
@@ -49,17 +51,12 @@ full signature list.
 
 ```julia
 using CellularSheaves
-using Graphs
-
-# a triangle graph
-g = Graph(3)
-add_edge!(g, 1, 2); add_edge!(g, 2, 3); add_edge!(g, 3, 1)
 
 # 1‑dimensional stalks (R) at each vertex
 stalks = [1, 1, 1]
 
 # create an empty Euclidean sheaf
-F = EuclideanSheaf(g, stalks)
+F = EuclideanSheaf{Float64}(stalks)
 
 # add an edge with identity restriction maps
 add_sheaf_edge!(F, 1, 2, [1], [1])
