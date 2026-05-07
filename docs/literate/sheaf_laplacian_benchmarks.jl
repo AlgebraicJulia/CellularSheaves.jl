@@ -99,7 +99,7 @@ end
 # Comparing `sheaf_laplacian_matrix` (builds `d`, then `d'*d`) against
 # `sheaf_laplacian_matrix_direct` (accumulates blocks edge-by-edge).
 
-sizes = [20, 50, 100, 200, 400]
+sizes = [20, 50, 100]
 
 ## Force JIT compilation on a tiny sheaf before timing.
 let s0 = make_test_sheaf(5)
@@ -136,7 +136,7 @@ plot!(p1, sizes, t_new_full;
 # ## Benchmark 2 — restricted blocks for boundary-value problems
 #
 # `harmonic_extension` needs only ``L_{II}`` and ``L_{IB}``.
-# We fix ``n = 200`` vertices and vary the fraction of boundary vertices
+# We fix ``n = 50`` vertices and vary the fraction of boundary vertices
 # from 10 % to 90 % to show how the savings grow as the boundary gets larger.
 
 function old_restricted(s, interior, boundary, offsets)
@@ -146,7 +146,7 @@ function old_restricted(s, interior, boundary, offsets)
     return L[I_idx, I_idx], L[I_idx, B_idx]
 end
 
-n_bvp     = 200
+n_bvp     = 50
 s_bvp     = make_test_sheaf(n_bvp)
 offsets_b = [0; cumsum(s_bvp.vertex_stalks)]
 perm      = shuffle(MersenneTwister(7), 1:n_bvp)
