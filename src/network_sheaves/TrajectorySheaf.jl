@@ -39,7 +39,7 @@ module TrajectorySheaves
 export TrajectorySheaf, build_trajectory_sheaf, colocation_trajectory,
     continuous_to_discrete_zoh, ControlledTrajectorySheaf,
     feasible_control_trajectory_basis,
-    lqr_objective, optimal_control_trajectory
+    lqr_objective, optimal_control_trajectory, nullspace_trajectory_family
 
 using ArgCheck: @argcheck
 using LinearAlgebra
@@ -50,6 +50,7 @@ using CliqueTrees.Multifrontal
 using ..EuclideanSheaves: EuclideanSheaf, add_sheaf_edge!, harmonic_extension,
     ldlt_pseudoinverse_and_null
 using ..SheafInterface: vertex_stalks, coboundary_map
+import ..SheafInterface: nullspace_trajectory_family
 
 # ---------------------------------------------------------------------------
 # Struct
@@ -591,6 +592,10 @@ function _internal_to_public_matrix(N_int::AbstractMatrix{T}, n::Int, m::Int, k:
     return N_pub
 end
 
+function _public_trajectory_block_sizes(ts::ControlledTrajectorySheaf)
+    return [fill(ts.state_dim, ts.k + 1); fill(ts.control_dim, ts.k)]
+end
+
 # ---------------------------------------------------------------------------
 # Feasible trajectory basis
 # ---------------------------------------------------------------------------
@@ -658,6 +663,61 @@ function feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
     null_basis = _internal_to_public_matrix(null_internal, n, m, k)
 
     return z_p, null_basis
+end
+
+"""
+    nullspace_trajectory_family(
+        ts::ControlledTrajectorySheaf{T},
+        z_p::AbstractVector{T},
+        null_basis::AbstractMatrix{T};
+        amplitude::Real = one(T),
+        include_negative::Bool = false
+    ) where T
+        -> Vector{BlockVector{T}}
+
+Construct a family of feasible trajectories by activating one nullspace basis
+direction at a time in the affine parameterization
+`z = z_p + null_basis * α`.
+
+For each basis column `n_j`, this returns `z_p + amplitude*n_j`. If
+`include_negative=true`, it also returns `z_p - amplitude*n_j`.
+
+The returned trajectories use the public block layout:
+`k+1` state blocks of size `ts.state_dim` followed by `k` control blocks of
+size `ts.control_dim`.
+"""
+function nullspace_trajectory_family(
+    ts::ControlledTrajectorySheaf{T},
+    z_p::AbstractVector{T},
+    null_basis::AbstractMatrix{T};
+    amplitude::Real = one(T),
+    include_negative::Bool = false
+) where T
+    p = (ts.k + 1) * ts.state_dim + ts.k * ts.control_dim
+    @argcheck length(z_p) == p "z_p must have length $p, got $(length(z_p))"
+    @argcheck size(null_basis, 1) == p "null_basis must have $p rows, got $(size(null_basis, 1))"
+    @argcheck amplitude >= 0 "amplitude must be nonnegative, got $amplitude"
+
+    r = size(null_basis, 2)
+    r == 0 && return BlockVector{T}[]
+
+    block_sizes = _public_trajectory_block_sizes(ts)
+    ampT = T(amplitude)
+    family = BlockVector{T}[]
+    sizehint!(family, include_negative ? 2 * r : r)
+
+    for j in 1:r
+        direction = view(null_basis, :, j)
+        z_plus = z_p + ampT * direction
+        push!(family, BlockArray(z_plus, block_sizes))
+
+        if include_negative
+            z_minus = z_p - ampT * direction
+            push!(family, BlockArray(z_minus, block_sizes))
+        end
+    end
+
+    return family
 end
 
 # ---------------------------------------------------------------------------
@@ -881,7 +941,7 @@ function optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
     q_p, null_basis = feasible_control_trajectory_basis(ts, x1, xk1)
 
     # Block partition: k+1 state blocks of size n, then k control blocks of size m
-    block_sizes = [fill(n, k + 1); fill(m, k)]
+    block_sizes = _public_trajectory_block_sizes(ts)
 
     # Short-circuit: feasible trajectory is unique.
     if size(null_basis, 2) == 0

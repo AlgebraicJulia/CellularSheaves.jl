@@ -14,6 +14,7 @@ end
   include("network_sheaves/TrajectorySheaf.jl")
   include("network_sheaves/ControlledTrajectorySheaf.jl")
   include("network_sheaves/ControlledOptimalControl.jl")
+  include("network_sheaves/NullspaceTrajectoryFamily.jl")
   include("network_sheaves/GraphHomomorphisms.jl")
   include("network_sheaves/ControlledTrajectoryExamples.jl")
 end

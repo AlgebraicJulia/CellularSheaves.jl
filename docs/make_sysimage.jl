@@ -1,29 +1,37 @@
 # Build a precompiled system image for the documentation workflow.
 #
 # This script is called by .github/workflows/docs.yml when the sysimage cache
-# is stale. It compiles a sysimage from the manually maintained package list
-# below, which is intended to cover dependencies from Project.toml,
-# test/Project.toml, and docs/Project.toml (except CellularSheaves itself,
-# which changes with every source edit). Keep that list in sync as
-# dependencies change. Heavy packages like Plots.jl and Documenter.jl
-# benefit most from precompilation.
+# is stale. It compiles a sysimage from *all* dependencies of the docs
+# environment **except** the package being documented (CellularSheaves).
+# The list is generated automatically, so you no longer need to maintain a
+# manual hard‑coded list.
 #
-# Usage (from repo root):
+# Usage (from repository root):
 #   julia --project=docs docs/make_sysimage.jl
 
 using Pkg
-Pkg.develop(PackageSpec(path=joinpath(@__DIR__, "..")))
+
+# ️1. Activate the docs environment (which already has CellularSheaves
+#    develop‑ed and all docs dependencies listed in docs/Project.toml).
+Pkg.activate(@__DIR__)
 Pkg.instantiate()
+
+# 2️⃣ Query the **direct** dependencies listed in the docs Project.toml.
+#    `Pkg.project()` returns the active project's manifest where `deps`
+#    is a Dict mapping package name → UUID for *direct* dependencies only.
+proj = Pkg.project()
+# `proj.dependencies` contains the direct dependencies (including CellularSheaves).
+# Extract the keys (the package names) and drop CellularSheaves.
+package_names = filter(name -> name != "CellularSheaves", collect(keys(proj.dependencies)))
+
+println("Creating sysimage with direct docs dependencies (excluding CellularSheaves):")
+println(package_names)
 
 using PackageCompiler
 
-create_sysimage(
-    [
-        # CellularSheaves and its transitive deps are included automatically
-        "CellularSheaves",
-        # Documentation dependencies (docs/Project.toml)
-        "Documenter", "Literate", "Plots",
-    ],
-    sysimage_path=joinpath(@__DIR__, "..", "sysimage.so"),
-    cpu_target="generic",
+PackageCompiler.create_sysimage(
+    package_names;                     # all deps except CellularSheaves
+    sysimage_path = joinpath(@__DIR__, "..", "sysimage.so"),
+    cpu_target = "generic",
 )
+

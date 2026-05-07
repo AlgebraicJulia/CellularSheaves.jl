@@ -222,6 +222,24 @@ function sheaf_laplacian(s::AbstractNetworkSheaf)
     error("laplacian not implemented")
 end
 
+"""
+    $(TYPEDSIGNATURES)
+
+Construct a basis-indexed family of feasible controlled trajectories from an
+affine feasible-space parameterization.
+
+# Arguments
+- `ts`: controlled trajectory object
+- `z_p`: particular feasible trajectory in public coordinates
+- `null_basis`: matrix whose columns span endpoint-preserving feasible perturbations
+
+# Returns
+- Vector of trajectory objects, one (or two, if signed) per basis column.
+"""
+function nullspace_trajectory_family(ts, z_p, null_basis; amplitude=1, include_negative=false)
+    error("nullspace_trajectory_family not implemented")
+end
+
 function Base.show(io::IO, s::AbstractNetworkSheaf)
     println(io, "A network sheaf with ", length(vertex_stalks(s)), " vertex stalks and ", length(edge_stalks(s)), " edge stalks.")
 end

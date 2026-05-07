@@ -25,5 +25,6 @@ include("TrajectorySheaf.jl")
 @reexport using .Pushforwards
 @reexport using .Pushouts
 @reexport using .TrajectorySheaves
+export nullspace_trajectory_family
 
 end

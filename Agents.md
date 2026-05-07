@@ -26,6 +26,26 @@ test/network_sheaves/    # One test file per source module
 docs/issues/             # Feature request drafts (markdown, numbered)
 ```
 
+## Building the Docs
+
+The following instructions are copied from the `.github/workflows/docs.yml` file to help you successfully build the docs
+from the package root. You only need to Install docs dependencies the first time you try to build the docs.
+
+```yaml
+# Install Julia dependencies for the docs project.  This step is
+# required so that the current
+# development version of CellularSheaves is properly linked.
+- name: Install docs dependencies
+  run: julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+
+# Build documentation make sure to set the project to docs and run docs/make.jl from the package root.
+- name: Build and deploy docs
+  run: julia --project=docs docs/make.jl
+```
+
+These instructions are consistent with the standard julia package ecosystem as documented in 
+the github action 
+
 ## Dependency Philosophy
 
 **Prefer no new dependencies.** This is a focused linear-algebra package; heavyweight
