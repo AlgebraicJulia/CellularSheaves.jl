@@ -153,26 +153,11 @@ println("Optimality residual ‖Rred α* + rred‖ = ", norm(Rred * α_opt + rre
 println("Affine-space error ‖z_opt − (z_p + N α*)‖ = ",
         norm(Array(z_opt) - (Array(z_p_block) + null_basis * α_opt)))
 
-# ## Step 7: Visualize the nullspace as a trajectory family
-#
-# Each nullspace basis vector gives one endpoint-preserving control mode.
-# We visualize the family members
-#
-# ```math
-# z^{(j)} = z_p + n_j
-# ```
-#
-# where `n_j` is the `j`-th basis column. These trajectories are feasible but
-# not generally optimal; the optimizer chooses a linear combination of these
-# directions.
 
-# Use the null basis directly (the QR factor is not needed for this call)
-family = nullspace_trajectory_family(ts, Array(z_p_block), null_basis; amplitude=1.0)
-max_family = 8
-if length(family) > max_family
-    println("Plotting first $max_family of $(length(family)) basis trajectories.")
-    family = family[1:max_family]
-end
+# ## Step 8: Plot only the optimal trajectory (reference view)
+#
+# State blocks: `z_opt[Block(t)]` for `t = 1, …, k+1`.
+# Control blocks: `z_opt[Block(k+1+t)]` for `t = 1, …, k`.
 
 times_state   = h .* (0:k)
 times_control = h .* (0:k-1)
@@ -180,35 +165,6 @@ times_control = h .* (0:k-1)
 positions  = [Array(z_opt[Block(t)])[1] for t in 1:k+1]
 velocities = [Array(z_opt[Block(t)])[2] for t in 1:k+1]
 controls   = [Array(z_opt[Block(k+1+t)])[1] for t in 1:k]
-
-p_family_state = plot(
-    xlabel="time (s)", ylabel="state",
-    title="Nullspace family: state trajectories")
-for (j, zf) in enumerate(family)
-    pj = [Array(zf[Block(t)])[1] for t in 1:k+1]
-    vj = [Array(zf[Block(t)])[2] for t in 1:k+1]
-    plot!(p_family_state, times_state, pj; lw=1.5, alpha=0.6, label="n$(j): p")
-    plot!(p_family_state, times_state, vj; lw=1.5, alpha=0.6, ls=:dash, label="n$(j): ṗ")
-end
-plot!(p_family_state, times_state, positions; lw=3, color=:black, label="optimal p")
-plot!(p_family_state, times_state, velocities; lw=3, color=:black, ls=:dash, label="optimal ṗ")
-
-p_family_ctrl = plot(
-    xlabel="time (s)", ylabel="u",
-    title="Nullspace family: control trajectories")
-for (j, zf) in enumerate(family)
-    uj = [Array(zf[Block(k+1+t)])[1] for t in 1:k]
-    plot!(p_family_ctrl, times_control, uj; lw=1.5, alpha=0.6, label="n$(j)")
-end
-plot!(p_family_ctrl, times_control, controls; lw=3, color=:black, label="optimal")
-
-family_plot = plot(p_family_state, p_family_ctrl; layout=(2, 1), size=(800, 560))
-family_plot
-
-# ## Step 8: Plot only the optimal trajectory (reference view)
-#
-# State blocks: `z_opt[Block(t)]` for `t = 1, …, k+1`.
-# Control blocks: `z_opt[Block(k+1+t)]` for `t = 1, …, k`.
 
 p_pos = plot(times_state, positions;
     lw=2, marker=:circle, label="position p(t)",
@@ -224,6 +180,18 @@ p_ctrl = plot(times_control, controls;
 
 di_plot = plot(p_pos, p_ctrl; layout=(2, 1), size=(700, 500))
 di_plot
+
+# ## Step 9: Spy plot of the nullspace basis matrix
+#
+# The nullspace basis `null_basis` (size p × r) is typically a dense matrix that
+# spans the feasible perturbations around the optimal trajectory.  A spy plot
+# gives a quick visual cue of its sparsity pattern, which can be useful for
+# debugging or understanding how many degrees of freedom are active.
+#
+# The `Plots.spy` recipe works with any standard `AbstractMatrix`.
+# We convert the matrix to a plain dense `Matrix` just in case it is a
+# `BlockArray` or other wrapper.
+spy(Matrix(null_basis), markersize=2, title="Sparsity pattern of null_basis")
 
 # ## Verification
 #
@@ -263,3 +231,56 @@ println("All endpoint and dynamics constraints satisfied.")
 # scales to a multi-agent setting by stacking two double integrators on a
 # two-vertex base sheaf, making the connection to network-structured problems
 # explicit for the first time.
+
+# ## Step 9: Visualize the nullspace as a trajectory family
+#
+# Each nullspace basis vector gives one endpoint-preserving control mode.
+# We visualize the family members
+#
+# ```math
+# z^{(j)} = z_p + n_j
+# ```
+#
+# where `n_j` is the `j`-th basis column. These trajectories are feasible but
+# not generally optimal; the optimizer chooses a linear combination of these
+# directions.
+
+family = nullspace_trajectory_family(ts, Array(z_p_block), null_basis; amplitude=3.0)
+# family = qr(Matrix(family)).Q  # orthogonalize for better visualization
+# println("Nullspace family has $(length(family)) trajectories.")
+# family
+spy(Matrix(null_basis), markersize=2, title="Sparsity pattern of null_basis")
+null_basis
+
+# Plot the trajectories as perturbations of the optimal trajectory.
+
+max_family = 8
+if length(family) > max_family
+    println("Plotting first $max_family of $(length(family)) basis trajectories.")
+    family = family[1:max_family]
+end
+
+
+p_family_state = plot(
+    xlabel="time (s)", ylabel="state",
+    title="Nullspace family: state trajectories")
+for (j, zf) in enumerate(family)
+    pj = [Array(zf[Block(t)])[1] for t in 1:k+1]
+    vj = [Array(zf[Block(t)])[2] for t in 1:k+1]
+    plot!(p_family_state, times_state, pj; lw=1.5, alpha=0.6, label="n$(j): p")
+    plot!(p_family_state, times_state, vj; lw=1.5, alpha=0.6, ls=:dash, label="n$(j): ṗ")
+end
+plot!(p_family_state, times_state, positions; lw=3, color=:black, label="optimal p")
+plot!(p_family_state, times_state, velocities; lw=3, color=:black, ls=:dash, label="optimal ṗ")
+
+p_family_ctrl = plot(
+    xlabel="time (s)", ylabel="u",
+    title="Nullspace family: control trajectories")
+for (j, zf) in enumerate(family)
+    uj = [Array(zf[Block(k+1+t)])[1] for t in 1:k]
+    plot!(p_family_ctrl, times_control, uj; lw=1.5, alpha=0.6, label="n$(j)")
+end
+plot!(p_family_ctrl, times_control, controls; lw=3, color=:black, label="optimal")
+
+family_plot = plot(p_family_state, p_family_ctrl; layout=(2, 1), size=(800, 560))
+family_plot
