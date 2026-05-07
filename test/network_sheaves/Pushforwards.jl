@@ -157,3 +157,60 @@ end
     @test_throws ArgumentError pushforward_sheaf(bad_hom, F)
     @test_throws ArgumentError pushforward_transfer_map(bad_hom, F)
 end
+
+# ---------------------------------------------------------------------------
+# Non-injective edge map: multiple source edges → same target edge
+# ---------------------------------------------------------------------------
+
+@testset "pushforward_sheaf — non-injective edge map (two cross-edges → one target edge)" begin
+    # 4-vertex source graph; hom maps: 1→1, 2→2, 3→1, 4→2.
+    # Edges 1-2 and 3-4 are both cross-edges mapping to target edge (1,2).
+    # Without the fix, the second add_sheaf_edge! call would silently overwrite
+    # the first, leaving a structurally wrong pushforward sheaf.
+
+    g = Graph(4)
+    add_edge!(g, 1, 2)   # cross-edge → target (1,2)
+    add_edge!(g, 3, 4)   # cross-edge → target (1,2)
+
+    # 1-dimensional stalks, identity restriction maps
+    F = EuclideanSheaf{Float64}(repeat([1], 4))
+    for e in edges(g)
+        add_sheaf_edge!(F, src(e), dst(e), ones(1, 1), ones(1, 1))
+    end
+
+    hom = GraphHomomorphism([1, 2, 1, 2])
+    PfF = pushforward_sheaf(hom, F)
+
+    # Target graph has 2 vertices and 1 edge (not two!)
+    @test nv(underlying_graph(PfF)) == 2
+    @test ne(underlying_graph(PfF)) == 1
+
+    # Edge stalk should be 2-dimensional (direct sum of both 1-dim edge stalks)
+    @test get_edge_stalk(PfF, 1, 2) == 2
+end
+
+@testset "pushforward_sheaf — non-injective: global section count preserved" begin
+    # Same setup plus intra-fiber edges so fibers have non-trivial sections.
+    g = Graph(4)
+    add_edge!(g, 1, 2)   # cross-edge → target (1,2)
+    add_edge!(g, 3, 4)   # cross-edge → target (1,2)
+    add_edge!(g, 1, 3)   # fiber edge within fiber 1
+    add_edge!(g, 2, 4)   # fiber edge within fiber 2
+
+    F = EuclideanSheaf{Float64}(repeat([1], 4))
+    for e in edges(g)
+        add_sheaf_edge!(F, src(e), dst(e), ones(1, 1), ones(1, 1))
+    end
+
+    hom = GraphHomomorphism([1, 2, 1, 2])
+    PfF = pushforward_sheaf(hom, F)
+
+    @test nv(underlying_graph(PfF)) == 2
+    @test ne(underlying_graph(PfF)) == 1
+    @test get_edge_stalk(PfF, 1, 2) == 2
+
+    # Global section counts must match
+    NS_F   = nullspace_ldlt(F)
+    NS_PfF = nullspace_ldlt(PfF)
+    @test size(NS_F, 2) == size(NS_PfF, 2)
+end
