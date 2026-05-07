@@ -153,26 +153,11 @@ println("Optimality residual ‖Rred α* + rred‖ = ", norm(Rred * α_opt + rre
 println("Affine-space error ‖z_opt − (z_p + N α*)‖ = ",
         norm(Array(z_opt) - (Array(z_p_block) + null_basis * α_opt)))
 
-# ## Step 7: Visualize the nullspace as a trajectory family
-#
-# Each nullspace basis vector gives one endpoint-preserving control mode.
-# We visualize the family members
-#
-# ```math
-# z^{(j)} = z_p + n_j
-# ```
-#
-# where `n_j` is the `j`-th basis column. These trajectories are feasible but
-# not generally optimal; the optimizer chooses a linear combination of these
-# directions.
 
-# Use the null basis directly (the QR factor is not needed for this call)
-family = nullspace_trajectory_family(ts, Array(z_p_block), null_basis; amplitude=1.0)
-max_family = 8
-if length(family) > max_family
-    println("Plotting first $max_family of $(length(family)) basis trajectories.")
-    family = family[1:max_family]
-end
+# ## Step 7: Plot only the optimal trajectory (reference view)
+#
+# State blocks: `z_opt[Block(t)]` for `t = 1, …, k+1`.
+# Control blocks: `z_opt[Block(k+1+t)]` for `t = 1, …, k`.
 
 times_state   = h .* (0:k)
 times_control = h .* (0:k-1)
@@ -180,35 +165,6 @@ times_control = h .* (0:k-1)
 positions  = [Array(z_opt[Block(t)])[1] for t in 1:k+1]
 velocities = [Array(z_opt[Block(t)])[2] for t in 1:k+1]
 controls   = [Array(z_opt[Block(k+1+t)])[1] for t in 1:k]
-
-p_family_state = plot(
-    xlabel="time (s)", ylabel="state",
-    title="Nullspace family: state trajectories")
-for (j, zf) in enumerate(family)
-    pj = [Array(zf[Block(t)])[1] for t in 1:k+1]
-    vj = [Array(zf[Block(t)])[2] for t in 1:k+1]
-    plot!(p_family_state, times_state, pj; lw=1.5, alpha=0.6, label="n$(j): p")
-    plot!(p_family_state, times_state, vj; lw=1.5, alpha=0.6, ls=:dash, label="n$(j): ṗ")
-end
-plot!(p_family_state, times_state, positions; lw=3, color=:black, label="optimal p")
-plot!(p_family_state, times_state, velocities; lw=3, color=:black, ls=:dash, label="optimal ṗ")
-
-p_family_ctrl = plot(
-    xlabel="time (s)", ylabel="u",
-    title="Nullspace family: control trajectories")
-for (j, zf) in enumerate(family)
-    uj = [Array(zf[Block(k+1+t)])[1] for t in 1:k]
-    plot!(p_family_ctrl, times_control, uj; lw=1.5, alpha=0.6, label="n$(j)")
-end
-plot!(p_family_ctrl, times_control, controls; lw=3, color=:black, label="optimal")
-
-family_plot = plot(p_family_state, p_family_ctrl; layout=(2, 1), size=(800, 560))
-family_plot
-
-# ## Step 8: Plot only the optimal trajectory (reference view)
-#
-# State blocks: `z_opt[Block(t)]` for `t = 1, …, k+1`.
-# Control blocks: `z_opt[Block(k+1+t)]` for `t = 1, …, k`.
 
 p_pos = plot(times_state, positions;
     lw=2, marker=:circle, label="position p(t)",
@@ -224,6 +180,16 @@ p_ctrl = plot(times_control, controls;
 
 di_plot = plot(p_pos, p_ctrl; layout=(2, 1), size=(700, 500))
 di_plot
+
+# ## Step 8: Spy plot of the nullspace basis matrix
+#
+# The nullspace basis `null_basis` (size p × r) spans the feasible
+# perturbations around the optimal trajectory. A spy plot gives a quick visual
+# cue of its sparsity pattern, which can be useful for debugging or
+# understanding how many degrees of freedom are active.
+#
+# The `Plots.spy` recipe works directly with this returned matrix.
+spy(null_basis, markersize=2, title="Sparsity pattern of null_basis")
 
 # ## Verification
 #
@@ -256,9 +222,67 @@ println("All endpoint and dynamics constraints satisfied.")
 # viewpoints — sheaf / harmonic-extension and quadratic / LQR — combine cleanly
 # because the feasible set is a finite-dimensional affine subspace.
 #
+# ## Step 9: Visualize the nullspace as a trajectory family
+#
+# The spy plot in Step 8 revealed which rows of `null_basis` are non-zero,
+# showing the sparsity structure of the feasible perturbations.  Step 9 brings
+# those abstract columns to life: each one becomes a concrete state-control
+# trajectory that starts and ends at the prescribed boundary conditions.
+#
+# Each nullspace basis vector gives one endpoint-preserving control mode.
+# We visualize the family members
+#
+# ```math
+# z^{(j)} = z_p + n_j
+# ```
+#
+# where `n_j` is the `j`-th basis column scaled by `amplitude`.  These
+# trajectories are feasible but not generally optimal; the optimizer chooses a
+# linear combination of these directions that minimises the LQR cost.
+
+family = nullspace_trajectory_family(ts, Array(z_p_block), null_basis; amplitude=3.0)
+
+# Plot the trajectories as perturbations of the optimal trajectory.
+
+max_family = 8
+if length(family) > max_family
+    println("Plotting first $max_family of $(length(family)) basis trajectories.")
+    family = family[1:max_family]
+end
+
+
+p_family_state = plot(
+    xlabel="time (s)", ylabel="state",
+    title="Nullspace family: state trajectories")
+for (j, zf) in enumerate(family)
+    pj = [Array(zf[Block(t)])[1] for t in 1:k+1]
+    vj = [Array(zf[Block(t)])[2] for t in 1:k+1]
+    plot!(p_family_state, times_state, pj; lw=1.5, alpha=0.6, label="n$(j): p")
+    plot!(p_family_state, times_state, vj; lw=1.5, alpha=0.6, ls=:dash, label="n$(j): ṗ")
+end
+plot!(p_family_state, times_state, positions; lw=3, color=:black, label="optimal p")
+plot!(p_family_state, times_state, velocities; lw=3, color=:black, ls=:dash, label="optimal ṗ")
+
+p_family_ctrl = plot(
+    xlabel="time (s)", ylabel="u",
+    title="Nullspace family: control trajectories")
+for (j, zf) in enumerate(family)
+    uj = [Array(zf[Block(k+1+t)])[1] for t in 1:k]
+    plot!(p_family_ctrl, times_control, uj; lw=1.5, alpha=0.6, label="n$(j)")
+end
+plot!(p_family_ctrl, times_control, controls; lw=3, color=:black, label="optimal")
+
+family_plot = plot(p_family_state, p_family_ctrl; layout=(2, 1), size=(800, 560))
+family_plot
+
 # ## What this example establishes
 #
 # The double integrator illustrates the complete pipeline in its simplest form.
+# Steps 8 and 9 together reveal two complementary views of the feasible
+# subspace: the spy plot (Step 8) shows the algebraic sparsity structure of the
+# null-basis matrix, while the trajectory family (Step 9) shows what those
+# basis directions look like as physical state-control trajectories.
+#
 # The next example, **Vehicle Platoon**, keeps the same control story but
 # scales to a multi-agent setting by stacking two double integrators on a
 # two-vertex base sheaf, making the connection to network-structured problems
