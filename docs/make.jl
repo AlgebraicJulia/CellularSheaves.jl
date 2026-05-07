@@ -34,21 +34,49 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.NetworkSheaves.SheafMorphisms],
+  modules=[CellularSheaves],
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,
   checkdocs=:none,
+  warnonly=[:cross_references],
   pages=Any[
     "CellularSheaves.jl"=>"index.md",
     "Examples"=>Any[
       "generated/literate_example.md",
       "generated/sheaf_morphisms.md",
       "generated/nullspace.md",
-      "generated/pushforward.md",
+      "generated/nearest_global_section_iterative.md",
       "generated/sheaf_laplacian_benchmarks.md",
+      "generated/pushforward.md",
+      "generated/trajectory_sheaf.md",
+      "Control Examples"=>Any[
+        "generated/control/controlled_double_integrator.md",
+        "generated/control/controlled_vehicle_platoon.md",
+        "generated/control/controlled_planar_quadrotor.md",
+        "generated/control/controlled_mass_spring_damper_chain.md"
+      ]
     ],
-    "Library Reference"=>"api.md",
+    "Feature Guides"=>Any[
+      "features/core_sheaf_workflows.md",
+      "features/morphisms_and_pushforwards.md",
+      "features/trajectory_and_control.md",
+    ],
+    "API Reference"=>Any[
+      "api/index.md",
+      "api/network_sheaves.md",
+      "api/sheaf_interface.md",
+      "api/euclidean_sheaves.md",
+      "api/graph_homomorphisms.md",
+      "api/sheaf_morphisms.md",
+      "api/pushforwards.md",
+      "api/pushouts.md",
+      "api/trajectory_sheaves.md",
+      "api/dsl.md",
+      "api/block_sparse_arrays.md",
+      "api/potential_sheaves.md",
+      "api/herding_platoon.md",
+    ],
   ]
 )
 

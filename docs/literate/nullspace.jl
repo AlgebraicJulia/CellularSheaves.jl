@@ -1,18 +1,61 @@
+# # Computing the Nullspace of the Sheaf Laplacian
+
+# ## Introduction
+#
+# This example demonstrates how to compute and visualize the nullspace of the Laplacian operator
+# for a circular cellular sheaf. We construct a system of 6 agents, each with 3-dimensional stalks,
+# arranged in a cycle topology. The nullspace of the Laplacian contains the global sections---the
+# solutions that are preserved by the sheaf Laplacian operator. Understanding the structure of this
+# nullspace is fundamental to understanding the harmonic analysis and signal processing on cellular sheaves.
+
 using CellularSheaves
-using CliqueTrees.Multifrontal
 using LinearAlgebra
 using Plots
-using SparseArrays
 
-# F is a cellular sheaf
+# ## Visualization Helper Function
+#
+# We define a generalized function to visualize nullspace basis vectors using a spy plot
+# to show the sparsity structure of the nullspace basis matrix. Columns are sorted by
+# the number of nonzero elements, with ties broken by the row index of the first nonzero.
+# Horizontal lines mark agent boundaries.
 
-n = 6; stalk_dim = 3
+function plot_nullspace_basis(V, n, stalk_dim; title="Nullspace basis vectors")
+    nnz_per_col = vec(sum(abs.(V) .> 1e-10, dims=1))
+    first_nnz = [findfirst(abs.(V[:, i]) .> 1e-10) for i in 1:size(V, 2)]
+    first_nnz = [isnothing(x) ? size(V, 1) + 1 : x for x in first_nnz]
+    sorted_idx = sortperm(collect(zip(size(V,2) .- nnz_per_col, first_nnz)))
+    V_sorted = V[:, sorted_idx]
+    p = spy(V_sorted, title=title, xlabel="Basis vector index", ylabel="Stalk component (agent × coordinate)",
+        markersize=6, legend=false, size=(1000, 600))
+    for i in 1:n-1
+        hline!(p, [i*stalk_dim + 0.5], color=:gray, label="", linewidth=0.5, alpha=0.5)
+    end
+    p
+end
+
+# # Example 1: Identity Restriction Maps
+#
+# In this first example, we demonstrate the nullspace of a sheaf where all edges are fully constrained
+# by identity restriction maps. This means that adjacent agents must agree on all components of their
+# stalk values. The resulting nullspace consists of *constant* sections---vectors that have the same
+# value at every agent. For a 3-dimensional stalk, this gives a 3-dimensional nullspace.
+#
+# ## Building the Sheaf
+#
+# We start by creating a Euclidean sheaf with 6 vertices (agents), each equipped with a 3-dimensional
+# vector space as its stalk. The stalks represent local data or state at each agent.
+
+n = 6
+stalk_dim = 3
 
 F = EuclideanSheaf{Float64}(Int[])
 
 for i in 1:n
     add_vertex_stalk!(F, stalk_dim)
 end
+
+# Next, we add edges connecting the agents in a cycle. Each edge is equipped with the identity
+# restriction map, meaning that sections on adjacent agents must have the same value where they overlap.
 
 for i in 1:n
     v1 = i
@@ -21,38 +64,62 @@ for i in 1:n
     add_sheaf_edge!(F, v1, v2, rm, rm)
 end
 
-# X is the Laplacian of F
-
-C = sparse(coboundary_map(F))
-X = C' * C
-
-# M is an LDLt factorization of X
+# ## Computing the Nullspace
 #
-# ```math
-#   X = P^\mathsf{T} L D L^\mathsf{T} P
-# ```
+# We call `nullspace_ldlt` directly on the sheaf. Internally it forms the
+# Laplacian ``X = d^\mathsf{T} d`` from the coboundary map ``d``, factorises it as
+# ``X = P^\mathsf{T} L D L^\mathsf{T} P`` via a sparse Chordal LDLt decomposition,
+# and returns a basis for the nullspace from the zero-diagonal entries of ``D``.
+# The nullspace of the Laplacian is exactly the space of *global sections* of the sheaf.
+
+V = nullspace_ldlt(F)
+
+# ## Visualizing the Nullspace
 #
-M = ldlt!(ChordalLDLt(X), RowMaximum())
+# We use our visualization helper function to show the three orthogonal projections of the nullspace
+# basis vectors. Notice that the basis vectors are highly structured: they represent constant sections
+# where each coordinate direction is independently constant across all agents.
 
-L = M.L # lower triangular factor
-D = M.D # diagonal factor
-P = M.P # permutation
+plot_nullspace_basis(V, n, stalk_dim; title="Example 1: 3D Nullspace (fully constrained)")
 
-L
 
-# V is a basis for the nullspace of X
+# # Example 2: Partial Restriction Maps
+#
+# ## Effect of Partial Constraints
+#
+# In this second example, we modify the edge structure to allow one component of the stalk to vary
+# freely across edges. We keep edge stalks at 3-dimensional but restrict them only in the x and y
+# components using the restriction map ``[1\ 0\ 0;\ 0\ 1\ 0]``. This leaves the z component
+# unconstrained on edges---agents can have different z values even on adjacent edges.
+#
+# This partial constraint has a dramatic effect on the nullspace: in addition to the 3 constant
+# sections, we now get 3 additional basis vectors representing the free z degrees of freedom at
+# each agent. The result is a 6-dimensional nullspace.
+#
+# ## Building the Modified Sheaf
 
-max_abs_diag = maximum(i -> abs(D[i, i]), 1:size(D, 1); init=0.0)
-tol = eps(Float64) * max(1.0, max_abs_diag)
-ind = findall(i -> abs(D[i, i]) <= tol, 1:size(D, 1))
-U = zeros(size(D, 1), length(ind))
+F2 = EuclideanSheaf{Float64}(Int[])
 
-for j in eachindex(ind)
-    U[ind[j], j] = 1
+for i in 1:n
+    add_vertex_stalk!(F2, stalk_dim)
 end
 
-V = P \ (L' \ U)
+# Add edges with partial restriction maps: only x and y are constrained
+for i in 1:n
+    v1 = i
+    v2 = (i % n) + 1 # Restriction map that selects only x and y components
+    rm = [1.0 0.0 0.0; 0.0 1.0 0.0]
+    add_sheaf_edge!(F2, v1, v2, rm, rm)
+end
 
-# Visualize the nullspace basis: each column of V is plotted as a separate scatter series.
+# ## Computing the Nullspace with Partial Constraints
 
-scatter(V, legend=false, title="Nullspace basis vectors")
+V2 = nullspace_ldlt(F2)
+
+# ## Visualizing the Extended Nullspace
+#
+# With partial constraints, the nullspace is now 8-dimensional. We can see this in the visualization:
+# the basis vectors are more spread out, and we see additional degrees of freedom particularly in
+# the z-component projections (y vs z and x vs z).
+
+plot_nullspace_basis(V2, n, stalk_dim; title="Example 2: 8D Nullspace (z unconstrained)")

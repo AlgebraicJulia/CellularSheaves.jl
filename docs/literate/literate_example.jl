@@ -27,7 +27,8 @@ end
 # We start with a random 0-cochain:
 x0 = rand(sum(vertex_stalks(sheaf)))
 
-global_section = nearest_global_section(sheaf, x0)
+# We use the deterministic direct LDLt backend to guarantee a result.
+global_section = nearest_global_section(sheaf, x0; method=:ldl)
 
 # Now we can check that this is indeed a global section by
 # verifying that the coboundary map applied to it is zero.

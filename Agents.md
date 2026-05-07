@@ -26,6 +26,26 @@ test/network_sheaves/    # One test file per source module
 docs/issues/             # Feature request drafts (markdown, numbered)
 ```
 
+## Building the Docs
+
+The following instructions are copied from the `.github/workflows/docs.yml` file to help you successfully build the docs
+from the package root. You only need to Install docs dependencies the first time you try to build the docs.
+
+```yaml
+# Install Julia dependencies for the docs project.  This step is
+# required so that the current
+# development version of CellularSheaves is properly linked.
+- name: Install docs dependencies
+  run: julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+
+# Build documentation make sure to set the project to docs and run docs/make.jl from the package root.
+- name: Build and deploy docs
+  run: julia --project=docs docs/make.jl
+```
+
+These instructions are consistent with the standard julia package ecosystem as documented in 
+the github action 
+
 ## Dependency Philosophy
 
 **Prefer no new dependencies.** This is a focused linear-algebra package; heavyweight
@@ -88,6 +108,21 @@ which is the authoritative reference for LDLt usage in this codebase.
 - Add `export` lines to `NetworkSheaves.jl`.
 - New test files go in `test/network_sheaves/` and are included from `test/runtests.jl`.
 - Do not add the package under test to the test dependencies `test/Project.toml`. This breaks the CI.
+
+## Documentation Structure Conformance
+
+When updating the docs, make them conform to the package's current module structure.
+
+- Keep the `makedocs(modules=...)` list in `docs/make.jl` aligned with the modules and
+  submodules whose docstrings are referenced from the documentation.
+- In `docs/src/api.md`, include a separate `@autodocs` block for every documented
+  module or submodule. Do not assume a parent module's autodocs block is enough.
+- Prefer this "one autodocs block per module" pattern whenever modules are added,
+  renamed, or reorganized; otherwise Documenter cross-references can fail to resolve.
+- When adding a new module that should appear in the docs, update `docs/make.jl` and
+  `docs/src/api.md` in the same change.
+- When you run the docs build, make sure that there are no missing cross references.
+  Missing cross references will produce warnings in `docs/make.jl` rather than failing the build.
 
 ## Feature Request Format
 
