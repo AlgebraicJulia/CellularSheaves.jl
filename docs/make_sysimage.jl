@@ -16,15 +16,15 @@ using Pkg
 Pkg.activate(@__DIR__)
 Pkg.instantiate()
 
-# 2. Query the resolved dependency graph. `Pkg.dependencies()` returns a
-#    dictionary keyed by UUID where each entry contains a `name` field.
-#    We collect every package name and then filter out the target package
-#    itself, ensuring the sysimage contains only the *dependencies*.
-all_deps = collect(values(Pkg.dependencies()))
-package_names = map(d -> d.name, all_deps)
-filter!(n -> n != "CellularSheaves", package_names)  # exclude the core package
+# 2️⃣ Query the **direct** dependencies listed in the docs Project.toml.
+#    `Pkg.project()` returns the active project's manifest where `deps`
+#    is a Dict mapping package name → UUID for *direct* dependencies only.
+proj = Pkg.project()
+# `proj.dependencies` contains the direct dependencies (including CellularSheaves).
+# Extract the keys (the package names) and drop CellularSheaves.
+package_names = filter(name -> name != "CellularSheaves", collect(keys(proj.dependencies)))
 
-println("Creating sysimage with the following packages (excluding CellularSheaves):")
+println("Creating sysimage with direct docs dependencies (excluding CellularSheaves):")
 println(package_names)
 
 using PackageCompiler
