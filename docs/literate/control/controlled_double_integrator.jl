@@ -154,7 +154,7 @@ println("Affine-space error ‖z_opt − (z_p + N α*)‖ = ",
         norm(Array(z_opt) - (Array(z_p_block) + null_basis * α_opt)))
 
 
-# ## Step 8: Plot only the optimal trajectory (reference view)
+# ## Step 7: Plot only the optimal trajectory (reference view)
 #
 # State blocks: `z_opt[Block(t)]` for `t = 1, …, k+1`.
 # Control blocks: `z_opt[Block(k+1+t)]` for `t = 1, …, k`.
@@ -183,15 +183,13 @@ di_plot
 
 # ## Step 9: Spy plot of the nullspace basis matrix
 #
-# The nullspace basis `null_basis` (size p × r) is typically a dense matrix that
-# spans the feasible perturbations around the optimal trajectory.  A spy plot
-# gives a quick visual cue of its sparsity pattern, which can be useful for
-# debugging or understanding how many degrees of freedom are active.
+# The nullspace basis `null_basis` (size p × r) spans the feasible
+# perturbations around the optimal trajectory. A spy plot gives a quick visual
+# cue of its sparsity pattern, which can be useful for debugging or
+# understanding how many degrees of freedom are active.
 #
-# The `Plots.spy` recipe works with any standard `AbstractMatrix`.
-# We convert the matrix to a plain dense `Matrix` just in case it is a
-# `BlockArray` or other wrapper.
-spy(Matrix(null_basis), markersize=2, title="Sparsity pattern of null_basis")
+# The `Plots.spy` recipe works directly with this returned matrix.
+spy(null_basis, markersize=2, title="Sparsity pattern of null_basis")
 
 # ## Verification
 #
@@ -249,8 +247,6 @@ family = nullspace_trajectory_family(ts, Array(z_p_block), null_basis; amplitude
 # family = qr(Matrix(family)).Q  # orthogonalize for better visualization
 # println("Nullspace family has $(length(family)) trajectories.")
 # family
-spy(Matrix(null_basis), markersize=2, title="Sparsity pattern of null_basis")
-null_basis
 
 # Plot the trajectories as perturbations of the optimal trajectory.
 
