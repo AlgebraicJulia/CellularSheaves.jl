@@ -157,7 +157,7 @@ let bnd = perm[1:20], int = sort(setdiff(1:n_bvp, bnd))
     restricted_laplacian_blocks(s_bvp, int, bnd)
 end
 
-fractions    = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+fractions    = [0.1, 0.3, 0.5, 0.7, 0.9]
 t_old_bvp    = Float64[]
 t_new_bvp    = Float64[]
 
