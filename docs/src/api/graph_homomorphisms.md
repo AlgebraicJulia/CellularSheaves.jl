@@ -1,10 +1,7 @@
 # Graph Homomorphisms
 
-Primary symbols:
+The Graph Homomorphisms module provides utilities for mapping graphs to graphs while preserving their structure, essential for constructing sheaf morphisms. Below are the primary exported symbols.
 
-- `GraphHomomorphism`
-- `fiber_vertices`
-- `fiber_edges`
-- `cross_edges`
-- `compose`
-- `graph_pushout`
+```@autodocs
+Modules = [CellularSheaves.NetworkSheaves.GraphHomomorphisms]
+```
