@@ -47,6 +47,7 @@ makedocs(
       "generated/sheaf_morphisms.md",
       "generated/nullspace.md",
       "generated/nearest_global_section_iterative.md",
+      "generated/sheaf_laplacian_benchmarks.md",
       "generated/pushforward.md",
       "generated/trajectory_sheaf.md",
       "Control Examples"=>Any[
