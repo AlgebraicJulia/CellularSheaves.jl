@@ -1,0 +1,78 @@
+{
+  "final_time": 50,
+  "time_step_delta": 0.001,
+  "seed": 0,
+
+  "roa_disagreement": {
+    "enabled": true,
+    "mode": "tracking",
+    "r_min": 1e-3,
+    "r_max": 3.0,
+    "num_angles": 20,
+    "horizon_s": 10.0,
+    "eps_conv": 1e-3,
+    "tail_window_s": 1.0,
+    "grid_streamplot": 0,
+    "dt_probe": 0.02,
+    "dt_multiplier": 1.0,
+    "integration_method": "rk4",
+    "max_stream_runs": 150,
+    "plot_sample_trajs": true,
+    "num_sample_radii": 4,
+    "num_sample_angles": 8,
+    "bracket_iters": 3,
+    "bisect_iters": 10
+  },
+
+  "targets": [
+    {"id": "T1", "dynamics_type": "current_target", "tracking_type": "f8_dynamics", "initial_position": [40.0, 9.0, -37.0], "num_states": 3},
+    {"id": "T2", "dynamics_type": "current_target", "tracking_type": "f8_dynamics", "initial_position": [60.0, 5.0, -47.0], "num_states": 3},
+    {"id": "T3", "dynamics_type": "current_target", "tracking_type": "f8_dynamics", "initial_position": [35.0, 3.0, -30.0], "num_states": 3},
+    {"id": "T4", "dynamics_type": "current_target", "tracking_type": "f8_dynamics", "initial_position": [43.0, 8.0, -40.0], "num_states": 3}
+  ],
+
+  "agents": [
+    {"id": "A1",  "dynamics_type": "current_agent", "initial_position": [-20.0, 10.0, 0.0], "num_states": 3},
+    {"id": "A2",  "dynamics_type": "current_agent", "initial_position": [5.0, -25.0, 0.0], "num_states": 3},
+    {"id": "A3",  "dynamics_type": "current_agent", "initial_position": [-17.0, 45.0, 0.0], "num_states": 3},
+    {"id": "A4",  "dynamics_type": "current_agent", "initial_position": [60.0, 10.0, 0.0], "num_states": 3},
+    {"id": "A5",  "dynamics_type": "current_agent", "initial_position": [5.0, 15.0, 0.0], "num_states": 3},
+    {"id": "A6",  "dynamics_type": "current_agent", "initial_position": [7.0, -5.0, 0.0], "num_states": 3},
+    {"id": "A7",  "dynamics_type": "current_agent", "initial_position": [30.0, -4.0, 0.0], "num_states": 3},
+    {"id": "A8",  "dynamics_type": "current_agent", "initial_position": [-18.0, 32.0, 0.0], "num_states": 3},
+    {"id": "A9",  "dynamics_type": "current_agent", "initial_position": [35.0, 5.0, 0.0], "num_states": 3},
+    {"id": "A10", "dynamics_type": "current_agent", "initial_position": [10.0, 0.0, 0.0], "num_states": 3},
+    {"id": "A11", "dynamics_type": "current_agent", "initial_position": [0.0, 5.0, 0.0], "num_states": 3},
+    {"id": "A12", "dynamics_type": "current_agent", "initial_position": [-10.0, 0.0, 0.0], "num_states": 3},
+    {"id": "A13", "dynamics_type": "current_agent", "initial_position": [0.0, -2.0, 0.0], "num_states": 3}
+  ],
+
+  "target_edge_set": [[1,2], [2,3], [1,3], [1,4], [2,4], [3,4]],
+
+  "agent_edge_set": [
+    [1,2], [2,3], [3,1],
+    [4,5], [5,6], [6,4],
+    [7,8], [8,9], [9,7],
+    [10,11], [11,12], [12,13], [13,10],
+    [1,4], [6,13], [9,11], [7,10], [3,12]
+  ],
+
+  "pinning_matrix": [
+    [0, 0, 0, 0],
+    [1, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 1, 0, 0],
+    [0, 1, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 1, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1],
+    [0, 0, 0, 0],
+    [0, 0, 0, 0],
+    [0, 0, 0, 1]
+  ],
+
+  "agents_proportional_gain": 100,
+  "targets_proportional_gain": 5
+}
