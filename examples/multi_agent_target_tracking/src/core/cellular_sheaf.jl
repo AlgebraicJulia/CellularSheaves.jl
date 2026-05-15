@@ -9,6 +9,7 @@ export build_agent_sheaf, build_target_sheaf,
 
 using LinearAlgebra
 using CellularSheaves
+using BlockArrays: BlockArray
 
 
 function make_agent_restriction_maps(nd::Int)
@@ -166,7 +167,12 @@ end
 function project_to_global_section(sheaf::EuclideanSheaf, z::Vector{Float64};
                                    method::Symbol=:ldl)
     gs = nearest_global_section(sheaf, z; method=method)
-    return collect(gs)   # unwrap BlockArray → plain Vector
+    return collect(gs)
+end
+
+function project_to_global_section(sheaf::EuclideanSheaf, z::BlockArray;
+                                   method::Symbol=:ldl)
+    return nearest_global_section(sheaf, z; method=method)
 end
 
 end # module SheafConsensus

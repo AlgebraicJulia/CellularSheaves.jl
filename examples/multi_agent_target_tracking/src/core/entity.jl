@@ -84,7 +84,7 @@ function update_dynamics!(entity::AbstractEntity, step::Int)
     run_dynamics!(entity, vel, pos_prev)
     vel .+= entity.control_output
 
-    result = integrate_step(pos_prev, step - 1, entity.time_step_delta) do _t, pos
+    result = integrate_step(pos_prev, step - 2, entity.time_step_delta) do _t, pos
         return run_dynamics(entity, pos) + entity.control_output
     end
 

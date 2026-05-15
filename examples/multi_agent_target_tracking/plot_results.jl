@@ -2,10 +2,37 @@ module Plotter
 
 using CSV
 using DataFrames
-using Plots
 using Statistics
-using JSON3
 using Printf
+
+function _ensure_plotting_dependencies()
+    try
+        @eval using Plots
+        @eval using JSON3
+    catch err
+        if err isa ArgumentError
+            deps = ["Plots", "JSON3"]
+            pkg_list = join(["\"$(dep)\"" for dep in deps], ", ")
+            msg = """
+            Missing example plotting dependencies: $(join(deps, ", ")).
+
+            This example script requires additional packages that may not be
+            installed in the active environment. Install them before running:
+
+                julia -e 'import Pkg; Pkg.add([$(pkg_list)])'
+
+            Then re-run examples/multi_agent_target_tracking/plot_results.jl.
+            """
+            error(msg)
+        end
+        rethrow()
+    end
+    return nothing
+end
+
+function __init__()
+    _ensure_plotting_dependencies()
+end
 
 const STATE_SUFFIX = "_state_data.csv"
 
@@ -23,20 +50,20 @@ _name_from_file(f::AbstractString) = replace(f, STATE_SUFFIX => "")
 _read_state(path::AbstractString) = CSV.read(path, DataFrame)
 _rms(x::AbstractVector{<:Real}) = sqrt(mean(abs2, x))
 
-function _repo_root()
-    return normpath(joinpath(@__DIR__, "..", ".."))
+function _example_root()
+    return normpath(@__DIR__)
 end
 
 # function _default_outdir()
-#     return joinpath(_repo_root(), "examples", "simulation_data")
+#     return joinpath(_example_root(), "examples", "simulation_data")
 # end
 
 function _default_outdir()
-    return joinpath(_repo_root(), "simulation_data")
+    return joinpath(_example_root(), "simulation_data")
 end
 
 function _default_config_path()
-    return joinpath(_repo_root(), "configurations", "config_common.json")
+    return joinpath(_example_root(), "configurations", "config_common.json")
 end
 
 function get_simulation_data(outdir::AbstractString)
