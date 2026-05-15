@@ -357,7 +357,7 @@ function run_config_sheaf(path::AbstractString; run_analysis::Bool=false)
         for ag in agents;  update_dynamics!(ag, step); end
         for tg in targets; update_dynamics!(tg, step); end
 
-        save_step!(dm, agents, targets, step, dt; python_style=true)
+        save_step!(dm, agents, targets, step, dt; python_style=false)
 
         if step % max(1, Int(floor(steps / 100))) == 0
             pct = round(100 * step / steps, digits=2)
