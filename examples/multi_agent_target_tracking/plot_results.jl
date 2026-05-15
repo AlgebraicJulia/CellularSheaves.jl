@@ -50,20 +50,20 @@ _name_from_file(f::AbstractString) = replace(f, STATE_SUFFIX => "")
 _read_state(path::AbstractString) = CSV.read(path, DataFrame)
 _rms(x::AbstractVector{<:Real}) = sqrt(mean(abs2, x))
 
-function _repo_root()
-    return normpath(joinpath(@__DIR__, "..", ".."))
+function _example_root()
+    return normpath(@__DIR__)
 end
 
 # function _default_outdir()
-#     return joinpath(_repo_root(), "examples", "simulation_data")
+#     return joinpath(_example_root(), "examples", "simulation_data")
 # end
 
 function _default_outdir()
-    return joinpath(_repo_root(), "simulation_data")
+    return joinpath(_example_root(), "simulation_data")
 end
 
 function _default_config_path()
-    return joinpath(_repo_root(), "configurations", "config_common.json")
+    return joinpath(_example_root(), "configurations", "config_common.json")
 end
 
 function get_simulation_data(outdir::AbstractString)
