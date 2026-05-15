@@ -2,10 +2,37 @@ module Plotter
 
 using CSV
 using DataFrames
-using Plots
 using Statistics
-using JSON3
 using Printf
+
+function _ensure_plotting_dependencies()
+    try
+        @eval using Plots
+        @eval using JSON3
+    catch err
+        if err isa ArgumentError
+            deps = ["Plots", "JSON3"]
+            pkg_list = join(["\"$(dep)\"" for dep in deps], ", ")
+            msg = """
+            Missing example plotting dependencies: $(join(deps, ", ")).
+
+            This example script requires additional packages that may not be
+            installed in the active environment. Install them before running:
+
+                julia -e 'import Pkg; Pkg.add([$(pkg_list)])'
+
+            Then re-run examples/multi_agent_target_tracking/plot_results.jl.
+            """
+            error(msg)
+        end
+        rethrow()
+    end
+    return nothing
+end
+
+function __init__()
+    _ensure_plotting_dependencies()
+end
 
 const STATE_SUFFIX = "_state_data.csv"
 
