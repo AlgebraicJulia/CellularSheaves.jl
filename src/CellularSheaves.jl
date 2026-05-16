@@ -2,6 +2,10 @@
 """
 module CellularSheaves
 
+include("ControlSheaves/ControlSheaves.jl")
+using .ControlSheaves
+export ControlSheaves
+
 using Reexport
 
 include("network_sheaves/NetworkSheaves.jl")
