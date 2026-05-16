@@ -54,10 +54,6 @@ function _example_root()
     return normpath(@__DIR__)
 end
 
-# function _default_outdir()
-#     return joinpath(_example_root(), "examples", "simulation_data")
-# end
-
 function _default_outdir()
     return joinpath(_example_root(), "simulation_data")
 end
@@ -65,6 +61,23 @@ end
 function _default_config_path()
     return joinpath(_example_root(), "configurations", "config_common.json")
 end
+
+
+# function _example_root()
+#     return normpath(@__DIR__)
+# end
+
+# # function _default_outdir()
+# #     return joinpath(_example_root(), "examples", "simulation_data")
+# # end
+
+# function _default_outdir()
+#     return joinpath(_example_root(), "simulation_data")
+# end
+
+# function _default_config_path()
+#     return joinpath(_example_root(), "configurations", "config_common.json")
+# end
 
 function get_simulation_data(outdir::AbstractString)
     agent_dir = joinpath(outdir, "agent_data")
@@ -613,7 +626,9 @@ function results(; outdir=nothing,
                    snapshots::Bool=true)
     outdir === nothing && (outdir = _default_outdir())
     config_path === nothing && (config_path = _default_config_path())
-    save_dir === nothing && (save_dir = joinpath(_repo_root(), "plots"))
+    save_dir === nothing && (save_dir = joinpath(_example_root(), "plots"))
+    # save_dir === nothing && (save_dir = joinpath(_repo_root(), "plots"))
+    
 
     return plot_from_csv(
         outdir;
@@ -626,7 +641,8 @@ end
 
 end # module
 
-if abspath(PROGRAM_FILE) == @__FILE__
+
+if abspath(PROGRAM_FILE) == abspath((@__FILE__)) || isinteractive()
     using .Plotter
-    Plotter.results()
+    Plotter.results(show=true)
 end
