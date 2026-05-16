@@ -12,6 +12,8 @@ mutable struct Entity{D <: AbstractDynamics}
     synchronization_error::Vector{Float64}
     offsets::Vector{Float64}
     neighbors::Vector{AbstractEntity}
+    integration_problem::Union{Nothing,ODEProblem}
+    integrator::Any
 end
 
 mutable struct Target{D <: AbstractDynamics} <: AbstractEntity{D}
@@ -37,8 +39,10 @@ function Entity{D}(initial_position::Vector{Float64}, time_steps::Int, id::Strin
     synchronization_error = zeros(Float64, num_states)
     offsets = zeros(Float64, num_states)
     neighbors = AbstractEntity[]
+    integration_problem = nothing
+    integrator = nothing
     return Entity{D}(id, num_states, time_step_delta, positions, velocities,
-                     control_output, synchronization_error, offsets, neighbors)
+                     control_output, synchronization_error, offsets, neighbors, integration_problem, integrator)
 end
 
 function Target{D}(initial_position::Vector{Float64}, time_steps::Int, id::String,
@@ -62,7 +66,8 @@ end
 # Delegate selected field accesses to the inner Entity.
 function Base.getproperty(entity::AbstractEntity, name::Symbol)
     if name in (:id, :num_states, :time_step_delta, :positions, :velocities,
-                :control_output, :synchronization_error, :offsets, :neighbors)
+                :control_output, :synchronization_error, :offsets, :neighbors,
+                :integration_problem, :integrator)
         return getfield(getfield(entity, :entity), name)
     else
         return getfield(entity, name)
@@ -77,16 +82,61 @@ function run_dynamics!(entity::AbstractEntity{D}, output, input) where {D <: Abs
     return run_dynamics!(D, output, input)
 end
 
-function update_dynamics!(entity::AbstractEntity, step::Int)
+# edit function so save computations for basic dynamics NoDynamics, CurrentAgentDynamics, CurrentTargetDynamics
+# function update_dynamics!(entity::AbstractEntity, step::Int)
+#     vel      = view(entity.velocities, :, step)
+#     pos_prev = view(entity.positions,  :, step - 1)
+
+#     run_dynamics!(entity, vel, pos_prev)
+#     vel .+= entity.control_output
+
+#     result = integrate_step(pos_prev, step - 2, entity.time_step_delta) do _t, pos
+#         return run_dynamics(entity, pos) + entity.control_output
+#     end
+
+#     entity.positions[:, step] .= result
+#     return entity
+# end
+
+function _direct_update_dynamics!(entity::AbstractEntity, step::Int)
     vel      = view(entity.velocities, :, step)
     pos_prev = view(entity.positions,  :, step - 1)
 
     run_dynamics!(entity, vel, pos_prev)
     vel .+= entity.control_output
 
-    result = integrate_step(pos_prev, step - 2, entity.time_step_delta) do _t, pos
-        return run_dynamics(entity, pos) + entity.control_output
+    entity.positions[:, step] .= pos_prev .+ entity.time_step_delta .* vel
+    return entity
+end
+
+function update_dynamics!(entity::AbstractEntity{NoDynamics}, step::Int)
+    return _direct_update_dynamics!(entity, step)
+end
+
+function update_dynamics!(entity::AbstractEntity{CurrentAgentDynamics}, step::Int)
+    return _direct_update_dynamics!(entity, step)
+end
+
+function update_dynamics!(entity::AbstractEntity{CurrentTargetDynamics}, step::Int)
+    return _direct_update_dynamics!(entity, step)
+end
+
+function update_dynamics!(entity::AbstractEntity{D}, step::Int) where {D <: AbstractDynamics}
+    vel      = view(entity.velocities, :, step)
+    pos_prev = view(entity.positions,  :, step - 1)
+
+    run_dynamics!(entity, vel, pos_prev)
+    vel .+= entity.control_output
+
+    derivative = (_t, pos) -> run_dynamics(entity, pos) + entity.control_output
+
+    if isnothing(entity.entity.integration_problem) || isnothing(entity.entity.integrator)
+        entity.entity.integration_problem = build_ode_problem(pos_prev, step - 2, entity.time_step_delta, derivative)
+        entity.entity.integrator = build_integrator(entity.entity.integration_problem)
     end
+
+    result = integrate_step!(entity.entity.integration_problem, pos_prev, step - 2, entity.time_step_delta, derivative;
+                             integrator=entity.entity.integrator)
 
     entity.positions[:, step] .= result
     return entity
