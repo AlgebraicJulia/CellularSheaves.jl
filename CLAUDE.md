@@ -1,0 +1,101 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+**Run all tests:**
+```julia
+julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
+**Run a single test file:**
+```julia
+julia --project=. -e 'include("test/network_sheaves/SheafLaplacian.jl")'
+```
+
+**Install docs dependencies (first time only):**
+```julia
+julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+```
+
+**Build docs:**
+```julia
+julia --project=docs docs/make.jl
+```
+
+**Build docs without regenerating literate examples:**
+```julia
+julia --project=docs docs/make.jl --no-literate
+```
+
+## Architecture
+
+`CellularSheaves` re-exports `NetworkSheaves`, which aggregates all submodules:
+
+```
+src/network_sheaves/
+  SheafInterface.jl      # Abstract declarations — new operations go here first
+  EuclideanSheaves.jl    # EuclideanSheaf type, coboundary map, Laplacian, solvers
+  Morphisms.jl           # SheafMorphism, ComplexMorphism, compose, is_morphism
+  Pushforwards.jl        # pushforward_sheaf, fiber operations
+  Pushouts.jl            # Sheaf pushouts over graph spans
+  GraphHomomorphisms.jl  # GraphHomomorphism type and helpers
+  TrajectorySheaf.jl     # Trajectory/controlled trajectory sheaves for LTI systems
+  ADT.jl + Parser.jl     # @cellular_sheaf DSL macro
+  BlockSparseArrays.jl   # blocksparse helper used by coboundary_map
+  PotentialSheaves.jl    # Potential sheaf constructions
+```
+
+The primary concrete type is `EuclideanSheaf{T}`, a struct with `vertex_stalks::Vector{Int}`, `edge_stalks::Dict{UnorderedPair{Int},Int}`, `underlying_graph::Graph`, and `restriction_maps::Dict{Pair{Int},Matrix{T}}`. The restriction map from vertex `v1` to edge `(v1, v2)` is keyed `v1 => v2`.
+
+**Adding a new operation:** declare it in `SheafInterface.jl`, implement on `EuclideanSheaf` in the appropriate module, add the export to `NetworkSheaves.jl`.
+
+**Test layout:** one test file per source module in `test/network_sheaves/`, included from `test/runtests.jl`. Do not add `CellularSheaves` to `test/Project.toml` — this breaks CI.
+
+## Cochain indexing
+
+Vertex `v`'s DOF slice in a flat cochain vector `x`:
+```julia
+offsets = [0; cumsum(vertex_stalks(s))]
+x[offsets[v]+1 : offsets[v+1]]
+```
+Return cochains as `BlockArray(x, vertex_stalks(s))`.
+
+## Solver conventions
+
+Use `CliqueTrees.Multifrontal.ChordalLDLt` (not dense `ldlt`) for all new sparse symmetric PSD linear systems. The factorization convention is `X = P' * L * D * L' * P`:
+
+```julia
+using CliqueTrees.Multifrontal
+M = ldlt!(ChordalLDLt(A), RowMaximum())
+# solve M*v = b:
+c = M.P' \ b; z = M.L \ c; w = M.D \ z; y = M.L' \ w; v = M.P \ y
+```
+
+`nullspace_ldlt` in `EuclideanSheaves.jl` is the authoritative reference for this pattern. Avoid `Matrix(A)` or `Array(A)` conversions in hot paths — keep matrices sparse throughout.
+
+## Dependency philosophy
+
+No new top-level dependencies without checking `Project.toml` first. Implement graph-combinatorial operations directly on `Graphs.SimpleGraph` (union-find, etc.) rather than pulling in Catlab.jl. Do not add `LDLFactorizations.jl` — `ChordalLDLt` is already present.
+
+## Code conventions
+
+- Input validation at public boundaries via `@argcheck` (ArgCheck.jl, already a dependency).
+- No Java-style getter/setter names (`get_foo` / `set_foo`); prefer idiomatic Julia names.
+- Do not put line comments inside function definitions in literate examples (`docs/literate/`) — this breaks the Literate.jl pipeline. Place explanatory comments above the function or as end-of-line comments.
+
+## Documentation
+
+- Keep `makedocs(modules=...)` in `docs/make.jl` aligned with all documented modules.
+- Add a separate `@autodocs` block per module in `docs/src/api/*.md`.
+- When adding a new module, update both `docs/make.jl` and the relevant `docs/src/api/` file in the same change.
+- Check for missing cross-references after building (they appear as warnings, not errors).
+
+## Feature requests
+
+Store feature request drafts in `docs/issues/` (numbered markdown files). Each issue must include: **Mathematical Background**, **Codebase Orientation** (table of files + why), **Requested Implementation** (exact signature + docstring + algorithm sketch), **Tests to Write** (concrete `@test` statements), **Verification Checklist**, and **Out of Scope**. Split issues at natural seams — one self-contained function per issue.
+
+## Mathematical context
+
+The codebase targets researchers in sheaf theory, category theory, and applied linear algebra (Hansen, Ghrist, Curry, Riess). Docstrings for public-facing functions should explain the math for users who are not specialists. When a request is mathematically ambiguous, ask for clarification before implementing. Cite relevant papers and use their nomenclature.
