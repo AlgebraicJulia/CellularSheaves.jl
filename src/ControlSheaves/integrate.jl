@@ -18,20 +18,18 @@ function build_integrator(prob::ODEProblem)
     return init(prob, Tsit5(); reltol=1e-9, abstol=1e-12)
 end
 
-function integrate_step!(prob::ODEProblem, state::AbstractArray{Float64}, step::Int, dt::Float64,
-                         _derivative::Function; integrator=nothing)
+function integrate_step!(_prob::ODEProblem, state::AbstractArray{Float64}, step::Int, dt::Float64,
+                         derivative::Function; integrator=nothing)
     shape = size(state)
     y0 = reshape(state, :)
     t0 = step * dt
     tf = t0 + dt
+    prob = build_ode_problem(state, step, dt, derivative)
 
-    if isnothing(integrator)
-        integrator = build_integrator(prob)
-    end
-
+    integrator = build_integrator(prob)
     reinit!(integrator, y0; t0=t0, tf=tf)
     solve!(integrator)
-    return reshape(integrator.u, shape)
+    return copy(reshape(integrator.u, shape))
 end
 
 function integrate_step(state::AbstractArray{Float64}, step::Int, dt::Float64, derivative::Function)
