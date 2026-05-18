@@ -248,13 +248,7 @@ end
 # Plot 3: 2D snapshots, initial and final, with TT / AT / AA links
 # -----------------------------------------------------------------------------
 
-function plot_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
-                           config_path::Union{Nothing,AbstractString}=nothing,
-                           show::Bool=true,
-                           save_path=nothing)
-    isempty(agent_dfs) && isempty(target_dfs) && return nothing
-
-    cfg = _load_config(config_path)
+function _snapshot_context(agent_dfs, target_dfs, cfg, rows_for_limits::Vector{Int})
     n_agents = length(agent_dfs)
     n_targets = length(target_dfs)
 
@@ -267,18 +261,28 @@ function plot_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
     square_group = n_agents >= k_square ? collect(n_agents-k_square+1:n_agents) : Int[]
     tri_pool = n_agents >= k_square ? collect(1:n_agents-k_square) : collect(1:n_agents)
     tri_groups = _chunk_triplets(tri_pool)
-
-    max_len = maximum([nrow(df) for df in vcat(agent_dfs, target_dfs)])
-    rows = [1, max_len]
-    titles = ["t = 0", "t = final"]
-
-    # Same axis limits for both plots, so initial/final are comparable.
-    xlim, ylim = _xy_limits(agent_dfs, target_dfs, rows)
-
     tri_colors = [:purple, :green, :orange, :brown]
 
-    function draw_single_snapshot(row::Int, title_text::String; legend_on::Bool=true)
-        p = plot(
+    xlim, ylim = _xy_limits(agent_dfs, target_dfs, rows_for_limits)
+
+    return (
+        n_agents=n_agents,
+        n_targets=n_targets,
+        target_edge_set=target_edge_set,
+        agent_neighbors=agent_neighbors,
+        pinning_matrix=pinning_matrix,
+        square_group=square_group,
+        tri_groups=tri_groups,
+        tri_colors=tri_colors,
+        xlim=xlim,
+        ylim=ylim,
+    )
+end
+
+function draw_single_snapshot(agent_names, agent_dfs, target_names, target_dfs,
+                              row::Int, title_text::String, ctx;
+                              legend_on::Bool=true)
+    p = plot(
         xlabel="X (m)",
         ylabel="Y (m)",
         title=title_text,
@@ -292,160 +296,193 @@ function plot_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
         right_margin=35Plots.mm,
         bottom_margin=14Plots.mm,
         top_margin=8Plots.mm
-        )
+    )
 
-        did_tt = false
-        did_at = false
-        did_square = false
-        did_inter = false
-        did_tri = falses(length(tri_groups))
+    did_tt = false
+    did_at = false
+    did_square = false
+    did_inter = false
+    did_tri = falses(length(ctx.tri_groups))
 
-        # Target-target links
-        for (i, j) in target_edge_set
-            if 1 <= i <= n_targets && 1 <= j <= n_targets
-                a = _pos_at(target_dfs[i], row)
-                b = _pos_at(target_dfs[j], row)
+    # Target-target links
+    for (i, j) in ctx.target_edge_set
+        if 1 <= i <= ctx.n_targets && 1 <= j <= ctx.n_targets
+            a = _pos_at(target_dfs[i], row)
+            b = _pos_at(target_dfs[j], row)
 
-                plot!(p, [a[1], b[1]], [a[2], b[2]];
-                    color=:red,
-                    lw=2.2,
-                    alpha=0.85,
-                    label="")
+            plot!(p, [a[1], b[1]], [a[2], b[2]];
+                  color=:red,
+                  lw=2.2,
+                  alpha=0.85,
+                  label="")
 
-                did_tt = true
-            end
+            did_tt = true
         end
-
-        # Dummy legend entry for target formation
-        if legend_on && did_tt
-            plot!(p, [NaN], [NaN];
-                color=:red,
-                lw=2.2,
-                alpha=0.85,
-                label="Target Formation")
-        end
-
-        # Agent-target pinning links
-        if size(pinning_matrix, 1) == n_agents
-            for ai in 1:size(pinning_matrix, 1), tj in 1:size(pinning_matrix, 2)
-                if pinning_matrix[ai, tj] != 0.0 && 1 <= tj <= n_targets
-                    a = _pos_at(agent_dfs[ai], row)
-                    b = _pos_at(target_dfs[tj], row)
-
-                    plot!(p, [a[1], b[1]], [a[2], b[2]];
-                          color=:cyan,
-                          lw=1.5,
-                          linestyle=:dot,
-                          alpha=0.80,
-                        #   label=(legend_on && !did_at) ? "Agent-Target" : "")
-                          label="")
-
-                    did_at = true
-                end
-            end
-        end
-
-        # Agent-agent links inside triangle groups
-        for (gidx, g) in enumerate(tri_groups)
-            col = tri_colors[mod1(gidx, length(tri_colors))]
-
-            for i in g
-                for j in agent_neighbors[i]
-                    if j > i && j in g
-                        a = _pos_at(agent_dfs[i], row)
-                        b = _pos_at(agent_dfs[j], row)
-
-                        plot!(p, [a[1], b[1]], [a[2], b[2]];
-                              color=col,
-                              lw=1.8,
-                              alpha=0.85,
-                              label=(legend_on && !did_tri[gidx]) ? "Triangle Formation $(gidx)" : "")
-
-                        did_tri[gidx] = true
-                    end
-                end
-            end
-        end
-
-        # Agent-agent links inside square group
-        for i in square_group
-            for j in agent_neighbors[i]
-                if j > i && j in square_group
-                    a = _pos_at(agent_dfs[i], row)
-                    b = _pos_at(agent_dfs[j], row)
-
-                    plot!(p, [a[1], b[1]], [a[2], b[2]];
-                          color=:blue,
-                          lw=1.8,
-                          alpha=0.85,
-                          label=(legend_on && !did_square) ? "Square Formation" : "")
-
-                    did_square = true
-                end
-            end
-        end
-
-        # Agent-agent links across formations
-        labels_map = Dict{Int,String}()
-
-        for i in square_group
-            labels_map[i] = "square"
-        end
-
-        for (gidx, g) in enumerate(tri_groups)
-            for i in g
-                labels_map[i] = "tri$(gidx)"
-            end
-        end
-
-        for i in 1:n_agents
-            for j in agent_neighbors[i]
-                if j > i && haskey(labels_map, i) && haskey(labels_map, j) && labels_map[i] != labels_map[j]
-                    a = _pos_at(agent_dfs[i], row)
-                    b = _pos_at(agent_dfs[j], row)
-
-                    plot!(p, [a[1], b[1]], [a[2], b[2]];
-                          color=:olive,
-                          lw=1.5,
-                          linestyle=:dot,
-                          alpha=0.80,
-                        #   label=(legend_on && !did_inter) ? "Agent-Agent (out of formation)" : "")
-                            label="")
-
-                    did_inter = true
-                end
-            end
-        end
-
-        # Targets
-        for (name, df) in zip(target_names, target_dfs)
-            x, y = _pos_at(df, row)
-            scatter!(p, [x], [y];
-                     markershape=:x,
-                     markersize=8,
-                     markerstrokewidth=2,
-                     label="")
-        end
-
-        # Agents
-        for (name, df) in zip(agent_names, agent_dfs)
-            x, y = _pos_at(df, row)
-            scatter!(p, [x], [y];
-                     markershape=:circle,
-                     markersize=5,
-                     markerstrokecolor=:black,
-                     markerstrokewidth=0.5,
-                     label="")
-        end
-
-        xlims!(p, xlim...)
-        ylims!(p, ylim...)
-
-        return p
     end
 
-    p_initial = draw_single_snapshot(rows[1], titles[1]; legend_on=true)
-    p_final = draw_single_snapshot(rows[2], titles[2]; legend_on=true)
+    # Dummy legend entry for target formation
+    if legend_on && did_tt
+        plot!(p, [NaN], [NaN];
+              color=:red,
+              lw=2.2,
+              alpha=0.85,
+              label="Target Formation")
+    end
+
+    # Agent-target pinning links
+    if size(ctx.pinning_matrix, 1) == ctx.n_agents
+        for ai in 1:size(ctx.pinning_matrix, 1), tj in 1:size(ctx.pinning_matrix, 2)
+            if ctx.pinning_matrix[ai, tj] != 0.0 && 1 <= tj <= ctx.n_targets
+                a = _pos_at(agent_dfs[ai], row)
+                b = _pos_at(target_dfs[tj], row)
+
+                plot!(p, [a[1], b[1]], [a[2], b[2]];
+                      color=:cyan,
+                      lw=1.5,
+                      linestyle=:dot,
+                      alpha=0.80,
+                      label="")
+
+                did_at = true
+            end
+        end
+    end
+
+    # Agent-agent links inside triangle groups
+    for (gidx, g) in enumerate(ctx.tri_groups)
+        col = ctx.tri_colors[mod1(gidx, length(ctx.tri_colors))]
+
+        for i in g
+            for j in ctx.agent_neighbors[i]
+                if j > i && j in g
+                    a = _pos_at(agent_dfs[i], row)
+                    b = _pos_at(agent_dfs[j], row)
+
+                    plot!(p, [a[1], b[1]], [a[2], b[2]];
+                          color=col,
+                          lw=1.8,
+                          alpha=0.85,
+                          label=(legend_on && !did_tri[gidx]) ? "Triangle Formation $(gidx)" : "")
+
+                    did_tri[gidx] = true
+                end
+            end
+        end
+    end
+
+    # Agent-agent links inside square group
+    for i in ctx.square_group
+        for j in ctx.agent_neighbors[i]
+            if j > i && j in ctx.square_group
+                a = _pos_at(agent_dfs[i], row)
+                b = _pos_at(agent_dfs[j], row)
+
+                plot!(p, [a[1], b[1]], [a[2], b[2]];
+                      color=:blue,
+                      lw=1.8,
+                      alpha=0.85,
+                      label=(legend_on && !did_square) ? "Square Formation" : "")
+
+                did_square = true
+            end
+        end
+    end
+
+    # Agent-agent links across formations
+    labels_map = Dict{Int,String}()
+
+    for i in ctx.square_group
+        labels_map[i] = "square"
+    end
+
+    for (gidx, g) in enumerate(ctx.tri_groups)
+        for i in g
+            labels_map[i] = "tri$(gidx)"
+        end
+    end
+
+    for i in 1:ctx.n_agents
+        for j in ctx.agent_neighbors[i]
+            if j > i && haskey(labels_map, i) && haskey(labels_map, j) && labels_map[i] != labels_map[j]
+                a = _pos_at(agent_dfs[i], row)
+                b = _pos_at(agent_dfs[j], row)
+
+                plot!(p, [a[1], b[1]], [a[2], b[2]];
+                      color=:olive,
+                      lw=1.5,
+                      linestyle=:dot,
+                      alpha=0.80,
+                      label="")
+
+                did_inter = true
+            end
+        end
+    end
+
+    # Targets
+    for (name, df) in zip(target_names, target_dfs)
+        x, y = _pos_at(df, row)
+        scatter!(p, [x], [y];
+                 markershape=:x,
+                 markersize=8,
+                 markerstrokewidth=2,
+                 label="")
+    end
+
+    # Agents
+    for (name, df) in zip(agent_names, agent_dfs)
+        x, y = _pos_at(df, row)
+        scatter!(p, [x], [y];
+                 markershape=:circle,
+                 markersize=5,
+                 markerstrokecolor=:black,
+                 markerstrokewidth=0.5,
+                 label="")
+    end
+
+    xlims!(p, ctx.xlim...)
+    ylims!(p, ctx.ylim...)
+
+    return p
+end
+
+"""
+        plot_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
+                                            config_path=nothing, show=true, save_path=nothing)
+
+Generate two 2D formation snapshots from CSV-backed simulation data: one at
+`t = 0` and one at the final timestep.
+
+The plot overlays target-target links, agent-target pinning links, and
+agent-agent formation links inferred from the configuration.
+
+# Keyword arguments
+- `config_path`: Optional JSON config path used to recover edge sets and pinning.
+- `show`: If `true`, display both plots in the active backend.
+- `save_path`: Optional output path. When provided, the function writes
+    `snapshot_t0.png` and `snapshot_final.png` in `dirname(save_path)`.
+
+# Returns
+Named tuple `(p_initial, p_final)` containing the two `Plots.Plot` objects.
+Returns `nothing` when both agent and target datasets are empty.
+"""
+function plot_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
+                           config_path::Union{Nothing,AbstractString}=nothing,
+                           show::Bool=true,
+                           save_path=nothing)
+    isempty(agent_dfs) && isempty(target_dfs) && return nothing
+
+    cfg = _load_config(config_path)
+
+    max_len = maximum([nrow(df) for df in vcat(agent_dfs, target_dfs)])
+    rows = [1, max_len]
+    titles = ["t = 0", "t = final"]
+
+    ctx = _snapshot_context(agent_dfs, target_dfs, cfg, rows)
+    p_initial = draw_single_snapshot(agent_names, agent_dfs, target_names, target_dfs,
+                                     rows[1], titles[1], ctx; legend_on=true)
+    p_final = draw_single_snapshot(agent_names, agent_dfs, target_names, target_dfs,
+                                   rows[2], titles[2], ctx; legend_on=true)
 
     # p_initial = draw_single_snapshot(rows[1], titles[1]; legend_on=false)
     # p_final = draw_single_snapshot(rows[2], titles[2]; legend_on=false)
@@ -470,6 +507,67 @@ function plot_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
     end
 
     return (p_initial=p_initial, p_final=p_final)
+end
+
+"""
+        animate_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
+                                                 config_path=nothing, show=false, save_path=nothing,
+                                                 fps=20, stride=1)
+
+Create a GIF animation of the 2D formation view from the first available row to
+the final timestep, reusing the same visual conventions as `plot_snapshots_2d`.
+
+# Keyword arguments
+- `config_path`: Optional JSON config path used to recover edge sets and pinning.
+- `show`: If `true`, display the final frame after writing the GIF.
+- `save_path`: Output GIF path. Defaults to
+    `joinpath(_example_root(), "plots", "snapshots_2d.gif")`.
+- `fps`: Frames per second of the output GIF (must be `>= 1`).
+- `stride`: Row stride used to subsample frames (must be `>= 1`).
+
+# Returns
+The GIF output path as a `String`, or `nothing` when both datasets are empty.
+"""
+function animate_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
+                              config_path::Union{Nothing,AbstractString}=nothing,
+                              show::Bool=false,
+                              save_path::Union{Nothing,AbstractString}=nothing,
+                              fps::Int=20,
+                              stride::Int=1)
+    isempty(agent_dfs) && isempty(target_dfs) && return nothing
+    stride >= 1 || error("stride must be >= 1")
+    fps >= 1 || error("fps must be >= 1")
+
+    cfg = _load_config(config_path)
+    max_len = maximum([nrow(df) for df in vcat(agent_dfs, target_dfs)])
+    rows = collect(1:stride:max_len)
+    rows[end] != max_len && push!(rows, max_len)
+
+    ctx = _snapshot_context(agent_dfs, target_dfs, cfg, rows)
+
+    if save_path === nothing
+        save_path = joinpath(_example_root(), "plots", "snapshots_2d.gif")
+    end
+    mkpath(dirname(save_path))
+
+    tdf = !isempty(agent_dfs) ? agent_dfs[1] : target_dfs[1]
+    anim = @animate for row in rows
+        t = row <= nrow(tdf) ? Float64(tdf[row, :Time]) : Float64(tdf[end, :Time])
+        title_text = @sprintf("t = %.2f s", t)
+        draw_single_snapshot(agent_names, agent_dfs, target_names, target_dfs,
+                             row, title_text, ctx; legend_on=true)
+    end
+
+    gif(anim, save_path; fps=fps)
+    @info "Saved 2D snapshot animation" save_path fps stride n_frames=length(rows)
+
+    if show
+        p_last = draw_single_snapshot(agent_names, agent_dfs, target_names, target_dfs,
+                                      max_len, "t = final", ctx; legend_on=true)
+        display(p_last)
+    end
+
+    return save_path
 end
 
 # -----------------------------------------------------------------------------
@@ -542,11 +640,36 @@ end
 # Main entry point
 # -----------------------------------------------------------------------------
 
+"""
+    plot_from_csv(outdir; config_path=nothing, show=true, save_dir=nothing,
+                  snapshots=true, animate_snapshots=false,
+                  animation_fps=20, animation_stride=1)
+
+Load agent/target CSV outputs from `outdir` and generate the standard plotting
+bundle: error norm, 3D trajectories, optional static 2D snapshots, and optional
+2D GIF animation.
+
+# Keyword arguments
+- `config_path`: Optional JSON config used by 2D snapshot/animation overlays.
+- `show`: Display generated plots in addition to saving them.
+- `save_dir`: Optional directory for output artifacts.
+- `snapshots`: If `true`, generate initial/final 2D snapshots.
+- `animate_snapshots`: If `true`, generate a full-timestep 2D GIF.
+- `animation_fps`: GIF frame rate used when `animate_snapshots=true`.
+- `animation_stride`: Frame subsampling stride for the GIF.
+
+# Returns
+Named tuple `(p_err, p_traj, p_snap, p_anim)` where `p_anim` is the GIF path
+string when generated, else `nothing`.
+"""
 function plot_from_csv(outdir::AbstractString;
                        config_path::Union{Nothing,AbstractString}=nothing,
                        show::Bool=true,
                        save_dir=nothing,
-                       snapshots::Bool=true)
+                       snapshots::Bool=true,
+                       animate_snapshots::Bool=false,
+                       animation_fps::Int=20,
+                       animation_stride::Int=1)
     agent_names, agent_dfs, target_names, target_dfs = get_simulation_data(outdir)
 
     if isempty(agent_dfs) && isempty(target_dfs)
@@ -576,14 +699,41 @@ function plot_from_csv(outdir::AbstractString;
         @info "Skipping 2D snapshots because snapshots=false"
     end
 
-    return (p_err=p_err, p_traj=p_traj, p_snap=p_snap)
+    anim_path = nothing
+    if animate_snapshots
+        gif_path = save_dir === nothing ? nothing : joinpath(save_dir, "snapshots_2d.gif")
+        @info "Generating 2D snapshot animation" gif_path config_path fps=animation_fps stride=animation_stride
+        anim_path = animate_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
+                                         config_path=config_path,
+                                         show=show,
+                                         save_path=gif_path,
+                                         fps=animation_fps,
+                                         stride=animation_stride)
+    else
+        @info "Skipping 2D snapshot animation because animate_snapshots=false"
+    end
+
+    return (p_err=p_err, p_traj=p_traj, p_snap=p_snap, p_anim=anim_path)
 end
 
+"""
+    results(; outdir=nothing, config_path=nothing, show=false, save_dir=nothing,
+            snapshots=true, animate_snapshots=false,
+            animation_fps=20, animation_stride=1)
+
+Convenience wrapper around `plot_from_csv` using default example paths when
+`outdir`, `config_path`, or `save_dir` are omitted.
+
+Set `animate_snapshots=true` to write `snapshots_2d.gif` in `save_dir`.
+"""
 function results(; outdir=nothing,
                    config_path=nothing,
                    show::Bool=false,
                    save_dir=nothing,
-                   snapshots::Bool=true)
+                   snapshots::Bool=true,
+                   animate_snapshots::Bool=false,
+                   animation_fps::Int=20,
+                   animation_stride::Int=1)
     outdir === nothing && (outdir = _default_outdir())
     config_path === nothing && (config_path = _default_config_path())
     save_dir === nothing && (save_dir = joinpath(_example_root(), "plots"))
@@ -593,7 +743,10 @@ function results(; outdir=nothing,
         config_path=config_path,
         show=show,
         save_dir=save_dir,
-        snapshots=snapshots
+        snapshots=snapshots,
+        animate_snapshots=animate_snapshots,
+        animation_fps=animation_fps,
+        animation_stride=animation_stride
     )
 end
 
