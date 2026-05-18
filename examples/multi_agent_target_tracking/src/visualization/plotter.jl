@@ -27,20 +27,16 @@ _name_from_file(f::AbstractString) = replace(f, STATE_SUFFIX => "")
 _read_state(path::AbstractString) = CSV.read(path, DataFrame)
 _rms(x::AbstractVector{<:Real}) = sqrt(mean(abs2, x))
 
-function _repo_root()
+function _example_root()
     return normpath(joinpath(@__DIR__, "..", ".."))
 end
 
-# function _default_outdir()
-#     return joinpath(_repo_root(), "examples", "simulation_data")
-# end
-
 function _default_outdir()
-    return joinpath(_repo_root(), "simulation_data")
+    return joinpath(_example_root(), "simulation_data")
 end
 
 function _default_config_path()
-    return joinpath(_repo_root(), "configurations", "config_common.json")
+    return joinpath(_example_root(), "configurations", "config_common.json")
 end
 
 function get_simulation_data(outdir::AbstractString)
@@ -201,13 +197,6 @@ end
 # Plot 2: 3D trajectories
 # -----------------------------------------------------------------------------
 
-# function plot_trajectories_3d(agent_names, agent_dfs, target_names, target_dfs;
-#                               show::Bool=true, save_path=nothing)
-#     p = plot(; xlabel="X (m)",
-#                ylabel="  Y (m)",
-#                zlabel="Z (m)",
-#                title="Trajectories",
-#                legend=:best)
 function plot_trajectories_3d(agent_names, agent_dfs, target_names, target_dfs;
                               show::Bool=true, save_path=nothing)
 
@@ -597,7 +586,7 @@ function results(; outdir=nothing,
                    snapshots::Bool=true)
     outdir === nothing && (outdir = _default_outdir())
     config_path === nothing && (config_path = _default_config_path())
-    save_dir === nothing && (save_dir = joinpath(_repo_root(), "plots"))
+    save_dir === nothing && (save_dir = joinpath(_example_root(), "plots"))
 
     return plot_from_csv(
         outdir;
