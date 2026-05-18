@@ -34,7 +34,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves],
+  modules=[CellularSheaves, CellularSheaves.AsynchSheaves],
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,
@@ -55,6 +55,12 @@ makedocs(
         "generated/control/controlled_vehicle_platoon.md",
         "generated/control/controlled_planar_quadrotor.md",
         "generated/control/controlled_mass_spring_damper_chain.md"
+      ],
+      "Asynchronous Diffusion"=>Any[
+        "generated/asynch/convergence_vs_delay.md",
+        "generated/asynch/step_size_comparison.md",
+        "generated/asynch/restriction_map_comparison.md",
+        "generated/asynch/orthogonal_projection.md",
       ]
     ],
     "Feature Guides"=>Any[
@@ -76,6 +82,7 @@ makedocs(
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
       "api/herding_platoon.md",
+      "api/asynch.md",
     ],
   ]
 )
