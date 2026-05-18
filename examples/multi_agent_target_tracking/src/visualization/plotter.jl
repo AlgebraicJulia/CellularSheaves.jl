@@ -279,6 +279,38 @@ function _snapshot_context(agent_dfs, target_dfs, cfg, rows_for_limits::Vector{I
     )
 end
 
+function _uniform_rows(max_len::Int, stride::Int)
+    rows = collect(1:stride:max_len)
+    rows[end] != max_len && push!(rows, max_len)
+    return rows
+end
+
+function _exp_decay_rows(max_len::Int; dense_prefix::Int=100,
+                         tail_fraction::Float64=0.01,
+                         decay::Float64=5.0)
+    dense_prefix >= 1 || error("dense_prefix must be >= 1")
+    0.0 < tail_fraction <= 1.0 || error("tail_fraction must be in (0, 1]")
+    decay > 0.0 || error("decay must be > 0")
+
+    dense_end = min(dense_prefix, max_len)
+    rows = collect(1:dense_end)
+    dense_end == max_len && return rows
+
+    remaining = max_len - dense_end
+    n_tail = max(1, round(Int, tail_fraction * remaining))
+    tail = Int[]
+    denom = exp(decay) - 1.0
+    for i in 1:n_tail
+        u = i / n_tail
+        frac = (exp(decay * u) - 1.0) / denom
+        push!(tail, dense_end + round(Int, frac * remaining))
+    end
+
+    append!(rows, tail)
+    rows[end] != max_len && push!(rows, max_len)
+    return unique(sort(rows))
+end
+
 function draw_single_snapshot(agent_names, agent_dfs, target_names, target_dfs,
                               row::Int, title_text::String, ctx;
                               legend_on::Bool=true)
@@ -512,7 +544,8 @@ end
 """
         animate_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
                                                  config_path=nothing, show=false, save_path=nothing,
-                                                 fps=20, stride=1)
+                         fps=20, stride=1, sampling=:exponential,
+                             dense_prefix=100, tail_fraction=0.01, decay=5.0)
 
 Create a GIF animation of the 2D formation view from the first available row to
 the final timestep, reusing the same visual conventions as `plot_snapshots_2d`.
@@ -523,7 +556,13 @@ the final timestep, reusing the same visual conventions as `plot_snapshots_2d`.
 - `save_path`: Output GIF path. Defaults to
     `joinpath(_example_root(), "plots", "snapshots_2d.gif")`.
 - `fps`: Frames per second of the output GIF (must be `>= 1`).
-- `stride`: Row stride used to subsample frames (must be `>= 1`).
+- `stride`: Row stride for uniform sampling (must be `>= 1`).
+- `sampling`: Frame schedule. Use `:uniform` or `:exponential`.
+- `dense_prefix`: Number of initial frames kept densely for `:exponential`.
+- `tail_fraction`: Fraction of remaining frames kept in the tail for
+    `:exponential`.
+- `decay`: Exponential curvature for tail sparsification (`> 0`). Larger values
+    allocate more frames near the start and fewer near the end.
 
 # Returns
 The GIF output path as a `String`, or `nothing` when both datasets are empty.
@@ -533,15 +572,27 @@ function animate_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
                               show::Bool=false,
                               save_path::Union{Nothing,AbstractString}=nothing,
                               fps::Int=20,
-                              stride::Int=1)
+                              stride::Int=1,
+                              sampling::Symbol=:exponential,
+                              dense_prefix::Int=100,
+                              tail_fraction::Float64=0.01,
+                              decay::Float64=5.0)
     isempty(agent_dfs) && isempty(target_dfs) && return nothing
     stride >= 1 || error("stride must be >= 1")
     fps >= 1 || error("fps must be >= 1")
 
     cfg = _load_config(config_path)
     max_len = maximum([nrow(df) for df in vcat(agent_dfs, target_dfs)])
-    rows = collect(1:stride:max_len)
-    rows[end] != max_len && push!(rows, max_len)
+    rows = if sampling == :uniform
+        _uniform_rows(max_len, stride)
+    elseif sampling == :exponential
+        _exp_decay_rows(max_len;
+                        dense_prefix=dense_prefix,
+                        tail_fraction=tail_fraction,
+                        decay=decay)
+    else
+        error("Unknown sampling method: $(sampling). Use :uniform or :exponential")
+    end
 
     ctx = _snapshot_context(agent_dfs, target_dfs, cfg, rows)
 
@@ -559,7 +610,7 @@ function animate_snapshots_2d(agent_names, agent_dfs, target_names, target_dfs;
     end
 
     gif(anim, save_path; fps=fps)
-    @info "Saved 2D snapshot animation" save_path fps stride n_frames=length(rows)
+    @info "Saved 2D snapshot animation" save_path fps sampling stride dense_prefix tail_fraction decay n_frames=length(rows)
 
     if show
         p_last = draw_single_snapshot(agent_names, agent_dfs, target_names, target_dfs,
@@ -643,7 +694,11 @@ end
 """
     plot_from_csv(outdir; config_path=nothing, show=true, save_dir=nothing,
                   snapshots=true, animate_snapshots=false,
-                  animation_fps=20, animation_stride=1)
+                  animation_fps=20, animation_stride=1,
+                  animation_sampling=:exponential,
+                  animation_dense_prefix=100,
+                  animation_tail_fraction=0.01,
+                  animation_decay=5.0)
 
 Load agent/target CSV outputs from `outdir` and generate the standard plotting
 bundle: error norm, 3D trajectories, optional static 2D snapshots, and optional
@@ -657,6 +712,10 @@ bundle: error norm, 3D trajectories, optional static 2D snapshots, and optional
 - `animate_snapshots`: If `true`, generate a full-timestep 2D GIF.
 - `animation_fps`: GIF frame rate used when `animate_snapshots=true`.
 - `animation_stride`: Frame subsampling stride for the GIF.
+- `animation_sampling`: `:uniform` or `:exponential` frame schedule.
+- `animation_dense_prefix`: Initial dense-frame count for exponential sampling.
+- `animation_tail_fraction`: Tail keep-fraction for exponential sampling.
+- `animation_decay`: Exponential sparsification curvature for tail frames.
 
 # Returns
 Named tuple `(p_err, p_traj, p_snap, p_anim)` where `p_anim` is the GIF path
@@ -669,7 +728,11 @@ function plot_from_csv(outdir::AbstractString;
                        snapshots::Bool=true,
                        animate_snapshots::Bool=false,
                        animation_fps::Int=20,
-                       animation_stride::Int=1)
+                       animation_stride::Int=1,
+                       animation_sampling::Symbol=:exponential,
+                       animation_dense_prefix::Int=100,
+                       animation_tail_fraction::Float64=0.01,
+                       animation_decay::Float64=5.0)
     agent_names, agent_dfs, target_names, target_dfs = get_simulation_data(outdir)
 
     if isempty(agent_dfs) && isempty(target_dfs)
@@ -708,7 +771,11 @@ function plot_from_csv(outdir::AbstractString;
                                          show=show,
                                          save_path=gif_path,
                                          fps=animation_fps,
-                                         stride=animation_stride)
+                                         stride=animation_stride,
+                                         sampling=animation_sampling,
+                                         dense_prefix=animation_dense_prefix,
+                                         tail_fraction=animation_tail_fraction,
+                                         decay=animation_decay)
     else
         @info "Skipping 2D snapshot animation because animate_snapshots=false"
     end
@@ -719,7 +786,11 @@ end
 """
     results(; outdir=nothing, config_path=nothing, show=false, save_dir=nothing,
             snapshots=true, animate_snapshots=false,
-            animation_fps=20, animation_stride=1)
+            animation_fps=20, animation_stride=1,
+            animation_sampling=:exponential,
+            animation_dense_prefix=100,
+            animation_tail_fraction=0.01,
+            animation_decay=5.0)
 
 Convenience wrapper around `plot_from_csv` using default example paths when
 `outdir`, `config_path`, or `save_dir` are omitted.
@@ -733,7 +804,11 @@ function results(; outdir=nothing,
                    snapshots::Bool=true,
                    animate_snapshots::Bool=false,
                    animation_fps::Int=20,
-                   animation_stride::Int=1)
+                   animation_stride::Int=1,
+                   animation_sampling::Symbol=:exponential,
+                   animation_dense_prefix::Int=100,
+                   animation_tail_fraction::Float64=0.01,
+                   animation_decay::Float64=5.0)
     outdir === nothing && (outdir = _default_outdir())
     config_path === nothing && (config_path = _default_config_path())
     save_dir === nothing && (save_dir = joinpath(_example_root(), "plots"))
@@ -746,7 +821,11 @@ function results(; outdir=nothing,
         snapshots=snapshots,
         animate_snapshots=animate_snapshots,
         animation_fps=animation_fps,
-        animation_stride=animation_stride
+        animation_stride=animation_stride,
+        animation_sampling=animation_sampling,
+        animation_dense_prefix=animation_dense_prefix,
+        animation_tail_fraction=animation_tail_fraction,
+        animation_decay=animation_decay
     )
 end
 
