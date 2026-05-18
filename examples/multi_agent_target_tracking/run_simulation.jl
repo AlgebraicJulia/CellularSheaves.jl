@@ -1,45 +1,22 @@
 # examples/run_main_sheaf.jl
 
-# using LinearAlgebra
 using LinearAlgebra
 using JSON3
 using CellularSheaves
+using CellularSheaves.ControlSheaves
 
 # This example relies on external packages that may not be present in the
 # package's default project environment. Load them explicitly and provide a
 # clear setup message if they are missing so the example is reproducible.
-const _EXAMPLE_DEPENDENCIES = ("JSON3", "CellularSheaves", "DifferentialEquations")
+# const _EXAMPLE_DEPENDENCIES = ("JSON3", "CellularSheaves", "DifferentialEquations")
 
-# function _load_example_dependency(pkg::AbstractString)
-#     try
-#         Base.eval(Main, Expr(:using, Symbol(pkg)))
-#     catch err
-#         if err isa ArgumentError || err isa LoadError
-#             error(
-#                 "Missing example dependency `$(pkg)` for " *
-#                 "`examples/multi_agent_target_tracking/run_simulation.jl`.\n" *
-#                 "Activate an environment for this example and install its runtime dependencies, e.g.:\n" *
-#                 "  using Pkg\n" *
-#                 "  Pkg.activate(\"examples/multi_agent_target_tracking\")\n" *
-#                 "  Pkg.add($(repr(collect(_EXAMPLE_DEPENDENCIES))))"
-#             )
-#         end
-#         rethrow()
-#     end
-# end
 
-# _load_example_dependency("JSON3")
-# _load_example_dependency("CellularSheaves")
+# include(joinpath(@__DIR__, "src", "simulation", "integrate.jl")) -- changed path to ControlSheaves/ControlSheaves.jl
 
-abstract type AbstractDynamics end
-struct NoDynamics <: AbstractDynamics end
-struct TrophicDynamics <: AbstractDynamics end
-struct CurrentAgentDynamics <: AbstractDynamics end
-struct CurrentTargetDynamics <: AbstractDynamics end
-
-include(joinpath(@__DIR__, "src", "simulation", "integrate.jl"))
+import CellularSheaves.ControlSheaves: run_dynamics, run_dynamics!
 include(joinpath(@__DIR__, "src", "simulation", "dynamics.jl"))
-include(joinpath(@__DIR__, "src", "core", "entity.jl"))
+
+# include(joinpath(@__DIR__, "src", "core", "entity.jl"))       -- changed path to ControlSheaves/ControlSheaves.jl
 include(joinpath(@__DIR__, "src", "io", "data_manager.jl"))
 include(joinpath(@__DIR__, "src", "core", "cellular_sheaf.jl"))
 
