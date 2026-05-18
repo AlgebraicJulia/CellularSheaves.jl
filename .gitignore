@@ -30,3 +30,11 @@ sysimage.so
 .DS_Store
 .vscode
 .ipynb_checkpoints
+
+# AI Stuff
+.agents
+.claude
+skills-lock.json
+
+# Benchmarking
+bench/results.json

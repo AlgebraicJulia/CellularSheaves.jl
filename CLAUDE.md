@@ -14,6 +14,21 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 julia --project=. -e 'include("test/network_sheaves/SheafLaplacian.jl")'
 ```
 
+**Setup benchmark environment (first time only):**
+```julia
+julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+```
+
+**Run benchmarks:**
+```
+julia --project=bench bench/benchmarks.jl
+```
+
+**Update baseline after an intentional perf change:**
+```
+cp bench/results.json bench/baseline.json
+```
+
 **Install docs dependencies (first time only):**
 ```julia
 julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
