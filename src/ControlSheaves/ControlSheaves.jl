@@ -13,6 +13,8 @@ export AbstractDynamics,
        run_dynamics!,
        update_dynamics!,
        compute_control_output!,
+       build_ode_problem,
+       build_integrator,
        integrate_step,
        integrate_step!
 
