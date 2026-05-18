@@ -13,7 +13,8 @@ export AbstractDynamics,
        run_dynamics!,
        update_dynamics!,
        compute_control_output!,
-       integrate_step
+       integrate_step,
+       integrate_step!
 
 abstract type AbstractDynamics end
 struct NoDynamics <: AbstractDynamics end

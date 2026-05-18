@@ -12,6 +12,7 @@ mutable struct Entity{D <: AbstractDynamics}
     synchronization_error::Vector{Float64}
     offsets::Vector{Float64}
     neighbors::Vector{AbstractEntity}
+    integration_problem::Any
 end
 
 mutable struct Target{D <: AbstractDynamics} <: AbstractEntity{D}
@@ -37,8 +38,9 @@ function Entity{D}(initial_position::Vector{Float64}, time_steps::Int, id::Strin
     synchronization_error = zeros(Float64, num_states)
     offsets = zeros(Float64, num_states)
     neighbors = AbstractEntity[]
+    integration_problem = nothing
     return Entity{D}(id, num_states, time_step_delta, positions, velocities,
-                     control_output, synchronization_error, offsets, neighbors)
+                     control_output, synchronization_error, offsets, neighbors, integration_problem)
 end
 
 function Target{D}(initial_position::Vector{Float64}, time_steps::Int, id::String,
@@ -123,7 +125,13 @@ function update_dynamics!(entity::AbstractEntity{D}, step::Int) where {D <: Abst
     run_dynamics!(entity, vel, pos_prev)
     vel .+= entity.control_output
 
-    result = integrate_step(pos_prev, step - 2, entity.time_step_delta) do _t, pos
+    if isnothing(entity.integration_problem)
+        entity.integration_problem = build_ode_problem(pos_prev, step - 2, entity.time_step_delta) do _t, pos
+            return run_dynamics(entity, pos) + entity.control_output
+        end
+    end
+
+    result = integrate_step!(entity.integration_problem, pos_prev, step - 2, entity.time_step_delta) do _t, pos
         return run_dynamics(entity, pos) + entity.control_output
     end
 
