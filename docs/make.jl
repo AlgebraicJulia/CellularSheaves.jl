@@ -54,7 +54,8 @@ makedocs(
         "generated/control/controlled_double_integrator.md",
         "generated/control/controlled_vehicle_platoon.md",
         "generated/control/controlled_planar_quadrotor.md",
-        "generated/control/controlled_mass_spring_damper_chain.md"
+        "generated/control/controlled_mass_spring_damper_chain.md",
+        "generated/control/multi_quadrotor_target_tracking.md"
       ]
     ],
     "Feature Guides"=>Any[
