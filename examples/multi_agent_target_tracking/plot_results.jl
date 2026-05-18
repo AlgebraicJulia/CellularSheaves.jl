@@ -62,23 +62,6 @@ function _default_config_path()
     return joinpath(_example_root(), "configurations", "config_common.json")
 end
 
-
-# function _example_root()
-#     return normpath(@__DIR__)
-# end
-
-# # function _default_outdir()
-# #     return joinpath(_example_root(), "examples", "simulation_data")
-# # end
-
-# function _default_outdir()
-#     return joinpath(_example_root(), "simulation_data")
-# end
-
-# function _default_config_path()
-#     return joinpath(_example_root(), "configurations", "config_common.json")
-# end
-
 function get_simulation_data(outdir::AbstractString)
     agent_dir = joinpath(outdir, "agent_data")
     target_dir = joinpath(outdir, "target_data")

@@ -77,7 +77,46 @@ function run_dynamics!(entity::AbstractEntity{D}, output, input) where {D <: Abs
     return run_dynamics!(D, output, input)
 end
 
-function update_dynamics!(entity::AbstractEntity, step::Int)
+# edit function so save computations for basic dynamics NoDynamics, CurrentAgentDynamics, CurrentTargetDynamics
+# function update_dynamics!(entity::AbstractEntity, step::Int)
+#     vel      = view(entity.velocities, :, step)
+#     pos_prev = view(entity.positions,  :, step - 1)
+
+#     run_dynamics!(entity, vel, pos_prev)
+#     vel .+= entity.control_output
+
+#     result = integrate_step(pos_prev, step - 2, entity.time_step_delta) do _t, pos
+#         return run_dynamics(entity, pos) + entity.control_output
+#     end
+
+#     entity.positions[:, step] .= result
+#     return entity
+# end
+
+function _direct_update_dynamics!(entity::AbstractEntity, step::Int)
+    vel      = view(entity.velocities, :, step)
+    pos_prev = view(entity.positions,  :, step - 1)
+
+    run_dynamics!(entity, vel, pos_prev)
+    vel .+= entity.control_output
+
+    entity.positions[:, step] .= pos_prev .+ entity.time_step_delta .* vel
+    return entity
+end
+
+function update_dynamics!(entity::AbstractEntity{NoDynamics}, step::Int)
+    return _direct_update_dynamics!(entity, step)
+end
+
+function update_dynamics!(entity::AbstractEntity{CurrentAgentDynamics}, step::Int)
+    return _direct_update_dynamics!(entity, step)
+end
+
+function update_dynamics!(entity::AbstractEntity{CurrentTargetDynamics}, step::Int)
+    return _direct_update_dynamics!(entity, step)
+end
+
+function update_dynamics!(entity::AbstractEntity{D}, step::Int) where {D <: AbstractDynamics}
     vel      = view(entity.velocities, :, step)
     pos_prev = view(entity.positions,  :, step - 1)
 
