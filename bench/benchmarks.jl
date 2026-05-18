@@ -36,7 +36,7 @@ for (name, _) in FACTORIES
     SUITE["coboundary_map"][name] = BenchmarkGroup()
     for n in SIZES
         s = SHEAVES[(name, n)]
-        SUITE["coboundary_map"][name][n] = @benchmarkable coboundary_map($s)
+        SUITE["coboundary_map"][name]["n$n"] = @benchmarkable coboundary_map($s)
     end
 end
 
@@ -50,7 +50,7 @@ for (name, _) in FACTORIES
     for n in SIZES
         s = SHEAVES[(name, n)]
         #SUITE["laplacian"][name]["matrix"][n] = @benchmarkable sheaf_laplacian_matrix($s)
-        SUITE["laplacian"][name]["matrix_direct"][n] = @benchmarkable sheaf_laplacian_matrix_direct($s)
+        SUITE["laplacian"][name]["matrix_direct"]["n$n"] = @benchmarkable sheaf_laplacian_matrix_direct($s)
     end
 end
 
@@ -64,7 +64,7 @@ for (name, _) in FACTORIES
         s = SHEAVES[(name, n)]
         v2 = name == "path" ? n : n ÷ 2
         boundary = Dict(1 => zeros(STALK_DIM), v2 => ones(STALK_DIM))
-        SUITE["harmonic_extension"][name][n] = @benchmarkable harmonic_extension($s, $boundary)
+        SUITE["harmonic_extension"][name]["n$n"] = @benchmarkable harmonic_extension($s, $boundary)
     end
 end
 
@@ -77,7 +77,7 @@ for (name, _) in FACTORIES
     for n in SIZES
         s = SHEAVES[(name, n)]
         x0 = randn(STALK_DIM * n)
-        SUITE["nearest_global_section"][name][n] = @benchmarkable nearest_global_section($s, $x0; method=:ldl)
+        SUITE["nearest_global_section"][name]["n$n"] = @benchmarkable nearest_global_section($s, $x0; method=:ldl)
     end
 end
 
@@ -100,7 +100,7 @@ if isfile(baseline_path)
     println("\n=== Regression report vs baseline ===")
     display(j)
     local any_regression = false
-    for (keys, jmt) in leaves(j)
+    for (keys, jmt) in BenchmarkTools.leaves(j)
         if jmt.time === :regression && ratio(jmt).time > 2.0
             @warn "Regression >2x" benchmark = join(string.(keys), "/") factor = ratio(jmt).time
             any_regression = true
