@@ -34,7 +34,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking],
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,
@@ -77,6 +77,7 @@ makedocs(
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
       "api/herding_platoon.md",
+      "api/multi_agent_tracking.md",
     ],
   ]
 )
