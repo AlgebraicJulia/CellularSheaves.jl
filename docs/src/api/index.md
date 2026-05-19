@@ -24,6 +24,7 @@ This API reference is organized by module so that each page maps to a coherent p
 
 - [Trajectory Sheaves](trajectory_sheaves.md)
 - [Herding Platoon Utilities](herding_platoon.md)
+- [Multi-Agent Tracking](multi_agent_tracking.md)
 
 ## DSL and Parser Internals
 

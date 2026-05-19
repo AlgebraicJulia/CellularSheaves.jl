@@ -34,7 +34,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking],
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,
@@ -54,7 +54,8 @@ makedocs(
         "generated/control/controlled_double_integrator.md",
         "generated/control/controlled_vehicle_platoon.md",
         "generated/control/controlled_planar_quadrotor.md",
-        "generated/control/controlled_mass_spring_damper_chain.md"
+        "generated/control/controlled_mass_spring_damper_chain.md",
+        "generated/control/multi_quadrotor_target_tracking.md"
       ]
     ],
     "Feature Guides"=>Any[
@@ -76,6 +77,7 @@ makedocs(
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
       "api/herding_platoon.md",
+      "api/multi_agent_tracking.md",
     ],
   ]
 )
