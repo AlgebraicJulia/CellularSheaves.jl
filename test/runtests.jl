@@ -20,4 +20,5 @@ end
   include("network_sheaves/ControlledOptimalControl.jl")
   include("network_sheaves/NullspaceTrajectoryFamily.jl")
   include("network_sheaves/ControlledTrajectoryExamples.jl")
+  include("network_sheaves/MultiAgentTracking.jl")
 end

@@ -34,7 +34,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.AsynchSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.AsynchSheaves],
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,
@@ -54,8 +54,9 @@ makedocs(
         "generated/control/controlled_double_integrator.md",
         "generated/control/controlled_vehicle_platoon.md",
         "generated/control/controlled_planar_quadrotor.md",
-        "generated/control/controlled_mass_spring_damper_chain.md"
-      ],
+        "generated/control/controlled_mass_spring_damper_chain.md",
+        "generated/control/multi_quadrotor_target_tracking.md"
+        ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
         "generated/asynch/step_size_comparison.md",
@@ -77,12 +78,13 @@ makedocs(
       "api/sheaf_morphisms.md",
       "api/pushforwards.md",
       "api/pushouts.md",
-      "api/trajectory_sheaves.md",
       "api/dsl.md",
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
+      "api/trajectory_sheaves.md",
       "api/herding_platoon.md",
-      "api/asynch.md",
+      "api/multi_agent_tracking.md",
+      "api/asynch.md"
     ],
   ]
 )
