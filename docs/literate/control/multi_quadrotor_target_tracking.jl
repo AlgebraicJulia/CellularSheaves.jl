@@ -57,6 +57,11 @@ Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
 nx = size(Ad, 1)
 nu = size(Bd, 2)
 
+# State-index constants used when constructing projection matrices.
+const IDX_Y   = 1  # lateral position y
+const IDX_Z   = 2  # altitude z
+const IDX_PHI = 3  # roll angle φ
+
 # ## Reusable Helper Functions
 #
 # All four scenarios share the same building blocks.  The functions below are
@@ -159,13 +164,11 @@ function build_time_expanded_tracking_sheaf(
     consensus_weight::Float64 = 1.0,
     tracking_weight::Float64 = 5.0,
 )
-    if length(assignment) != n_agents
+    if length(assignment) != n_agents ||
+            !(all(j -> j >= 1, assignment) && all(j -> j <= n_targets, assignment))
         throw(ArgumentError(
-            "length(assignment) must equal n_agents = $n_agents, got $(length(assignment))"))
-    end
-    if !(all(j -> j >= 1, assignment) && all(j -> j <= n_targets, assignment))
-        throw(ArgumentError(
-            "All entries of assignment must be in 1:$n_targets, got $assignment"))
+            "assignment must be a length-$n_agents vector with all entries in " *
+            "1:$n_targets, got $assignment"))
     end
     nx_loc = size(Ad, 1)
     nu_loc = size(Bd, 2)
@@ -280,14 +283,16 @@ end
     run_scenario(label, sheaf, boundary, idx, k, n_agents, nx)
 
 Run `harmonic_extension` on `sheaf` with the given `boundary` conditions.
-Prints the Laplacian energy ``\\sqrt{z^\\top L z}`` (equal to ``\\|dz\\|`` when all
-vertices participate in edges) and the nullspace dimension, and returns
+Prints the Laplacian energy ``\\sqrt{z^\\top L z}`` (equal to ``\\|dz\\|`` for all
+edges in the sheaf) and the nullspace dimension, and returns
 `(state_trajectories, nullspace_dim, residual)`.
 
-`sheaf_laplacian_matrix_direct` is used instead of `coboundary_map` because the
-latter only generates columns for vertices that appear in at least one edge;
-when some targets are isolated (e.g. when `include_target_dynamics = false`),
-`coboundary_map` would produce a matrix of the wrong size.
+`sheaf_laplacian_matrix_direct` is used instead of `coboundary_map` because
+`coboundary_map` produces a matrix whose **column count** equals the sum of stalk
+dimensions only for vertices that appear in at least one edge.  When targets are
+isolated (i.e. `include_target_dynamics = false`), those vertices are absent from
+the coboundary matrix, making `d * Array(z_harmonic)` a size mismatch.
+`sheaf_laplacian_matrix_direct` always spans all ``n_{\\text{total}}`` stalk dimensions.
 """
 function run_scenario(label::String, sheaf, boundary, idx, k::Int, n_agents::Int, nx::Int)
     z_harmonic, null_basis = harmonic_extension(sheaf, boundary)
@@ -315,9 +320,9 @@ k         = 40
 
 times = h .* (0:k)
 
-R_yz = state_projection_matrix([1, 2], nx, nu)  # 2×8: projects onto (y, z)
-R_y  = state_projection_matrix([1],    nx, nu)  # 1×8: projects onto y
-R_z  = state_projection_matrix([2],    nx, nu)  # 1×8: projects onto z
+R_yz = state_projection_matrix([IDX_Y, IDX_Z], nx, nu)  # 2×8: projects onto (y, z)
+R_y  = state_projection_matrix([IDX_Y],         nx, nu)  # 1×8: projects onto y
+R_z  = state_projection_matrix([IDX_Z],         nx, nu)  # 1×8: projects onto z
 
 # Bobbing reference trajectories (used in Scenarios 2–4).
 # Target 1 oscillates around z = 1.0 m; Target 2 around z = 2.0 m.
