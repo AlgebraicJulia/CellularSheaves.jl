@@ -25,7 +25,7 @@ include("integrate.jl")
 include("entity.jl")
 include("MultiAgentTracking.jl")
 
-using .MultiAgentTracking
+import .MultiAgentTracking
 export MultiAgentTracking
 
 end # module ControlSheaves
