@@ -195,12 +195,12 @@ as unevaluated `Expr` objects.  Use `bind!` to supply concrete values after
 calling this function:
 
 ```julia
-prog = parse_tracking_program(Meta.quot(quote
+prog = parse_tracking_program(quote
     agent(a1; dynamics=(A,B), period=dt)
     horizon(K)
     time(initial = 0)
     time(final = K)
-end))
+end)
 bind!(prog, :K, 40)
 bind!(prog, :A, [1.0 0.0; 0.0 1.0])
 bind!(prog, :B, [0.0; 1.0;;])
@@ -210,13 +210,13 @@ bind!(prog, :dt, 0.05)
 # Example — late binding with indexed reference
 
 ```julia
-prog = parse_tracking_program(Meta.quot(quote
+prog = parse_tracking_program(quote
     agent(a1; dynamics=(A,B), period=dt)
     horizon(K)
     time(initial = 0)
     time(final = K)
     boundary(:agent, a; at=t, value=x[a,t])
-end))
+end)
 bind!(prog, :K, 5)
 bind!(prog, :a, 1)
 bind!(prog, :t, 3)

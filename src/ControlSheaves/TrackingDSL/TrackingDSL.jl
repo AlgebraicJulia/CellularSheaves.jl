@@ -21,27 +21,27 @@ using CellularSheaves
 using CellularSheaves.ControlSheaves.TrackingDSL
 
 prog = @tracking_problem begin
-    space X = R^2
-    space U = R^1
-    map A : X -> X
-    map B : U -> X
-    map R_y : X -> X
-    agent a1 dynamics (A, B) period dt
-    agent a2 dynamics (A, B) period dt
-    target t1
-    horizon K
-    time initial = 0
-    time final   = K
-    times Tall   = initial:final
-    consensus c1 between (a1, a2) using (R_y, R_y) at Tall
-    track     tr1 agent a1 target t1 using (R_y, R_y) at final
-    boundary  agent a1 at initial = x0_a1
-    bind K    => 10
-    bind A    => [1.0 0.0; 0.0 1.0]
-    bind B    => [0.0; 1.0;;]
-    bind R_y  => [1.0 0.0; 0.0 0.0]
-    bind dt   => 0.05
-    bind x0_a1 => [0.0, 0.0, 0.0]
+    space(X) = R^2
+    space(U) = R^1
+    map_decl(A, X, X)
+    map_decl(B, U, X)
+    map_decl(R_y, X, X)
+    agent(a1; dynamics=(A,B), period=dt)
+    agent(a2; dynamics=(A,B), period=dt)
+    target(t1)
+    horizon(K)
+    time(initial = 0)
+    time(final = K)
+    times(Tall = initial:final)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
+    track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
+    boundary(:agent, a1; at=initial, value=x0_a1)
+    bind(K => 10)
+    bind(A => [1.0 0.0; 0.0 1.0])
+    bind(B => [0.0; 1.0;;])
+    bind(R_y => [1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 0.0])
+    bind(dt => 0.05)
+    bind(x0_a1 => [0.0, 0.0, 0.0])
 end
 
 result = prog |> validate_tracking_program |> resolve_tracking_program |> lower_tracking_program

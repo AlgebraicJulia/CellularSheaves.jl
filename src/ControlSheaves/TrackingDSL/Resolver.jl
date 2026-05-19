@@ -202,12 +202,7 @@ function _apply_binds!(env::Dict, stmts)
             _store_indexed_bind!(env, stmt.lhs, stmt.rhs)
         else
             name = (stmt.lhs::PlainRef).name
-            if haskey(env, name)
-                # Later binding overwrites earlier (allows re-binding)
-                env[name] = stmt.rhs
-            else
-                env[name] = stmt.rhs
-            end
+            env[name] = stmt.rhs
         end
     end
     # Second pass: resolve any deferred indexed binds

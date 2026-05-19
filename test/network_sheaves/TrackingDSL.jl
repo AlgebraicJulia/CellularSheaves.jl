@@ -29,7 +29,7 @@ import CellularSheaves.ControlSheaves.MultiAgentTracking as MAT
 function _make_test_prog(; k=3)
     Ad = [1.0 0.0; 0.0 1.0]  # nx=2
     Bd = reshape([0.0; 1.0], 2, 1)  # nu=1
-    # stalk_dim = 3; R_y must be 3×3
+    # stalk_dim = nx+nu = 3; R_y must be (stalk_dim)×(stalk_dim)
     R_y = Matrix{Float64}(I, 3, 3)
 
     prog = parse_tracking_program(quote
