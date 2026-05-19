@@ -27,8 +27,12 @@ struct CurrentTargetDynamics <: AbstractDynamics end
 include("integrate.jl")
 include("entity.jl")
 include("MultiAgentTracking.jl")
+include("TrackingDSL/TrackingDSL.jl")
 
 import .MultiAgentTracking
 export MultiAgentTracking
+
+import .TrackingDSL
+export TrackingDSL
 
 end # module ControlSheaves
