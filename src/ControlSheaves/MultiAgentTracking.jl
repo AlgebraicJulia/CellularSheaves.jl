@@ -178,6 +178,19 @@ struct ScenarioResult
     z_col::Int
 end
 
+function Base.show(io::IO, sr::ScenarioResult)
+    print(io, "ScenarioResult(\"$(sr.label)\": null dim = $(sr.null_dim), ||dz|| = $(round(sr.residual; sigdigits=4)))")
+end
+
+function Base.show(io::IO, ::MIME"text/plain", sr::ScenarioResult)
+    println(io, "ScenarioResult:")
+    println(io, "  label    : $(sr.label)")
+    println(io, "  null dim : $(sr.null_dim)")
+    println(io, "  ||dz||   : $(round(sr.residual; sigdigits=4))")
+    println(io, "  agents   : $(length(sr.agent_trajs))")
+    print(  io, "  targets  : $(length(sr.target_trajs))")
+end
+
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
@@ -252,6 +265,13 @@ Restriction maps for consensus and tracking edges are pre-scaled by
 resulting Laplacian is `weight * R' * R`.
 """
 function build_time_expanded_tracking_sheaf(prob::TrackingProblem)
+    @argcheck prob.consensus_weight >= 0 "consensus_weight must be non-negative, got $(prob.consensus_weight)"
+    @argcheck prob.tracking_weight  >= 0 "tracking_weight must be non-negative, got $(prob.tracking_weight)"
+    @argcheck all(t -> 0 <= t <= prob.k, prob.consensus_timesteps) "all consensus_timesteps must be in 0:$(prob.k), got $(prob.consensus_timesteps)"
+    @argcheck all(t -> 0 <= t <= prob.k, prob.tracking_timesteps)  "all tracking_timesteps must be in 0:$(prob.k), got $(prob.tracking_timesteps)"
+    @argcheck all(((i,j),) -> 1 <= i <= prob.n_agents && 1 <= j <= prob.n_agents, prob.agent_edges) "agent_edges indices must be in 1:$(prob.n_agents), got $(prob.agent_edges)"
+    @argcheck all(te -> 1 <= te.agent_index  <= prob.n_agents,  prob.tracking_edges) "TrackingEdge agent_index must be in 1:$(prob.n_agents)"
+    @argcheck all(te -> 1 <= te.target_index <= prob.n_targets, prob.tracking_edges) "TrackingEdge target_index must be in 1:$(prob.n_targets)"
     nx_loc  = size(prob.Ad, 1)
     nu_loc  = size(prob.Bd, 2)
     nt      = nx_loc + nu_loc
@@ -330,16 +350,13 @@ from the harmonic-extension output (no intermediate concatenations).
 """
 function extract_state_trajectories(z_harmonic, prob::TrackingProblem)
     nx_loc = size(prob.Ad, 1)
-    return [
-        begin
-            X = Matrix{Float64}(undef, prob.k + 1, nx_loc)
-            for t in 0:prob.k
-                X[t + 1, :] = Array(z_harmonic[Block(agent_vertex(prob, i, t))])[1:nx_loc]
-            end
-            X
+    return map(1:prob.n_agents) do i
+        X = Matrix{Float64}(undef, prob.k + 1, nx_loc)
+        for t in 0:prob.k
+            X[t + 1, :] = Array(z_harmonic[Block(agent_vertex(prob, i, t))])[1:nx_loc]
         end
-        for i in 1:prob.n_agents
-    ]
+        X
+    end
 end
 
 """
@@ -372,7 +389,6 @@ function run_scenario(
     xv = Array(z_harmonic)
     r  = sqrt(max(0.0, dot(xv, L * xv)))
     nd = size(null_basis, 2)
-    println("$label:  ||dz|| = $(round(r; sigdigits=4)),   null dim = $nd")
     trajs = extract_state_trajectories(z_harmonic, prob)
     return ScenarioResult(label, collect(times), trajs, target_trajs, nd, r, y_col, z_col)
 end

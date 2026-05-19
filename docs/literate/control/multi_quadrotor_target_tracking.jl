@@ -317,7 +317,7 @@ plot(result4)
 # ## Comparison: How Constraints Shape the Solution Space
 #
 # The four scenarios are summarised below.  The nullspace dimension and
-# Laplacian residual ``\|dz\|`` are printed at runtime.
+# Laplacian residual ``\|dz\|`` are displayed via the `ScenarioResult` show method.
 #
 # | Scenario | Consensus | Tracking | Active timesteps | Initial alignment |
 # |----------|-----------|----------|-----------------|-------------------|
@@ -350,7 +350,9 @@ plot(result4)
 # misaligned; the minimum-energy harmonic path converges to the terminal constraint
 # while the large nullspace deforms it freely in the unconstrained directions.
 
-println("Summary: null dims = [$(result1.null_dim), $(result2.null_dim), $(result3.null_dim), $(result4.null_dim)]")
+for r in (result1, result2, result3, result4)
+    show(stdout, MIME("text/plain"), r); println()
+end
 
 bar(["S1\n(y,z) all-t", "S2\ny/z all-t", "S3\ny/z last-t", "S4\ny/z last-t\n(mis-tgt)"],
     [result1.null_dim, result2.null_dim, result3.null_dim, result4.null_dim];
