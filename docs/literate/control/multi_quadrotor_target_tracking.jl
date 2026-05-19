@@ -151,15 +151,18 @@ struct BobbingTarget
 end
 
 """
-    trajectory(bt::BobbingTarget, t_range, h, nx, nu)
+    trajectory(bt::BobbingTarget, t_range::AbstractVector{<:Integer}, h, nx, nu)
 
-Return a `Vector` of stalk vectors for `bt` over the integer range `t_range`.
+Return a `Vector` of `length(t_range)` stalk vectors for `bt`, one per integer timestep.
 
 Altitude follows ``z(t) = z_c + A\\sin(\\omega t_s)`` where ``t_s = t \\cdot h``;
 ``\\dot z`` is set to the analytic derivative.  Lateral position is `y_fixed`;
 all other state components and all controls are zero.
+
+`t_range` can be any integer range, e.g. `0:k` or `10:20`, enabling trajectory
+evaluation over an arbitrary sub-interval without recomputing from scratch.
 """
-function trajectory(bt::BobbingTarget, t_range, h::Float64, nx::Int, nu::Int)
+function trajectory(bt::BobbingTarget, t_range::AbstractVector{<:Integer}, h::Float64, nx::Int, nu::Int)
     return map(t_range) do t
         t_s = t * h
         z_t    = bt.z_center + bt.z_amplitude * sin(bt.omega * t_s)
@@ -446,6 +449,11 @@ bt2 = BobbingTarget(0.0, 2.0, 0.3, omega_2periods)   # target 2: y = 0, z ≈ 2 
 traj_bt1 = trajectory(bt1, 0:k, h, nx, nu)
 traj_bt2 = trajectory(bt2, 0:k, h, nx, nu)
 
+# Named edge configurations reused across scenarios.
+edges_12 = [(1, 2)]  # consensus: agents 1 and 2 must agree
+te_yz = [TrackingEdge(1, 1, R_yz, R_yz), TrackingEdge(2, 2, R_yz, R_yz)]  # Scenario 1
+te_z  = [TrackingEdge(1, 1, R_z,  R_z),  TrackingEdge(2, 2, R_z,  R_z)]   # Scenarios 2–4
+
 # ## Scenario 1: Full (y,z) Coordination at Every Timestep
 #
 # This scenario imposes the maximum coordination: both consensus edges and tracking
@@ -471,9 +479,7 @@ traj_t2_s1 = generate_reference_trajectory(x0_a2_s1, xk_a2_s1, k, Ad, Bd, nx, nu
 
 prob1 = TrackingProblem(
     n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
-    [(1, 2)],
-    [TrackingEdge(1, 1, R_yz, R_yz), TrackingEdge(2, 2, R_yz, R_yz)],
-    R_yz,
+    edges_12, te_yz, R_yz,
     collect(0:k), collect(0:k),
     true, 1.0, 5.0,
 )
@@ -512,9 +518,7 @@ plot(result1)
 
 prob2 = TrackingProblem(
     n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
-    [(1, 2)],
-    [TrackingEdge(1, 1, R_z, R_z), TrackingEdge(2, 2, R_z, R_z)],
-    R_y,
+    edges_12, te_z, R_y,
     collect(0:k), collect(0:k),
     false, 1.0, 5.0,
 )
@@ -548,9 +552,7 @@ plot(result2)
 
 prob3 = TrackingProblem(
     n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
-    [(1, 2)],
-    [TrackingEdge(1, 1, R_z, R_z), TrackingEdge(2, 2, R_z, R_z)],
-    R_y,
+    edges_12, te_z, R_y,
     [k], [k],
     false, 1.0, 5.0,
 )
@@ -588,9 +590,7 @@ traj_bt2_s4 = trajectory(bt2_s4, 0:k, h, nx, nu)
 
 prob4 = TrackingProblem(
     n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
-    [(1, 2)],
-    [TrackingEdge(1, 1, R_z, R_z), TrackingEdge(2, 2, R_z, R_z)],
-    R_y,
+    edges_12, te_z, R_y,
     [k], [k],
     false, 1.0, 5.0,
 )
