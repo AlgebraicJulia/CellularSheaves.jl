@@ -68,7 +68,7 @@ Bc = reshape([0.0, 1.0], 2, 1)
 # sections are exactly the feasible sampled state-control trajectories.
 
 h = 0.25   # sample period (seconds)
-k = 8      # number of time steps
+k = 18      # number of time steps
 
 F  = EuclideanSheaf{Float64}(fill(2, 1))   # base sheaf: one vertex, 2D stalk
 ts = ControlledTrajectorySheaf(F, Ac, Bc, h, k)
@@ -102,6 +102,64 @@ r = size(N, 2)
 println("Trajectory dimension p = ", (k+1)*n + k*m)
 println("Free parameters      r = ", r)
 
+extract_positions(traj) = traj[1:2:(k+1)*n, :]
+extract_velocities(traj) = traj[2:2:((k+1)*n+1), :]
+
+positions = extract_positions(z_p_raw)
+velocities = extract_velocities(z_p_raw)
+plt_soln = plot(positions, label="x")
+plot!(plt_soln, velocities, label="v")
+plt_soln
+
+# Plot the trajectories as perturbations of the optimal trajectory.
+
+
+function plot_nullspace_family(N)
+    N, R = qr(N, ColumnNorm())
+    max_family = 8
+    if r < max_family
+        max_family = r
+    end
+    println("Plotting first $max_family of $(r) basis trajectories.")
+    family_positions = extract_positions(N[:, 1:max_family])
+    family_velocities = extract_velocities(N[:, 1:max_family])
+
+    times_state   = h .* (0:k)
+    times_control = h .* (0:k-1)
+
+    p_family_position = plot(
+        xlabel="time (s)", ylabel="position",
+        title="Nullspace family: position trajectories")
+    p_family_velocity = plot(
+        xlabel="time (s)", ylabel="velocity",
+        title="Nullspace family: velocity trajectories")
+    
+    for j in 1:size(family_positions,2)
+        pj = family_positions[:, j]
+        vj = family_velocities[:,j]
+        plot!(p_family_position, times_state, pj; lw=1.5, alpha=0.6, label="n$(j): p")
+        plot!(p_family_velocity, times_state, vj; lw=1.5, alpha=0.6, ls=:dash, label="n$(j): ṗ")
+    end
+    plot(p_family_position, p_family_velocity)
+end
+
+plot_nullspace_family(N)
+    # plot!(p_family_state, times_state, positions; lw=3, color=:black, label="optimal p")
+    # plot!(p_family_state, times_state, velocities; lw=3, color=:black, ls=:dash, label="optimal ṗ")
+
+p_family_ctrl = plot(
+    xlabel="time (s)", ylabel="u",
+    title="Nullspace family: control trajectories")
+for (j, zf) in enumerate(family)
+    uj = [Array(zf[Block(k+1+t)])[1] for t in 1:k]
+    plot!(p_family_ctrl, times_control, uj; lw=1.5, alpha=0.6, label="n$(j)")
+end
+plot!(p_family_ctrl, times_control, controls; lw=3, color=:black, label="optimal")
+
+family_plot = plot(p_family_state, p_family_ctrl; layout=(2, 1), size=(800, 560))
+family_plot
+
+
 # ## Step 5: Assemble the LQR objective
 #
 # We minimize the quadratic running cost
@@ -118,7 +176,7 @@ println("Free parameters      r = ", r)
 
 Q  = Matrix{Float64}(I, n, n)
 Ru = Matrix{Float64}(I, m, m)
-Qf = 10.0 * Matrix{Float64}(I, n, n)   # heavier terminal penalty
+Qf = (10.0*(k/8.0)) * Matrix{Float64}(I, n, n)   # heavier terminal penalty
 
 H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
 # Rows/columns are ordered: [x₁, x₂, …, x_{k+1}, u₁, …, u_k].
