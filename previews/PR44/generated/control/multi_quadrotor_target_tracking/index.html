@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf · CellularSheaves.jl</title><meta name="title" content="Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf · CellularSheaves.jl"/><meta property="og:title" content="Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf · CellularSheaves.jl"/><meta property="twitter:title" content="Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../search_index.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../../literate_example/">Code Example</a></li><li><a class="tocitem" href="../../sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../nullspace/">Computing the Nullspace of the Sheaf Laplacian</a></li><li><a class="tocitem" href="../../nearest_global_section_iterative/">Nearest Global Section: Iterative Method</a></li><li><a class="tocitem" href="../../sheaf_laplacian_benchmarks/">Faster Sheaf Laplacians: Direct Block Assembly</a></li><li><a class="tocitem" href="../../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li><li><a class="tocitem" href="../../trajectory_sheaf/">Spring Oscillator: Four Colocation Methods Compared</a></li><li><input class="collapse-toggle" id="menuitem-2-8" type="checkbox" checked/><label class="tocitem" for="menuitem-2-8"><span class="docs-label">Control Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../controlled_double_integrator/">Controlled Trajectory Examples: 1 — Double Integrator</a></li><li><a class="tocitem" href="../controlled_vehicle_platoon/">Controlled Trajectory Examples: 2 — Vehicle Platoon</a></li><li><a class="tocitem" href="../controlled_planar_quadrotor/">Controlled Trajectory Examples: 3 — Planar Quadrotor</a></li><li><a class="tocitem" href="../controlled_mass_spring_damper_chain/">Controlled Trajectory Examples: 4 — Mass-Spring-Damper Chain</a></li><li class="is-active"><a class="tocitem" href>Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a><ul class="internal"><li><a class="tocitem" href="#Step-1:-Single-agent-dynamics-(planar-quadrotor)"><span>Step 1: Single-agent dynamics (planar quadrotor)</span></a></li><li><a class="tocitem" href="#Step-2:-Time-expanded-multi-agent-sheaf-construction"><span>Step 2: Time-expanded multi-agent sheaf construction</span></a></li><li><a class="tocitem" href="#Step-3:-Problem-instance"><span>Step 3: Problem instance</span></a></li><li><a class="tocitem" href="#Step-4:-Boundary-data-and-harmonic-extension"><span>Step 4: Boundary data and harmonic extension</span></a></li><li><a class="tocitem" href="#Step-5:-Extract-trajectories"><span>Step 5: Extract trajectories</span></a></li><li><a class="tocitem" href="#Step-6:-Visualize-trajectories-in-a-2x2-multipanel-figure"><span>Step 6: Visualize trajectories in a 2x2 multipanel figure</span></a></li><li><a class="tocitem" href="#Step-7:-Check-temporal-dynamics-edges-directly"><span>Step 7: Check temporal dynamics edges directly</span></a></li><li><a class="tocitem" href="#Key-takeaway"><span>Key takeaway</span></a></li></ul></li></ul></li></ul></li><li><span class="tocitem">Feature Guides</span><ul><li><a class="tocitem" href="../../../features/core_sheaf_workflows/">Core Sheaf Workflows</a></li><li><a class="tocitem" href="../../../features/morphisms_and_pushforwards/">Morphisms and Pushforwards</a></li><li><a class="tocitem" href="../../../features/trajectory_and_control/">Trajectory and Control</a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../../api/">API Reference</a></li><li><a class="tocitem" href="../../../api/network_sheaves/">Network Sheaves</a></li><li><a class="tocitem" href="../../../api/sheaf_interface/">Sheaf Interface</a></li><li><a class="tocitem" href="../../../api/euclidean_sheaves/">Euclidean Sheaves</a></li><li><a class="tocitem" href="../../../api/graph_homomorphisms/">Graph Homomorphisms</a></li><li><a class="tocitem" href="../../../api/sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../../api/pushforwards/">Pushforwards</a></li><li><a class="tocitem" href="../../../api/pushouts/">Pushouts</a></li><li><a class="tocitem" href="../../../api/trajectory_sheaves/">Trajectory Sheaves</a></li><li><a class="tocitem" href="../../../api/dsl/">Cellular Sheaf DSL</a></li><li><a class="tocitem" href="../../../api/block_sparse_arrays/">Block Sparse Arrays</a></li><li><a class="tocitem" href="../../../api/potential_sheaves/">Potential Sheaves</a></li><li><a class="tocitem" href="../../../api/herding_platoon/">Herding Platoon Utilities</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li><a class="is-disabled">Control Examples</a></li><li class="is-active"><a href>Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/literate/control/multi_quadrotor_target_tracking.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Multi-Agent-Target-Tracking-via-a-Time-Expanded-Cellular-Sheaf"><a class="docs-heading-anchor" href="#Multi-Agent-Target-Tracking-via-a-Time-Expanded-Cellular-Sheaf">Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a><a id="Multi-Agent-Target-Tracking-via-a-Time-Expanded-Cellular-Sheaf-1"></a><a class="docs-heading-anchor-permalink" href="#Multi-Agent-Target-Tracking-via-a-Time-Expanded-Cellular-Sheaf" title="Permalink"></a></h1><p>This version encodes dynamics and coordination directly in one sheaf. Each vertex is one agent or one target at one time step.</p><p>For agents, the stalk is augmented as</p><p class="math-container">\[z_{i,t} = \begin{bmatrix} x_{i,t} \\ u_{i,t} \end{bmatrix}
+\in \mathbb{R}^{n_x+n_u},
+\qquad
+x_{i,t+1} = A_d x_{i,t} + B_d u_{i,t}.\]</p><p>Edge families:</p><ol><li>Temporal edges <code>agent(i,t) ↔ agent(i,t+1)</code> encode dynamics.</li><li>Temporal edges <code>target(j,t) ↔ target(j,t+1)</code> encode target evolution.</li><li>In-time edges <code>agent(i,t) ↔ agent(i&#39;,t)</code> encode consensus (position match).</li><li>In-time edges <code>agent(i,t) ↔ target(assign(i),t)</code> encode tracking/pinning.</li></ol><p>Targets are modeled with the same augmented quadrotor stalks as agents so that the tracking problem is feasible under the same sampled dynamics.</p><pre><code class="language-julia hljs">using CellularSheaves
+using CellularSheaves.TrajectorySheaves: continuous_to_discrete_zoh
+using LinearAlgebra
+using BlockArrays
+using Plots</code></pre><h2 id="Step-1:-Single-agent-dynamics-(planar-quadrotor)"><a class="docs-heading-anchor" href="#Step-1:-Single-agent-dynamics-(planar-quadrotor)">Step 1: Single-agent dynamics (planar quadrotor)</a><a id="Step-1:-Single-agent-dynamics-(planar-quadrotor)-1"></a><a class="docs-heading-anchor-permalink" href="#Step-1:-Single-agent-dynamics-(planar-quadrotor)" title="Permalink"></a></h2><pre><code class="language-julia hljs">g = 9.81
+m_veh = 0.5
+I_quad = 0.01
+ell = 0.25
+
+Ac = [0.0  0.0   0.0   1.0  0.0  0.0;
+      0.0  0.0   0.0   0.0  1.0  0.0;
+      0.0  0.0   0.0   0.0  0.0  1.0;
+      0.0  0.0  -g     0.0  0.0  0.0;
+      0.0  0.0   0.0   0.0  0.0  0.0;
+      0.0  0.0   0.0   0.0  0.0  0.0]
+
+Bc = [0.0             0.0;
+      0.0             0.0;
+      0.0             0.0;
+      0.0             0.0;
+      1.0 / m_veh     1.0 / m_veh;
+      ell / (2I_quad) -ell / (2I_quad)]
+
+h = 0.05
+Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
+
+nx = size(Ad, 1)
+nu = size(Bd, 2)
+npos = 2   # use (y,z) for consensus and pinning
+
+function selector_matrix(state_indices::AbstractVector{&lt;:Integer}, full_dim::Int)
+    @assert all(1 .&lt;= state_indices .&lt;= full_dim)
+    selector = zeros(Float64, length(state_indices), full_dim)
+    for (row, col) in enumerate(state_indices)
+        selector[row, col] = 1.0
+    end
+    return selector
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">selector_matrix (generic function with 1 method)</code></pre><h2 id="Step-2:-Time-expanded-multi-agent-sheaf-construction"><a class="docs-heading-anchor" href="#Step-2:-Time-expanded-multi-agent-sheaf-construction">Step 2: Time-expanded multi-agent sheaf construction</a><a id="Step-2:-Time-expanded-multi-agent-sheaf-construction-1"></a><a class="docs-heading-anchor-permalink" href="#Step-2:-Time-expanded-multi-agent-sheaf-construction" title="Permalink"></a></h2><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    build_time_expanded_tracking_sheaf(
+        n_agents, n_targets, k, Ad, Bd;
+        agent_edges, assignment,
+        target_transition, consensus_weight, pinning_weight)
+
+Construct a sheaf whose vertices are `(entity, time)` pairs.
+
+- Agent stalk dimension: `nx + nu` (state + control).
+- Target stalk dimension: `nx + nu` (state + control).
+&quot;&quot;&quot;
+function build_time_expanded_tracking_sheaf(
+    n_agents::Int,
+    n_targets::Int,
+    k::Int,
+    Ad::AbstractMatrix,
+    Bd::AbstractMatrix;
+    agent_edges::Vector{Tuple{Int,Int}},
+    assignment::Vector{Int},
+    agent_consensus_states::AbstractVector{&lt;:Integer},
+    target_pinning_states::AbstractVector{&lt;:Integer},
+    consensus_weight::Float64=1.0,
+    pinning_weight::Float64=5.0,
+)
+    nx = size(Ad, 1)
+    nu = size(Bd, 2)
+    nt = nx + nu
+
+    n_per_t = n_agents + n_targets
+    n_vertices = (k + 1) * n_per_t
+
+    vertex_dims = fill(nt, n_vertices)
+
+    function vid_agent(i::Int, t::Int)
+        return t * n_per_t + i
+    end
+
+    function vid_target(j::Int, t::Int)
+        return t * n_per_t + n_agents + j
+    end
+
+    for t in 0:k
+        for i in 1:n_agents
+            vertex_dims[vid_agent(i, t)] = nx + nu
+        end
+    end
+
+    sheaf = EuclideanSheaf{Float64}(vertex_dims)
+
+    agent_now_map = hcat(Matrix(Ad), Matrix(Bd))
+    agent_next_map = hcat(Matrix{Float64}(I, nx, nx), zeros(nx, nu))
+
+    for t in 0:k-1
+        for i in 1:n_agents
+            add_sheaf_edge!(
+                sheaf,
+                vid_agent(i, t),
+                vid_agent(i, t + 1),
+                agent_now_map,
+                agent_next_map,
+            )
+        end
+    end
+
+    for t in 0:k-1
+        for j in 1:n_targets
+            add_sheaf_edge!(
+                sheaf,
+                vid_target(j, t),
+                vid_target(j, t + 1),
+                agent_now_map,
+                agent_next_map,
+            )
+        end
+    end
+
+    agent_selector = selector_matrix(agent_consensus_states, nx)
+    target_selector = selector_matrix(target_pinning_states, nt)
+    P_agent = hcat(agent_selector, zeros(size(agent_selector, 1), nx - size(agent_selector, 2) + nu))
+    P_target = hcat(target_selector, zeros(size(target_selector, 1), nt - size(target_selector, 2)))
+    cscale = sqrt(consensus_weight)
+    pscale = sqrt(pinning_weight)
+
+    for t in 0:k
+        for (i, j) in agent_edges
+            add_sheaf_edge!(
+                sheaf,
+                vid_agent(i, t),
+                vid_agent(j, t),
+                cscale * P_agent,
+                cscale * P_agent,
+            )
+        end
+    end
+
+    for t in 0:k
+        for i in 1:n_agents
+            j = assignment[i]
+            add_sheaf_edge!(
+                sheaf,
+                vid_agent(i, t),
+                vid_target(j, t),
+                pscale * P_agent,
+                pscale * P_target,
+            )
+        end
+    end
+
+    index = (
+        agent=vid_agent,
+        target=vid_target,
+        n_per_t=n_per_t,
+        nx=nx,
+        nu=nu,
+        nt=nt,
+    )
+
+    return sheaf, index
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Main.build_time_expanded_tracking_sheaf</code></pre><h2 id="Step-3:-Problem-instance"><a class="docs-heading-anchor" href="#Step-3:-Problem-instance">Step 3: Problem instance</a><a id="Step-3:-Problem-instance-1"></a><a class="docs-heading-anchor-permalink" href="#Step-3:-Problem-instance" title="Permalink"></a></h2><pre><code class="language-julia hljs">n_agents = 2
+n_targets = 2
+k = 36
+
+agent_edges = [(1, 2)]
+assignment = [1, 2]   # agent i tracks target assignment[i]
+    agent_consensus_states = [1, 2]
+    target_pinning_states = [1, 2]
+
+sheaf, idx = build_time_expanded_tracking_sheaf(
+    n_agents,
+    n_targets,
+    k,
+    Ad,
+    Bd;
+    agent_edges=agent_edges,
+    assignment=assignment,
+    agent_consensus_states=agent_consensus_states,
+    target_pinning_states=target_pinning_states,
+    consensus_weight=1.0,
+    pinning_weight=8.0,
+)
+
+println(&quot;Vertices: &quot;, length(vertex_stalks(sheaf)))
+println(&quot;Edges:    &quot;, length(edge_stalks(sheaf)))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Vertices: 148
+Edges:    255</code></pre><h2 id="Step-4:-Boundary-data-and-harmonic-extension"><a class="docs-heading-anchor" href="#Step-4:-Boundary-data-and-harmonic-extension">Step 4: Boundary data and harmonic extension</a><a id="Step-4:-Boundary-data-and-harmonic-extension-1"></a><a class="docs-heading-anchor-permalink" href="#Step-4:-Boundary-data-and-harmonic-extension" title="Permalink"></a></h2><p>We fix initial/final agent states and target endpoints only.</p><pre><code class="language-julia hljs">function agent_stalk(x::AbstractVector, u::AbstractVector)
+    return vcat(Vector{Float64}(x), Vector{Float64}(u))
+end
+
+function generate_quadrotor_reference_trajectory(x0::AbstractVector, xk::AbstractVector)
+    reference_sheaf = EuclideanSheaf{Float64}(fill(nx + nu, k + 1))
+    reference_now_map = hcat(Matrix(Ad), Matrix(Bd))
+    reference_next_map = hcat(Matrix{Float64}(I, nx, nx), zeros(nx, nu))
+    for t in 1:k
+        add_sheaf_edge!(reference_sheaf, t, t + 1, reference_now_map, reference_next_map)
+    end
+
+    reference_boundary = Dict{Int,Vector{Float64}}(
+        1 =&gt; agent_stalk(x0, zeros(nu)),
+        k + 1 =&gt; agent_stalk(xk, zeros(nu)),
+    )
+
+    reference_path, _ = harmonic_extension(reference_sheaf, reference_boundary)
+    return [Array(reference_path[Block(t)]) for t in 1:k+1]
+end
+
+boundary = Dict{Int,Vector{Float64}}()
+
+x0_a1 = zeros(nx)
+xk_a1 = zeros(nx)
+xk_a1[1] = 1.0
+xk_a1[2] = 0.5
+
+x0_a2 = copy(x0_a1)
+xk_a2 = copy(xk_a1)
+
+u0 = zeros(nu)
+
+boundary[idx.agent(1, 0)] = agent_stalk(x0_a1, u0)
+boundary[idx.agent(2, 0)] = agent_stalk(x0_a2, u0)
+boundary[idx.agent(1, k)] = agent_stalk(xk_a1, u0)
+boundary[idx.agent(2, k)] = agent_stalk(xk_a2, u0)
+
+target0 = [
+    zeros(nx),
+    zeros(nx),
+]
+targetk = [
+    [1.0, 0.5, 0.0, 0.0, 0.0, 0.0],
+    [1.0, 0.5, 0.0, 0.0, 0.0, 0.0],
+]
+
+target_reference = [
+    generate_quadrotor_reference_trajectory(target0[1], targetk[1]),
+    generate_quadrotor_reference_trajectory(target0[2], targetk[2]),
+]
+
+for j in 1:n_targets
+    for t in 0:k
+        boundary[idx.target(j, t)] = target_reference[j][t + 1]
+    end
+end
+
+z_harmonic, null_basis = harmonic_extension(sheaf, boundary)
+
+d = coboundary_map(sheaf)
+residual = norm(d * Array(z_harmonic))
+
+println(&quot;Harmonic extension residual ||d*z|| = &quot;, residual)
+println(&quot;Nullspace dimension = &quot;, size(null_basis, 2))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Harmonic extension residual ||d*z|| = 1.948821699790103e-6
+Nullspace dimension = 0</code></pre><h2 id="Step-5:-Extract-trajectories"><a class="docs-heading-anchor" href="#Step-5:-Extract-trajectories">Step 5: Extract trajectories</a><a id="Step-5:-Extract-trajectories-1"></a><a class="docs-heading-anchor-permalink" href="#Step-5:-Extract-trajectories" title="Permalink"></a></h2><pre><code class="language-julia hljs">function unpack_agent_block(v::AbstractVector, nx::Int, nu::Int)
+    return v[1:nx], v[nx+1:nx+nu]
+end
+
+times = h .* (0:k)
+
+y1 = zeros(k + 1)
+z1 = zeros(k + 1)
+phi1 = zeros(k + 1)
+y2 = zeros(k + 1)
+z2 = zeros(k + 1)
+phi2 = zeros(k + 1)
+u11 = zeros(k + 1)
+u12 = zeros(k + 1)
+u21 = zeros(k + 1)
+u22 = zeros(k + 1)
+
+for t in 0:k
+    b1 = Array(z_harmonic[Block(idx.agent(1, t))])
+    b2 = Array(z_harmonic[Block(idx.agent(2, t))])
+    x1, u1 = unpack_agent_block(b1, nx, nu)
+    x2, u2 = unpack_agent_block(b2, nx, nu)
+
+    y1[t + 1] = x1[1]
+    z1[t + 1] = x1[2]
+    phi1[t + 1] = x1[3]
+    y2[t + 1] = x2[1]
+    z2[t + 1] = x2[2]
+    phi2[t + 1] = x2[3]
+
+    u11[t + 1] = u1[1]
+    u12[t + 1] = u1[2]
+    u21[t + 1] = u2[1]
+    u22[t + 1] = u2[2]
+end</code></pre><h2 id="Step-6:-Visualize-trajectories-in-a-2x2-multipanel-figure"><a class="docs-heading-anchor" href="#Step-6:-Visualize-trajectories-in-a-2x2-multipanel-figure">Step 6: Visualize trajectories in a 2x2 multipanel figure</a><a id="Step-6:-Visualize-trajectories-in-a-2x2-multipanel-figure-1"></a><a class="docs-heading-anchor-permalink" href="#Step-6:-Visualize-trajectories-in-a-2x2-multipanel-figure" title="Permalink"></a></h2><pre><code class="language-julia hljs">t_normalized = range(0.0, 1.0; length=k+1)
+
+p_plane = scatter(y1, z1;
+    marker_z=t_normalized, color=:plasma, colorbar=true,
+    label=&quot;A1&quot;, xlabel=&quot;y (m)&quot;, ylabel=&quot;z (m)&quot;,
+    title=&quot;(y,z) Phase Plane (Agent 1)&quot;,
+    markerstrokewidth=0, markersize=7)
+plot!(p_plane, y1, z1; lw=1.5, color=:gray, label=&quot;&quot;)
+scatter!(p_plane, [y1[1]], [z1[1]]; color=:green, markersize=9, markershape=:star5, label=&quot;start&quot;)
+scatter!(p_plane, [y1[end]], [z1[end]]; color=:red, markersize=9, markershape=:star5, label=&quot;end&quot;)
+
+p_y = plot(times, y1;
+    lw=2.5, marker=:circle, label=&quot;A1&quot;,
+    xlabel=&quot;time (s)&quot;, ylabel=&quot;y (m)&quot;,
+    title=&quot;Lateral Position vs Time&quot;,
+    markersize=4)
+plot!(p_y, times, y2; lw=2.5, marker=:circle, color=:darkorange, label=&quot;A2&quot;, markersize=4)
+
+p_z = plot(times, z1;
+    lw=2.5, marker=:square, label=&quot;A1&quot;,
+    xlabel=&quot;time (s)&quot;, ylabel=&quot;z (m)&quot;,
+    title=&quot;Vertical Position vs Time&quot;,
+    markersize=4, linestyle=:dash)
+plot!(p_z, times, z2; lw=2.5, marker=:square, color=:darkorange, label=&quot;A2&quot;, markersize=4, linestyle=:dash)
+
+p_ctrl = plot(times, u11;
+    lw=2, marker=:circle, label=&quot;A1: u₁&quot;,
+    xlabel=&quot;time (s)&quot;, ylabel=&quot;control&quot;,
+    title=&quot;Control Inputs vs Time&quot;,
+    markersize=3)
+plot!(p_ctrl, times, u12; lw=2, marker=:square, linestyle=:dot, label=&quot;A1: u₂&quot;, markersize=3)
+plot!(p_ctrl, times, u21; lw=2, marker=:circle, color=:darkorange, label=&quot;A2: u₁&quot;, markersize=3)
+plot!(p_ctrl, times, u22; lw=2, marker=:square, color=:darkorange, linestyle=:dot, label=&quot;A2: u₂&quot;, markersize=3)
+
+plot(p_plane, p_y, p_z, p_ctrl; layout=(2, 2), size=(1000, 900))</code></pre><img src="61d9d10b.svg" alt="Example block output"/><h2 id="Step-7:-Check-temporal-dynamics-edges-directly"><a class="docs-heading-anchor" href="#Step-7:-Check-temporal-dynamics-edges-directly">Step 7: Check temporal dynamics edges directly</a><a id="Step-7:-Check-temporal-dynamics-edges-directly-1"></a><a class="docs-heading-anchor-permalink" href="#Step-7:-Check-temporal-dynamics-edges-directly" title="Permalink"></a></h2><pre><code class="language-julia hljs">max_dyn_residual = Ref(0.0)
+for t in 0:k-1
+    for i in 1:n_agents
+        zt = Array(z_harmonic[Block(idx.agent(i, t))])
+        zt1 = Array(z_harmonic[Block(idx.agent(i, t + 1))])
+
+        xt, ut = unpack_agent_block(zt, nx, nu)
+        xt1, _ = unpack_agent_block(zt1, nx, nu)
+
+        r = norm(Ad * xt + Bd * ut - xt1)
+        max_dyn_residual[] = max(max_dyn_residual[], r)
+    end
+end
+
+println(&quot;Max agent dynamics residual = &quot;, max_dyn_residual[])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Max agent dynamics residual = 3.0037587155940507e-7</code></pre><h2 id="Key-takeaway"><a class="docs-heading-anchor" href="#Key-takeaway">Key takeaway</a><a id="Key-takeaway-1"></a><a class="docs-heading-anchor-permalink" href="#Key-takeaway" title="Permalink"></a></h2><p>This construction uses one sheaf to encode:</p><ul><li>dynamics (temporal edges),</li><li>agent-agent consensus (in-time edges),</li><li>agent-target tracking (pinning edges).</li></ul><p>No direct-sum black-box system is formed; the multi-agent/time structure is explicit in the sheaf topology.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../controlled_mass_spring_damper_chain/">« Controlled Trajectory Examples: 4 — Mass-Spring-Damper Chain</a><a class="docs-footer-nextpage" href="../../../features/core_sheaf_workflows/">Core Sheaf Workflows »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 19 May 2026 11:32">Tuesday 19 May 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
