@@ -200,6 +200,23 @@ using SparseArrays
     end
 
     # -----------------------------------------------------------------------
+    # 9b. Non-PSD reduced Hessian throws before attempting the pseudoinverse solve
+    # -----------------------------------------------------------------------
+    @testset "non-convex reduced problem throws" begin
+        k3 = 3
+        ts3 = ControlledTrajectorySheaf(F1, Ac_int, Bc_int, h, k3)
+        x1  = [0.0]
+        xk1 = [1.0]
+        q_p, N = feasible_control_trajectory_basis(ts3, x1, xk1)
+
+        # Make the reduced Hessian strictly negative along one feasible direction.
+        v = N[:, 1]
+        H_bad = -(v * v')
+
+        @test_throws ArgumentError optimal_control_trajectory(ts3, x1, xk1, H_bad, zeros(size(H_bad, 1)))
+    end
+
+    # -----------------------------------------------------------------------
     # 10. Reduced first-order optimality condition holds
     # -----------------------------------------------------------------------
     @testset "reduced first-order optimality" begin
