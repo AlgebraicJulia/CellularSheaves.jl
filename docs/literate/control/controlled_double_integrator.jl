@@ -104,7 +104,17 @@ println("Free parameters      r = ", r)
 
 # ## Step 5: Assemble the LQR objective
 #
-# We minimize the quadratic running cost
+# The conditioning diagnostic above helps distinguish two different effects:
+# the full sheaf Laplacian is singular for structural reasons, whereas the
+# restricted interior block `L_II` is the matrix actually inverted in the
+# harmonic extension step.
+#
+# As in the scalar integrator example, a nonzero running state penalty `Q`
+# pulls the optimizer toward smaller intermediate states and can visibly squash
+# the trajectory. To emphasize the minimum-control-effort solution between fixed
+# endpoints, we set `Q = 0` here.
+#
+# We therefore minimize the quadratic running cost
 #
 # ```math
 # J(z) = \tfrac{1}{2} \sum_{t=1}^{k}
@@ -114,11 +124,13 @@ println("Free parameters      r = ", r)
 #
 # The assembled cost Hessian ``H`` is block-diagonal: ``k`` copies of ``Q``
 # on the running state blocks, ``Q_f`` on the terminal block, and ``k`` copies
-# of ``R_u`` on the control blocks.
+# of ``R_u`` on the control blocks. Because `x_{k+1}` is fixed as a hard
+# boundary condition, the `Q_f` term is constant over the feasible set and does
+# not affect the optimizer.
 
-Q  = Matrix{Float64}(I, n, n)
+Q  = zeros(n, n)
 Ru = Matrix{Float64}(I, m, m)
-Qf = 10.0 * Matrix{Float64}(I, n, n)   # heavier terminal penalty
+Qf = 0.0 * Matrix{Float64}(I, n, n)   # constant over the feasible set here
 
 H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
 # Rows/columns are ordered: [x₁, x₂, …, x_{k+1}, u₁, …, u_k].

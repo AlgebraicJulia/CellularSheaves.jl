@@ -902,7 +902,7 @@ reduced first-order conditions
 When the reduced Hessian ``N^\\top H N`` is singular, the minimum-norm optimizer
 is returned (using the pseudoinverse).  If the reduced problem is unbounded below
 (i.e. the right-hand side has a component outside the range of the reduced Hessian),
-an `ArgumentError` is thrown.
+or if the reduced Hessian is not positive semidefinite, an `ArgumentError` is thrown.
 
 # Arguments
 - `ts`  — a `ControlledTrajectorySheaf{T}`.
@@ -923,6 +923,7 @@ an `ArgumentError` is thrown.
 - `ArgumentError` if `size(H)` is not `p × p`.
 - `ArgumentError` if `length(f)` is not `p`.
 - `ArgumentError` if the reduced quadratic problem is unbounded below.
+- `ArgumentError` if the reduced Hessian is not positive semidefinite.
 """
 function optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
                                     x1::AbstractVector,
@@ -961,14 +962,27 @@ function optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
     # Step 3: Solve using ChordalLDLt pseudoinverse.
     Rred_sparse = sparse(Rred)
     M_ldlt      = ldlt!(ChordalLDLt(Rred_sparse), RowMaximum())
-    α_opt, null_red = ldlt_pseudoinverse_and_null(M_ldlt, -rred)
+
+    # Cheap convexity check: for a symmetric matrix, a negative LDL pivot
+    # certifies that the reduced Hessian is not positive semidefinite.
+    D = M_ldlt.D
+    max_abs = maximum(i -> abs(D[i, i]), 1:size(D, 1); init=zero(T))
+    tol = eps(T) * max(one(T), max_abs)
+    min_diag = minimum(i -> D[i, i], 1:size(D, 1); init=zero(T))
+    if min_diag < -tol
+        throw(ArgumentError(
+            "The reduced Hessian is not positive semidefinite " *
+            "(minimum LDL pivot = $(min_diag)). The reduced quadratic problem is non-convex."))
+    end
+
+    α_opt, null_red = ldlt_pseudoinverse_and_null(M_ldlt, -rred; tol=tol)
 
     # Check bounded: rred must lie in the range of Rred.
     # Equivalently, rred must be orthogonal to the null space of Rred.
     if size(null_red, 2) > 0
         out_of_range = norm(null_red' * rred)
-        tol = eps(T) * max(one(T), norm(rred))
-        if out_of_range > tol * sqrt(T(size(null_red, 2)))
+        range_tol = eps(T) * max(one(T), norm(rred))
+        if out_of_range > range_tol * sqrt(T(size(null_red, 2)))
             throw(ArgumentError(
                 "The reduced quadratic problem is unbounded below: the reduced " *
                 "linear term has a component (norm $(out_of_range)) outside the " *
