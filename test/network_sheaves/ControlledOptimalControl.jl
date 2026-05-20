@@ -6,6 +6,10 @@ using SparseArrays
 
 @testset "ControlledOptimalControl" begin
 
+    function block_slice(offsets, block_index)
+        return offsets[block_index] + 1:offsets[block_index + 1]
+    end
+
     # -----------------------------------------------------------------------
     # Primary test system: scalar integrator  ẋ = u
     #   Ac = [0], Bc = [1], h = 1  →  Ad = [1], Bd = [1]
@@ -208,6 +212,72 @@ using SparseArrays
         Rred = N' * H * N
         rred = N' * (H * q_p + f)
         @test norm(Rred * α_opt + rred) < 1e-10
+    end
+
+    # -----------------------------------------------------------------------
+    # 11. Regression test for the scalar integrator docs example
+    #     Checks feasibility basis dimension, harmonic-extension residual,
+    #     affine-space consistency, dynamics, and LQR first-order optimality.
+    # -----------------------------------------------------------------------
+    @testset "scalar integrator docs example regression" begin
+        h_ex  = 0.5
+        k_ex  = 5
+        ts_ex = ControlledTrajectorySheaf(F1, Ac_int, Bc_int, h_ex, k_ex)
+
+        x1_ex  = [0.0]
+        xk1_ex = [2.0]
+
+        z_p, N = feasible_control_trajectory_basis(ts_ex, x1_ex, xk1_ex)
+        @test size(N, 2) == k_ex - 1
+
+        boundary = Dict(1 => copy(x1_ex), k_ex + 2 => copy(xk1_ex))
+        x_p_internal, _ = harmonic_extension(ts_ex.sheaf, boundary)
+
+        interior_verts = collect(2:k_ex + 1)
+        boundary_verts = [1, k_ex + 2]
+        L_II, L_IB = restricted_laplacian_blocks(ts_ex.sheaf, interior_verts, boundary_verts)
+
+        stalks = vertex_stalks(ts_ex.sheaf)
+        offsets = [0; cumsum(stalks)]
+        x_I = vcat([Array(x_p_internal)[block_slice(offsets, v)] for v in interior_verts]...)
+        x_B = vcat([Array(x_p_internal)[block_slice(offsets, v)] for v in boundary_verts]...)
+        @test norm(L_II * x_I + L_IB * x_B) < 1e-10
+
+        z_p_block = BlockArray(z_p, vcat(fill(ts_ex.state_dim, k_ex + 1), fill(ts_ex.control_dim, k_ex)))
+        @test Array(z_p_block[Block(1)]) ≈ x1_ex
+        @test Array(z_p_block[Block(k_ex + 1)]) ≈ xk1_ex
+
+        for t in 1:k_ex
+            xt  = Array(z_p_block[Block(t)])
+            xt1 = Array(z_p_block[Block(t + 1)])
+            ut  = Array(z_p_block[Block(k_ex + 1 + t)])
+            @test norm(ts_ex.Ad * xt + ts_ex.Bd * ut - xt1) < 1e-10
+        end
+
+        Q_ex  = reshape([1.0], 1, 1)
+        Ru_ex = reshape([1.0], 1, 1)
+        Qf_ex = reshape([10.0], 1, 1)
+        H_ex, f_ex, _ = lqr_objective(ts_ex, Q_ex, Ru_ex; Qf=Qf_ex)
+
+        z_opt, α_opt, z_p_block_opt, null_basis = optimal_control_trajectory(ts_ex, x1_ex, xk1_ex, H_ex, f_ex)
+        @test Array(z_opt[Block(1)]) ≈ x1_ex
+        @test Array(z_opt[Block(k_ex + 1)]) ≈ xk1_ex
+        @test Array(z_opt) ≈ Array(z_p_block_opt) + null_basis * α_opt atol=1e-10
+
+        for t in 1:k_ex
+            xt  = Array(z_opt[Block(t)])
+            xt1 = Array(z_opt[Block(t + 1)])
+            ut  = Array(z_opt[Block(k_ex + 1 + t)])
+            @test norm(ts_ex.Ad * xt + ts_ex.Bd * ut - xt1) < 1e-10
+        end
+
+        Rred = null_basis' * H_ex * null_basis
+        rred = null_basis' * (H_ex * Array(z_p_block_opt) + f_ex)
+        @test norm(Rred * α_opt + rred) < 1e-10
+
+        J_opt = 0.5 * dot(Array(z_opt), H_ex * Array(z_opt)) + dot(Array(z_opt), f_ex)
+        J_p   = 0.5 * dot(Array(z_p_block_opt), H_ex * Array(z_p_block_opt)) + dot(Array(z_p_block_opt), f_ex)
+        @test J_opt <= J_p + 1e-10
     end
 
     # -----------------------------------------------------------------------
