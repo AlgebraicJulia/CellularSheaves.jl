@@ -596,6 +596,31 @@ function _public_trajectory_block_sizes(ts::ControlledTrajectorySheaf)
     return [fill(ts.state_dim, ts.k + 1); fill(ts.control_dim, ts.k)]
 end
 
+function _vertex_ranges(stalks::Vector{Int})
+    offsets = [0; cumsum(stalks)]
+    return [offsets[v] + 1 : offsets[v + 1] for v in eachindex(stalks)]
+end
+
+function _particular_and_null_svd(A, b; rtol=1e-10)
+    A0 = Matrix{Float64}(A)
+    b0 = Vector{Float64}(b)
+
+    F = svd(A0; full=true)
+    σmax = isempty(F.S) ? 0.0 : maximum(F.S)
+    tol = rtol * max(1.0, σmax)
+    r = count(σ -> σ > tol, F.S)
+
+    V = F.Vt'
+    x = zeros(size(A0, 2))
+
+    if r > 0
+        x .= V[:, 1:r] * ((F.U[:, 1:r]' * b0) ./ F.S[1:r])
+    end
+
+    N = V[:, r+1:end]
+    return x, N, r, tol
+end
+
 # ---------------------------------------------------------------------------
 # Feasible trajectory basis
 # ---------------------------------------------------------------------------
@@ -603,7 +628,8 @@ end
 """
     feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
                                       x1::AbstractVector{T},
-                                      xk1::AbstractVector{T}) where T
+                                      xk1::AbstractVector{T};
+                                      rtol::Real=1e-10) where T
         -> (z_p::Vector{T}, null_basis::Matrix{T})
 
 Return one feasible trajectory hitting the endpoint states together with a basis
@@ -625,6 +651,8 @@ The complete feasible set is `{ z_p + null_basis * α : α ∈ Rᵈ }`.
 - `ts`  — a `ControlledTrajectorySheaf{T}`.
 - `x1`  — initial state vector of length `ts.state_dim`.
 - `xk1` — terminal state vector of length `ts.state_dim`.
+- `rtol` — relative tolerance used to determine the numerical rank of the
+  restricted coboundary matrix.
 
 # Throws
 - `ArgumentError` if `length(x1) ≠ ts.state_dim`.
@@ -632,34 +660,50 @@ The complete feasible set is `{ z_p + null_basis * α : α ∈ Rᵈ }`.
 """
 function feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
                                             x1::AbstractVector,
-                                            xk1::AbstractVector) where T
+                                            xk1::AbstractVector;
+                                            rtol::Real=1e-10) where T
     n = ts.state_dim
     m = ts.control_dim
     k = ts.k
 
     @argcheck length(x1) == n "x1 must have length $n, got $(length(x1))"
     @argcheck length(xk1) == n "xk1 must have length $n, got $(length(xk1))"
+    @argcheck rtol > 0 "rtol must be positive, got $rtol"
 
-    boundary = Dict{Int,Vector{T}}(
-        1       => convert(Vector{T}, x1),
-        k + 2   => convert(Vector{T}, xk1),
-    )
+    stalks = vertex_stalks(ts.sheaf)
+    ranges = _vertex_ranges(stalks)
 
-    x_p_internal, null_internal = harmonic_extension(ts.sheaf, boundary)
+    boundary_verts = [1, k + 2]
+    interior_verts = setdiff(1:length(stalks), boundary_verts)
 
-    # Check that the endpoints are reachable: a feasible trajectory must satisfy
-    # the discrete dynamics, i.e. the coboundary residual must be zero.
-    x_p_vec  = Array(x_p_internal)
-    d_mat    = sparse(coboundary_map(ts.sheaf))
-    residual = norm(d_mat * x_p_vec)
-    if residual > sqrt(eps(T)) * (1 + norm(x_p_vec))
+    I_idx = vcat((collect(ranges[v]) for v in interior_verts)...)
+    B_idx = vcat((collect(ranges[v]) for v in boundary_verts)...)
+
+    xB = convert(Vector{T}, vcat(x1, xk1))
+
+    D = sparse(coboundary_map(ts.sheaf))
+    DI = D[:, I_idx]
+    DB = D[:, B_idx]
+    rhs = -DB * xB
+
+    xI, NI, _, tol = _particular_and_null_svd(DI, rhs; rtol=rtol)
+
+    residual = norm(DI * xI - rhs)
+    if residual > 100 * tol * (1 + norm(rhs))
         throw(ArgumentError(
             "Endpoint states are not mutually reachable under the controlled dynamics " *
             "(coboundary residual = $(residual)).  Check that x1 and xk1 are connected " *
             "by a valid k-step trajectory."))
     end
 
-    z_p        = _internal_to_public(x_p_vec, n, m, k)
+    x_internal = zeros(T, sum(stalks))
+    x_internal[I_idx] .= T.(xI)
+    x_internal[B_idx] .= xB
+
+    null_internal = zeros(T, sum(stalks), size(NI, 2))
+    null_internal[I_idx, :] .= T.(NI)
+
+    z_p        = _internal_to_public(x_internal, n, m, k)
     null_basis = _internal_to_public_matrix(null_internal, n, m, k)
 
     return z_p, null_basis

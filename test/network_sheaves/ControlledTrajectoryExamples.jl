@@ -3,6 +3,47 @@ using CellularSheaves
 using LinearAlgebra
 using BlockArrays
 
+function finite_horizon_controllability(ts)
+    hcat([ts.Ad^(ts.k - t) * ts.Bd for t in 1:ts.k]...)
+end
+
+function expected_feasible_dimension(ts; rtol=1e-10)
+    C = finite_horizon_controllability(ts)
+    return ts.k * ts.control_dim - rank(Matrix(C); rtol=rtol)
+end
+
+function public_dynamics_constraints(ts)
+    n = ts.state_dim
+    m = ts.control_dim
+    k = ts.k
+    p = (k + 1) * n + k * m
+
+    Aeq = zeros(k * n + 2n, p)
+    row = 1
+
+    Aeq[row:row+n-1, 1:n] .= Matrix{Float64}(I, n, n)
+    row += n
+
+    for t in 1:k
+        x_t  = (t - 1) * n + 1 : t * n
+        x_tp = t * n + 1 : (t + 1) * n
+        u_t  = (k + 1) * n + (t - 1) * m + 1 : (k + 1) * n + t * m
+
+        Aeq[row:row+n-1, x_t]  .= ts.Ad
+        Aeq[row:row+n-1, u_t]  .= ts.Bd
+        Aeq[row:row+n-1, x_tp] .-= Matrix{Float64}(I, n, n)
+        row += n
+    end
+
+    Aeq[row:row+n-1, k*n+1:(k+1)*n] .= Matrix{Float64}(I, n, n)
+    return Aeq
+end
+
+function full_space_kkt_residual(ts, z, H, f)
+    Z = nullspace(public_dynamics_constraints(ts))
+    return norm(Z' * (H * Array(z) + f))
+end
+
 @testset "ControlledTrajectoryExamples" begin
 
     # -----------------------------------------------------------------------
@@ -32,14 +73,17 @@ using BlockArrays
         Qf = 10.0 * Matrix{Float64}(I, n, n)
 
         H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
-        z_opt, _, _, _ = optimal_control_trajectory(ts, x1, xk1, H, f)
+        z_opt, _, _, N = optimal_control_trajectory(ts, x1, xk1, H, f)
 
         # Total coordinate length
         @test length(Array(z_opt)) == p
 
+        @test size(N, 2) == expected_feasible_dimension(ts)
+
         # Initial and terminal state blocks match requested endpoints
         @test Array(z_opt[Block(1)])     ≈ x1
         @test Array(z_opt[Block(k + 1)]) ≈ xk1
+        @test full_space_kkt_residual(ts, z_opt, H, f) < 1e-8
     end
 
     # -----------------------------------------------------------------------
@@ -71,11 +115,13 @@ using BlockArrays
         Qf = 10.0 * Matrix{Float64}(I, n, n)
 
         H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
-        z_opt, _, _, _ = optimal_control_trajectory(ts, x1, xk1, H, f)
+        z_opt, _, _, N = optimal_control_trajectory(ts, x1, xk1, H, f)
 
         # Optimization succeeds (no exception) and endpoints are satisfied
+        @test size(N, 2) == expected_feasible_dimension(ts)
         @test Array(z_opt[Block(1)])     ≈ x1
         @test Array(z_opt[Block(k + 1)]) ≈ xk1
+        @test full_space_kkt_residual(ts, z_opt, H, f) < 1e-8
 
         # Endpoint constraints per vehicle: vehicle 1 position and velocity
         @test Array(z_opt[Block(1)])[1:2]     ≈ x1[1:2]
@@ -125,9 +171,10 @@ using BlockArrays
         Qf = Diagonal([10.0, 10.0, 20.0, 1.0, 1.0, 1.0])
 
         H, f, _ = lqr_objective(ts, Matrix(Q), Ru; Qf=Matrix(Qf))
-        z_opt, _, _, _ = optimal_control_trajectory(ts, x1, xk1, H, f)
+        z_opt, _, _, null_basis = optimal_control_trajectory(ts, x1, xk1, H, f)
 
         # Control blocks have 2 coordinates per time step
+        @test size(null_basis, 2) == expected_feasible_dimension(ts)
         for t in 1:k
             ctrl_block = Array(z_opt[Block(k + 1 + t)])
             @test length(ctrl_block) == 2
@@ -135,6 +182,7 @@ using BlockArrays
 
         # All entries are finite
         @test all(isfinite, Array(z_opt))
+        @test full_space_kkt_residual(ts, z_opt, H, f) < 1e-8
     end
 
     # -----------------------------------------------------------------------
@@ -173,14 +221,16 @@ using BlockArrays
         Qf = 5.0 * Matrix{Float64}(I, n, n)
 
         H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)
-        z_opt, _, _, _ = optimal_control_trajectory(ts, x1, xk1, H, f)
+        z_opt, _, _, null_basis = optimal_control_trajectory(ts, x1, xk1, H, f)
 
         # Optimal trajectory satisfies the requested endpoints
+        @test size(null_basis, 2) == expected_feasible_dimension(ts)
         @test Array(z_opt[Block(1)])     ≈ x1
         @test Array(z_opt[Block(k + 1)]) ≈ xk1
 
         # State dimension is larger than the single-agent double integrator (2)
         @test ts.state_dim > 2
+        @test full_space_kkt_residual(ts, z_opt, H, f) < 1e-8
     end
 
 end
