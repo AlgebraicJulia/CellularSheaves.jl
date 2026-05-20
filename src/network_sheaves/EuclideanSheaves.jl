@@ -5,7 +5,9 @@ module EuclideanSheaves
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_laplacian_matrix_direct,
     restricted_laplacian_blocks, sheaf_from_graph, energy_function,
     nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
-    ldlt_pseudoinverse_and_null, zero_sheaf, constant_sheaf, cycle_sheaf
+    ldlt_pseudoinverse_and_null, HarmonicExtensionLDLDiagnostics,
+    HarmonicExtensionSVDDiagnostics, harmonic_extension_ldl_diagnostics,
+    harmonic_extension_svd_diagnostics, zero_sheaf, constant_sheaf, cycle_sheaf
 
 using ArgCheck: @argcheck
 using Graphs
@@ -607,6 +609,214 @@ function ldlt_pseudoinverse_and_null(M, b; tol=nothing)
     return x_p, null_vecs
 end
 
+function _harmonic_extension_partition(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVector})
+    nv_graph = nv(s.underlying_graph)
+    for (v, val) in boundary
+        @argcheck 1 <= v <= nv_graph
+        @argcheck length(val) == s.vertex_stalks[v]
+    end
+
+    boundary_verts = sort(collect(keys(boundary)))
+    interior_verts = setdiff(1:nv_graph, boundary_verts)
+    return boundary_verts, interior_verts
+end
+
+function _harmonic_extension_restricted_laplacian(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVector})
+    boundary_verts, interior_verts = _harmonic_extension_partition(s, boundary)
+    offsets = [0; cumsum(s.vertex_stalks)]
+    L_full = sheaf_laplacian_matrix_direct(s)
+
+    I_idx = isempty(interior_verts) ? Int[] :
+        vcat([offsets[v] + 1:offsets[v + 1] for v in interior_verts]...)
+    B_idx = isempty(boundary_verts) ? Int[] :
+        vcat([offsets[v] + 1:offsets[v + 1] for v in boundary_verts]...)
+
+    L_II = L_full[I_idx, I_idx]
+    L_IB = L_full[I_idx, B_idx]
+    return boundary_verts, interior_verts, L_II, L_IB
+end
+
+struct HarmonicExtensionLDLDiagnostics
+    boundary_vertices::Vector{Int}
+    interior_vertices::Vector{Int}
+    restricted_size::Tuple{Int,Int}
+    tolerance::Float64
+    nullity_estimate::Int
+    rank_estimate::Int
+    minimum_pivot::Float64
+    maximum_pivot::Float64
+    largest_zero_pivot::Float64
+    smallest_positive_pivot::Float64
+    pivot_gap::Float64
+    pivots::Vector{Float64}
+    absolute_pivots::Vector{Float64}
+    sorted_absolute_pivots::Vector{Float64}
+end
+
+struct HarmonicExtensionSVDDiagnostics
+    boundary_vertices::Vector{Int}
+    interior_vertices::Vector{Int}
+    restricted_size::Tuple{Int,Int}
+    tolerance::Float64
+    nullity_estimate::Int
+    rank_estimate::Int
+    largest_small_singular_value::Float64
+    smallest_positive_singular_value::Float64
+    singular_value_gap::Float64
+    condition_number::Float64
+    positive_condition_number::Float64
+    singular_values::Vector{Float64}
+end
+
+function _show_diag_line(io::IO, label::AbstractString, value)
+    println(io, rpad(label, 30), value)
+end
+
+_diag_fmt(x::Real) = isfinite(x) ? string(round(float(x), sigdigits=6)) : string(x)
+
+function Base.show(io::IO, ::MIME"text/plain", diag::HarmonicExtensionLDLDiagnostics)
+    println(io, "HarmonicExtensionLDLDiagnostics")
+    _show_diag_line(io, "boundary vertices", diag.boundary_vertices)
+    _show_diag_line(io, "interior vertices", diag.interior_vertices)
+    _show_diag_line(io, "restricted size", diag.restricted_size)
+    _show_diag_line(io, "tolerance", _diag_fmt(diag.tolerance))
+    _show_diag_line(io, "rank estimate", diag.rank_estimate)
+    _show_diag_line(io, "nullity estimate", diag.nullity_estimate)
+    _show_diag_line(io, "minimum pivot", _diag_fmt(diag.minimum_pivot))
+    _show_diag_line(io, "maximum pivot", _diag_fmt(diag.maximum_pivot))
+    _show_diag_line(io, "largest zero pivot", _diag_fmt(diag.largest_zero_pivot))
+    _show_diag_line(io, "smallest positive pivot", _diag_fmt(diag.smallest_positive_pivot))
+    _show_diag_line(io, "pivot gap", _diag_fmt(diag.pivot_gap))
+    _show_diag_line(io, "sorted |pivots|", diag.sorted_absolute_pivots)
+end
+
+function Base.show(io::IO, ::MIME"text/plain", diag::HarmonicExtensionSVDDiagnostics)
+    println(io, "HarmonicExtensionSVDDiagnostics")
+    _show_diag_line(io, "boundary vertices", diag.boundary_vertices)
+    _show_diag_line(io, "interior vertices", diag.interior_vertices)
+    _show_diag_line(io, "restricted size", diag.restricted_size)
+    _show_diag_line(io, "tolerance", _diag_fmt(diag.tolerance))
+    _show_diag_line(io, "rank estimate", diag.rank_estimate)
+    _show_diag_line(io, "nullity estimate", diag.nullity_estimate)
+    _show_diag_line(io, "largest small singular", _diag_fmt(diag.largest_small_singular_value))
+    _show_diag_line(io, "smallest positive singular", _diag_fmt(diag.smallest_positive_singular_value))
+    _show_diag_line(io, "singular value gap", _diag_fmt(diag.singular_value_gap))
+    _show_diag_line(io, "condition number", _diag_fmt(diag.condition_number))
+    _show_diag_line(io, "positive condition #", _diag_fmt(diag.positive_condition_number))
+    _show_diag_line(io, "singular values", diag.singular_values)
+end
+
+"""
+    harmonic_extension_ldl_diagnostics(s::EuclideanSheaf,
+                                       boundary::Dict{Int,<:AbstractVector};
+                                       tol=nothing)
+        -> HarmonicExtensionLDLDiagnostics
+
+Compute LDL-based diagnostics for the restricted Laplacian `L_II` used by
+[`harmonic_extension`](@ref) for the boundary data `boundary`.
+
+The boundary and interior vertex sets are exactly those induced by the harmonic
+extension problem: `boundary` fixes the boundary vertices and the remaining
+vertices are treated as interior. The diagnostics are computed from the sparse
+`ChordalLDLt` factorization of `L_II` with `RowMaximum` pivoting, matching the
+solver path used internally by [`harmonic_extension`](@ref).
+
+Returns a `HarmonicExtensionLDLDiagnostics` struct. Its fields expose the same
+partition metadata and pivot summary used internally, and its text/plain `show`
+method prints a structured diagnostic table.
+
+When `L_II` is empty (no interior degrees of freedom), the returned arrays are
+empty and the rank/nullity estimates are both zero.
+"""
+function harmonic_extension_ldl_diagnostics(s::EuclideanSheaf,
+                                            boundary::Dict{Int,<:AbstractVector};
+                                            tol=nothing)
+    boundary_verts, interior_verts, L_II, _ = _harmonic_extension_restricted_laplacian(s, boundary)
+
+    if size(L_II, 1) == 0
+        return HarmonicExtensionLDLDiagnostics(
+            boundary_verts, interior_verts, size(L_II), 0.0, 0, 0,
+            0.0, 0.0, 0.0, 0.0, Inf, Float64[], Float64[], Float64[])
+    end
+
+    M = ldlt!(ChordalLDLt(L_II), RowMaximum())
+    pivots = [M.D[i, i] for i in 1:size(M.D, 1)]
+    abs_pivots = abs.(pivots)
+    max_abs = maximum(abs_pivots; init=0.0)
+    threshold = isnothing(tol) ? eps(Float64) * max(1.0, max_abs) : Float64(tol)
+    zero_pivots = filter(<=(threshold), abs_pivots)
+    positive_pivots = filter(>(threshold), abs_pivots)
+
+    return HarmonicExtensionLDLDiagnostics(
+        boundary_verts,
+        interior_verts,
+        size(L_II),
+        threshold,
+        length(zero_pivots),
+        length(positive_pivots),
+        minimum(pivots),
+        maximum(pivots),
+        isempty(zero_pivots) ? 0.0 : maximum(zero_pivots),
+        isempty(positive_pivots) ? 0.0 : minimum(positive_pivots),
+        isempty(positive_pivots) ? Inf : minimum(positive_pivots) /
+            max(threshold, isempty(zero_pivots) ? threshold : maximum(zero_pivots)),
+        pivots,
+        abs_pivots,
+        sort(abs_pivots),
+    )
+end
+
+"""
+    harmonic_extension_svd_diagnostics(s::EuclideanSheaf,
+                                       boundary::Dict{Int,<:AbstractVector};
+                                       tol=nothing)
+        -> HarmonicExtensionSVDDiagnostics
+
+Compute SVD-based diagnostics for the restricted Laplacian `L_II` used by
+[`harmonic_extension`](@ref) for the boundary data `boundary`.
+
+The interface matches [`harmonic_extension_ldl_diagnostics`](@ref). The return
+value is a `HarmonicExtensionSVDDiagnostics` struct with the same partition
+metadata, plus singular-value-specific diagnostics and a formatted `show`
+method for interactive inspection.
+
+When `L_II` is empty (no interior degrees of freedom), the singular-value arrays
+are empty and the condition numbers are reported as `Inf`.
+"""
+function harmonic_extension_svd_diagnostics(s::EuclideanSheaf,
+                                            boundary::Dict{Int,<:AbstractVector};
+                                            tol=nothing)
+    boundary_verts, interior_verts, L_II, _ = _harmonic_extension_restricted_laplacian(s, boundary)
+
+    if size(L_II, 1) == 0
+        return HarmonicExtensionSVDDiagnostics(
+            boundary_verts, interior_verts, size(L_II), 0.0, 0, 0,
+            0.0, 0.0, Inf, Inf, Inf, Float64[])
+    end
+
+    singular_values = svdvals(Matrix(L_II))
+    max_sv = maximum(singular_values; init=0.0)
+    threshold = isnothing(tol) ? eps(Float64) * max(1.0, max_sv) : Float64(tol)
+    small_svs = filter(<=(threshold), singular_values)
+    positive_svs = filter(>(threshold), singular_values)
+
+    return HarmonicExtensionSVDDiagnostics(
+        boundary_verts,
+        interior_verts,
+        size(L_II),
+        threshold,
+        length(small_svs),
+        length(positive_svs),
+        isempty(small_svs) ? 0.0 : maximum(small_svs),
+        isempty(positive_svs) ? 0.0 : minimum(positive_svs),
+        isempty(positive_svs) ? Inf : minimum(positive_svs) /
+            max(threshold, isempty(small_svs) ? threshold : maximum(small_svs)),
+        cond(Matrix(L_II)),
+        isempty(positive_svs) ? Inf : maximum(positive_svs) / minimum(positive_svs),
+        singular_values,
+    )
+end
+
 """
     harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVector})
         -> (BlockVector, Matrix)
@@ -634,8 +844,7 @@ function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVect
     end
 
     offsets        = [0; cumsum(s.vertex_stalks)]
-    boundary_verts = sort(collect(keys(boundary)))
-    interior_verts = setdiff(1:nv_graph, boundary_verts)
+    boundary_verts, interior_verts, L_II, L_IB = _harmonic_extension_restricted_laplacian(s, boundary)
     n_total        = sum(s.vertex_stalks)
 
     # Short-circuit: no interior dofs — nothing to solve
@@ -648,9 +857,6 @@ function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVect
 
     B_idx = isempty(boundary_verts) ? Int[] :
         vcat([offsets[v]+1:offsets[v+1] for v in boundary_verts]...)
-
-    # Assemble L_II and L_IB directly without materialising the full Laplacian
-    L_II, L_IB = restricted_laplacian_blocks(s, interior_verts, boundary_verts)
 
     if isempty(boundary_verts)
         b = zeros(length(I_idx))
