@@ -4,8 +4,8 @@ module EuclideanSheaves
 
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_laplacian_matrix_direct,
     restricted_laplacian_blocks, sheaf_from_graph, energy_function,
-    nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
-    ldlt_pseudoinverse_and_null, HarmonicExtensionLDLDiagnostics,
+    nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, nullspace_svd,
+    harmonic_extension, ldlt_pseudoinverse_and_null, HarmonicExtensionLDLDiagnostics,
     HarmonicExtensionSVDDiagnostics, harmonic_extension_ldl_diagnostics,
     harmonic_extension_svd_diagnostics, zero_sheaf, constant_sheaf, cycle_sheaf
 
@@ -549,15 +549,22 @@ with `RowMaximum` pivoting).
 
 The factorisation is ``X = P^\\mathsf{T} L D L^\\mathsf{T} P``.  Columns of `D`
 whose absolute diagonal value is at or below `tol` (default:
-``\\varepsilon_\\text{Float64} \\times \\max(1, \\|D\\|_\\infty)``) identify null
+``\\sqrt{\\varepsilon_\\text{Float64}} \\times \\max(1, \\|D\\|_\\infty)``) identify null
 directions; the corresponding columns of `P^{-1} (L^\\mathsf{T})^{-1}` form the
 returned basis matrix.
+
+The default tolerance uses ``\\sqrt{\\varepsilon}`` rather than ``\\varepsilon``
+because the LDLt factorisation accumulates rounding errors whose magnitude scales
+as ``O(\\varepsilon \\cdot \\kappa)`` where ``\\kappa`` is the condition number of
+the non-degenerate block; using ``\\sqrt{\\varepsilon}`` provides a reliable gap
+between exact-zero and small-but-nonzero pivots across a wide range of problem
+sizes and system conditioning.
 """
 function nullspace_ldlt(X::AbstractMatrix; tol=nothing)
     M = ldlt!(ChordalLDLt(X), RowMaximum())
     D = M.D; L = M.L; P = M.P
     max_abs = maximum(i -> abs(D[i, i]), 1:size(D, 1); init=0.0)
-    threshold = isnothing(tol) ? eps(Float64) * max(1.0, max_abs) : tol
+    threshold = isnothing(tol) ? sqrt(eps(Float64)) * max(1.0, max_abs) : tol
     ind = findall(i -> abs(D[i, i]) <= threshold, 1:size(D, 1))
     U = zeros(size(D, 1), length(ind))
     for j in eachindex(ind)
@@ -577,6 +584,44 @@ function nullspace_ldlt(s::EuclideanSheaf; tol=nothing)
     return nullspace_ldlt(sheaf_laplacian_matrix_direct(s); tol=tol)
 end
 
+"""    nullspace_svd(A::AbstractMatrix; rtol=1e-10) -> Matrix
+
+Compute a basis for the nullspace of `A` using a full SVD.
+
+Singular values below `rtol * max(1, σ_max)` (where `σ_max` is the largest
+singular value of `A`) are treated as zero.  The returned matrix columns are
+the corresponding right singular vectors.
+
+This function can be used alongside [`nullspace_ldlt`](@ref) as an independent
+check that both methods agree on the nullspace dimension.  For the sheaf
+Laplacian setting this means verifying
+`size(nullspace_svd(L), 2) == size(nullspace_ldlt(L), 2)`.
+
+!!! note
+    This function densifies the matrix; use it for diagnostics or on
+    moderately-sized problems.  For large sparse systems prefer
+    [`nullspace_ldlt`](@ref).
+"""
+function nullspace_svd(A::AbstractMatrix; rtol=1e-10)
+    A0 = Matrix{Float64}(A)
+    F = svd(A0; full=true)
+    σmax = isempty(F.S) ? 0.0 : maximum(F.S)
+    tol = rtol * max(1.0, σmax)
+    r = count(σ -> σ > tol, F.S)
+    return F.Vt'[:, r+1:end]
+end
+
+"""    nullspace_svd(s::EuclideanSheaf; rtol=1e-10) -> Matrix
+
+Convenience overload: computes the sheaf Laplacian ``L = d^\\mathsf{T} d`` and
+delegates to `nullspace_svd(L)`.
+
+The returned columns form a basis for the space of *global sections* of `s`.
+"""
+function nullspace_svd(s::EuclideanSheaf; rtol=1e-10)
+    return nullspace_svd(sheaf_laplacian_matrix_direct(s); rtol=rtol)
+end
+
 # Private helper: given a ChordalLDLt factorization `M` of a symmetric
 # positive-semidefinite matrix and a right-hand side `b`, return both the
 # minimum-norm particular solution `x_p` satisfying `M * x_p ≈ b` (in the
@@ -586,7 +631,7 @@ function ldlt_pseudoinverse_and_null(M, b; tol=nothing)
     D = M.D; Lfac = M.L; P = M.P
     n = size(D, 1)
     max_abs = maximum(i -> abs(D[i, i]), 1:n; init=0.0)
-    threshold = isnothing(tol) ? eps(Float64) * max(1.0, max_abs) : tol
+    threshold = isnothing(tol) ? sqrt(eps(Float64)) * max(1.0, max_abs) : tol
 
     null_idx = findall(i -> abs(D[i, i]) <= threshold, 1:n)
 
@@ -743,7 +788,7 @@ function harmonic_extension_ldl_diagnostics(s::EuclideanSheaf,
     pivots = [M.D[i, i] for i in 1:size(M.D, 1)]
     abs_pivots = abs.(pivots)
     max_abs = maximum(abs_pivots; init=0.0)
-    threshold = isnothing(tol) ? eps(Float64) * max(1.0, max_abs) : Float64(tol)
+    threshold = isnothing(tol) ? sqrt(eps(Float64)) * max(1.0, max_abs) : Float64(tol)
     zero_pivots = filter(<=(threshold), abs_pivots)
     positive_pivots = filter(>(threshold), abs_pivots)
 
@@ -796,7 +841,7 @@ function harmonic_extension_svd_diagnostics(s::EuclideanSheaf,
 
     singular_values = svdvals(Matrix(L_II))
     max_sv = maximum(singular_values; init=0.0)
-    threshold = isnothing(tol) ? eps(Float64) * max(1.0, max_sv) : Float64(tol)
+    threshold = isnothing(tol) ? sqrt(eps(Float64)) * max(1.0, max_sv) : Float64(tol)
     small_svs = filter(<=(threshold), singular_values)
     positive_svs = filter(>(threshold), singular_values)
 

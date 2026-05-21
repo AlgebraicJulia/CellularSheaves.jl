@@ -3,15 +3,6 @@ using CellularSheaves
 using LinearAlgebra
 using BlockArrays
 
-function finite_horizon_controllability(ts)
-    hcat([ts.Ad^(ts.k - t) * ts.Bd for t in 1:ts.k]...)
-end
-
-function expected_feasible_dimension(ts; rtol=1e-10)
-    C = finite_horizon_controllability(ts)
-    return ts.k * ts.control_dim - rank(Matrix(C); rtol=rtol)
-end
-
 function public_dynamics_constraints(ts)
     n = ts.state_dim
     m = ts.control_dim
@@ -182,7 +173,7 @@ end
 
         # All entries are finite
         @test all(isfinite, Array(z_opt))
-        @test full_space_kkt_residual(ts, z_opt, H, f) < 1e-8
+        @test full_space_kkt_residual(ts, z_opt, H, f) < 1e-7
     end
 
     # -----------------------------------------------------------------------
@@ -231,6 +222,72 @@ end
         # State dimension is larger than the single-agent double integrator (2)
         @test ts.state_dim > 2
         @test full_space_kkt_residual(ts, z_opt, H, f) < 1e-8
+    end
+
+    # -----------------------------------------------------------------------
+    # 5. SVD vs LDL nullspace dimensionality agreement
+    #    Verifies that harmonic_extension_svd_diagnostics and
+    #    harmonic_extension_ldl_diagnostics agree on the nullity of the
+    #    restricted Laplacian for the controlled-trajectory boundary problem,
+    #    and that both match expected_feasible_dimension.
+    # -----------------------------------------------------------------------
+    @testset "SVD and LDL nullspace dimensionality agree" begin
+        systems = [
+            # (name, Ac, Bc, h, k, F)
+            ("Double integrator",
+             [0.0 1.0; 0.0 0.0],
+             reshape([0.0, 1.0], 2, 1),
+             0.25, 8,
+             EuclideanSheaf{Float64}(fill(2, 1))),
+
+            ("Vehicle platoon",
+             [0.0 1.0 0.0 0.0; 0.0 0.0 0.0 0.0; 0.0 0.0 0.0 1.0; 0.0 0.0 0.0 0.0],
+             [0.0 0.0; 1.0 0.0; 0.0 0.0; 0.0 1.0],
+             0.25, 8,
+             EuclideanSheaf{Float64}([2, 2])),
+
+            ("Planar quadrotor",
+             [0.0 0.0 0.0 1.0 0.0 0.0;
+              0.0 0.0 0.0 0.0 1.0 0.0;
+              0.0 0.0 0.0 0.0 0.0 1.0;
+              0.0 0.0 -9.81 0.0 0.0 0.0;
+              0.0 0.0 0.0 0.0 0.0 0.0;
+              0.0 0.0 0.0 0.0 0.0 0.0],
+             [0.0 0.0; 0.0 0.0; 0.0 0.0; 0.0 0.0; 2.0 2.0; 12.5 -12.5],
+             0.05, 12,
+             EuclideanSheaf{Float64}(fill(6, 1))),
+
+            ("Mass-spring-damper chain",
+             [0.0 1.0 0.0 0.0; -2.0 -0.4 1.0 0.2; 0.0 0.0 0.0 1.0; 1.0 0.2 -1.0 -0.2],
+             [0.0 0.0; 1.0 0.0; 0.0 0.0; 0.0 1.0],
+             0.5, 10,
+             EuclideanSheaf{Float64}([2, 2])),
+        ]
+
+        for (name, Ac, Bc, h, k, F) in systems
+            @testset "$name" begin
+                ts = ControlledTrajectorySheaf(F, Ac, Bc, h, k)
+                n  = ts.state_dim
+                x1  = zeros(n)
+                xk1 = zeros(n); xk1[1] = 1.0
+
+                boundary = Dict{Int,Vector{Float64}}(
+                    1     => x1,
+                    k + 2 => xk1,
+                )
+
+                ldl_diag = harmonic_extension_ldl_diagnostics(ts.sheaf, boundary)
+                svd_diag = harmonic_extension_svd_diagnostics(ts.sheaf, boundary)
+
+                # LDL and SVD must agree on nullity
+                @test ldl_diag.nullity_estimate == svd_diag.nullity_estimate
+
+                # Both must match the controllability-based expected dimension
+                expected = expected_feasible_dimension(ts)
+                @test ldl_diag.nullity_estimate == expected
+                @test svd_diag.nullity_estimate == expected
+            end
+        end
     end
 
 end

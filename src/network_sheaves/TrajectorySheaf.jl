@@ -39,6 +39,7 @@ module TrajectorySheaves
 export TrajectorySheaf, build_trajectory_sheaf, colocation_trajectory,
     continuous_to_discrete_zoh, ControlledTrajectorySheaf,
     feasible_control_trajectory_basis,
+    finite_horizon_controllability, expected_feasible_dimension,
     lqr_objective, optimal_control_trajectory, nullspace_trajectory_family
 
 using ArgCheck: @argcheck
@@ -596,29 +597,58 @@ function _public_trajectory_block_sizes(ts::ControlledTrajectorySheaf)
     return [fill(ts.state_dim, ts.k + 1); fill(ts.control_dim, ts.k)]
 end
 
-function _vertex_ranges(stalks::Vector{Int})
-    offsets = [0; cumsum(stalks)]
-    return [offsets[v] + 1 : offsets[v + 1] for v in eachindex(stalks)]
+"""
+    finite_horizon_controllability(ts::ControlledTrajectorySheaf) -> Matrix
+
+Compute the finite-horizon controllability matrix for `ts`.
+
+For a `k`-step controlled trajectory sheaf with discrete-time matrices `(Ad, Bd)`,
+the controllability matrix is
+
+```math
+C_k = \\bigl[\\, A_d^{k-1} B_d \\mid A_d^{k-2} B_d \\mid \\cdots \\mid B_d \\,\\bigr] \\in \\mathbb{R}^{n \\times km}
+```
+
+where `n = ts.state_dim` and `m = ts.control_dim`.
+
+The rank of `C_k` equals the number of independently reachable terminal-state
+directions from the zero initial state in `k` steps.  The nullspace dimension of
+`C_k` (i.e. `k*m - rank(C_k)`) is the number of free input directions, and
+equals the size of the null basis returned by
+[`feasible_control_trajectory_basis`](@ref).
+
+# See also
+- [`expected_feasible_dimension`](@ref)
+"""
+function finite_horizon_controllability(ts::ControlledTrajectorySheaf)
+    hcat([ts.Ad^(ts.k - t) * ts.Bd for t in 1:ts.k]...)
 end
 
-function _particular_and_null_svd(A, b; rtol=1e-10)
-    A0 = Matrix{Float64}(A)
-    b0 = Vector{Float64}(b)
+"""
+    expected_feasible_dimension(ts::ControlledTrajectorySheaf; rtol=1e-10) -> Int
 
-    F = svd(A0; full=true)
-    σmax = isempty(F.S) ? 0.0 : maximum(F.S)
-    tol = rtol * max(1.0, σmax)
-    r = count(σ -> σ > tol, F.S)
+Return the expected number of free directions in the endpoint-preserving
+feasible perturbation space for `ts`.
 
-    V = F.Vt'
-    x = zeros(size(A0, 2))
+This equals `k * m - rank(C_k)`, where `C_k` is the finite-horizon
+controllability matrix ([`finite_horizon_controllability`](@ref)), `k = ts.k`,
+and `m = ts.control_dim`.
 
-    if r > 0
-        x .= V[:, 1:r] * ((F.U[:, 1:r]' * b0) ./ F.S[1:r])
-    end
+The quantity equals the number of columns in the null basis returned by
+[`feasible_control_trajectory_basis`](@ref).  It can be used as a
+correctness check: `size(null_basis, 2) == expected_feasible_dimension(ts)`.
 
-    N = V[:, r+1:end]
-    return x, N, r, tol
+# Arguments
+- `ts`   — a `ControlledTrajectorySheaf`.
+- `rtol` — relative tolerance passed to `LinearAlgebra.rank`.
+
+# See also
+- [`finite_horizon_controllability`](@ref)
+- [`feasible_control_trajectory_basis`](@ref)
+"""
+function expected_feasible_dimension(ts::ControlledTrajectorySheaf; rtol=1e-10)
+    C = finite_horizon_controllability(ts)
+    return ts.k * ts.control_dim - rank(Matrix(C); rtol=rtol)
 end
 
 # ---------------------------------------------------------------------------
@@ -628,8 +658,7 @@ end
 """
     feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
                                       x1::AbstractVector{T},
-                                      xk1::AbstractVector{T};
-                                      rtol::Real=1e-10) where T
+                                      xk1::AbstractVector{T}) where T
         -> (z_p::Vector{T}, null_basis::Matrix{T})
 
 Return one feasible trajectory hitting the endpoint states together with a basis
@@ -651,8 +680,6 @@ The complete feasible set is `{ z_p + null_basis * α : α ∈ Rᵈ }`.
 - `ts`  — a `ControlledTrajectorySheaf{T}`.
 - `x1`  — initial state vector of length `ts.state_dim`.
 - `xk1` — terminal state vector of length `ts.state_dim`.
-- `rtol` — relative tolerance used to determine the numerical rank of the
-  restricted coboundary matrix.
 
 # Throws
 - `ArgumentError` if `length(x1) ≠ ts.state_dim`.
@@ -660,50 +687,34 @@ The complete feasible set is `{ z_p + null_basis * α : α ∈ Rᵈ }`.
 """
 function feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
                                             x1::AbstractVector,
-                                            xk1::AbstractVector;
-                                            rtol::Real=1e-10) where T
+                                            xk1::AbstractVector) where T
     n = ts.state_dim
     m = ts.control_dim
     k = ts.k
 
     @argcheck length(x1) == n "x1 must have length $n, got $(length(x1))"
     @argcheck length(xk1) == n "xk1 must have length $n, got $(length(xk1))"
-    @argcheck rtol > 0 "rtol must be positive, got $rtol"
 
-    stalks = vertex_stalks(ts.sheaf)
-    ranges = _vertex_ranges(stalks)
+    boundary = Dict{Int,Vector{T}}(
+        1       => convert(Vector{T}, x1),
+        k + 2   => convert(Vector{T}, xk1),
+    )
 
-    boundary_verts = [1, k + 2]
-    interior_verts = setdiff(1:length(stalks), boundary_verts)
+    x_p_internal, null_internal = harmonic_extension(ts.sheaf, boundary)
 
-    I_idx = vcat((collect(ranges[v]) for v in interior_verts)...)
-    B_idx = vcat((collect(ranges[v]) for v in boundary_verts)...)
-
-    xB = convert(Vector{T}, vcat(x1, xk1))
-
-    D = sparse(coboundary_map(ts.sheaf))
-    DI = D[:, I_idx]
-    DB = D[:, B_idx]
-    rhs = -DB * xB
-
-    xI, NI, _, tol = _particular_and_null_svd(DI, rhs; rtol=rtol)
-
-    residual = norm(DI * xI - rhs)
-    if residual > 100 * tol * (1 + norm(rhs))
+    # Check that the endpoints are reachable: a feasible trajectory must satisfy
+    # the discrete dynamics, i.e. the coboundary residual must be zero.
+    x_p_vec  = Array(x_p_internal)
+    d_mat    = sparse(coboundary_map(ts.sheaf))
+    residual = norm(d_mat * x_p_vec)
+    if residual > sqrt(eps(T)) * (1 + norm(x_p_vec))
         throw(ArgumentError(
             "Endpoint states are not mutually reachable under the controlled dynamics " *
             "(coboundary residual = $(residual)).  Check that x1 and xk1 are connected " *
             "by a valid k-step trajectory."))
     end
 
-    x_internal = zeros(T, sum(stalks))
-    x_internal[I_idx] .= T.(xI)
-    x_internal[B_idx] .= xB
-
-    null_internal = zeros(T, sum(stalks), size(NI, 2))
-    null_internal[I_idx, :] .= T.(NI)
-
-    z_p        = _internal_to_public(x_internal, n, m, k)
+    z_p        = _internal_to_public(x_p_vec, n, m, k)
     null_basis = _internal_to_public_matrix(null_internal, n, m, k)
 
     return z_p, null_basis
