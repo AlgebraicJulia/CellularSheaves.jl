@@ -23,13 +23,21 @@ if !no_literate
     for file in files
       f, l = splitext(file)
       if l == ".jl" && !startswith(f, "_")
-        Literate.markdown(joinpath(root, file), out_dir;
+        src_path = joinpath(root, file)
+        Literate.markdown(src_path, out_dir;
           config=config, documenter=true, credit=false)
-        Literate.notebook(joinpath(root, file), out_dir;
-          execute=true, documenter=true, credit=false)
+        execute = !contains(src_path, "asynch")
+        Literate.notebook(src_path, out_dir;
+          execute=execute, documenter=true, credit=false)
       end
     end
   end
+end
+
+let src = joinpath(@__DIR__, "figures", "asynch"),
+    dst = joinpath(@__DIR__, "src", "assets", "figures", "asynch")
+  mkpath(dirname(dst))
+  cp(src, dst; force=true)
 end
 
 @info "Building Documenter.jl docs"

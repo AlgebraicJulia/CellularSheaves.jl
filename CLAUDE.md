@@ -44,6 +44,16 @@ julia --project=docs docs/make.jl
 julia --project=docs docs/make.jl --no-literate
 ```
 
+**Regenerate asynch experiment data:**
+```
+julia --project=docs docs/scripts/acc26_experiments.jl
+```
+
+**Regenerate asynch doc figures from data:**
+```
+julia --project=docs docs/scripts/generate_figures.jl
+```
+
 ## Architecture
 
 `CellularSheaves` re-exports `NetworkSheaves`, which aggregates all submodules:
