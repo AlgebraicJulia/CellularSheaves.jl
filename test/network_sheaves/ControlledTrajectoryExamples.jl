@@ -173,6 +173,9 @@ end
 
         # All entries are finite
         @test all(isfinite, Array(z_opt))
+        # Tolerance is 1e-7 (vs 1e-8 elsewhere): the quadrotor's LDL null-basis uses
+        # pivots near the sqrt(eps) threshold, producing a slightly less orthogonal
+        # basis than other examples; the optimality gap is still well within 1e-7.
         @test full_space_kkt_residual(ts, z_opt, H, f) < 1e-7
     end
 

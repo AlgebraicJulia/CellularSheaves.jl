@@ -606,7 +606,7 @@ For a `k`-step controlled trajectory sheaf with discrete-time matrices `(Ad, Bd)
 the controllability matrix is
 
 ```math
-C_k = \\bigl[\\, A_d^{k-1} B_d \\mid A_d^{k-2} B_d \\mid \\cdots \\mid B_d \\,\\bigr] \\in \\mathbb{R}^{n \\times km}
+C_k = \\bigl[\\, \\mathrm{Ad}^{k-1}\\,\\mathrm{Bd} \\mid \\mathrm{Ad}^{k-2}\\,\\mathrm{Bd} \\mid \\cdots \\mid \\mathrm{Bd} \\,\\bigr] \\in \\mathbb{R}^{n \\times km}
 ```
 
 where `n = ts.state_dim` and `m = ts.control_dim`.
