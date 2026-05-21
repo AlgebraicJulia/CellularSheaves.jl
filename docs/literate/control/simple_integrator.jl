@@ -20,7 +20,7 @@
 # A single point whose position is directly commanded by a scalar control input:
 #
 # ```math
-# x_t \in \mathbb{R}, \quad u_t \in \mathbb{R}, \quad x_{t+1} = x_t + u_t.
+# x_t \in \mathbb{R}, \quad u_t \in \mathbb{R}, \quad x_{t+1} = x_t + h \cdot u_t.
 # ```
 #
 # The state dimension is `n = 1`; the control dimension is `m = 1`.
