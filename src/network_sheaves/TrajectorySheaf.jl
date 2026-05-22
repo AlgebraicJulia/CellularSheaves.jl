@@ -38,7 +38,8 @@ module TrajectorySheaves
 
 export TrajectorySheaf, build_trajectory_sheaf, colocation_trajectory,
     continuous_to_discrete_zoh, ControlledTrajectorySheaf,
-    feasible_control_trajectory_basis,
+    feasible_control_trajectory_basis, finite_horizon_controllability,
+    expected_feasible_dimension,
     lqr_objective, optimal_control_trajectory, nullspace_trajectory_family
 
 using ArgCheck: @argcheck
@@ -594,6 +595,47 @@ end
 
 function _public_trajectory_block_sizes(ts::ControlledTrajectorySheaf)
     return [fill(ts.state_dim, ts.k + 1); fill(ts.control_dim, ts.k)]
+end
+
+"""
+    finite_horizon_controllability(ts::ControlledTrajectorySheaf{T}) where T
+        -> Matrix{T}
+
+Return the finite-horizon controllability matrix
+
+```math
+\\mathcal{C}_k =
+\begin{bmatrix}
+A_d^{k-1} B_d & A_d^{k-2} B_d & \\cdots & B_d
+\end{bmatrix}
+```
+
+for the `k`-step sampled dynamics stored in `ts`.
+"""
+function finite_horizon_controllability(ts::ControlledTrajectorySheaf{T}) where T
+    return hcat([ts.Ad^(ts.k - t) * ts.Bd for t in 1:ts.k]...)
+end
+
+"""
+    expected_feasible_dimension(ts::ControlledTrajectorySheaf{T};
+                                rtol::Real=1e-10) where T
+        -> Int
+
+Return the expected dimension of the endpoint-preserving feasible trajectory
+family for `ts`, computed as
+
+```math
+k m - \\operatorname{rank}(\\mathcal{C}_k),
+```
+
+where `m` is the control dimension and `\\mathcal{C}_k` is the finite-horizon
+controllability matrix from [`finite_horizon_controllability`](@ref).
+"""
+function expected_feasible_dimension(ts::ControlledTrajectorySheaf{T};
+                                     rtol::Real=1e-10) where T
+    @argcheck rtol > 0 "rtol must be positive, got $rtol"
+    C = finite_horizon_controllability(ts)
+    return ts.k * ts.control_dim - rank(Matrix(C); rtol=rtol)
 end
 
 # ---------------------------------------------------------------------------

@@ -101,22 +101,37 @@ using BlockArrays
     # 11. Invalid boundary vertex index throws ArgumentError
     @test_throws ArgumentError harmonic_extension(s, Dict(1 => [0.0], 6 => [4.0]))
 
-    # 12. LDL diagnostics describe the restricted harmonic-extension problem
+    # 12. LDL and SVD diagnostics agree on the restricted harmonic-extension problem
     ldl_diag = harmonic_extension_ldl_diagnostics(s, boundary)
+    svd_diag = harmonic_extension_svd_diagnostics(s, boundary)
     @test ldl_diag isa HarmonicExtensionLDLDiagnostics
+    @test svd_diag isa HarmonicExtensionSVDDiagnostics
     @test ldl_diag.boundary_vertices == [1, 5]
+    @test svd_diag.boundary_vertices == [1, 5]
     @test ldl_diag.interior_vertices == [2, 3, 4]
+    @test svd_diag.interior_vertices == [2, 3, 4]
     @test ldl_diag.restricted_size == (3, 3)
+    @test svd_diag.restricted_size == (3, 3)
     @test ldl_diag.nullity_estimate == 0
+    @test svd_diag.nullity_estimate == 0
     @test ldl_diag.rank_estimate == 3
+    @test svd_diag.rank_estimate == 3
     @test ldl_diag.smallest_positive_pivot > 0.0
+    @test svd_diag.smallest_positive_singular_value > 0.0
     @test isfinite(ldl_diag.pivot_gap)
+    @test isfinite(svd_diag.singular_value_gap)
     @test occursin("HarmonicExtensionLDLDiagnostics", sprint(show, MIME("text/plain"), ldl_diag))
+    @test occursin("HarmonicExtensionSVDDiagnostics", sprint(show, MIME("text/plain"), svd_diag))
+    @test ldl_diag.nullity_estimate == svd_diag.nullity_estimate
 
     # 13. Empty-interior problems return empty diagnostics consistently
     all_boundary_diag_ldl = harmonic_extension_ldl_diagnostics(s, all_bnd)
+    all_boundary_diag_svd = harmonic_extension_svd_diagnostics(s, all_bnd)
     @test all_boundary_diag_ldl.restricted_size == (0, 0)
+    @test all_boundary_diag_svd.restricted_size == (0, 0)
     @test isempty(all_boundary_diag_ldl.pivots)
+    @test isempty(all_boundary_diag_svd.singular_values)
     @test all_boundary_diag_ldl.nullity_estimate == 0
+    @test all_boundary_diag_svd.nullity_estimate == 0
 
 end
