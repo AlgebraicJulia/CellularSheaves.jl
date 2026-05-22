@@ -4,10 +4,9 @@ module EuclideanSheaves
 
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_laplacian_matrix_direct,
     restricted_laplacian_blocks, sheaf_from_graph, energy_function,
-    nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, nullspace_svd,
-    harmonic_extension, ldlt_pseudoinverse_and_null, HarmonicExtensionLDLDiagnostics,
-    HarmonicExtensionSVDDiagnostics, harmonic_extension_ldl_diagnostics,
-    harmonic_extension_svd_diagnostics, zero_sheaf, constant_sheaf, cycle_sheaf
+    nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
+    ldlt_pseudoinverse_and_null, HarmonicExtensionLDLDiagnostics,
+    harmonic_extension_ldl_diagnostics, zero_sheaf, constant_sheaf, cycle_sheaf
 
 using ArgCheck: @argcheck
 using Graphs
@@ -668,16 +667,7 @@ end
 
 function _harmonic_extension_restricted_laplacian(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVector})
     boundary_verts, interior_verts = _harmonic_extension_partition(s, boundary)
-    offsets = [0; cumsum(s.vertex_stalks)]
-    L_full = sheaf_laplacian_matrix_direct(s)
-
-    I_idx = isempty(interior_verts) ? Int[] :
-        vcat([offsets[v] + 1:offsets[v + 1] for v in interior_verts]...)
-    B_idx = isempty(boundary_verts) ? Int[] :
-        vcat([offsets[v] + 1:offsets[v + 1] for v in boundary_verts]...)
-
-    L_II = L_full[I_idx, I_idx]
-    L_IB = L_full[I_idx, B_idx]
+    L_II, L_IB = restricted_laplacian_blocks(s, interior_verts, boundary_verts)
     return boundary_verts, interior_verts, L_II, L_IB
 end
 

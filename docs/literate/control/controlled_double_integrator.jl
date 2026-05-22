@@ -102,31 +102,19 @@ r = size(N, 2)
 println("Trajectory dimension p = ", (k+1)*n + k*m)
 println("Free parameters      r = ", r)
 
-# Diagnose the conditioning of the sheaf Laplacian used in the harmonic extension.
-# The full Laplacian is singular by design because unconstrained global sections
-# lie in its nullspace, so its ordinary condition number is expected to be `Inf`.
-# The matrix that actually matters for the boundary-value solve is the interior
-# block `L_II` after fixing the two endpoint vertices.
-L_full = sheaf_laplacian_matrix_direct(ts.sheaf)
-σ_full = svdvals(Matrix(L_full))
-σ_full_positive = filter(>(sqrt(eps(Float64))), σ_full)
+# Diagnose the restricted Laplacian used in the harmonic extension.
+# The full sheaf Laplacian is singular by design because unconstrained global
+# sections lie in its nullspace, so we inspect the interior block `L_II`
+# directly after fixing the two endpoint vertices.
 boundary = Dict(1 => x1, k + 2 => xk1)
 ldl_diag = harmonic_extension_ldl_diagnostics(ts.sheaf, boundary)
-svd_diag = harmonic_extension_svd_diagnostics(ts.sheaf, boundary)
 harmonic_extension_diagnostics = (
-    full_cond=cond(Matrix(L_full)),
-    full_positive_cond=isempty(σ_full_positive) ? Inf : maximum(σ_full_positive) / minimum(σ_full_positive),
-    restricted_cond=svd_diag.condition_number,
-    full_rank=size(σ_full_positive, 1),
     restricted_size=ldl_diag.restricted_size,
     restricted_zero_pivots=ldl_diag.nullity_estimate,
     restricted_smallest_positive_pivot=ldl_diag.smallest_positive_pivot,
     restricted_largest_zero_pivot=ldl_diag.largest_zero_pivot,
     restricted_pivot_gap=ldl_diag.pivot_gap,
     restricted_sorted_abs_pivots=ldl_diag.sorted_absolute_pivots,
-    restricted_smallest_positive_singular_value=svd_diag.smallest_positive_singular_value,
-    restricted_largest_small_singular_value=svd_diag.largest_small_singular_value,
-    restricted_singular_value_gap=svd_diag.singular_value_gap,
 )
 harmonic_extension_diagnostics
 
