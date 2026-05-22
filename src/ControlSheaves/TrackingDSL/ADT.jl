@@ -4,15 +4,14 @@
 Abstract data type (AST) definitions for the name-driven Tracking DSL.
 
 The DSL allows symbolic specification of multi-agent tracking problems with
-late binding of numeric values. A `TrackingProgram` is the root node holding
-a flat list of `TrackingStmt` nodes. Statements cover:
+late binding of numeric values via an external context dict. A `TrackingProgram`
+is the root node holding a flat list of `TrackingStmt` nodes. Statements cover:
 
 - Space and map declarations (`space X = R^6`, `map A : X -> X`)
 - Agent/target declarations with optional dynamics (`agent a1 dynamics (A, B) period dt`)
 - Time declarations (`horizon K`, `time initial = 0`, `times Tall = initial:final`)
 - Constraints (`consensus`, `track`, `consensus_sheaf`)
 - Boundary conditions (`boundary agent a1 at initial = x0`)
-- Value bindings (`bind A => [...]`, `bind dt => 0.05`)
 """
 module TrackingDSLTerm
 
@@ -23,7 +22,6 @@ export SpaceDecl, MapDecl, VectorDecl, AgentDecl, TargetDecl
 export HorizonDecl, TimeAliasDecl, TimeSetDecl
 export ConsensusConstraint, TrackConstraint, ConsensusSheafConstraint
 export BoundaryConstraint
-export BindStmt
 export TimeSpec, SingletonTime, TimeList, TimeRange, NamedTimeSet
 export TimeRef, LiteralTime, NamedTime, InitialTime, FinalTime
 export SpaceExpr, BaseSpace, ProductSpace, DirectSumSpace
@@ -174,8 +172,8 @@ struct DirectSumSpace <: SpaceExpr; a::SpaceExpr; b::SpaceExpr; end
 """
     BoundaryRef
 
-A reference to a boundary value. Either a plain name `foo` (unindexed) or an
-indexed form `x[a, t]` allowing late-bound agent/time indices.
+A reference to a boundary value in the context dict. Either a plain name `foo`
+(unindexed) or an indexed form `x[a, t]` allowing late-bound agent/time indices.
 """
 abstract type BoundaryRef end
 struct PlainRef   <: BoundaryRef; name::Symbol; end
@@ -347,25 +345,6 @@ struct BoundaryConstraint <: TrackingStmt
     entity_name::Symbol
     time_ref::TimeRef
     value_ref::BoundaryRef
-end
-
-# --- Bind statements ---
-
-"""
-    BindStmt(lhs, rhs)
-
-Binds a name to a value, e.g.
-
-- `bind A => [1.0 0.0; 0.0 1.0]`   → `lhs = PlainRef(:A)`, `rhs = Matrix`
-- `bind dt => 0.05`                  → scalar
-- `bind a => 3`                      → integer
-- `bind x[a,t] => [...]`             → indexed binding
-
-The `rhs` is stored as `Any`; type checking is deferred to the resolution phase.
-"""
-struct BindStmt <: TrackingStmt
-    lhs::BoundaryRef   # may be PlainRef or IndexedRef
-    rhs::Any
 end
 
 # ── Program root ──────────────────────────────────────────────────────────────

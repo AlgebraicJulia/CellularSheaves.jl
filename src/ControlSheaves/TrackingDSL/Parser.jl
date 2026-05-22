@@ -91,18 +91,16 @@ export @tracking_problem, parse_tracking_program
 Parse a TrackingDSL program and return a `TrackingProgram` AST.
 
 Statements are valid Julia expressions interpreted by their leading name.
-Values are bound with `bind(name => value)` statements or later via `bind!`.
-The `bind` RHS values are **evaluated in the calling scope** at macro expansion time,
-so local variables can appear on the right-hand side of `bind` statements.
+Numeric values are **not** embedded in the program; pass them via the `ctx`
+argument of `resolve_tracking_program` or `lower_tracking_program`.
 
 The special time aliases `initial` and `final` are built-in: `initial` resolves
-to `0`; `final` resolves to the horizon value `k` (from `horizon(K)` + `bind(K => ...)`).
+to `0`; `final` resolves to the horizon value `k` (from `horizon(K)` in the
+program and `:K` in the context dict).
 
-# Example — names only with late binding
+# Example
 
 ```julia
-K_val = 40
-A_mat = [1.0 0.0; 0.0 1.0]
 prog = @tracking_problem begin
     space(X) = R^2
     map_decl(A, X, X)
@@ -117,69 +115,29 @@ prog = @tracking_problem begin
     consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
     track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
     boundary(:agent, a1; at=initial, value=x0_a1)
-    bind(K => K_val)    # K_val is a local variable evaluated here
-    bind(A => A_mat)
-    bind(R_y => [1.0 0.0; 0.0 0.0])
-    bind(dt => 0.05)
-    bind(x0_a1 => zeros(3))
 end
-```
 
-# Example — indexed boundary with late binding
-
-```julia
-prog = @tracking_problem begin
-    agent(a1; dynamics=(A,B), period=dt)
-    horizon(K)
-    time(initial = 0)
-    time(final = K)
-    boundary(:agent, a; at=t, value=x_ref[a,t])
-    bind(K => 5)
-    bind(a => 1)
-    bind(t => 3)
-    bind(x_ref[a,t] => [0.0, 1.0, 0.0, 0.0])
-    bind(A => Matrix(1.0I, 2, 2))
-    bind(B => zeros(2, 1))
-    bind(dt => 0.05)
-end
+ctx = Dict{Symbol,Any}(
+    :K    => 40,
+    :A    => [1.0 0.0; 0.0 1.0],
+    :R_y  => [1.0 0.0; 0.0 0.0],
+    :dt   => 0.05,
+    :x0_a1 => zeros(2),
+)
+result = lower_tracking_program(prog, ctx)
 ```
 
 `initial` resolves to `0`; `final` resolves to the value of `K`.
 """
 macro tracking_problem(block::Expr)
-    # Walk the block: for bind statements, evaluate RHS in calling scope;
-    # for all other statements, parse statically and embed as literal.
     stmt_exprs = Any[]
     for line in block.args
         line isa LineNumberNode && continue
-        if _is_bind_call(line)
-            lhs_expr, rhs_expr = _extract_bind_parts(line)
-            lhs_ref = _parse_bind_lhs(lhs_expr)
-            # rhs_expr is evaluated in the calling scope at runtime
-            push!(stmt_exprs, :(BindStmt($(QuoteNode(lhs_ref)), $(esc(rhs_expr)))))
-        else
-            stmt = _parse_stmt(line)
-            stmt === nothing && continue
-            push!(stmt_exprs, QuoteNode(stmt))
-        end
+        stmt = _parse_stmt(line)
+        stmt === nothing && continue
+        push!(stmt_exprs, QuoteNode(stmt))
     end
     return :(TrackingProgram(TrackingStmt[$(stmt_exprs...)]))
-end
-
-# Helpers used by the macro at expansion time
-function _is_bind_call(line::Expr)
-    @match line begin
-        Expr(:call, :bind, Expr(:call, :(=>), _, _)) => true
-        _ => false
-    end
-end
-_is_bind_call(_) = false
-
-function _extract_bind_parts(line::Expr)
-    @match line begin
-        Expr(:call, :bind, Expr(:call, :(=>), lhs, rhs)) => (lhs, rhs)
-        _ => throw(TrackingSyntaxError("Not a bind statement: $(repr(line))"))
-    end
 end
 
 """
@@ -188,11 +146,9 @@ end
 Functional entry point for parsing a TrackingDSL program from a Julia `Expr`
 (as returned by `Meta.quot(quote ... end)`).
 
-Returns a `TrackingProgram` AST without validating or resolving names.  Prefer
-the `@tracking_problem` macro for interactive use, because `@tracking_problem`
-evaluates bind RHS values in the calling scope whereas this function stores them
-as unevaluated `Expr` objects.  Use `bind!` to supply concrete values after
-calling this function:
+Returns a `TrackingProgram` AST without validating or resolving names.  Supply
+numeric values via the `ctx` argument of `resolve_tracking_program` or
+`lower_tracking_program`:
 
 ```julia
 prog = parse_tracking_program(quote
@@ -201,13 +157,11 @@ prog = parse_tracking_program(quote
     time(initial = 0)
     time(final = K)
 end)
-bind!(prog, :K, 40)
-bind!(prog, :A, [1.0 0.0; 0.0 1.0])
-bind!(prog, :B, [0.0; 1.0;;])
-bind!(prog, :dt, 0.05)
+ctx = Dict{Symbol,Any}(:K => 40, :A => [1.0 0.0; 0.0 1.0], :B => [0.0; 1.0;;], :dt => 0.05)
+resolved = resolve_tracking_program(prog, ctx)
 ```
 
-# Example — late binding with indexed reference
+# Example — indexed boundary reference
 
 ```julia
 prog = parse_tracking_program(quote
@@ -215,12 +169,11 @@ prog = parse_tracking_program(quote
     horizon(K)
     time(initial = 0)
     time(final = K)
-    boundary(:agent, a; at=t, value=x[a,t])
+    boundary(:agent, a1; at=t_pin, value=x_ref[a,t_pin])
 end)
-bind!(prog, :K, 5)
-bind!(prog, :a, 1)
-bind!(prog, :t, 3)
-bind!(prog, :x, :a, :t, [0.0, 1.0, 0.0, 0.0])
+ctx = Dict{Symbol,Any}(:K => 5, :A => ..., :B => ..., :dt => 0.05, :a => 1, :t_pin => 3)
+set_indexed!(ctx, :x_ref, 1, 3, [0.0, 1.0, 0.0, 0.0])
+resolved = resolve_tracking_program(prog, ctx)
 ```
 
 `initial` resolves to `0`; `final` resolves to the horizon `K`.
@@ -293,10 +246,6 @@ function _parse_stmt(line)
         # ── boundary(:agent, name; at=time, value=expr) ─────────────────────
         Expr(:call, :boundary, Expr(:parameters, kws...), kind_lit, ename::Symbol) =>
             _parse_boundary(kind_lit, ename, kws)
-
-        # ── bind(name => value) ─────────────────────────────────────────────
-        Expr(:call, :bind, Expr(:call, :(=>), lhs, rhs)) =>
-            _parse_bind(lhs, rhs)
 
         # ── Skip nothing ────────────────────────────────────────────────────
         ::Nothing => nothing
@@ -531,24 +480,6 @@ function _extract_entity_kind(lit)
         :agent             => :agent
         :target            => :target
         _ => throw(TrackingSyntaxError("boundary: entity kind must be :agent or :target, got: $(repr(lit))"))
-    end
-end
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Bind: bind(name => value) / bind(x[a,t] => value)
-# ─────────────────────────────────────────────────────────────────────────────
-
-function _parse_bind(lhs, rhs)
-    ref = _parse_bind_lhs(lhs)
-    return BindStmt(ref, rhs)
-end
-
-function _parse_bind_lhs(lhs)::BoundaryRef
-    @match lhs begin
-        s::Symbol => PlainRef(s)
-        Expr(:ref, name::Symbol, a::Symbol, t::Symbol) => IndexedRef(name, a, t)
-        Expr(:ref, name::Symbol, t::Symbol)            => IndexedRef(name, :_, t)
-        _ => throw(TrackingSyntaxError("bind: LHS must be a name or x[a,t], got: $(repr(lhs))"))
     end
 end
 

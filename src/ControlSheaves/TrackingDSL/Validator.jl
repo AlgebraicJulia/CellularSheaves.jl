@@ -27,7 +27,7 @@ Raises a `TrackingDeclarationError`, `TrackingTypeError`, or
 on success so it can be used in a pipeline:
 
 ```julia
-prog |> validate_tracking_program |> resolve_tracking_program |> lower_tracking_program
+prog |> validate_tracking_program |> p -> resolve_tracking_program(p, ctx) |> lower_tracking_program
 ```
 
 Validation checks:
@@ -103,10 +103,6 @@ function validate_tracking_program(prog::TrackingProgram)
                     "boundary: unknown entity kind '$(stmt.entity_kind)'"))
             end
             _validate_time_ref_loose(stmt.time_ref, times, "boundary")
-
-        elseif stmt isa BindStmt
-            # Bind statements are checked at resolution time
-            nothing
         end
     end
 

@@ -1,15 +1,15 @@
 """
     TrackingDSLResolver
 
-Name resolution and late-binding semantics for `TrackingProgram` ASTs.
+Name resolution for `TrackingProgram` ASTs.
 
 Resolution produces a `ResolvedProgram` that contains all numeric values needed
 by the lowering pass.  The `initial` and `final` time aliases are first-class:
 `initial` resolves to `0`; `final` resolves to the value of the horizon `k`.
 
-Late binding is performed by `BindStmt` declarations processed in declaration
-order. Indexed symbols like `x[a,t]` are resolved only after both `a` and `t`
-are bound.
+All numeric values (matrices, scalars, vectors) are supplied through an external
+context dict passed to `resolve_tracking_program`.  Use [`set_indexed!`](@ref) to
+register indexed boundary values.
 """
 module TrackingDSLResolver
 
@@ -17,7 +17,7 @@ using LinearAlgebra
 using ..TrackingDSLTerm
 
 export resolve_tracking_program, ResolvedProgram, ResolvedAgent, ResolvedTarget,
-    ResolvedConsensus, ResolvedTrack, ResolvedBoundary, bind!, set_indexed!
+    ResolvedConsensus, ResolvedTrack, ResolvedBoundary, set_indexed!
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Resolved data structures
@@ -104,28 +104,27 @@ end
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
-    resolve_tracking_program(prog::TrackingProgram) -> ResolvedProgram
     resolve_tracking_program(prog::TrackingProgram, ctx::AbstractDict) -> ResolvedProgram
 
-Resolve all symbolic names in `prog` to concrete numeric values.
+Resolve all symbolic names in `prog` to concrete numeric values using the
+supplied context dict `ctx`.
 
-The optional `ctx` argument is a `Dict{Symbol,Any}` (or any `AbstractDict` with
-`Symbol` keys) that maps names to their values.  It is merged with any `BindStmt`
-declarations present in `prog`, with **`ctx` taking precedence** over in-program
-`bind` statements when both supply a value for the same name.  This lets you keep
-`bind` defaults inside a program and override specific values at call-site, or
-omit `bind` statements entirely and supply everything through `ctx`.
-
-To store indexed boundary values in `ctx`, use the helper [`set_indexed!`](@ref):
+`ctx` maps `Symbol` keys to their values (scalars, matrices, vectors).  Use
+[`set_indexed!`](@ref) to register indexed boundary values:
 
 ```julia
-ctx = Dict{Symbol,Any}(:K => 5, :A => ..., :K => 5)
+ctx = Dict{Symbol,Any}(
+    :K  => 5,
+    :A  => [1.0 0.0; 0.0 1.0],
+    :B  => [0.0; 1.0;;],
+    :dt => 0.05,
+)
 set_indexed!(ctx, :x_ref, 1, 3, [1.0, 2.0, 0.0])  # x_ref[a=1, t=3]
-resolve_tracking_program(prog, ctx)
+resolved = resolve_tracking_program(prog, ctx)
 ```
 
 Resolution steps:
-1. Build the value environment from `BindStmt`s (lowest priority) then `ctx`.
+1. Build value environment from `ctx`.
 2. Resolve the horizon `k`.
 3. Resolve space dimensions.
 4. Resolve maps to concrete matrices.
@@ -133,137 +132,39 @@ Resolution steps:
 6. Resolve time specs to integer vectors.
 7. Resolve boundary conditions (including indexed references `x[a,t]`).
 
-Raises `TrackingUnboundSymbolError` if any required name is still unbound.
+Raises `TrackingUnboundSymbolError` if any required name is missing from `ctx`.
 Raises `TrackingDimensionMismatchError` for inconsistent matrix dimensions.
 
-# Example — context dict (no bind statements needed)
-
-```julia
-prog = parse_tracking_program(quote
-    space X = R^2
-    map_decl(A, X, X)
-    map_decl(B, X, X)
-    agent a1 dynamics (A, B) period dt
-    agent a2 dynamics (A, B) period dt
-    horizon K
-    time initial = 0
-    time final = K
-    times Tall = initial:final
-    consensus c1 between (a1, a2) using (A, A) at Tall
-end)
-ctx = Dict{Symbol,Any}(
-    :K  => 5,
-    :A  => [1.0 0.0; 0.0 1.0],
-    :B  => [0.0; 1.0;;],
-    :dt => 0.05,
-)
-resolved = resolve_tracking_program(prog, ctx)
-```
-
-# Example — bind statements as defaults, ctx as override
-
-```julia
-# The bind inside the program sets K=5 but the caller overrides it to K=10.
-resolved = resolve_tracking_program(prog_with_binds, Dict{Symbol,Any}(:K => 10))
-```
-
-`initial` resolves to `0`; `final` resolves to `K`.
+`initial` resolves to `0`; `final` resolves to the value of the horizon `K`.
 """
-function resolve_tracking_program(prog::TrackingProgram,
-                                  ctx::AbstractDict = Dict{Symbol,Any}())
-    # Build environment: BindStmts first (lower priority), then ctx (higher priority).
-    env = Dict{Any,Any}()
-    _apply_binds!(env, prog.statements)
-    _apply_context!(env, ctx)
+function resolve_tracking_program(prog::TrackingProgram, ctx::AbstractDict)
+    env = Dict{Any,Any}(ctx)
     return _resolve(prog, env)
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
-# bind! helper
+# set_indexed! helper
 # ─────────────────────────────────────────────────────────────────────────────
 
 """
-    bind!(prog::TrackingProgram, name, value) -> TrackingProgram
+    set_indexed!(ctx, name, agent_val, time_val, vec)
 
-Append a `BindStmt` for `name => value` to `prog.statements` in-place and
-return `prog`.
+Store an indexed boundary value in `ctx` under the canonical key
+`(name, agent_val, time_val)`.  Use this to supply values for boundary
+conditions declared with an indexed reference like `boundary(:agent, a; at=t, value=x[a,t])`.
 
-This is a convenience wrapper so you can build programs incrementally:
+Because the key is a `Tuple`, `ctx` must accept non-`Symbol` keys —
+use `Dict{Any,Any}` rather than `Dict{Symbol,Any}`:
 
 ```julia
-prog = parse_tracking_program(quote
-    agent a1 dynamics (A, B) period dt
-    horizon K
-    time initial = 0
-    time final = K
-    boundary agent a at t = x[a,t]
-end)
-bind!(prog, :K, 40)
-bind!(prog, :a, 1)
-bind!(prog, :t, 3)
-bind!(prog, :A, [1.0 0.0; 0.0 1.0])
+ctx = Dict{Any,Any}(:K => 5, :A => ..., :B => ..., :dt => 0.05, :a => 1, :t_pin => 3)
+set_indexed!(ctx, :x_ref, 1, 3, [0.0, 1.0, 0.0])
+resolved = resolve_tracking_program(prog, ctx)
 ```
-
-`initial` resolves to `0`; `final` resolves to the value of `K`.
 """
-function bind!(prog::TrackingProgram, name::Symbol, value)
-    push!(prog.statements, BindStmt(PlainRef(name), value))
-    return prog
-end
-
-function bind!(prog::TrackingProgram, name::Symbol, agent_sym::Symbol, time_sym::Symbol, value)
-    push!(prog.statements, BindStmt(IndexedRef(name, agent_sym, time_sym), value))
-    return prog
-end
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Internal: apply binds
-# ─────────────────────────────────────────────────────────────────────────────
-
-function _apply_binds!(env::Dict, stmts)
-    for stmt in stmts
-        stmt isa BindStmt || continue
-        key = _bind_key(stmt.lhs, env)
-        # For indexed refs resolve the indices first
-        if stmt.lhs isa IndexedRef
-            # defer resolution until indices are available
-            _store_indexed_bind!(env, stmt.lhs, stmt.rhs)
-        else
-            name = (stmt.lhs::PlainRef).name
-            env[name] = stmt.rhs
-        end
-    end
-    # Second pass: resolve any deferred indexed binds
-    _resolve_deferred_indexed!(env)
-end
-
-function _bind_key(ref::PlainRef, env)
-    return ref.name
-end
-
-function _bind_key(ref::IndexedRef, env)
-    return ref  # used as placeholder
-end
-
-function _store_indexed_bind!(env::Dict, ref::IndexedRef, value)
-    # Store raw indexed bind; key = (name, agent_val, time_val) or deferred
-    push!(get!(env, :__indexed_binds__, []), (ref, value))
-end
-
-function _resolve_deferred_indexed!(env::Dict)
-    binds = get(env, :__indexed_binds__, [])
-    for (ref, value) in binds
-        a_val = get(env, ref.agent_index, nothing)
-        t_val = get(env, ref.time_index, nothing)
-        if a_val !== nothing && t_val !== nothing
-            key = (ref.name, Int(a_val), Int(t_val))
-            env[key] = value
-        else
-            # Store with unresolved key for later use during boundary resolution
-            key = (ref.name, ref.agent_index, ref.time_index)
-            env[key] = value
-        end
-    end
+function set_indexed!(ctx::AbstractDict, name::Symbol, agent_val::Int, time_val::Int, vec)
+    ctx[(name, agent_val, time_val)] = vec
+    return ctx
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -398,14 +299,14 @@ function _resolve_horizon(prog::TrackingProgram, env::Dict)
         hname = stmt.name
         v = get(env, hname, nothing)
         v !== nothing || throw(TrackingUnboundSymbolError(
-            "Horizon '$hname' is not bound. Add `bind $hname => <integer>`."))
+            "Horizon '$hname' is not bound. Add `:$hname => <integer>` to the context dict."))
         return Int(v)
     end
     # No HorizonDecl found — look for a direct :k bind
     v = get(env, :k, nothing)
     v !== nothing && return Int(v)
     throw(TrackingUnboundSymbolError(
-        "No horizon declaration found. Add `horizon K` and `bind K => <integer>`."))
+        "No horizon declaration found. Add `horizon K` to the program and `:K => <integer>` to the context dict."))
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -566,7 +467,7 @@ function _resolve_time_ref_boundary(t::TimeRef, aliases::Dict{Symbol,Int}, k::In
         v = get(env, t.name, nothing)
         v !== nothing && return Int(v)
         throw(TrackingTimeResolutionError(
-            "Time reference '$(t.name)' is not bound. Add `bind $(t.name) => <int>`."))
+            "Time reference '$(t.name)' is not bound. Add it to the context dict."))
     else
         throw(TrackingTimeResolutionError("Unknown TimeRef type: $(typeof(t))"))
     end
@@ -580,7 +481,7 @@ function _resolve_boundary_value(ref::PlainRef, env::Dict, entity_name::Symbol, 
 end
 
 function _resolve_boundary_value(ref::IndexedRef, env::Dict, entity_name::Symbol, t::Int)
-    # Try to find (name, concrete_a, concrete_t) key first
+    # Resolve agent and time index values from env, then look up canonical key
     a_val = get(env, ref.agent_index, nothing)
     t_val = get(env, ref.time_index,  nothing)
     if a_val !== nothing && t_val !== nothing
@@ -588,13 +489,10 @@ function _resolve_boundary_value(ref::IndexedRef, env::Dict, entity_name::Symbol
         v = get(env, key, nothing)
         v !== nothing && return Vector{Float64}(v)
     end
-    # Fall back to symbolic key lookup
-    sym_key = (ref.name, ref.agent_index, ref.time_index)
-    v = get(env, sym_key, nothing)
-    v !== nothing && return Vector{Float64}(v)
     throw(TrackingUnboundSymbolError(
         "Boundary indexed value '$(ref.name)[$(ref.agent_index),$(ref.time_index)]' " *
-        "for entity '$entity_name' at time $t is not bound."))
+        "for entity '$entity_name' at time $t is not bound. " *
+        "Use set_indexed!(ctx, :$(ref.name), agent_val, time_val, vec)."))
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -604,11 +502,9 @@ end
 function _require_matrix(name::Symbol, source::Dict, ctx::String)::Matrix{Float64}
     v = get(source, name, nothing)
     v !== nothing || throw(TrackingUnboundSymbolError(
-        "$ctx: matrix '$name' is not bound. " *
-        "Use `bind!(prog, :$name, <matrix>)` or `@tracking_problem` with `bind($name => <matrix>)`."))
+        "$ctx: matrix '$name' is not bound. Add `:$name => <matrix>` to the context dict."))
     v isa Expr && throw(TrackingUnboundSymbolError(
-        "$ctx: matrix '$name' was bound to an unevaluated expression. " *
-        "Use `@tracking_problem` (which evaluates bind values) or `bind!(prog, :$name, <matrix>)`."))
+        "$ctx: matrix '$name' was bound to an unevaluated expression."))
     return Matrix{Float64}(v)
 end
 

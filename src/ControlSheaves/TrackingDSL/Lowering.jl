@@ -13,6 +13,7 @@ module TrackingDSLLowering
 using LinearAlgebra
 using ..TrackingDSLTerm
 using ..TrackingDSLResolver
+using ..TrackingDSLValidator: validate_tracking_program
 
 # Import the types we're targeting (... = grandparent = ControlSheaves)
 import ...MultiAgentTracking: TrackingEdge, TrackingProblem,
@@ -82,14 +83,16 @@ prog = parse_tracking_program(quote
     consensus c1 between (a1, a2) using (R_y, R_y) at Tall
     track tr1 agent a1 target t1 using (A, A) at final
     boundary agent a1 at initial = x0_a1
-    bind K => 5
-    bind A => [1.0 0.0; 0.0 1.0]
-    bind B => [0.0; 1.0;;]
-    bind R_y => [1.0 0.0; 0.0 0.0]
-    bind dt => 0.05
-    bind x0_a1 => [0.0, 0.0, 0.0]
 end)
-result = lower_tracking_program(resolve_tracking_program(prog))
+ctx = Dict{Symbol,Any}(
+    :K     => 5,
+    :A     => [1.0 0.0; 0.0 1.0],
+    :B     => [0.0; 1.0;;],
+    :R_y   => [1.0 0.0; 0.0 0.0],
+    :dt    => 0.05,
+    :x0_a1 => [0.0, 0.0, 0.0],
+)
+result = lower_tracking_program(prog, ctx)
 ```
 
 The special time aliases `initial = 0` and `final = K` are resolved before
@@ -184,6 +187,44 @@ function lower_tracking_program(
     end
 
     return LoweredTrackingProblem(prob, boundary)
+end
+
+"""
+    lower_tracking_program(prog::TrackingProgram, ctx::AbstractDict;
+        consensus_weight = 1.0,
+        tracking_weight  = 1.0,
+        include_target_dynamics = false) -> LoweredTrackingProblem
+
+Convenience entry point that runs the full validate → resolve → lower pipeline
+in one call.
+
+```julia
+prog = parse_tracking_program(quote
+    space X = R^2
+    map_decl(A, X, X)
+    map_decl(B, X, X)
+    agent a1 dynamics (A, B) period dt
+    agent a2 dynamics (A, B) period dt
+    horizon K
+    time initial = 0
+    time final = K
+    times Tall = initial:final
+    consensus c1 between (a1, a2) using (A, A) at Tall
+end)
+ctx = Dict{Symbol,Any}(:K => 5, :A => I(2), :B => reshape([0.0,1.0],2,1), :dt => 0.05)
+result = lower_tracking_program(prog, ctx)
+```
+"""
+function lower_tracking_program(
+    prog::TrackingProgram,
+    ctx::AbstractDict;
+    consensus_weight::Float64   = 1.0,
+    tracking_weight::Float64    = 1.0,
+    include_target_dynamics::Bool = false,
+)
+    resolved = resolve_tracking_program(validate_tracking_program(prog), ctx)
+    return lower_tracking_program(resolved;
+        consensus_weight, tracking_weight, include_target_dynamics)
 end
 
 end # module TrackingDSLLowering

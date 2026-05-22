@@ -202,14 +202,9 @@ prog1 = @tracking_problem begin
     consensus(c1; agents=(a1,a2), maps=(R_yz,R_yz), at=Tall)
     track(tr1; agent=a1, target=t1, maps=(R_yz,R_yz), at=Tall)
     track(tr2; agent=a2, target=t2, maps=(R_yz,R_yz), at=Tall)
-    bind(K    => k)
-    bind(Ad   => Ad)
-    bind(Bd   => Bd)
-    bind(R_yz => R_yz)
-    bind(h    => h)
 end
-prob1 = lower_tracking_program(
-    resolve_tracking_program(prog1);
+ctx1 = Dict{Symbol,Any}(:K => k, :Ad => Ad, :Bd => Bd, :R_yz => R_yz, :h => h)
+prob1 = lower_tracking_program(prog1, ctx1;
     include_target_dynamics=true, tracking_weight=5.0,
 ).problem
 
@@ -262,15 +257,9 @@ prog2 = @tracking_problem begin
     consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
     track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=Tall)
     track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=Tall)
-    bind(K   => k)
-    bind(Ad  => Ad)
-    bind(Bd  => Bd)
-    bind(R_y => R_y)
-    bind(R_z => R_z)
-    bind(h   => h)
 end
-prob2 = lower_tracking_program(
-    resolve_tracking_program(prog2);
+ctx2 = Dict{Symbol,Any}(:K => k, :Ad => Ad, :Bd => Bd, :R_y => R_y, :R_z => R_z, :h => h)
+prob2 = lower_tracking_program(prog2, ctx2;
     tracking_weight=5.0,
 ).problem
 
@@ -316,15 +305,9 @@ prog3 = @tracking_problem begin
     consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=final)
     track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=final)
     track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=final)
-    bind(K   => k)
-    bind(Ad  => Ad)
-    bind(Bd  => Bd)
-    bind(R_y => R_y)
-    bind(R_z => R_z)
-    bind(h   => h)
 end
-prob3 = lower_tracking_program(
-    resolve_tracking_program(prog3);
+ctx3 = Dict{Symbol,Any}(:K => k, :Ad => Ad, :Bd => Bd, :R_y => R_y, :R_z => R_z, :h => h)
+prob3 = lower_tracking_program(prog3, ctx3;
     tracking_weight=5.0,
 ).problem
 
@@ -375,15 +358,9 @@ prog4 = @tracking_problem begin
     consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=final)
     track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=final)
     track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=final)
-    bind(K   => k)
-    bind(Ad  => Ad)
-    bind(Bd  => Bd)
-    bind(R_y => R_y)
-    bind(R_z => R_z)
-    bind(h   => h)
 end
-prob4 = lower_tracking_program(
-    resolve_tracking_program(prog4);
+ctx4 = Dict{Symbol,Any}(:K => k, :Ad => Ad, :Bd => Bd, :R_y => R_y, :R_z => R_z, :h => h)
+prob4 = lower_tracking_program(prog4, ctx4;
     tracking_weight=5.0,
 ).problem
 

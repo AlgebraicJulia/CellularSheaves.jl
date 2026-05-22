@@ -3,15 +3,15 @@ Tests for the name-driven Tracking DSL (TrackingDSL).
 
 Coverage:
 1. Parse and validate a full happy-path program.
-2. Late binding with bind!: matrices passed by value after parsing.
+2. Context dict: matrices passed by value at resolve time.
 3. `initial` and `final` aliases resolve correctly with horizon.
 4. Consensus/tracking constraints activated on distinct time sets.
 5. Lowered TrackingProblem matches a manually assembled reference.
 6. Unbound symbol errors are thrown before lowering.
 7. Dimension mismatch errors include map/vector names.
-8. Conflicting bind types are rejected.
-9. Indexed boundary reference (x[a,t]) with late binding.
-10. @tracking_problem macro evaluates bind values inline.
+8. Conflicting context types are rejected.
+9. Indexed boundary reference (x[a,t]) with context dict and set_indexed!.
+10. @tracking_problem macro (no bind statements).
 """
 
 using Test
@@ -50,25 +50,27 @@ function _make_test_prog(; k=3)
         track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
         boundary(:agent, a1; at=initial, value=x0_a1)
     end)
-    bind!(prog, :K, k)
-    bind!(prog, :A, Ad)
-    bind!(prog, :B, Bd)
-    bind!(prog, :R_y, R_y)
-    bind!(prog, :dt, 0.01)
-    bind!(prog, :x0_a1, zeros(3))
-    return prog, Ad, Bd, R_y
+    ctx = Dict{Symbol,Any}(
+        :K     => k,
+        :A     => Ad,
+        :B     => Bd,
+        :R_y   => R_y,
+        :dt    => 0.01,
+        :x0_a1 => zeros(3),
+    )
+    return prog, ctx, Ad, Bd, R_y
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Happy-path: parse + validate + resolve + lower
 # ─────────────────────────────────────────────────────────────────────────────
 @testset "TrackingDSL happy path" begin
-    prog, Ad, Bd, R_y = _make_test_prog(k=4)
+    prog, ctx, Ad, Bd, R_y = _make_test_prog(k=4)
 
     @test length(prog.statements) > 0
     @test validate_tracking_program(prog) === prog
 
-    resolved = resolve_tracking_program(prog)
+    resolved = resolve_tracking_program(prog, ctx)
     @test resolved.k == 4
     @test length(resolved.agents)  == 2
     @test length(resolved.targets) == 1
@@ -86,9 +88,9 @@ end
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. Late binding via bind!
+# 2. Context dict: matrices passed by value at resolve time
 # ─────────────────────────────────────────────────────────────────────────────
-@testset "TrackingDSL late binding with bind!" begin
+@testset "TrackingDSL context dict binding" begin
     prog = parse_tracking_program(quote
         agent(a1; dynamics=(A,B), period=dt)
         horizon(K)
@@ -96,15 +98,16 @@ end
         time(final = K)
     end)
 
-    # Before binding, resolution should fail on missing horizon
-    @test_throws TrackingUnboundSymbolError resolve_tracking_program(prog)
+    # Before providing ctx, resolution should fail on missing horizon
+    @test_throws TrackingUnboundSymbolError resolve_tracking_program(prog, Dict{Symbol,Any}())
 
-    bind!(prog, :K, 6)
-    bind!(prog, :A, [1.0 0.0; 0.0 1.0])
-    bind!(prog, :B, reshape([0.0; 1.0], 2, 1))
-    bind!(prog, :dt, 0.05)
-
-    resolved = resolve_tracking_program(prog)
+    ctx = Dict{Symbol,Any}(
+        :K  => 6,
+        :A  => [1.0 0.0; 0.0 1.0],
+        :B  => reshape([0.0; 1.0], 2, 1),
+        :dt => 0.05,
+    )
+    resolved = resolve_tracking_program(prog, ctx)
     @test resolved.k == 6
     @test length(resolved.agents) == 1
 end
@@ -122,13 +125,15 @@ end
         track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
         target(t1)
     end)
-    bind!(prog, :K, 5)
-    bind!(prog, :A, [1.0 0.0; 0.0 1.0])
-    bind!(prog, :B, reshape([0.0; 1.0], 2, 1))
-    bind!(prog, :R_y, Matrix(1.0I, 3, 3))
-    bind!(prog, :dt, 0.05)
+    ctx = Dict{Symbol,Any}(
+        :K   => 5,
+        :A   => [1.0 0.0; 0.0 1.0],
+        :B   => reshape([0.0; 1.0], 2, 1),
+        :R_y => Matrix(1.0I, 3, 3),
+        :dt  => 0.05,
+    )
 
-    resolved = resolve_tracking_program(prog)
+    resolved = resolve_tracking_program(prog, ctx)
     @test resolved.k == 5
 
     # tracking at=final should activate only at t=5
@@ -151,13 +156,15 @@ end
         consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
         track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
     end)
-    bind!(prog, :K, 4)
-    bind!(prog, :A, [1.0 0.0; 0.0 1.0])
-    bind!(prog, :B, reshape([0.0; 1.0], 2, 1))
-    bind!(prog, :R_y, Matrix(1.0I, 3, 3))
-    bind!(prog, :dt, 0.05)
+    ctx = Dict{Symbol,Any}(
+        :K   => 4,
+        :A   => [1.0 0.0; 0.0 1.0],
+        :B   => reshape([0.0; 1.0], 2, 1),
+        :R_y => Matrix(1.0I, 3, 3),
+        :dt  => 0.05,
+    )
 
-    resolved = resolve_tracking_program(prog)
+    resolved = resolve_tracking_program(prog, ctx)
     # Tall = 0:4 → [0,1,2,3,4]
     @test resolved.consensus[1].timesteps == collect(0:4)
     # final = 4
@@ -175,8 +182,8 @@ end
     k = 3
 
     # DSL path
-    prog, _, _, _ = _make_test_prog(k=k)
-    resolved = resolve_tracking_program(prog)
+    prog, ctx, _, _, _ = _make_test_prog(k=k)
+    resolved = resolve_tracking_program(prog, ctx)
     result = lower_tracking_program(resolved)
 
     # Manual reference
@@ -218,11 +225,11 @@ end
         time(final = K)
     end)
     # K not bound → TrackingUnboundSymbolError
-    @test_throws TrackingUnboundSymbolError resolve_tracking_program(prog)
+    @test_throws TrackingUnboundSymbolError resolve_tracking_program(prog, Dict{Symbol,Any}())
 
-    bind!(prog, :K, 3)
-    # A, B not bound → TrackingUnboundSymbolError
-    @test_throws TrackingUnboundSymbolError resolve_tracking_program(prog)
+    # K bound but A, B not bound → TrackingUnboundSymbolError
+    ctx_partial = Dict{Symbol,Any}(:K => 3)
+    @test_throws TrackingUnboundSymbolError resolve_tracking_program(prog, ctx_partial)
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -235,14 +242,15 @@ end
         time(initial = 0)
         time(final = K)
     end)
-    bind!(prog, :K, 3)
-    bind!(prog, :dt, 0.05)
-    # Non-square A: rows ≠ cols
-    bind!(prog, :A, [1.0 0.0 0.0; 0.0 1.0 0.0])  # 2×3 — non-square
-    bind!(prog, :B, reshape([0.0; 1.0], 2, 1))
+    ctx = Dict{Symbol,Any}(
+        :K  => 3,
+        :dt => 0.05,
+        :A  => [1.0 0.0 0.0; 0.0 1.0 0.0],  # 2×3 — non-square
+        :B  => reshape([0.0; 1.0], 2, 1),
+    )
 
     err = try
-        resolve_tracking_program(prog)
+        resolve_tracking_program(prog, ctx)
         nothing
     catch e
         e
@@ -252,29 +260,30 @@ end
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. Conflicting bind types: scalar vs matrix
+# 8. Conflicting context types: scalar vs matrix
 # ─────────────────────────────────────────────────────────────────────────────
-@testset "TrackingDSL conflicting bind types" begin
+@testset "TrackingDSL conflicting context types" begin
     prog = parse_tracking_program(quote
         agent(a1; dynamics=(A,B), period=dt)
         horizon(K)
         time(initial = 0)
         time(final = K)
     end)
-    bind!(prog, :K, 3)
-    bind!(prog, :dt, 0.05)
-    # Bind A as a scalar — will fail when we try to use it as a matrix
-    bind!(prog, :A, 42.0)  # scalar, not matrix
-    bind!(prog, :B, reshape([0.0; 1.0], 2, 1))
+    ctx = Dict{Symbol,Any}(
+        :K  => 3,
+        :dt => 0.05,
+        :A  => 42.0,  # scalar, not matrix — should fail
+        :B  => reshape([0.0; 1.0], 2, 1),
+    )
 
     # Resolution should fail because 42.0 can't be converted to Matrix{Float64}
-    @test_throws Exception resolve_tracking_program(prog)
+    @test_throws Exception resolve_tracking_program(prog, ctx)
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. Indexed boundary: x[a,t] with late binding
+# 9. Indexed boundary: x[a,t] via set_indexed!
 # ─────────────────────────────────────────────────────────────────────────────
-@testset "TrackingDSL indexed boundary late binding" begin
+@testset "TrackingDSL indexed boundary via set_indexed!" begin
     prog = parse_tracking_program(quote
         agent(a1; dynamics=(A,B), period=dt)
         horizon(K)
@@ -282,16 +291,17 @@ end
         time(final = K)
         boundary(:agent, a1; at=t_pin, value=x_ref[a,t_pin])
     end)
-    bind!(prog, :K, 5)
-    bind!(prog, :A, [1.0 0.0; 0.0 1.0])
-    bind!(prog, :B, reshape([0.0; 1.0], 2, 1))
-    bind!(prog, :dt, 0.05)
-    # Bind the indexed reference: x_ref[a=1, t_pin=2] => some vector
-    bind!(prog, :x_ref, :a, :t_pin, [1.0, 2.0, 0.0])
-    bind!(prog, :a, 1)
-    bind!(prog, :t_pin, 2)
+    ctx = Dict{Any,Any}(
+        :K     => 5,
+        :A     => [1.0 0.0; 0.0 1.0],
+        :B     => reshape([0.0; 1.0], 2, 1),
+        :dt    => 0.05,
+        :a     => 1,
+        :t_pin => 2,
+    )
+    set_indexed!(ctx, :x_ref, 1, 2, [1.0, 2.0, 0.0])
 
-    resolved = resolve_tracking_program(prog)
+    resolved = resolve_tracking_program(prog, ctx)
     @test length(resolved.boundaries) == 1
     @test resolved.boundaries[1].time == 2
     @test resolved.boundaries[1].entity_index == 1
@@ -299,7 +309,7 @@ end
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 10. @tracking_problem macro evaluates bind values inline
+# 10. @tracking_problem macro (structural parsing, ctx dict for values)
 # ─────────────────────────────────────────────────────────────────────────────
 @testset "TrackingDSL @tracking_problem macro" begin
     Ad = [1.0 0.0; 0.0 1.0]
@@ -316,15 +326,16 @@ end
         time(final = K)
         times(Tall = initial:final)
         consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
-        bind(K => k_val)
-        bind(A => Ad)
-        bind(B => Bd)
-        bind(R_y => R_y)
-        bind(dt => 0.01)
     end
 
-    # Bind values are concrete (not Expr) because the macro evaluated them
-    resolved = resolve_tracking_program(validate_tracking_program(prog))
+    ctx = Dict{Symbol,Any}(
+        :K  => k_val,
+        :A  => Ad,
+        :B  => Bd,
+        :R_y => R_y,
+        :dt  => 0.01,
+    )
+    resolved = resolve_tracking_program(validate_tracking_program(prog), ctx)
     @test resolved.k == k_val
     @test resolved.agents[1].Ad ≈ Ad
     @test resolved.agents[1].Bd ≈ Bd
@@ -384,13 +395,15 @@ const _Q_R_Z  = MAT.state_projection_matrix([2],    _Q_NX, _Q_NU)
         consensus(c1; agents=(a1,a2), maps=(R_pos_m,R_pos_m), at=Tall)
         track(tr1; agent=a1, target=t1, maps=(R_pos_m,R_pos_m), at=final)
     end)
-    bind!(prog, :K, k)
-    bind!(prog, :Ad_m, Ad)
-    bind!(prog, :Bd_m, Bd)
-    bind!(prog, :R_pos_m, R_pos)
-    bind!(prog, :h, dt)
+    ctx = Dict{Symbol,Any}(
+        :K      => k,
+        :Ad_m   => Ad,
+        :Bd_m   => Bd,
+        :R_pos_m => R_pos,
+        :h      => dt,
+    )
 
-    resolved = resolve_tracking_program(prog)
+    resolved = resolve_tracking_program(prog, ctx)
     result = lower_tracking_program(resolved)
     sheaf_dsl = MAT.build_time_expanded_tracking_sheaf(result.problem)
 
@@ -433,14 +446,16 @@ end
         consensus(c1; agents=(a1,a2), maps=(R_yz_m,R_yz_m), at=Tall)
         track(tr1; agent=a1, target=t1, maps=(R_yz_m,R_yz_m), at=Tall)
         track(tr2; agent=a2, target=t2, maps=(R_yz_m,R_yz_m), at=Tall)
-        bind(K => _Q_K)
-        bind(Ad_dyn => _Q_AD)
-        bind(Bd_dyn => _Q_BD)
-        bind(R_yz_m => _Q_R_YZ)
-        bind(h_dt => _Q_DT)
     end
+    ctx = Dict{Symbol,Any}(
+        :K      => _Q_K,
+        :Ad_dyn => _Q_AD,
+        :Bd_dyn => _Q_BD,
+        :R_yz_m => _Q_R_YZ,
+        :h_dt   => _Q_DT,
+    )
 
-    resolved = prog |> validate_tracking_program |> resolve_tracking_program
+    resolved = resolve_tracking_program(validate_tracking_program(prog), ctx)
     lowered  = lower_tracking_program(resolved;
         include_target_dynamics=true, tracking_weight=5.0)
     p = lowered.problem
@@ -482,15 +497,17 @@ end
         consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=Tall)
         track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=Tall)
         track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=Tall)
-        bind(K => _Q_K)
-        bind(Ad_dyn => _Q_AD)
-        bind(Bd_dyn => _Q_BD)
-        bind(R_y_m => _Q_R_Y)
-        bind(R_z_m => _Q_R_Z)
-        bind(h_dt => _Q_DT)
     end
+    ctx = Dict{Symbol,Any}(
+        :K      => _Q_K,
+        :Ad_dyn => _Q_AD,
+        :Bd_dyn => _Q_BD,
+        :R_y_m  => _Q_R_Y,
+        :R_z_m  => _Q_R_Z,
+        :h_dt   => _Q_DT,
+    )
 
-    resolved = prog |> validate_tracking_program |> resolve_tracking_program
+    resolved = resolve_tracking_program(validate_tracking_program(prog), ctx)
     lowered  = lower_tracking_program(resolved)
     p = lowered.problem
 
@@ -506,6 +523,15 @@ end
 # 14. Scenario 3 mirror: y-consensus, z-tracking, terminal timestep only
 # ─────────────────────────────────────────────────────────────────────────────
 @testset "TrackingDSL Scenario 3: y-consensus z-tracking terminal only" begin
+    ctx = Dict{Symbol,Any}(
+        :K      => _Q_K,
+        :Ad_dyn => _Q_AD,
+        :Bd_dyn => _Q_BD,
+        :R_y_m  => _Q_R_Y,
+        :R_z_m  => _Q_R_Z,
+        :h_dt   => _Q_DT,
+    )
+
     prog = @tracking_problem begin
         agent(a1; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
         agent(a2; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
@@ -517,15 +543,9 @@ end
         consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=final)
         track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=final)
         track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=final)
-        bind(K => _Q_K)
-        bind(Ad_dyn => _Q_AD)
-        bind(Bd_dyn => _Q_BD)
-        bind(R_y_m => _Q_R_Y)
-        bind(R_z_m => _Q_R_Z)
-        bind(h_dt => _Q_DT)
     end
 
-    resolved = prog |> validate_tracking_program |> resolve_tracking_program
+    resolved = resolve_tracking_program(validate_tracking_program(prog), ctx)
     lowered  = lower_tracking_program(resolved)
     p = lowered.problem
 
@@ -546,14 +566,8 @@ end
         consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=Tall)
         track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=Tall)
         track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=Tall)
-        bind(K => _Q_K)
-        bind(Ad_dyn => _Q_AD)
-        bind(Bd_dyn => _Q_BD)
-        bind(R_y_m => _Q_R_Y)
-        bind(R_z_m => _Q_R_Z)
-        bind(h_dt => _Q_DT)
     end
-    p2 = lower_tracking_program(resolve_tracking_program(prog2)).problem
+    p2 = lower_tracking_program(resolve_tracking_program(prog2, ctx)).problem
     # Restricting to the terminal step removes k consensus + k*n_tracking_edges edges
     @test ne(MAT.build_time_expanded_tracking_sheaf(p).underlying_graph) <
           ne(MAT.build_time_expanded_tracking_sheaf(p2).underlying_graph)
@@ -568,6 +582,14 @@ end
     # Only the boundary data (target trajectories) differs; that is supplied
     # externally after lowering.  The resulting sheaf topology — and therefore
     # the nullspace dimension of the Laplacian — must be identical.
+    ctx = Dict{Symbol,Any}(
+        :K      => _Q_K,
+        :Ad_dyn => _Q_AD,
+        :Bd_dyn => _Q_BD,
+        :R_y_m  => _Q_R_Y,
+        :R_z_m  => _Q_R_Z,
+        :h_dt   => _Q_DT,
+    )
     function _s34_prog()
         @tracking_problem begin
             agent(a1; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
@@ -580,17 +602,11 @@ end
             consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=final)
             track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=final)
             track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=final)
-            bind(K => _Q_K)
-            bind(Ad_dyn => _Q_AD)
-            bind(Bd_dyn => _Q_BD)
-            bind(R_y_m => _Q_R_Y)
-            bind(R_z_m => _Q_R_Z)
-            bind(h_dt => _Q_DT)
         end
     end
 
-    p3 = lower_tracking_program(resolve_tracking_program(_s34_prog())).problem
-    p4 = lower_tracking_program(resolve_tracking_program(_s34_prog())).problem
+    p3 = lower_tracking_program(resolve_tracking_program(_s34_prog(), ctx)).problem
+    p4 = lower_tracking_program(resolve_tracking_program(_s34_prog(), ctx)).problem
 
     # Same topology → same sheaf
     s3 = MAT.build_time_expanded_tracking_sheaf(p3)
