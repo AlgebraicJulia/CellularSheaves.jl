@@ -27,7 +27,8 @@ Raises a `TrackingDeclarationError`, `TrackingTypeError`, or
 on success so it can be used in a pipeline:
 
 ```julia
-prog |> validate_tracking_program |> p -> resolve_tracking_program(p, ctx) |> lower_tracking_program
+ctx = Dict{Symbol,Any}(:K => 5, :A => ..., :B => ..., :dt => 0.05)
+lower_tracking_program(prog, ctx)
 ```
 
 Validation checks:

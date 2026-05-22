@@ -153,8 +153,8 @@ Store an indexed boundary value in `ctx` under the canonical key
 `(name, agent_val, time_val)`.  Use this to supply values for boundary
 conditions declared with an indexed reference like `boundary(:agent, a; at=t, value=x[a,t])`.
 
-Because the key is a `Tuple`, `ctx` must accept non-`Symbol` keys —
-use `Dict{Any,Any}` rather than `Dict{Symbol,Any}`:
+Because the key is a `Tuple`, `ctx` must support non-`Symbol` keys.
+Use `Dict{Any,Any}` (not `Dict{Symbol,Any}`) when indexed values are needed:
 
 ```julia
 ctx = Dict{Any,Any}(:K => 5, :A => ..., :B => ..., :dt => 0.05, :a => 1, :t_pin => 3)
