@@ -118,6 +118,20 @@ using BlockArrays
     end
 
     # -----------------------------------------------------------------------
+    # 8b. Finite-horizon controllability helpers are part of the public API
+    # -----------------------------------------------------------------------
+    @testset "finite-horizon controllability helpers" begin
+        k  = 3
+        ts = ControlledTrajectorySheaf(F1, Ac_int, Bc_int, h_int, k)
+        C  = finite_horizon_controllability(ts)
+
+        @test size(C) == (1, 3)
+        @test C ≈ [1.0 1.0 1.0]
+        @test expected_feasible_dimension(ts) == 2
+        @test_throws ArgumentError expected_feasible_dimension(ts; rtol=0.0)
+    end
+
+    # -----------------------------------------------------------------------
     # 9. Every null-basis column is a global section of the inner sheaf
     #    (after inverting the public→internal extraction, endpoints = 0)
     # -----------------------------------------------------------------------
@@ -208,6 +222,8 @@ using BlockArrays
         n2 = ts2.state_dim
         @test z_p2[1:n2] ≈ x1_2
         @test z_p2[k*n2+1:(k+1)*n2] ≈ xk1_2
+        @test size(finite_horizon_controllability(ts2)) == (2, 3)
+        @test expected_feasible_dimension(ts2) == 1
     end
 
 end

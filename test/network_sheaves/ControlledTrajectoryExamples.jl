@@ -183,4 +183,86 @@ using BlockArrays
         @test ts.state_dim > 2
     end
 
+    # -----------------------------------------------------------------------
+    # 5. SVD and LDL nullspace dimensionality agreement
+    #    The harmonic-extension diagnostics and the public feasible basis
+    #    should agree with the controllability-based expected dimension.
+    # -----------------------------------------------------------------------
+    @testset "SVD and LDL nullspace dimensionality agree" begin
+        systems = [
+            ("Double integrator",
+             [0.0 1.0; 0.0 0.0],
+             reshape([0.0, 1.0], 2, 1),
+             0.25, 8,
+             EuclideanSheaf{Float64}(fill(2, 1)),
+             [0.0, 0.0],
+             [1.0, 0.0]),
+
+            ("Vehicle platoon",
+             [0.0 1.0 0.0 0.0;
+              0.0 0.0 0.0 0.0;
+              0.0 0.0 0.0 1.0;
+              0.0 0.0 0.0 0.0],
+             [0.0 0.0;
+              1.0 0.0;
+              0.0 0.0;
+              0.0 1.0],
+             0.25, 8,
+             EuclideanSheaf{Float64}([2, 2]),
+             [0.0, 0.0, 2.0, 0.0],
+             [1.0, 0.0, 3.0, 0.0]),
+
+            ("Planar quadrotor",
+             [0.0 0.0 0.0 1.0 0.0 0.0;
+              0.0 0.0 0.0 0.0 1.0 0.0;
+              0.0 0.0 0.0 0.0 0.0 1.0;
+              0.0 0.0 -9.81 0.0 0.0 0.0;
+              0.0 0.0 0.0 0.0 0.0 0.0;
+              0.0 0.0 0.0 0.0 0.0 0.0],
+             [0.0 0.0;
+              0.0 0.0;
+              0.0 0.0;
+              0.0 0.0;
+              2.0 2.0;
+              12.5 -12.5],
+             0.05, 12,
+             EuclideanSheaf{Float64}(fill(6, 1)),
+             zeros(6),
+             [0.5, 0.0, 0.0, 0.0, 0.0, 0.0]),
+
+            ("Mass-spring-damper chain",
+             [0.0 1.0 0.0 0.0;
+              -2.0 -0.4 1.0 0.2;
+              0.0 0.0 0.0 1.0;
+              1.0 0.2 -1.0 -0.2],
+             [0.0 0.0;
+              1.0 0.0;
+              0.0 0.0;
+              0.0 1.0],
+             0.5, 10,
+             EuclideanSheaf{Float64}([2, 2]),
+             [0.0, 0.0, 0.0, 0.0],
+             [0.5, 0.0, 1.0, 0.0]),
+        ]
+
+        for (name, Ac, Bc, h, k, F, x1, xk1) in systems
+            @testset "$name" begin
+                ts = ControlledTrajectorySheaf(F, Ac, Bc, h, k)
+                boundary = Dict{Int,Vector{Float64}}(
+                    1     => convert(Vector{Float64}, x1),
+                    k + 2 => convert(Vector{Float64}, xk1),
+                )
+
+                ldl_diag = harmonic_extension_ldl_diagnostics(ts.sheaf, boundary)
+                svd_diag = harmonic_extension_svd_diagnostics(ts.sheaf, boundary)
+                _, null_basis = feasible_control_trajectory_basis(ts, x1, xk1)
+
+                expected = expected_feasible_dimension(ts)
+                @test ldl_diag.nullity_estimate == svd_diag.nullity_estimate
+                @test ldl_diag.nullity_estimate == expected
+                @test size(null_basis, 2) == expected
+            end
+        end
+    end
+
 end
