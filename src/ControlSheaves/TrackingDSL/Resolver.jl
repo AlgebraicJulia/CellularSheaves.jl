@@ -17,7 +17,7 @@ using LinearAlgebra
 using ..TrackingDSLTerm
 
 export resolve_tracking_program, ResolvedProgram, ResolvedAgent, ResolvedTarget,
-    ResolvedConsensus, ResolvedTrack, ResolvedBoundary, bind!
+    ResolvedConsensus, ResolvedTrack, ResolvedBoundary, bind!, set_indexed!
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Resolved data structures
@@ -105,11 +105,27 @@ end
 
 """
     resolve_tracking_program(prog::TrackingProgram) -> ResolvedProgram
+    resolve_tracking_program(prog::TrackingProgram, ctx::AbstractDict) -> ResolvedProgram
 
 Resolve all symbolic names in `prog` to concrete numeric values.
 
+The optional `ctx` argument is a `Dict{Symbol,Any}` (or any `AbstractDict` with
+`Symbol` keys) that maps names to their values.  It is merged with any `BindStmt`
+declarations present in `prog`, with **`ctx` taking precedence** over in-program
+`bind` statements when both supply a value for the same name.  This lets you keep
+`bind` defaults inside a program and override specific values at call-site, or
+omit `bind` statements entirely and supply everything through `ctx`.
+
+To store indexed boundary values in `ctx`, use the helper [`set_indexed!`](@ref):
+
+```julia
+ctx = Dict{Symbol,Any}(:K => 5, :A => ..., :K => 5)
+set_indexed!(ctx, :x_ref, 1, 3, [1.0, 2.0, 0.0])  # x_ref[a=1, t=3]
+resolve_tracking_program(prog, ctx)
+```
+
 Resolution steps:
-1. Process `BindStmt`s in declaration order to build a value environment.
+1. Build the value environment from `BindStmt`s (lowest priority) then `ctx`.
 2. Resolve the horizon `k`.
 3. Resolve space dimensions.
 4. Resolve maps to concrete matrices.
@@ -120,33 +136,45 @@ Resolution steps:
 Raises `TrackingUnboundSymbolError` if any required name is still unbound.
 Raises `TrackingDimensionMismatchError` for inconsistent matrix dimensions.
 
-# Example — symbolic + late binding
+# Example — context dict (no bind statements needed)
 
 ```julia
 prog = parse_tracking_program(quote
     space X = R^2
-    map A : X -> X
+    map_decl(A, X, X)
+    map_decl(B, X, X)
     agent a1 dynamics (A, B) period dt
+    agent a2 dynamics (A, B) period dt
     horizon K
     time initial = 0
     time final = K
-    boundary agent a at t = x[a,t]
-    bind a => 1
-    bind t => 3
-    bind K => 5
-    bind A => [1.0 0.0; 0.0 1.0]
-    bind B => [0.0; 1.0;;]
-    bind dt => 0.05
-    bind x[a,t] => [1.0, 0.0]
+    times Tall = initial:final
+    consensus c1 between (a1, a2) using (A, A) at Tall
 end)
-resolved = resolve_tracking_program(prog)
+ctx = Dict{Symbol,Any}(
+    :K  => 5,
+    :A  => [1.0 0.0; 0.0 1.0],
+    :B  => [0.0; 1.0;;],
+    :dt => 0.05,
+)
+resolved = resolve_tracking_program(prog, ctx)
+```
+
+# Example — bind statements as defaults, ctx as override
+
+```julia
+# The bind inside the program sets K=5 but the caller overrides it to K=10.
+resolved = resolve_tracking_program(prog_with_binds, Dict{Symbol,Any}(:K => 10))
 ```
 
 `initial` resolves to `0`; `final` resolves to `K`.
 """
-function resolve_tracking_program(prog::TrackingProgram)
+function resolve_tracking_program(prog::TrackingProgram,
+                                  ctx::AbstractDict = Dict{Symbol,Any}())
+    # Build environment: BindStmts first (lower priority), then ctx (higher priority).
     env = Dict{Any,Any}()
     _apply_binds!(env, prog.statements)
+    _apply_context!(env, ctx)
     return _resolve(prog, env)
 end
 
