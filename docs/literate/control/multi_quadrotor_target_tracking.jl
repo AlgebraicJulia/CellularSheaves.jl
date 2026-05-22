@@ -29,6 +29,7 @@
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.MultiAgentTracking
+using CellularSheaves.ControlSheaves.TrackingDSL
 using CellularSheaves.TrajectorySheaves: continuous_to_discrete_zoh
 using LinearAlgebra
 using Plots
@@ -135,6 +136,14 @@ end
 # - ``R_{yz}``: projects the ``(n_x + n_u)``-stalk onto ``(y, z)`` (Scenario 1).
 # - ``R_y``: projects onto ``y`` only (consensus in Scenarios 2–4).
 # - ``R_z``: projects onto ``z`` only (tracking in Scenarios 2–4).
+#
+# Each scenario is specified as a `@tracking_problem` DSL program.
+# The DSL declaratively names agents, targets, a time horizon, and the
+# consensus/tracking coordination edges.  Calling `lower_tracking_program`
+# on the resolved program produces the `TrackingProblem` struct used by the
+# simulation utilities.  The boundary data (initial conditions, target
+# trajectories) is still supplied externally as a plain `Dict` — it varies
+# per scenario but never changes the sheaf topology.
 
 n_agents  = 2
 n_targets = 2
@@ -152,11 +161,6 @@ bt1 = BobbingTarget(0.0, 1.0, 0.3, omega_2periods)
 bt2 = BobbingTarget(0.0, 2.0, 0.3, omega_2periods)
 traj_bt1 = trajectory(bt1, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
 traj_bt2 = trajectory(bt2, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
-
-# Named edge configurations reused across scenarios.
-edges_12 = [(1, 2)]
-te_yz = [TrackingEdge(1, 1, R_yz, R_yz), TrackingEdge(2, 2, R_yz, R_yz)]
-te_z  = [TrackingEdge(1, 1, R_z,  R_z),  TrackingEdge(2, 2, R_z,  R_z)]
 
 # ## Scenario 1: Full (y,z) Coordination at Every Timestep
 #
@@ -180,12 +184,34 @@ xk_a2_s1 = [2.0, 2.5, 0.0, 0.0, 0.0, 0.0]
 traj_t1_s1 = generate_reference_trajectory(x0_a1_s1, xk_a1_s1, k, Ad, Bd, nx, nu)
 traj_t2_s1 = generate_reference_trajectory(x0_a2_s1, xk_a2_s1, k, Ad, Bd, nx, nu)
 
-prob1 = TrackingProblem(
-    n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
-    edges_12, te_yz, R_yz,
-    collect(0:k), collect(0:k),
-    true, 1.0, 5.0,
-)
+# The DSL program below declares agents, targets, the time horizon, and the
+# ``(y,z)`` consensus and tracking edges active at every timestep.
+# `lower_tracking_program` builds the `TrackingProblem` with target dynamics
+# included and a higher tracking weight to steer the least-squares solution
+# toward the tracking objective.
+
+prog1 = @tracking_problem begin
+    agent(a1; dynamics=(Ad, Bd), period=h)
+    agent(a2; dynamics=(Ad, Bd), period=h)
+    target(t1)
+    target(t2)
+    horizon(K)
+    time(initial = 0)
+    time(final = K)
+    times(Tall = initial:final)
+    consensus(c1; agents=(a1,a2), maps=(R_yz,R_yz), at=Tall)
+    track(tr1; agent=a1, target=t1, maps=(R_yz,R_yz), at=Tall)
+    track(tr2; agent=a2, target=t2, maps=(R_yz,R_yz), at=Tall)
+    bind(K    => k)
+    bind(Ad   => Matrix(Ad))
+    bind(Bd   => Matrix(Bd))
+    bind(R_yz => R_yz)
+    bind(h    => h)
+end
+prob1 = lower_tracking_program(
+    resolve_tracking_program(prog1);
+    include_target_dynamics=true, tracking_weight=5.0,
+).problem
 
 bnd1 = Dict{Int,Vector{Float64}}()
 bnd1[agent_vertex(prob1, 1, 0)] = vcat(x0_a1_s1, zeros(nu))
@@ -219,12 +245,34 @@ plot(result1)
 # Since all target vertices are pinned as boundary data, target dynamics edges
 # are omitted (`include_target_dynamics = false`).
 
-prob2 = TrackingProblem(
-    n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
-    edges_12, te_z, R_y,
-    collect(0:k), collect(0:k),
-    false, 1.0, 5.0,
-)
+# The DSL program uses split projection matrices: ``R_y`` for consensus (lateral
+# agreement) and ``R_z`` for tracking (altitude following).  Both edge families
+# span every timestep (`at=Tall`).  Target dynamics are excluded because all
+# target vertices will be pinned as boundary conditions.
+
+prog2 = @tracking_problem begin
+    agent(a1; dynamics=(Ad, Bd), period=h)
+    agent(a2; dynamics=(Ad, Bd), period=h)
+    target(t1)
+    target(t2)
+    horizon(K)
+    time(initial = 0)
+    time(final = K)
+    times(Tall = initial:final)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
+    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=Tall)
+    track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=Tall)
+    bind(K   => k)
+    bind(Ad  => Matrix(Ad))
+    bind(Bd  => Matrix(Bd))
+    bind(R_y => R_y)
+    bind(R_z => R_z)
+    bind(h   => h)
+end
+prob2 = lower_tracking_program(
+    resolve_tracking_program(prog2);
+    tracking_weight=5.0,
+).problem
 
 x0_a1_s2 = [0.0, traj_bt1[1][IDX_Z], 0.0, 0.0, traj_bt1[1][IDX_ZDT], 0.0]
 x0_a2_s2 = [0.0, traj_bt2[1][IDX_Z], 0.0, 0.0, traj_bt2[1][IDX_ZDT], 0.0]
@@ -253,12 +301,32 @@ plot(result2)
 # Removing ``k`` timesteps of coordination edges dramatically enlarges the
 # feasible space (null dim >> Scenario 2).
 
-prob3 = TrackingProblem(
-    n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
-    edges_12, te_z, R_y,
-    [k], [k],
-    false, 1.0, 5.0,
-)
+# Changing `at=Tall` to `at=final` in the DSL restricts both the consensus and
+# tracking edges to the single terminal timestep `t = k`.  The only topological
+# difference from Scenario 2 is this single keyword change.
+
+prog3 = @tracking_problem begin
+    agent(a1; dynamics=(Ad, Bd), period=h)
+    agent(a2; dynamics=(Ad, Bd), period=h)
+    target(t1)
+    target(t2)
+    horizon(K)
+    time(initial = 0)
+    time(final = K)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=final)
+    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=final)
+    track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=final)
+    bind(K   => k)
+    bind(Ad  => Matrix(Ad))
+    bind(Bd  => Matrix(Bd))
+    bind(R_y => R_y)
+    bind(R_z => R_z)
+    bind(h   => h)
+end
+prob3 = lower_tracking_program(
+    resolve_tracking_program(prog3);
+    tracking_weight=5.0,
+).problem
 
 x0_a1_s3 = [-0.5, 0.5, 0.0, 0.0, 0.0, 0.0]
 x0_a2_s3 = [ 1.0, 1.5, 0.0, 0.0, 0.0, 0.0]
@@ -291,12 +359,33 @@ plot(result3)
 bt2_s4 = BobbingTarget(1.5, 2.0, 0.3, omega_2periods)
 traj_bt2_s4 = trajectory(bt2_s4, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
 
-prob4 = TrackingProblem(
-    n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
-    edges_12, te_z, R_y,
-    [k], [k],
-    false, 1.0, 5.0,
-)
+# The DSL program for Scenario 4 is **identical** to Scenario 3.
+# The different target trajectory (`traj_bt2_s4`) is boundary data supplied
+# externally — it never appears in the DSL program and does not change the
+# sheaf topology or nullspace dimension.
+
+prog4 = @tracking_problem begin
+    agent(a1; dynamics=(Ad, Bd), period=h)
+    agent(a2; dynamics=(Ad, Bd), period=h)
+    target(t1)
+    target(t2)
+    horizon(K)
+    time(initial = 0)
+    time(final = K)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=final)
+    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=final)
+    track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=final)
+    bind(K   => k)
+    bind(Ad  => Matrix(Ad))
+    bind(Bd  => Matrix(Bd))
+    bind(R_y => R_y)
+    bind(R_z => R_z)
+    bind(h   => h)
+end
+prob4 = lower_tracking_program(
+    resolve_tracking_program(prog4);
+    tracking_weight=5.0,
+).problem
 
 x0_a1_s4 = [-0.5, 0.5, 0.0, 0.0, 0.0, 0.0]
 x0_a2_s4 = [ 1.0, 1.5, 0.0, 0.0, 0.0, 0.0]

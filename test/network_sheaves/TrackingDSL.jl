@@ -331,6 +331,33 @@ end
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Shared setup for Scenarios 12–15 (quadrotor-like dynamics, k=5)
+# ─────────────────────────────────────────────────────────────────────────────
+# Simplified 6-state / 2-control kinematics (same dimensions as the full planar
+# quadrotor, but without the gravity/inertia nonlinearity for test speed).
+const _Q_DT  = 0.05
+const _Q_NX  = 6
+const _Q_NU  = 2
+const _Q_K   = 5
+
+const _Q_AD  = let A = Matrix{Float64}(I, _Q_NX, _Q_NX)
+    A[1,4] = _Q_DT; A[2,5] = _Q_DT; A[3,6] = _Q_DT   # pos += dt * vel
+    A
+end
+const _Q_BD  = let B = zeros(_Q_NX, _Q_NU)
+    B[4,1] = _Q_DT; B[5,2] = _Q_DT                    # vel += dt * u
+    B
+end
+
+# Projection matrices (rows select from the (nx+nu)-stalk):
+#   R_yz : project lateral (y) and altitude (z)          → 2×8
+#   R_y  : project lateral (y) only                      → 1×8
+#   R_z  : project altitude (z) only                     → 1×8
+const _Q_R_YZ = MAT.state_projection_matrix([1, 2], _Q_NX, _Q_NU)
+const _Q_R_Y  = MAT.state_projection_matrix([1],    _Q_NX, _Q_NU)
+const _Q_R_Z  = MAT.state_projection_matrix([2],    _Q_NX, _Q_NU)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 11. Regression: scenario from multi_quadrotor_target_tracking
 # ─────────────────────────────────────────────────────────────────────────────
 @testset "TrackingDSL regression vs manual setup" begin
@@ -387,4 +414,193 @@ end
     L_ref = sheaf_laplacian_matrix_direct(sheaf_ref)
     @test size(L_dsl) == size(L_ref)
     @test L_dsl ≈ L_ref
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 12. Scenario 1 mirror: (y,z) consensus + tracking at every timestep
+#     include_target_dynamics=true, tracking_weight=5.0
+# ─────────────────────────────────────────────────────────────────────────────
+@testset "TrackingDSL Scenario 1: (y,z) all-timestep consensus+tracking" begin
+    prog = @tracking_problem begin
+        agent(a1; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+        agent(a2; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+        target(t1)
+        target(t2)
+        horizon(K)
+        time(initial = 0)
+        time(final = K)
+        times(Tall = initial:final)
+        consensus(c1; agents=(a1,a2), maps=(R_yz_m,R_yz_m), at=Tall)
+        track(tr1; agent=a1, target=t1, maps=(R_yz_m,R_yz_m), at=Tall)
+        track(tr2; agent=a2, target=t2, maps=(R_yz_m,R_yz_m), at=Tall)
+        bind(K => _Q_K)
+        bind(Ad_dyn => _Q_AD)
+        bind(Bd_dyn => _Q_BD)
+        bind(R_yz_m => _Q_R_YZ)
+        bind(h_dt => _Q_DT)
+    end
+
+    resolved = prog |> validate_tracking_program |> resolve_tracking_program
+    lowered  = lower_tracking_program(resolved;
+        include_target_dynamics=true, tracking_weight=5.0)
+    p = lowered.problem
+
+    @test p.n_agents  == 2
+    @test p.n_targets == 2
+    @test p.k         == _Q_K
+    @test p.consensus_timesteps == collect(0:_Q_K)
+    @test p.tracking_timesteps  == collect(0:_Q_K)
+    @test p.consensus_restriction ≈ _Q_R_YZ
+
+    # Verify the DSL-built sheaf matches a manually-assembled reference
+    te_yz = [MAT.TrackingEdge(1,1,_Q_R_YZ,_Q_R_YZ),
+             MAT.TrackingEdge(2,2,_Q_R_YZ,_Q_R_YZ)]
+    ref_p = MAT.TrackingProblem(2, 2, _Q_K,
+        _Q_AD, _Q_BD,
+        [(1,2)], te_yz, _Q_R_YZ,
+        collect(0:_Q_K), collect(0:_Q_K),
+        true, 1.0, 5.0)
+    sheaf_dsl = MAT.build_time_expanded_tracking_sheaf(p)
+    sheaf_ref = MAT.build_time_expanded_tracking_sheaf(ref_p)
+    @test nv(sheaf_dsl.underlying_graph) == nv(sheaf_ref.underlying_graph)
+    @test ne(sheaf_dsl.underlying_graph) == ne(sheaf_ref.underlying_graph)
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 13. Scenario 2 mirror: y-consensus, z-tracking, all timesteps
+# ─────────────────────────────────────────────────────────────────────────────
+@testset "TrackingDSL Scenario 2: y-consensus z-tracking all timesteps" begin
+    prog = @tracking_problem begin
+        agent(a1; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+        agent(a2; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+        target(t1)
+        target(t2)
+        horizon(K)
+        time(initial = 0)
+        time(final = K)
+        times(Tall = initial:final)
+        consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=Tall)
+        track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=Tall)
+        track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=Tall)
+        bind(K => _Q_K)
+        bind(Ad_dyn => _Q_AD)
+        bind(Bd_dyn => _Q_BD)
+        bind(R_y_m => _Q_R_Y)
+        bind(R_z_m => _Q_R_Z)
+        bind(h_dt => _Q_DT)
+    end
+
+    resolved = prog |> validate_tracking_program |> resolve_tracking_program
+    lowered  = lower_tracking_program(resolved)
+    p = lowered.problem
+
+    @test p.consensus_timesteps == collect(0:_Q_K)
+    @test p.tracking_timesteps  == collect(0:_Q_K)
+    # Consensus projection is R_y; tracking projection is R_z
+    @test p.consensus_restriction ≈ _Q_R_Y
+    @test p.tracking_edges[1].agent_restriction ≈ _Q_R_Z
+    @test p.tracking_edges[2].agent_restriction ≈ _Q_R_Z
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 14. Scenario 3 mirror: y-consensus, z-tracking, terminal timestep only
+# ─────────────────────────────────────────────────────────────────────────────
+@testset "TrackingDSL Scenario 3: y-consensus z-tracking terminal only" begin
+    prog = @tracking_problem begin
+        agent(a1; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+        agent(a2; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+        target(t1)
+        target(t2)
+        horizon(K)
+        time(initial = 0)
+        time(final = K)
+        consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=final)
+        track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=final)
+        track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=final)
+        bind(K => _Q_K)
+        bind(Ad_dyn => _Q_AD)
+        bind(Bd_dyn => _Q_BD)
+        bind(R_y_m => _Q_R_Y)
+        bind(R_z_m => _Q_R_Z)
+        bind(h_dt => _Q_DT)
+    end
+
+    resolved = prog |> validate_tracking_program |> resolve_tracking_program
+    lowered  = lower_tracking_program(resolved)
+    p = lowered.problem
+
+    # Switching from Tall to `at=final` moves k constraints to just [k]
+    @test p.consensus_timesteps == [_Q_K]
+    @test p.tracking_timesteps  == [_Q_K]
+
+    # Verify sheaf has fewer edges than Scenario 2 (consensus+tracking only at t=k)
+    prog2 = @tracking_problem begin
+        agent(a1; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+        agent(a2; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+        target(t1)
+        target(t2)
+        horizon(K)
+        time(initial = 0)
+        time(final = K)
+        times(Tall = initial:final)
+        consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=Tall)
+        track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=Tall)
+        track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=Tall)
+        bind(K => _Q_K)
+        bind(Ad_dyn => _Q_AD)
+        bind(Bd_dyn => _Q_BD)
+        bind(R_y_m => _Q_R_Y)
+        bind(R_z_m => _Q_R_Z)
+        bind(h_dt => _Q_DT)
+    end
+    p2 = lower_tracking_program(resolve_tracking_program(prog2)).problem
+    # Restricting to the terminal step removes k consensus + k*n_tracking_edges edges
+    @test ne(MAT.build_time_expanded_tracking_sheaf(p).underlying_graph) <
+          ne(MAT.build_time_expanded_tracking_sheaf(p2).underlying_graph)
+end
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 15. Scenario 4 mirror: same DSL topology as Scenario 3; null dim is invariant
+#     (different target trajectories are boundary data, not part of the DSL)
+# ─────────────────────────────────────────────────────────────────────────────
+@testset "TrackingDSL Scenario 4: null dim invariant under boundary change" begin
+    # Scenario 4 uses exactly the same DSL program as Scenario 3.
+    # Only the boundary data (target trajectories) differs; that is supplied
+    # externally after lowering.  The resulting sheaf topology — and therefore
+    # the nullspace dimension of the Laplacian — must be identical.
+    function _s34_prog()
+        @tracking_problem begin
+            agent(a1; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+            agent(a2; dynamics=(Ad_dyn, Bd_dyn), period=h_dt)
+            target(t1)
+            target(t2)
+            horizon(K)
+            time(initial = 0)
+            time(final = K)
+            consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=final)
+            track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=final)
+            track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=final)
+            bind(K => _Q_K)
+            bind(Ad_dyn => _Q_AD)
+            bind(Bd_dyn => _Q_BD)
+            bind(R_y_m => _Q_R_Y)
+            bind(R_z_m => _Q_R_Z)
+            bind(h_dt => _Q_DT)
+        end
+    end
+
+    p3 = lower_tracking_program(resolve_tracking_program(_s34_prog())).problem
+    p4 = lower_tracking_program(resolve_tracking_program(_s34_prog())).problem
+
+    # Same topology → same sheaf
+    s3 = MAT.build_time_expanded_tracking_sheaf(p3)
+    s4 = MAT.build_time_expanded_tracking_sheaf(p4)
+    @test nv(s3.underlying_graph) == nv(s4.underlying_graph)
+    @test ne(s3.underlying_graph) == ne(s4.underlying_graph)
+
+    # Same Laplacian → same nullspace dimension
+    L3 = sheaf_laplacian_matrix_direct(s3)
+    L4 = sheaf_laplacian_matrix_direct(s4)
+    @test size(L3) == size(L4)
+    @test L3 ≈ L4
 end
