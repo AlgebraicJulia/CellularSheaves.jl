@@ -49,7 +49,7 @@ H, f, _ = lqr_objective(ts, Q, Ru; Qf=Qf)</code></pre><pre class="documenter-exa
     title=&quot;Cost Hessian H ($(size(H,1))×$(size(H,2)))&quot;,
     xlabel=&quot;trajectory index&quot;, ylabel=&quot;trajectory index&quot;,
     yflip=true, aspect_ratio=:equal, size=(500, 450))
-p_H</code></pre><img src="9dab0d4c.svg" alt="Example block output"/><h2 id="Step-5:-Solve-for-the-optimal-trajectory"><a class="docs-heading-anchor" href="#Step-5:-Solve-for-the-optimal-trajectory">Step 5: Solve for the optimal trajectory</a><a id="Step-5:-Solve-for-the-optimal-trajectory-1"></a><a class="docs-heading-anchor-permalink" href="#Step-5:-Solve-for-the-optimal-trajectory" title="Permalink"></a></h2><pre><code class="language-julia hljs">z_opt, α_opt, z_p, N = optimal_control_trajectory(ts, x1, xk1, H, f)
+p_H</code></pre><img src="353bb258.svg" alt="Example block output"/><h2 id="Step-5:-Solve-for-the-optimal-trajectory"><a class="docs-heading-anchor" href="#Step-5:-Solve-for-the-optimal-trajectory">Step 5: Solve for the optimal trajectory</a><a id="Step-5:-Solve-for-the-optimal-trajectory-1"></a><a class="docs-heading-anchor-permalink" href="#Step-5:-Solve-for-the-optimal-trajectory" title="Permalink"></a></h2><pre><code class="language-julia hljs">z_opt, α_opt, z_p, N = optimal_control_trajectory(ts, x1, xk1, H, f)
 
 println(&quot;Free parameters r = &quot;, size(N, 2))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Free parameters r = 12</code></pre><h2 id="Step-6:-Extract-and-plot-per-vehicle-trajectories"><a class="docs-heading-anchor" href="#Step-6:-Extract-and-plot-per-vehicle-trajectories">Step 6: Extract and plot per-vehicle trajectories</a><a id="Step-6:-Extract-and-plot-per-vehicle-trajectories-1"></a><a class="docs-heading-anchor-permalink" href="#Step-6:-Extract-and-plot-per-vehicle-trajectories" title="Permalink"></a></h2><p>The state ordering in each block is [p1, v1, p2, v2].  We unpack the position and velocity for each vehicle separately.</p><pre><code class="language-julia hljs">times_state   = h .* (0:k)
 times_control = h .* (0:k-1)
@@ -76,7 +76,7 @@ plot!(p_ctrl, times_control, ctrl2;
     lw=2, marker=:square, linestyle=:dash, label=&quot;u₂(t)&quot;)
 
 platoon_plot = plot(p_pos, p_ctrl; layout=(2, 1), size=(700, 500))
-platoon_plot</code></pre><img src="2914d5f5.svg" alt="Example block output"/><h2 id="Verification-(converted-to-warnings)"><a class="docs-heading-anchor" href="#Verification-(converted-to-warnings)">Verification (converted to warnings)</a><a id="Verification-(converted-to-warnings)-1"></a><a class="docs-heading-anchor-permalink" href="#Verification-(converted-to-warnings)" title="Permalink"></a></h2><p>Endpoint checks – issue warnings instead of failing the build.</p><pre><code class="language-julia hljs">if !(Array(z_opt[Block(1)]) ≈ x1)
+platoon_plot</code></pre><img src="17994e18.svg" alt="Example block output"/><h2 id="Verification-(converted-to-warnings)"><a class="docs-heading-anchor" href="#Verification-(converted-to-warnings)">Verification (converted to warnings)</a><a id="Verification-(converted-to-warnings)-1"></a><a class="docs-heading-anchor-permalink" href="#Verification-(converted-to-warnings)" title="Permalink"></a></h2><p>Endpoint checks – issue warnings instead of failing the build.</p><pre><code class="language-julia hljs">if !(Array(z_opt[Block(1)]) ≈ x1)
     @warn &quot;Initial state not satisfied&quot;
 end
 if !(Array(z_opt[Block(k + 1)]) ≈ xk1)
