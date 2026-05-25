@@ -84,6 +84,10 @@ The package is an implementation of computational methods developed by **Tyler H
 
 - **Ghrist, R. (2014).** *Elementary Applied Topology.* Createspace. ISBN 978-1502880857.
 - **Curry, J. (2014).** *Sheaves, Cosheaves and Applications.* PhD Thesis. [arXiv:1303.3405](https://arxiv.org/abs/1303.3405)
-- **Hansen, J. & Ghrist, R. (2019).** *Toward a Spectral Theory of Cellular Sheaves.* Journal of Applied and Computational Topology, 3(3), 315–358. [DOI:10.1007/s41468-019-00038-7](https://doi.org/10.1007/s41468-019-00038-7)
-- **Hansen, J. & Ghrist, R. (2021).** *Opinion Dynamics on Discourse Sheaves.* SIAM Journal on Applied Mathematics, 81(5), 2033–2060. [DOI:10.1137/20M1341088](https://doi.org/10.1137/20M1341088)
-- **Riess, H. & Hansen, J. (2022).** *Multidimensional Persistence Module Classification via Lattice-Theoretic Measures.* Foundations of Computational Mathematics. [arXiv:2104.09036](https://arxiv.org/abs/2104.09036)
+- **Hansen, J. & Ghrist, R. (2019).** *Toward a Spectral Theory of Cellular Sheaves.* Journal of Applied and Computational Topology, 3(3), 315–358. [DOI](https://doi.org/10.1007/s41468-019-00038-7)
+- **Hansen, J. & Ghrist, R. (2021).** *Opinion Dynamics on Discourse Sheaves.* SIAM Journal on Applied Mathematics, 81(5), 2033–2060. [DOI](https://doi.org/10.1137/20M1341088)
+- **Anwer, N., Riess, H., & Hale, M. (2026).** Multi-Agent System Identification with Nonlinear Sheaf Diffusion (arXiv:2605.11204). arXiv. https://doi.org/10.48550/arXiv.2605.11204
+- **Ghrist, R., Lopez, M., North, P. R., & Riess, H. (2026).** Categorical Diffusion of Weighted Lattices (arXiv:2501.03890). arXiv. [DOI](https://doi.org/10.48550/arXiv.2501.03890)
+- **Riess, H., & Ghrist, R. (2022). Diffusion of Information on Networked Lattices by Gossip. 2022** IEEE 61st Conference on Decision and Control (CDC), 5946–5952. [DOI](https://doi.org/10.1109/CDC51059.2022.9992539)
+- **Riess, H., Munger, M., & Zavlanos, M. M. (2023).** Max-Plus Synchronization in Decentralized Trading Systems. 2023 62nd IEEE Conference on Decision and Control (CDC), 221–227. [DOI](https://doi.org/10.1109/CDC49753.2023.10383918)
+- **Ghrist, R., & Riess, H. (2022).** Cellular sheaves of lattices and the Tarski Laplacian. Homology, Homotopy and Applications, 24(1), 325–345. [DOI](https://doi.org/10.4310/HHA.2022.v24.n1.a16)
