@@ -181,7 +181,8 @@ traj_t1_s1 = generate_reference_trajectory(x0_a1_s1, xk_a1_s1, k, Ad, Bd, nx, nu
 traj_t2_s1 = generate_reference_trajectory(x0_a2_s1, xk_a2_s1, k, Ad, Bd, nx, nu)
 
 prob1 = TrackingProblem(
-    n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
+    n_agents, n_targets, k, fill(Matrix(Ad), n_agents), fill(Matrix(Bd), n_agents),
+    fill(Matrix(Ad), n_targets), fill(Matrix(Bd), n_targets),
     edges_12, te_yz, R_yz,
     collect(0:k), collect(0:k),
     true, 1.0, 5.0,
@@ -220,7 +221,8 @@ plot(result1)
 # are omitted (`include_target_dynamics = false`).
 
 prob2 = TrackingProblem(
-    n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
+    n_agents, n_targets, k, fill(Matrix(Ad), n_agents), fill(Matrix(Bd), n_agents),
+    fill(Matrix(Ad), n_targets), fill(Matrix(Bd), n_targets),
     edges_12, te_z, R_y,
     collect(0:k), collect(0:k),
     false, 1.0, 5.0,
@@ -254,7 +256,8 @@ plot(result2)
 # feasible space (null dim >> Scenario 2).
 
 prob3 = TrackingProblem(
-    n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
+    n_agents, n_targets, k, fill(Matrix(Ad), n_agents), fill(Matrix(Bd), n_agents),
+    fill(Matrix(Ad), n_targets), fill(Matrix(Bd), n_targets),
     edges_12, te_z, R_y,
     [k], [k],
     false, 1.0, 5.0,
@@ -292,7 +295,8 @@ bt2_s4 = BobbingTarget(1.5, 2.0, 0.3, omega_2periods)
 traj_bt2_s4 = trajectory(bt2_s4, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
 
 prob4 = TrackingProblem(
-    n_agents, n_targets, k, Matrix(Ad), Matrix(Bd),
+    n_agents, n_targets, k, fill(Matrix(Ad), n_agents), fill(Matrix(Bd), n_agents),
+    fill(Matrix(Ad), n_targets), fill(Matrix(Bd), n_targets),
     edges_12, te_z, R_y,
     [k], [k],
     false, 1.0, 5.0,

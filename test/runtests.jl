@@ -21,4 +21,5 @@ end
   include("network_sheaves/NullspaceTrajectoryFamily.jl")
   include("network_sheaves/ControlledTrajectoryExamples.jl")
   include("network_sheaves/MultiAgentTracking.jl")
+  include("network_sheaves/per_agent_and_target_dynamics.jl")
 end

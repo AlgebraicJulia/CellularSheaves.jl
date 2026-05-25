@@ -21,7 +21,7 @@ export trajectory
 export selector_matrix, state_projection_matrix
 export agent_vertex, target_vertex
 export build_time_expanded_tracking_sheaf
-export generate_reference_trajectory, extract_state_trajectories, run_scenario
+export generate_reference_trajectory, extract_state_trajectories, extract_target_trajectories, run_scenario
 
 # ---------------------------------------------------------------------------
 # Problem-specification types
@@ -52,13 +52,16 @@ end
 """
     TrackingProblem
 
-All parameters of a multi-agent, multi-target tracking problem encoded as a
-time-expanded cellular sheaf.
+Specification of a heterogeneous multi-agent / multi-target tracking problem
+encoded as a time-expanded cellular sheaf.
 
 Fields:
 - `n_agents`, `n_targets`: fleet sizes.
 - `k`: horizon length; the trajectory has `k+1` timesteps `t = 0, …, k`.
-- `Ad`, `Bd`: ZOH-discretised state-space matrices (size `nx × nx`, `nx × nu`).
+- `Ad`: ZOH-discretised dynamics matrices, one per agent (length `n_agents`).
+- `Bd`: ZOH-discretised control matrices, one per agent (length `n_agents`).
+- `target_Ad`: dynamics matrices, one per target (length `n_targets`).
+- `target_Bd`: control matrices, one per target (length `n_targets`).
 - `agent_edges`: undirected agent–agent consensus pairs `(i, j)`.
 - `tracking_edges`: many-to-many agent–target edges (see `TrackingEdge`).
 - `consensus_restriction`: projection used for all agent–agent consensus edges.
@@ -72,8 +75,10 @@ struct TrackingProblem
     n_agents::Int
     n_targets::Int
     k::Int
-    Ad::Matrix{Float64}
-    Bd::Matrix{Float64}
+    Ad::Vector{Matrix{Float64}}          # length = n_agents
+    Bd::Vector{Matrix{Float64}}          # length = n_agents
+    target_Ad::Vector{Matrix{Float64}}   # length = n_targets
+    target_Bd::Vector{Matrix{Float64}}   # length = n_targets
     agent_edges::Vector{Tuple{Int,Int}}
     tracking_edges::Vector{TrackingEdge}
     consensus_restriction::Matrix{Float64}
@@ -272,25 +277,58 @@ function build_time_expanded_tracking_sheaf(prob::TrackingProblem)
     @argcheck all(((i,j),) -> 1 <= i <= prob.n_agents && 1 <= j <= prob.n_agents, prob.agent_edges) "agent_edges indices must be in 1:$(prob.n_agents), got $(prob.agent_edges)"
     @argcheck all(te -> 1 <= te.agent_index  <= prob.n_agents,  prob.tracking_edges) "TrackingEdge agent_index must be in 1:$(prob.n_agents)"
     @argcheck all(te -> 1 <= te.target_index <= prob.n_targets, prob.tracking_edges) "TrackingEdge target_index must be in 1:$(prob.n_targets)"
-    nx_loc  = size(prob.Ad, 1)
-    nu_loc  = size(prob.Bd, 2)
-    nt      = nx_loc + nu_loc
-    n_per_t = prob.n_agents + prob.n_targets
-    sheaf   = EuclideanSheaf{Float64}(fill(nt, (prob.k + 1) * n_per_t))
-    now_map  = hcat(Matrix(prob.Ad), Matrix(prob.Bd))
-    next_map = hcat(Matrix{Float64}(I, nx_loc, nx_loc), zeros(nx_loc, nu_loc))
-    for t in 0:prob.k-1, i in 1:prob.n_agents
-        add_sheaf_edge!(sheaf,
-            agent_vertex(prob, i, t), agent_vertex(prob, i, t + 1),
-            now_map, next_map)
+    @argcheck length(prob.Ad)        == prob.n_agents  "Ad vector length must equal n_agents ($(prob.n_agents)), got $(length(prob.Ad))"
+    @argcheck length(prob.Bd)        == prob.n_agents  "Bd vector length must equal n_agents ($(prob.n_agents)), got $(length(prob.Bd))"
+    @argcheck length(prob.target_Ad) == prob.n_targets "target_Ad vector length must equal n_targets ($(prob.n_targets)), got $(length(prob.target_Ad))"
+    @argcheck length(prob.target_Bd) == prob.n_targets "target_Bd vector length must equal n_targets ($(prob.n_targets)), got $(length(prob.target_Bd))"
+    for i in 1:prob.n_agents
+        @argcheck size(prob.Ad[i], 1) == size(prob.Ad[i], 2) "Ad[$i] must be square, got size $(size(prob.Ad[i]))"
+        @argcheck size(prob.Bd[i], 1) == size(prob.Ad[i], 1) "Bd[$i] rows must match Ad[$i] rows, got $(size(prob.Bd[i],1)) vs $(size(prob.Ad[i],1))"
     end
-    if prob.include_target_dynamics
-        for t in 0:prob.k-1, j in 1:prob.n_targets
+    for j in 1:prob.n_targets
+        @argcheck size(prob.target_Ad[j], 1) == size(prob.target_Ad[j], 2) "target_Ad[$j] must be square, got size $(size(prob.target_Ad[j]))"
+        @argcheck size(prob.target_Bd[j], 1) == size(prob.target_Ad[j], 1) "target_Bd[$j] rows must match target_Ad[$j] rows, got $(size(prob.target_Bd[j],1)) vs $(size(prob.target_Ad[j],1))"
+    end
+
+    # Allocate heterogeneous stalk sizes for every vertex (agents + targets)
+    n_per_t = prob.n_agents + prob.n_targets
+    stalk_sizes = Vector{Int}(undef, (prob.k + 1) * n_per_t)
+    for t in 0:prob.k, i in 1:prob.n_agents
+        stalk_sizes[t * n_per_t + i] = size(prob.Ad[i], 1) + size(prob.Bd[i], 2)
+    end
+    for t in 0:prob.k, j in 1:prob.n_targets
+        stalk_sizes[t * n_per_t + prob.n_agents + j] = size(prob.target_Ad[j], 1) + size(prob.target_Bd[j], 2)
+    end
+    sheaf = EuclideanSheaf{Float64}(stalk_sizes)
+
+    # Agent dynamics edges (per-agent)
+    for i in 1:prob.n_agents
+        Ad_i = prob.Ad[i]; Bd_i = prob.Bd[i]
+        nx_i = size(Ad_i, 1); nu_i = size(Bd_i, 2)
+        now_map  = hcat(Matrix(Ad_i), Matrix(Bd_i))
+        next_map = hcat(Matrix{Float64}(I, nx_i, nx_i), zeros(nx_i, nu_i))
+        for t in 0:prob.k-1
             add_sheaf_edge!(sheaf,
-                target_vertex(prob, j, t), target_vertex(prob, j, t + 1),
+                agent_vertex(prob, i, t), agent_vertex(prob, i, t + 1),
                 now_map, next_map)
         end
     end
+
+    # Target dynamics edges (per-target, if requested)
+    if prob.include_target_dynamics
+        for j in 1:prob.n_targets
+            At_j = prob.target_Ad[j]; Bt_j = prob.target_Bd[j]
+            nx_j = size(At_j, 1); nu_j = size(Bt_j, 2)
+            now_map  = hcat(Matrix(At_j), Matrix(Bt_j))
+            next_map = hcat(Matrix{Float64}(I, nx_j, nx_j), zeros(nx_j, nu_j))
+            for t in 0:prob.k-1
+                add_sheaf_edge!(sheaf,
+                    target_vertex(prob, j, t), target_vertex(prob, j, t + 1),
+                    now_map, next_map)
+            end
+        end
+    end
+
     cscale = sqrt(prob.consensus_weight)
     tscale = sqrt(prob.tracking_weight)
     for t in prob.consensus_timesteps, (i, j) in prob.agent_edges
@@ -345,17 +383,35 @@ end
 """
     extract_state_trajectories(z_harmonic, prob)
 
-Return one `(k+1) × nx` matrix per agent, pre-allocated and filled directly
-from the harmonic-extension output (no intermediate concatenations).
+Return one `(k+1) × nx_i` matrix per agent, where `nx_i` is the state dimension
+for agent `i`.  Pre-allocated and filled directly from the harmonic-extension
+output (no intermediate concatenations).
 """
 function extract_state_trajectories(z_harmonic, prob::TrackingProblem)
-    nx_loc = size(prob.Ad, 1)
     return map(1:prob.n_agents) do i
-        X = Matrix{Float64}(undef, prob.k + 1, nx_loc)
+        nx_i = size(prob.Ad[i], 1)
+        X = Matrix{Float64}(undef, prob.k + 1, nx_i)
         for t in 0:prob.k
-            X[t + 1, :] = Array(z_harmonic[Block(agent_vertex(prob, i, t))])[1:nx_loc]
+            X[t + 1, :] = Array(z_harmonic[Block(agent_vertex(prob, i, t))])[1:nx_i]
         end
         X
+    end
+end
+
+"""
+    extract_target_trajectories(z_harmonic, prob)
+
+Return a `Vector` of length `n_targets`, where each element is a
+`Vector{Vector{Float64}}` of length `k+1` containing the full stalk
+(state + control) for that target at each timestep.
+"""
+function extract_target_trajectories(z_harmonic, prob::TrackingProblem)
+    return map(1:prob.n_targets) do j
+        traj = Vector{Vector{Float64}}(undef, prob.k + 1)
+        for t in 0:prob.k
+            traj[t + 1] = Array(z_harmonic[Block(target_vertex(prob, j, t))])
+        end
+        traj
     end
 end
 
@@ -379,7 +435,7 @@ function run_scenario(
     prob::TrackingProblem,
     boundary::Dict{Int,Vector{Float64}},
     times::AbstractVector{<:Real};
-    target_trajs::Vector{Vector{Vector{Float64}}} = Vector{Vector{Vector{Float64}}}(),
+    target_trajs::Union{Nothing,Vector{Vector{Vector{Float64}}}} = nothing,
     y_col::Int = 1,
     z_col::Int = 2,
 )
@@ -390,7 +446,8 @@ function run_scenario(
     r  = sqrt(max(0.0, dot(xv, L * xv)))
     nd = size(null_basis, 2)
     trajs = extract_state_trajectories(z_harmonic, prob)
-    return ScenarioResult(label, collect(times), trajs, target_trajs, nd, r, y_col, z_col)
+    tt = isnothing(target_trajs) ? extract_target_trajectories(z_harmonic, prob) : target_trajs
+    return ScenarioResult(label, collect(times), trajs, tt, nd, r, y_col, z_col)
 end
 
 end # module MultiAgentTracking
