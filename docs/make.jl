@@ -23,18 +23,26 @@ if !no_literate
     for file in files
       f, l = splitext(file)
       if l == ".jl" && !startswith(f, "_")
-        Literate.markdown(joinpath(root, file), out_dir;
+        src_path = joinpath(root, file)
+        Literate.markdown(src_path, out_dir;
           config=config, documenter=true, credit=false)
-        Literate.notebook(joinpath(root, file), out_dir;
-          execute=true, documenter=true, credit=false)
+        execute = !contains(src_path, "asynch")
+        Literate.notebook(src_path, out_dir;
+          execute=execute, documenter=true, credit=false)
       end
     end
   end
 end
 
+let src = joinpath(@__DIR__, "figures", "asynch"),
+    dst = joinpath(@__DIR__, "src", "assets", "figures", "asynch")
+  mkpath(dirname(dst))
+  cp(src, dst; force=true)
+end
+
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.AsynchSheaves],
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,
@@ -57,6 +65,12 @@ makedocs(
         "generated/control/controlled_planar_quadrotor.md",
         "generated/control/controlled_mass_spring_damper_chain.md",
         "generated/control/multi_quadrotor_target_tracking.md"
+        ],
+      "Asynchronous Diffusion"=>Any[
+        "generated/asynch/convergence_vs_delay.md",
+        "generated/asynch/step_size_comparison.md",
+        "generated/asynch/restriction_map_comparison.md",
+        "generated/asynch/orthogonal_projection.md",
       ]
     ],
     "Feature Guides"=>Any[
@@ -73,12 +87,13 @@ makedocs(
       "api/sheaf_morphisms.md",
       "api/pushforwards.md",
       "api/pushouts.md",
-      "api/trajectory_sheaves.md",
       "api/dsl.md",
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
+      "api/trajectory_sheaves.md",
       "api/herding_platoon.md",
       "api/multi_agent_tracking.md",
+      "api/asynch.md"
     ],
   ]
 )

@@ -14,6 +14,21 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 julia --project=. -e 'include("test/network_sheaves/SheafLaplacian.jl")'
 ```
 
+**Setup benchmark environment (first time only):**
+```julia
+julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+```
+
+**Run benchmarks:**
+```
+julia --project=bench bench/benchmarks.jl
+```
+
+**Update baseline after an intentional perf change:**
+```
+cp bench/results.json bench/baseline.json
+```
+
 **Install docs dependencies (first time only):**
 ```julia
 julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
@@ -27,6 +42,16 @@ julia --project=docs docs/make.jl
 **Build docs without regenerating literate examples:**
 ```julia
 julia --project=docs docs/make.jl --no-literate
+```
+
+**Regenerate asynch experiment data:**
+```
+julia --project=docs docs/scripts/acc26_experiments.jl
+```
+
+**Regenerate asynch doc figures from data:**
+```
+julia --project=docs docs/scripts/generate_figures.jl
 ```
 
 ## Architecture
