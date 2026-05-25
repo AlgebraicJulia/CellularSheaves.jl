@@ -88,6 +88,6 @@ The package is an implementation of computational methods developed by **Tyler H
 - **Hansen, J. & Ghrist, R. (2021).** *Opinion Dynamics on Discourse Sheaves.* SIAM Journal on Applied Mathematics, 81(5), 2033–2060. [DOI](https://doi.org/10.1137/20M1341088)
 - **Anwer, N., Riess, H., & Hale, M. (2026).** Multi-Agent System Identification with Nonlinear Sheaf Diffusion (arXiv:2605.11204). arXiv. [DOI](https://doi.org/10.48550/arXiv.2605.11204)
 - **Ghrist, R., Lopez, M., North, P. R., & Riess, H. (2026).** Categorical Diffusion of Weighted Lattices (arXiv:2501.03890). arXiv. [DOI](https://doi.org/10.48550/arXiv.2501.03890)
-- **Riess, H., & Ghrist, R. (2022). Diffusion of Information on Networked Lattices by Gossip. 2022** IEEE 61st Conference on Decision and Control (CDC), 5946–5952. [DOI](https://doi.org/10.1109/CDC51059.2022.9992539)
+- **Riess, H., & Ghrist, R. (2022).** Diffusion of Information on Networked Lattices by Gossip. IEEE 61st Conference on Decision and Control (CDC), 5946–5952. [DOI](https://doi.org/10.1109/CDC51059.2022.9992539)
 - **Riess, H., Munger, M., & Zavlanos, M. M. (2023).** Max-Plus Synchronization in Decentralized Trading Systems. 2023 62nd IEEE Conference on Decision and Control (CDC), 221–227. [DOI](https://doi.org/10.1109/CDC49753.2023.10383918)
 - **Ghrist, R., & Riess, H. (2022).** Cellular sheaves of lattices and the Tarski Laplacian. Homology, Homotopy and Applications, 24(1), 325–345. [DOI](https://doi.org/10.4310/HHA.2022.v24.n1.a16)
