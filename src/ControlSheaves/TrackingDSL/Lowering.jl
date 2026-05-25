@@ -77,12 +77,10 @@ prog = parse_tracking_program(quote
     agent a2 dynamics (A, B) period dt
     target t1
     horizon K
-    time initial = 0
-    time final = K
-    times Tall = initial:final
+    times Tall = 0:K
     consensus c1 between (a1, a2) using (R_y, R_y) at Tall
-    track tr1 agent a1 target t1 using (A, A) at final
-    boundary agent a1 at initial = x0_a1
+    track tr1 agent a1 target t1 using (A, A) at t[end]
+    boundary agent a1 at t[begin] = x0_a1
 end)
 ctx = Dict{Symbol,Any}(
     :K     => 5,
@@ -95,8 +93,7 @@ ctx = Dict{Symbol,Any}(
 result = lower_tracking_program(prog, ctx)
 ```
 
-The special time aliases `initial = 0` and `final = K` are resolved before
-lowering.
+`t[begin]` always resolves to `0`; `t[end]` resolves to the horizon value `K`.
 """
 function lower_tracking_program(
     resolved::ResolvedProgram;
@@ -206,9 +203,7 @@ prog = parse_tracking_program(quote
     agent a1 dynamics (A, B) period dt
     agent a2 dynamics (A, B) period dt
     horizon K
-    time initial = 0
-    time final = K
-    times Tall = initial:final
+    times Tall = 0:K
     consensus c1 between (a1, a2) using (A, A) at Tall
 end)
 ctx = Dict{Symbol,Any}(:K => 5, :A => I(2), :B => reshape([0.0,1.0],2,1), :dt => 0.05)

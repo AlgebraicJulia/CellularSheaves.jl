@@ -9,9 +9,9 @@ is the root node holding a flat list of `TrackingStmt` nodes. Statements cover:
 
 - Space and map declarations (`space X = R^6`, `map A : X -> X`)
 - Agent/target declarations with optional dynamics (`agent a1 dynamics (A, B) period dt`)
-- Time declarations (`horizon K`, `time initial = 0`, `times Tall = initial:final`)
+- Time declarations (`horizon K`, `times Tall = 0:K`)
 - Constraints (`consensus`, `track`, `consensus_sheaf`)
-- Boundary conditions (`boundary agent a1 at initial = x0`)
+- Boundary conditions (`boundary agent a1 at t[begin] = x0`)
 """
 module TrackingDSLTerm
 
@@ -23,7 +23,7 @@ export HorizonDecl, TimeAliasDecl, TimeSetDecl
 export ConsensusConstraint, TrackConstraint, ConsensusSheafConstraint
 export BoundaryConstraint
 export TimeSpec, SingletonTime, TimeList, TimeRange, NamedTimeSet
-export TimeRef, LiteralTime, NamedTime, InitialTime, FinalTime
+export TimeRef, LiteralTime, NamedTime, BeginTime, EndTime
 export SpaceExpr, BaseSpace, ProductSpace, DirectSumSpace
 
 # ── Error hierarchy ─────────────────────────────────────────────────────────
@@ -126,14 +126,14 @@ export TrackingDSLError, TrackingSyntaxError, TrackingDeclarationError,
 A reference to a single point in time. Can be:
 - `LiteralTime(n)` — an integer literal (e.g. `0`, `7`)
 - `NamedTime(name)` — a named time alias (e.g. `tcapture`)
-- `InitialTime()` — the special alias `initial` (resolves to `0`)
-- `FinalTime()` — the special alias `final` (resolves to `k` from `horizon`)
+- `BeginTime()` — the special alias resolving to `0` (written `t[begin]` in the DSL)
+- `EndTime()` — the special alias resolving to `k` from `horizon` (written `t[end]` in the DSL)
 """
 abstract type TimeRef end
 struct LiteralTime <: TimeRef; value::Int; end
 struct NamedTime   <: TimeRef; name::Symbol; end
-struct InitialTime <: TimeRef; end
-struct FinalTime   <: TimeRef; end
+struct BeginTime   <: TimeRef; end
+struct EndTime     <: TimeRef; end
 
 """
     TimeSpec
@@ -259,7 +259,7 @@ end
     HorizonDecl(name)
 
 Declares the time horizon `horizon K`. `name` is the identifier (e.g. `:K`).
-It can be resolved later via a `bind K => 40` statement.
+The value is supplied at resolve time via the context dict (`:K => 40`).
 """
 struct HorizonDecl <: TrackingStmt
     name::Symbol
@@ -268,8 +268,7 @@ end
 """
     TimeAliasDecl(alias, ref)
 
-Declares a named single-time alias, e.g. `time initial = 0` or `time tcapture = 7`.
-`initial` and `final` have built-in semantics but can be declared explicitly.
+Declares a named single-time alias, e.g. `time tcapture = 7`.
 """
 struct TimeAliasDecl <: TrackingStmt
     alias::Symbol
@@ -279,7 +278,7 @@ end
 """
     TimeSetDecl(name, spec)
 
-Declares a named time *set*, e.g. `times Tall = initial:final`.
+Declares a named time *set*, e.g. `times Tall = 0:K`.
 """
 struct TimeSetDecl <: TrackingStmt
     name::Symbol

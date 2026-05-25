@@ -4,8 +4,9 @@
 Name resolution for `TrackingProgram` ASTs.
 
 Resolution produces a `ResolvedProgram` that contains all numeric values needed
-by the lowering pass.  The `initial` and `final` time aliases are first-class:
-`initial` resolves to `0`; `final` resolves to the value of the horizon `k`.
+by the lowering pass.  The `t[begin]` and `t[end]` time references are
+first-class: `t[begin]` resolves to `0`; `t[end]` resolves to the value of the
+horizon `k`.
 
 All numeric values (matrices, scalars, vectors) are supplied through an external
 context dict passed to `resolve_tracking_program`.  Use [`set_indexed!`](@ref) to
@@ -135,7 +136,7 @@ Resolution steps:
 Raises `TrackingUnboundSymbolError` if any required name is missing from `ctx`.
 Raises `TrackingDimensionMismatchError` for inconsistent matrix dimensions.
 
-`initial` resolves to `0`; `final` resolves to the value of the horizon `K`.
+`t[begin]` resolves to `0`; `t[end]` resolves to the value of the horizon `K`.
 """
 function resolve_tracking_program(prog::TrackingProgram, ctx::AbstractDict)
     env = Dict{Any,Any}(ctx)
@@ -238,9 +239,9 @@ function _resolve(prog::TrackingProgram, env::Dict)
     target_index = Dict(rt.name => i for (i, rt) in enumerate(resolved_targets))
 
     # 7. Resolve time specs
-    # Pre-seed with built-ins and horizon name
-    time_aliases = Dict{Symbol,Int}(:initial => 0, :final => k)
-    # Also add the horizon variable name as an alias for k
+    # Pre-seed with horizon name (resolves both K => k and k => k lookups)
+    time_aliases = Dict{Symbol,Int}()
+    # Add the horizon variable name as an alias for k
     for stmt in prog.statements
         stmt isa HorizonDecl || continue
         time_aliases[stmt.name] = k
@@ -302,9 +303,6 @@ function _resolve_horizon(prog::TrackingProgram, env::Dict)
             "Horizon '$hname' is not bound. Add `:$hname => <integer>` to the context dict."))
         return Int(v)
     end
-    # No HorizonDecl found — look for a direct :k bind
-    v = get(env, :k, nothing)
-    v !== nothing && return Int(v)
     throw(TrackingUnboundSymbolError(
         "No horizon declaration found. Add `horizon K` to the program and `:K => <integer>` to the context dict."))
 end
@@ -379,16 +377,13 @@ end
 # ─────────────────────────────────────────────────────────────────────────────
 
 function _resolve_time_ref(t::TimeRef, aliases::Dict{Symbol,Int}, k::Int)::Int
-    if t isa InitialTime
+    if t isa BeginTime
         return 0
-    elseif t isa FinalTime
+    elseif t isa EndTime
         return k
     elseif t isa LiteralTime
         return t.value
     elseif t isa NamedTime
-        # initial and final are built-in even if specified as NamedTime
-        t.name == :initial && return 0
-        t.name == :final   && return k
         haskey(aliases, t.name) ||
             throw(TrackingTimeResolutionError("Undefined time alias '$(t.name)'"))
         return aliases[t.name]
@@ -409,12 +404,7 @@ function _resolve_time_spec(spec::TimeSpec, aliases::Dict{Symbol,Int},
         return collect(a:b)
     elseif spec isa NamedTimeSet
         # NamedTimeSet can refer to either a declared time set OR a time alias (singleton)
-        # Also handle built-in initial/final
-        if spec.name == :initial
-            return [0]
-        elseif spec.name == :final
-            return [k]
-        elseif haskey(time_sets, spec.name)
+        if haskey(time_sets, spec.name)
             return time_sets[spec.name]
         elseif haskey(aliases, spec.name)
             return [aliases[spec.name]]
@@ -453,9 +443,9 @@ function _resolve_boundary(stmt::BoundaryConstraint, agent_index, target_index,
 end
 
 function _resolve_time_ref_boundary(t::TimeRef, aliases::Dict{Symbol,Int}, k::Int, env::Dict)::Int
-    if t isa InitialTime
+    if t isa BeginTime
         return 0
-    elseif t isa FinalTime
+    elseif t isa EndTime
         return k
     elseif t isa LiteralTime
         return t.value

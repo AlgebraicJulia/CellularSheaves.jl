@@ -4,7 +4,7 @@ Tests for the name-driven Tracking DSL (TrackingDSL).
 Coverage:
 1. Parse and validate a full happy-path program.
 2. Context dict: matrices passed by value at resolve time.
-3. `initial` and `final` aliases resolve correctly with horizon.
+3. `t[begin]` and `t[end]` aliases resolve correctly with horizon.
 4. Consensus/tracking constraints activated on distinct time sets.
 5. Lowered TrackingProblem matches a manually assembled reference.
 6. Unbound symbol errors are thrown before lowering.
@@ -43,12 +43,10 @@ function _make_test_prog(; k=3)
         agent(a2; dynamics=(A,B), period=dt)
         target(t1)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
-        times(Tall = initial:final)
+        times(Tall = 0:K)
         consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
-        track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
-        boundary(:agent, a1; at=initial, value=x0_a1)
+        track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=Tall[end])
+        boundary(:agent, a1; at=Tall[begin], value=x0_a1)
     end)
     ctx = Dict{Symbol,Any}(
         :K     => k,
@@ -94,8 +92,7 @@ end
     prog = parse_tracking_program(quote
         agent(a1; dynamics=(A,B), period=dt)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
+        times(Tall = 0:K)
     end)
 
     # Before providing ctx, resolution should fail on missing horizon
@@ -113,16 +110,14 @@ end
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. initial / final aliases resolve correctly
+# 3. t[begin] / t[end] aliases resolve correctly
 # ─────────────────────────────────────────────────────────────────────────────
-@testset "TrackingDSL initial and final aliases" begin
+@testset "TrackingDSL begin and end aliases" begin
     prog = parse_tracking_program(quote
         agent(a1; dynamics=(A,B), period=dt)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
-        times(Tall = initial:final)
-        track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
+        times(Tall = 0:K)
+        track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=Tall[end])
         target(t1)
     end)
     ctx = Dict{Symbol,Any}(
@@ -136,7 +131,7 @@ end
     resolved = resolve_tracking_program(prog, ctx)
     @test resolved.k == 5
 
-    # tracking at=final should activate only at t=5
+    # tracking at=Tall[end] should activate only at t=5
     @test length(resolved.tracking) == 1
     @test resolved.tracking[1].timesteps == [5]
 end
@@ -150,11 +145,9 @@ end
         agent(a2; dynamics=(A,B), period=dt)
         target(t1)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
-        times(Tall = initial:final)
+        times(Tall = 0:K)
         consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
-        track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
+        track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=Tall[end])
     end)
     ctx = Dict{Symbol,Any}(
         :K   => 4,
@@ -167,7 +160,7 @@ end
     resolved = resolve_tracking_program(prog, ctx)
     # Tall = 0:4 → [0,1,2,3,4]
     @test resolved.consensus[1].timesteps == collect(0:4)
-    # final = 4
+    # Tall[end] = 4
     @test resolved.tracking[1].timesteps == [4]
     @test resolved.consensus[1].timesteps ≠ resolved.tracking[1].timesteps
 end
@@ -221,8 +214,6 @@ end
     prog = parse_tracking_program(quote
         agent(a1; dynamics=(A,B), period=dt)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
     end)
     # K not bound → TrackingUnboundSymbolError
     @test_throws TrackingUnboundSymbolError resolve_tracking_program(prog, Dict{Symbol,Any}())
@@ -239,8 +230,6 @@ end
     prog = parse_tracking_program(quote
         agent(a1; dynamics=(A,B), period=dt)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
     end)
     ctx = Dict{Symbol,Any}(
         :K  => 3,
@@ -266,8 +255,6 @@ end
     prog = parse_tracking_program(quote
         agent(a1; dynamics=(A,B), period=dt)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
     end)
     ctx = Dict{Symbol,Any}(
         :K  => 3,
@@ -287,8 +274,6 @@ end
     prog = parse_tracking_program(quote
         agent(a1; dynamics=(A,B), period=dt)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
         boundary(:agent, a1; at=t_pin, value=x_ref[a,t_pin])
     end)
     ctx = Dict{Any,Any}(
@@ -322,9 +307,7 @@ end
         agent(a2; dynamics=(A,B), period=dt)
         target(t1)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
-        times(Tall = initial:final)
+        times(Tall = 0:K)
         consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
     end
 
@@ -389,11 +372,9 @@ const _Q_R_Z  = MAT.state_projection_matrix([2],    _Q_NX, _Q_NU)
         agent(a2; dynamics=(Ad_m,Bd_m), period=h)
         target(t1)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
-        times(Tall = initial:final)
+        times(Tall = 0:K)
         consensus(c1; agents=(a1,a2), maps=(R_pos_m,R_pos_m), at=Tall)
-        track(tr1; agent=a1, target=t1, maps=(R_pos_m,R_pos_m), at=final)
+        track(tr1; agent=a1, target=t1, maps=(R_pos_m,R_pos_m), at=Tall[end])
     end)
     ctx = Dict{Symbol,Any}(
         :K      => k,
@@ -440,9 +421,7 @@ end
         target(t1)
         target(t2)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
-        times(Tall = initial:final)
+        times(Tall = 0:K)
         consensus(c1; agents=(a1,a2), maps=(R_yz_m,R_yz_m), at=Tall)
         track(tr1; agent=a1, target=t1, maps=(R_yz_m,R_yz_m), at=Tall)
         track(tr2; agent=a2, target=t2, maps=(R_yz_m,R_yz_m), at=Tall)
@@ -491,9 +470,7 @@ end
         target(t1)
         target(t2)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
-        times(Tall = initial:final)
+        times(Tall = 0:K)
         consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=Tall)
         track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=Tall)
         track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=Tall)
@@ -538,18 +515,16 @@ end
         target(t1)
         target(t2)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
-        consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=final)
-        track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=final)
-        track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=final)
+        consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=t[end])
+        track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=t[end])
+        track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=t[end])
     end
 
     resolved = resolve_tracking_program(validate_tracking_program(prog), ctx)
     lowered  = lower_tracking_program(resolved)
     p = lowered.problem
 
-    # Switching from Tall to `at=final` moves k constraints to just [k]
+    # Switching from Tall to `at=t[end]` moves constraints to just [k]
     @test p.consensus_timesteps == [_Q_K]
     @test p.tracking_timesteps  == [_Q_K]
 
@@ -560,9 +535,7 @@ end
         target(t1)
         target(t2)
         horizon(K)
-        time(initial = 0)
-        time(final = K)
-        times(Tall = initial:final)
+        times(Tall = 0:K)
         consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=Tall)
         track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=Tall)
         track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=Tall)
@@ -597,11 +570,9 @@ end
             target(t1)
             target(t2)
             horizon(K)
-            time(initial = 0)
-            time(final = K)
-            consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=final)
-            track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=final)
-            track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=final)
+            consensus(c1; agents=(a1,a2), maps=(R_y_m,R_y_m), at=t[end])
+            track(tr1; agent=a1, target=t1, maps=(R_z_m,R_z_m), at=t[end])
+            track(tr2; agent=a2, target=t2, maps=(R_z_m,R_z_m), at=t[end])
         end
     end
 

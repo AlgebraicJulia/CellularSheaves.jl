@@ -30,12 +30,10 @@ prog = @tracking_problem begin
     agent(a2; dynamics=(A,B), period=dt)
     target(t1)
     horizon(K)
-    time(initial = 0)
-    time(final = K)
-    times(Tall = initial:final)
+    times(Tall = 0:K)
     consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
-    track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
-    boundary(:agent, a1; at=initial, value=x0_a1)
+    track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=Tall[end])
+    boundary(:agent, a1; at=Tall[begin], value=x0_a1)
 end
 
 ctx = Dict{Symbol,Any}(
@@ -50,10 +48,11 @@ result = lower_tracking_program(prog, ctx)
 sheaf  = build_time_expanded_tracking_sheaf(result.problem)
 ```
 
-## Special aliases
+## Special time references
 
-`initial` always resolves to `0`.  `final` resolves to the value of the
+`t[begin]` always resolves to `0`.  `t[end]` resolves to the value of the
 horizon `k` declared with `horizon K` (after `K` is bound in `ctx`).
+The qualifying name `t` is syntactic decoration and is ignored.
 
 ## Sub-modules
 

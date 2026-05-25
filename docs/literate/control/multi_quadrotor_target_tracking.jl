@@ -196,9 +196,7 @@ prog1 = @tracking_problem begin
     target(t1)
     target(t2)
     horizon(K)
-    time(initial = 0)
-    time(final = K)
-    times(Tall = initial:final)
+    times(Tall = 0:K)
     consensus(c1; agents=(a1,a2), maps=(R_yz,R_yz), at=Tall)
     track(tr1; agent=a1, target=t1, maps=(R_yz,R_yz), at=Tall)
     track(tr2; agent=a2, target=t2, maps=(R_yz,R_yz), at=Tall)
@@ -251,9 +249,7 @@ prog2 = @tracking_problem begin
     target(t1)
     target(t2)
     horizon(K)
-    time(initial = 0)
-    time(final = K)
-    times(Tall = initial:final)
+    times(Tall = 0:K)
     consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
     track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=Tall)
     track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=Tall)
@@ -290,7 +286,7 @@ plot(result2)
 # Removing ``k`` timesteps of coordination edges dramatically enlarges the
 # feasible space (null dim >> Scenario 2).
 
-# Changing `at=Tall` to `at=final` in the DSL restricts both the consensus and
+# Changing `at=Tall` to `at=t[end]` in the DSL restricts both the consensus and
 # tracking edges to the single terminal timestep `t = k`.  The only topological
 # difference from Scenario 2 is this single keyword change.
 
@@ -300,11 +296,9 @@ prog3 = @tracking_problem begin
     target(t1)
     target(t2)
     horizon(K)
-    time(initial = 0)
-    time(final = K)
-    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=final)
-    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=final)
-    track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=final)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=t[end])
+    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=t[end])
+    track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=t[end])
 end
 ctx3 = Dict{Symbol,Any}(:K => k, :Ad => Ad, :Bd => Bd, :R_y => R_y, :R_z => R_z, :h => h)
 prob3 = lower_tracking_program(prog3, ctx3;
@@ -353,11 +347,9 @@ prog4 = @tracking_problem begin
     target(t1)
     target(t2)
     horizon(K)
-    time(initial = 0)
-    time(final = K)
-    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=final)
-    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=final)
-    track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=final)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=t[end])
+    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=t[end])
+    track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=t[end])
 end
 ctx4 = Dict{Symbol,Any}(:K => k, :Ad => Ad, :Bd => Bd, :R_y => R_y, :R_z => R_z, :h => h)
 prob4 = lower_tracking_program(prog4, ctx4;

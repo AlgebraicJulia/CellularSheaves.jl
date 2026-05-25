@@ -34,44 +34,35 @@ expressions. The DSL interprets them by their leading function name:
     horizon(K)
 
     # Time aliases (keyword-argument syntax)
-    time(initial = 0)
-    time(final = K)
     time(tcapture = 7)
 
     # Time sets
-    times(Tall = initial:final)
+    times(Tall = 0:K)
 
     # Constraints
     consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
-    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=final)
+    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=Tall[end])
     consensus_sheaf(cS; template=CTemplate, over=(a1,a2,a3), at=tcapture)
 
     # Boundary conditions
-    boundary(:agent, a1; at=initial, value=x0_a1)
+    boundary(:agent, a1; at=Tall[begin], value=x0_a1)
     boundary(:target, t1; at=t, value=x_ref[t])
     boundary(:agent, a; at=t, value=x[a,t])   # indexed reference
-
-    # Value bindings (pair syntax)
-    bind(K => 40)
-    bind(A => [1.0 0.0; 0.0 1.0])
-    bind(B => [0.0; 1.0;;])
-    bind(dt => 0.05)
-    bind(a => 3)
-    bind(t => 7)
-    bind(x[a,t] => [1.0, 0.0])   # indexed bind
 end
 ```
 
 ### Time specifications
 
 At any `at=` keyword, time can be given as:
-- a named time alias:    `at=Tall` (NamedTimeSet), `at=final` (FinalTime), `at=initial` (InitialTime)
+- a named time set:      `at=Tall` (NamedTimeSet)
+- begin/end of horizon:  `at=t[begin]` (BeginTime = 0), `at=t[end]` (EndTime = k)
 - a literal integer:     `at=0`
-- a range:               `at=(initial:final)` or `at=(0:K)`
-- an explicit list:      `at=[0,3,final]`
+- a range:               `at=(0:K)`
+- an explicit list:      `at=[0,3]`
 
-`initial` and `final` are built-in and resolve to `0` and `k` (from `horizon`)
-respectively, without any `time(...)` declaration.
+`t[begin]` and `t[end]` use Julia array-indexing syntax; the qualifying name `t`
+is ignored and the references resolve to `0` and the horizon value `k`
+respectively.
 """
 module TrackingDSLParser
 
@@ -94,9 +85,10 @@ Statements are valid Julia expressions interpreted by their leading name.
 Numeric values are **not** embedded in the program; pass them via the `ctx`
 argument of `resolve_tracking_program` or `lower_tracking_program`.
 
-The special time aliases `initial` and `final` are built-in: `initial` resolves
-to `0`; `final` resolves to the horizon value `k` (from `horizon(K)` in the
-program and `:K` in the context dict).
+The special time references `t[begin]` and `t[end]` are built-in: `t[begin]`
+resolves to `0`; `t[end]` resolves to the horizon value `k` (from `horizon(K)` in
+the program and `:K` in the context dict). The qualifying name `t` is syntactic
+decoration and is ignored.
 
 # Example
 
@@ -109,12 +101,10 @@ prog = @tracking_problem begin
     agent(a2; dynamics=(A,R_y), period=dt)
     target(t1)
     horizon(K)
-    time(initial = 0)
-    time(final = K)
-    times(Tall = initial:final)
+    times(Tall = 0:K)
     consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
-    track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=final)
-    boundary(:agent, a1; at=initial, value=x0_a1)
+    track(tr1; agent=a1, target=t1, maps=(R_y,R_y), at=Tall[end])
+    boundary(:agent, a1; at=Tall[begin], value=x0_a1)
 end
 
 ctx = Dict{Symbol,Any}(
@@ -127,7 +117,7 @@ ctx = Dict{Symbol,Any}(
 result = lower_tracking_program(prog, ctx)
 ```
 
-`initial` resolves to `0`; `final` resolves to the value of `K`.
+`t[begin]` resolves to `0`; `t[end]` resolves to the value of `K`.
 """
 macro tracking_problem(block::Expr)
     stmt_exprs = Any[]
@@ -154,8 +144,7 @@ numeric values via the `ctx` argument of `resolve_tracking_program` or
 prog = parse_tracking_program(quote
     agent(a1; dynamics=(A,B), period=dt)
     horizon(K)
-    time(initial = 0)
-    time(final = K)
+    times(Tall = 0:K)
 end)
 ctx = Dict{Symbol,Any}(:K => 40, :A => [1.0 0.0; 0.0 1.0], :B => [0.0; 1.0;;], :dt => 0.05)
 resolved = resolve_tracking_program(prog, ctx)
@@ -167,8 +156,6 @@ resolved = resolve_tracking_program(prog, ctx)
 prog = parse_tracking_program(quote
     agent(a1; dynamics=(A,B), period=dt)
     horizon(K)
-    time(initial = 0)
-    time(final = K)
     boundary(:agent, a1; at=t_pin, value=x_ref[a,t_pin])
 end)
 ctx = Dict{Symbol,Any}(:K => 5, :A => ..., :B => ..., :dt => 0.05, :a => 1, :t_pin => 3)
@@ -176,7 +163,7 @@ set_indexed!(ctx, :x_ref, 1, 3, [0.0, 1.0, 0.0, 0.0])
 resolved = resolve_tracking_program(prog, ctx)
 ```
 
-`initial` resolves to `0`; `final` resolves to the horizon `K`.
+`t[begin]` resolves to `0`; `t[end]` resolves to the horizon `K`.
 """
 function parse_tracking_program(block::Expr)
     # Unwrap :quote and :block wrappings (from quote ... end passed as argument)
@@ -450,7 +437,7 @@ function _parse_consensus_sheaf(name::Symbol, kws)
 end
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Boundary: boundary(:agent, a1; at=initial, value=x0_a1)
+# Boundary: boundary(:agent, a1; at=t[begin], value=x0_a1)
 #            boundary(:agent, a; at=t, value=x[a,t])
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -489,8 +476,8 @@ end
 
 function _parse_time_ref(r)::TimeRef
     @match r begin
-        :initial     => InitialTime()
-        :final       => FinalTime()
+        Expr(:ref, _::Symbol, :begin) => BeginTime()
+        Expr(:ref, _::Symbol, :end)   => EndTime()
         n::Int       => LiteralTime(n)
         s::Symbol    => NamedTime(s)
         _ => throw(TrackingSyntaxError("Cannot parse time reference: $(repr(r))"))
@@ -499,13 +486,13 @@ end
 
 function _parse_time_spec_expr(spec)::TimeSpec
     @match spec begin
-        :initial      => SingletonTime(InitialTime())
-        :final        => SingletonTime(FinalTime())
+        Expr(:ref, _::Symbol, :begin) => SingletonTime(BeginTime())
+        Expr(:ref, _::Symbol, :end)   => SingletonTime(EndTime())
         n::Int        => SingletonTime(LiteralTime(n))
         s::Symbol     => NamedTimeSet(s)   # named time set reference
         # lo:hi range
         Expr(:call, :(:), lo, hi) => TimeRange(_parse_time_ref(lo), _parse_time_ref(hi))
-        # [0, 3, final] explicit list
+        # [0, 3, t[end]] explicit list
         Expr(:vect, ts...)   => TimeList([_parse_time_ref(t) for t in ts])
         # (lo:hi) — parenthesised range
         Expr(:block, Expr(:call, :(:), lo, hi)) =>
@@ -516,12 +503,10 @@ end
 
 function _parse_at_spec(spec)::TimeSpec
     # Same as _parse_time_spec_expr but a singleton symbol resolves to
-    # SingletonTime(NamedTime) when it looks like a time *alias* rather than a set name.
-    # We use SingletonTime for non-range scalars, NamedTimeSet for bare names
-    # that are expected to be time sets.
+    # NamedTimeSet for bare names expected to be time sets.
     @match spec begin
-        :initial      => SingletonTime(InitialTime())
-        :final        => SingletonTime(FinalTime())
+        Expr(:ref, _::Symbol, :begin) => SingletonTime(BeginTime())
+        Expr(:ref, _::Symbol, :end)   => SingletonTime(EndTime())
         n::Int        => SingletonTime(LiteralTime(n))
         s::Symbol     => NamedTimeSet(s)
         Expr(:call, :(:), lo, hi) => TimeRange(_parse_time_ref(lo), _parse_time_ref(hi))

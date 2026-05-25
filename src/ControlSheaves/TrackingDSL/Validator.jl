@@ -34,7 +34,7 @@ lower_tracking_program(prog, ctx)
 Validation checks:
 - No duplicate names across spaces, maps, agents, targets, time aliases, constraints.
 - All names referenced in constraints exist as declarations.
-- `initial` and `final` are allowed without declaration (built-in aliases).
+- `t[begin]` and `t[end]` are always valid (built-in time references).
 """
 function validate_tracking_program(prog::TrackingProgram)
     # Collect declared names by category
@@ -42,7 +42,7 @@ function validate_tracking_program(prog::TrackingProgram)
     maps     = Set{Symbol}()
     agents   = Set{Symbol}()
     targets  = Set{Symbol}()
-    times    = Set{Symbol}()    # user-declared aliases; initial/final are built-in
+    times    = Set{Symbol}()    # user-declared aliases; t[begin]/t[end] are built-in
     time_sets = Set{Symbol}()
     horizons  = Symbol[]
 
@@ -142,21 +142,18 @@ function _validate_time_spec(spec::TimeSpec, times::Set{Symbol}, time_sets::Set{
         _validate_time_ref(spec.lo, times, ctx)
         _validate_time_ref(spec.hi, times, ctx)
     elseif spec isa NamedTimeSet
-        # NamedTimeSet can refer to either a declared time alias (singleton) or
-        # a declared time set (range). initial/final are built-in; others must be declared.
-        (spec.name == :initial || spec.name == :final ||
-         spec.name in time_sets || spec.name in times) ||
+        # NamedTimeSet must refer to a declared time alias or time set.
+        (spec.name in time_sets || spec.name in times) ||
             throw(TrackingTimeResolutionError(
                 "$ctx references undeclared time set or alias '$(spec.name)'"))
     end
 end
 
 function _validate_time_ref(t::TimeRef, times::Set{Symbol}, ctx::String)
-    if t isa InitialTime || t isa FinalTime || t isa LiteralTime
-        nothing   # always valid (built-in aliases or literals)
+    if t isa BeginTime || t isa EndTime || t isa LiteralTime
+        nothing   # always valid (built-in or literals)
     elseif t isa NamedTime
-        # initial and final are built-in; other names must be declared
-        (t.name == :initial || t.name == :final || t.name in times) ||
+        (t.name in times) ||
             throw(TrackingTimeResolutionError(
                 "$ctx references undeclared time alias '$(t.name)'"))
     end
