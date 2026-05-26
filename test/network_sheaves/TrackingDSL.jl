@@ -80,8 +80,8 @@ end
     @test result.problem.n_agents  == 2
     @test result.problem.n_targets == 1
     @test result.problem.k         == 4
-    @test result.problem.Ad ≈ Ad
-    @test result.problem.Bd ≈ Bd
+    @test result.problem.Ad[1] ≈ Ad
+    @test result.problem.Bd[1] ≈ Bd
     @test length(result.boundary) == 1
 end
 
@@ -183,7 +183,8 @@ end
     te = MAT.TrackingEdge(1, 1, R_y, R_y)
     ref_prob = MAT.TrackingProblem(
         2, 1, k,
-        Ad, Bd,
+        [Ad, Ad], [Bd, Bd],
+        [Matrix{Float64}(I, 3, 3)], [zeros(3, 0)],
         [(1,2)], [te],
         R_y,
         collect(0:k), [k],
@@ -194,8 +195,8 @@ end
     @test dsl_prob.n_agents  == ref_prob.n_agents
     @test dsl_prob.n_targets == ref_prob.n_targets
     @test dsl_prob.k         == ref_prob.k
-    @test dsl_prob.Ad        ≈ ref_prob.Ad
-    @test dsl_prob.Bd        ≈ ref_prob.Bd
+    @test dsl_prob.Ad[1]     ≈ Ad
+    @test dsl_prob.Bd[1]     ≈ Bd
     @test dsl_prob.agent_edges == ref_prob.agent_edges
     @test dsl_prob.consensus_timesteps == ref_prob.consensus_timesteps
     @test dsl_prob.tracking_timesteps  == ref_prob.tracking_timesteps
@@ -392,7 +393,8 @@ const _Q_R_Z  = MAT.state_projection_matrix([2],    _Q_NX, _Q_NU)
     te = MAT.TrackingEdge(1, 1, R_pos, R_pos)
     ref_prob = MAT.TrackingProblem(
         2, 1, k,
-        Ad, Bd,
+        [Ad, Ad], [Bd, Bd],
+        [Matrix{Float64}(I, 6, 6)], [zeros(6, 0)],
         [(1,2)], [te],
         R_pos,
         collect(0:k), [k],
@@ -450,7 +452,9 @@ end
     te_yz = [MAT.TrackingEdge(1,1,_Q_R_YZ,_Q_R_YZ),
              MAT.TrackingEdge(2,2,_Q_R_YZ,_Q_R_YZ)]
     ref_p = MAT.TrackingProblem(2, 2, _Q_K,
-        _Q_AD, _Q_BD,
+        [_Q_AD, _Q_AD], [_Q_BD, _Q_BD],
+        [Matrix{Float64}(I, _Q_NX+_Q_NU, _Q_NX+_Q_NU), Matrix{Float64}(I, _Q_NX+_Q_NU, _Q_NX+_Q_NU)],
+        [zeros(_Q_NX+_Q_NU, 0), zeros(_Q_NX+_Q_NU, 0)],
         [(1,2)], te_yz, _Q_R_YZ,
         collect(0:_Q_K), collect(0:_Q_K),
         true, 1.0, 5.0)

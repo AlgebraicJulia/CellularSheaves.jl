@@ -105,26 +105,17 @@ function lower_tracking_program(
     n_targets = length(resolved.targets)
     k         = resolved.k
 
-    # All agents must share the same dynamics for TrackingProblem
     isempty(resolved.agents) &&
         throw(TrackingDimensionMismatchError("At least one agent must be declared."))
 
-    Ad = resolved.agents[1].Ad
-    Bd = resolved.agents[1].Bd
-    nx = resolved.agents[1].nx
-    nu = resolved.agents[1].nu
+    # Collect per-agent dynamics vectors
+    ad_agents = [ra.Ad for ra in resolved.agents]
+    bd_agents = [ra.Bd for ra in resolved.agents]
 
-    # Validate all agents have the same dynamics
-    for ra in resolved.agents[2:end]
-        size(ra.Ad) == size(Ad) && ra.Ad ≈ Ad ||
-            throw(TrackingDimensionMismatchError(
-                "All agents must share the same Ad matrix for TrackingProblem. " *
-                "Agent '$(ra.name)' differs."))
-        size(ra.Bd) == size(Bd) && ra.Bd ≈ Bd ||
-            throw(TrackingDimensionMismatchError(
-                "All agents must share the same Bd matrix for TrackingProblem. " *
-                "Agent '$(ra.name)' differs."))
-    end
+    # Default target dynamics: identity state propagation, no control input.
+    # Uses the common stalk dimension assigned by the resolver.
+    ad_targets = [Matrix{Float64}(I, rt.stalk_dim, rt.stalk_dim) for rt in resolved.targets]
+    bd_targets = [zeros(Float64, rt.stalk_dim, 0) for rt in resolved.targets]
 
     # Build agent_edges from consensus constraints (unique pairs)
     agent_edges      = Tuple{Int,Int}[]
@@ -142,7 +133,7 @@ function lower_tracking_program(
     end
     # Default consensus restriction if none was declared
     if consensus_restriction === nothing
-        consensus_restriction = Matrix{Float64}(I, nx + nu, nx + nu)
+        consensus_restriction = Matrix{Float64}(I, resolved.stalk_dim, resolved.stalk_dim)
     end
 
     consensus_timesteps = sort(collect(consensus_ts_set))
@@ -162,7 +153,8 @@ function lower_tracking_program(
 
     prob = TrackingProblem(
         n_agents, n_targets, k,
-        Ad, Bd,
+        ad_agents, bd_agents,
+        ad_targets, bd_targets,
         agent_edges, tracking_edges,
         consensus_restriction,
         consensus_timesteps, tracking_timesteps,

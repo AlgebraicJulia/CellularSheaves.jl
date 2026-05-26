@@ -38,7 +38,7 @@ using BlockArrays
 
     @testset "vertex indices" begin
         prob = TrackingProblem(
-            n_agents, n_targets, k, Ad, Bd,
+            n_agents, n_targets, k, [Ad, Ad], [Bd, Bd], [Ad, Ad], [Bd, Bd],
             [(1, 2)], te_full, R_full,
             collect(0:k), collect(0:k),
             true, 1.0, 1.0,
@@ -55,7 +55,7 @@ using BlockArrays
 
     @testset "build_time_expanded_tracking_sheaf — vertex count" begin
         prob = TrackingProblem(
-            n_agents, n_targets, k, Ad, Bd,
+            n_agents, n_targets, k, [Ad, Ad], [Bd, Bd], [Ad, Ad], [Bd, Bd],
             [(1, 2)], te_full, R_full,
             collect(0:k), collect(0:k),
             true, 1.0, 1.0,
@@ -69,7 +69,7 @@ using BlockArrays
     @testset "build_time_expanded_tracking_sheaf — @argcheck validation" begin
         # Negative consensus weight
         bad_prob = TrackingProblem(
-            n_agents, n_targets, k, Ad, Bd,
+            n_agents, n_targets, k, [Ad, Ad], [Bd, Bd], [Ad, Ad], [Bd, Bd],
             [(1, 2)], te_full, R_full,
             collect(0:k), collect(0:k),
             false, -1.0, 1.0,
@@ -78,7 +78,7 @@ using BlockArrays
 
         # Negative tracking weight
         bad_prob2 = TrackingProblem(
-            n_agents, n_targets, k, Ad, Bd,
+            n_agents, n_targets, k, [Ad, Ad], [Bd, Bd], [Ad, Ad], [Bd, Bd],
             [(1, 2)], te_full, R_full,
             collect(0:k), collect(0:k),
             false, 1.0, -0.5,
@@ -87,7 +87,7 @@ using BlockArrays
 
         # Out-of-range consensus timestep
         bad_prob3 = TrackingProblem(
-            n_agents, n_targets, k, Ad, Bd,
+            n_agents, n_targets, k, [Ad, Ad], [Bd, Bd], [Ad, Ad], [Bd, Bd],
             [(1, 2)], te_full, R_full,
             [k + 1], collect(0:k),
             false, 1.0, 1.0,
@@ -96,12 +96,30 @@ using BlockArrays
 
         # Out-of-range agent index in agent_edges
         bad_prob4 = TrackingProblem(
-            n_agents, n_targets, k, Ad, Bd,
+            n_agents, n_targets, k, [Ad, Ad], [Bd, Bd], [Ad, Ad], [Bd, Bd],
             [(1, n_agents + 1)], te_full, R_full,
             [k], [k],
             false, 1.0, 1.0,
         )
         @test_throws Exception build_time_expanded_tracking_sheaf(bad_prob4)
+
+        # Wrong length for Ad vector
+        bad_prob5 = TrackingProblem(
+            n_agents, n_targets, k, [Ad], [Bd, Bd], [Ad, Ad], [Bd, Bd],
+            [(1, 2)], te_full, R_full,
+            [k], [k],
+            false, 1.0, 1.0,
+        )
+        @test_throws Exception build_time_expanded_tracking_sheaf(bad_prob5)
+
+        # Wrong length for target_Ad vector
+        bad_prob6 = TrackingProblem(
+            n_agents, n_targets, k, [Ad, Ad], [Bd, Bd], [Ad], [Bd, Bd],
+            [(1, 2)], te_full, R_full,
+            [k], [k],
+            false, 1.0, 1.0,
+        )
+        @test_throws Exception build_time_expanded_tracking_sheaf(bad_prob6)
     end
 
     @testset "run_scenario — zero residual when boundary is consistent" begin
@@ -109,7 +127,8 @@ using BlockArrays
         # With consistent boundary data the harmonic extension is exact
         # and the Laplacian energy should be 0.
         prob_1a = TrackingProblem(
-            1, 1, k, Ad, Bd,
+            1, 1, k, [Ad], [Bd],
+            [Ad], [Bd],
             Tuple{Int,Int}[], [TrackingEdge(1, 1, R_full, R_full)],
             R_full,
             Int[], Int[],   # no consensus, no tracking edges
@@ -132,6 +151,9 @@ using BlockArrays
         # Boundary values are recovered exactly
         @test result.agent_trajs[1][1, :] ≈ x0
         @test result.agent_trajs[1][k + 1, :] ≈ xk
+        # target_trajs auto-extracted
+        @test length(result.target_trajs) == 1
+        @test length(result.target_trajs[1]) == k + 1
     end
 
     @testset "ScenarioResult show" begin
