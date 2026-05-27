@@ -27,7 +27,6 @@ struct CurrentTargetDynamics <: AbstractDynamics end
 include("integrate.jl")
 include("entity.jl")
 include("MultiAgentTracking.jl")
-include("QuadraticCosts.jl")
 include("TrackingDSL/TrackingDSL.jl")
 
 import .MultiAgentTracking

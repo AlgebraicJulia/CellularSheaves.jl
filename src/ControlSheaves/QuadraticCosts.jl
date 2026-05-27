@@ -124,9 +124,10 @@ function solve_quadratic_on_basis(
     N = basis
     QN = N' * Q * N
     rhs = - N' * Q * point
-    # Solve; fall back to least‑squares if singular
-    α_opt = QN \ rhs
+    # Solve in a least-squares / minimum-norm sense so rank-deficient
+    # reduced Hessians from semidefinite control costs do not throw.
+    α_opt = pinv(QN) * rhs
     return point + N * α_opt
 end
 
-end # module QuadraticCost
+end # module QuadraticCosts

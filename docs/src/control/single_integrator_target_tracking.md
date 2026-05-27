@@ -74,7 +74,6 @@ nu = 2
 h  = 0.5                                # sampling period
 K  = 100                                # horizon length (101 timesteps)
 times = 0:h:K*h
-Ac  = zeros(Float64, 2, 2)              # base drift matrix (zero here)
 Ac  = [0 1.0/20; 0.0 0]                      # simple spring‑like dynamics in the first state
 Bc  = Matrix{Float64}(I(2))                               # full actuation (identity)
 Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
@@ -154,7 +153,7 @@ animate_trajs(result_si, filename="scenario_1.gif")
 
 ![Scenario 1](../scenario1.gif)
 
-## Consenus only in a projection
+## Consensus only in a projection
 
 ```@example tracking_demo
 prog = @tracking_problem begin
@@ -212,9 +211,9 @@ prog = @tracking_problem begin
 
     # Consensus between the two agents at a subset of timesteps
     consensus(c1; agents=(a1,a2), maps=(pi_x2,pi_x2), at=25) # alignment in x2
-    consensus(c1; agents=(a1,a2), maps=(pi_x1,pi_x1), at=26) # alignment in x1
-    consensus(c1; agents=(a1,a2), maps=(pi_x1,pi_x1), at=90) # alignment in x1
-    consensus(c1; agents=(a1,a2), maps=(pi_x1,pi_x1), at=92) # alignment in x1
+    consensus(c2; agents=(a1,a2), maps=(pi_x1,pi_x1), at=26) # alignment in x1
+    consensus(c3; agents=(a1,a2), maps=(pi_x1,pi_x1), at=90) # alignment in x1
+    consensus(c4; agents=(a1,a2), maps=(pi_x1,pi_x1), at=92) # alignment in x1
 
     # Each agent tracks its own target at every timestep
     track(tr1; agent=a1, target=t1, maps=(pi_x1,pi_x1), at=Tall)
