@@ -1,6 +1,6 @@
-## Single and Double Integrator Target Tracking (DSL Version)
+## Single‑Integrator Target Tracking (DSL Version)
 
-In this literate notebook we illustrate how the *TrackingDSL* macro‑based language in **CellularSheaves.jl** can be used to describe simple single‑ and double‑integrator tracking problems.  The DSL lets us declare the spaces, dynamics, graph topology, consensus, and tracking edges symbolically; the concrete numeric values are supplied later via a context dictionary.  After lowering the program we obtain a *time‑expanded* `EuclideanSheaf`; solving for its global sections (via harmonic extension) yields the optimal tracking controller.
+In this literate notebook we illustrate how the *TrackingDSL* macro‑based language in **CellularSheaves.jl** can be used to describe a simple single‑integrator tracking problem.  The DSL lets us declare the spaces, dynamics, graph topology, consensus, and tracking edges symbolically; the concrete numeric values are supplied later via a context dictionary.  After lowering the program we obtain a *time‑expanded* `EuclideanSheaf`; solving for its global sections (via harmonic extension) yields the optimal tracking controller.
 
 ---
 
@@ -34,9 +34,8 @@ end
 ---
 
 ### 1️⃣ Single‑Integrator Tracking via the DSL
-We consider a single agent moving in the plane with dynamics
-`x_{k+1} = A·x_k + B·u_k`, where `A = I₂` and `B = h·I₂` (zero‑order‑hold with
-sampling period `h`).  The target follows the sinusoidal curve defined above.
+We consider two agents moving in the plane, each with dynamics
+`x_{k+1} = A·x_k + B·u_k`.  Here `A` and `B` are obtained from a zero‑order‑hold (ZOH) discretisation of continuous‑time matrices `Ac` and `Bc` with sampling period `h`.  The targets follow the sinusoidal curve defined above.
 
 ```julia
 # -------------------------------------------------------------------
@@ -67,16 +66,16 @@ prog_si = @tracking_problem begin
 end
 ```
 
-#### Context with concrete matrices and parameters
+#### Context with concrete matrices and parameters (ZOH discretisation)
 ```julia
 nx = 2
 nu = 2
 h  = 0.5                                # sampling period
 K  = 100                                # horizon length (101 timesteps)
 times = 0:h:K*h
-Ac  = zeros(Float64, 2, 2)              # no drift
-Ac  = [0 1.0/20; 0.0 0]                      # spring motion in x1
-Bc  = Matrix{Float64}(I(2))                               # full actuation  
+Ac  = zeros(Float64, 2, 2)              # base drift matrix (zero here)
+Ac  = [0 1.0/20; 0.0 0]                      # simple spring‑like dynamics in the first state
+Bc  = Matrix{Float64}(I(2))                               # full actuation (identity)
 Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
 x0_a1 = [1.0,  -1.0]                      # agent start
 x0_a2 = [-1.0,  1.0]                      # agent start
