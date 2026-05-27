@@ -1,11 +1,11 @@
-## Single‑Integrator Target Tracking (DSL Version)
+# Single‑Integrator Target Tracking (DSL Version)
 
-In this literate notebook we illustrate how the *TrackingDSL* macro‑based language in **CellularSheaves.jl** can be used to describe a simple single‑integrator tracking problem.  The DSL lets us declare the spaces, dynamics, graph topology, consensus, and tracking edges symbolically; the concrete numeric values are supplied later via a context dictionary.  After lowering the program we obtain a *time‑expanded* `EuclideanSheaf`; solving for its global sections (via harmonic extension) yields the optimal tracking controller.
+In this literate notebook we illustrate how the *TrackingDSL* macro‑based language in **CellularSheaves.jl** can be used to describe a simple single‑integrator tracking problem.  The DSL lets us declare the spaces, dynamics, graph topology, consensus, and tracking edges symbolically; the concrete numeric values are supplied later via a context dictionary.  After lowering the program we obtain a *time‑expanded* `EuclideanSheaf`; solving for its global sections (via harmonic extension) yields the optimal tracking control trajectory.
 
 ---
 
 ### Imports
-```julia
+```@example tracking_demo
 using LinearAlgebra
 using Plots
 using Graphs
@@ -17,7 +17,8 @@ using CellularSheaves.ControlSheaves.MultiAgentTracking   # sheaf builder & solv
 
 ### Helper: smooth reference trajectory
 We keep the same sinusoidal reference used previously; it will be turned into a *pinned target* later.
-```julia
+
+```@example tracking_demo
 """
     ref_curve(t; ω = 0.5, amp = 1.0)
 
@@ -37,7 +38,7 @@ end
 We consider two agents moving in the plane, each with dynamics
 `x_{k+1} = A·x_k + B·u_k`.  Here `A` and `B` are obtained from a zero‑order‑hold (ZOH) discretisation of continuous‑time matrices `Ac` and `Bc` with sampling period `h`.  The targets follow the sinusoidal curve defined above.
 
-```julia
+```@example tracking_demo
 # -------------------------------------------------------------------
 # 1️⃣ Declare the tracking program (symbolic)
 # -------------------------------------------------------------------
@@ -67,7 +68,7 @@ end
 ```
 
 #### Context with concrete matrices and parameters (ZOH discretisation)
-```julia
+```@example tracking_demo
 nx = 2
 nu = 2
 h  = 0.5                                # sampling period
@@ -80,7 +81,7 @@ Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
 x0_a1 = [1.0,  -1.0]                      # agent start
 x0_a2 = [-1.0,  1.0]                      # agent start
 p0, _, _ = ref_curve(0.0)               # target start (reference at t=0)
-circle, _, _ = ref_curve(times)         # target (reference at over whole domain
+circle, _, _ = ref_curve(times)         # target (reference over whole domain
 circle = hcat(circle...)
 circle = hcat(circle, zeros(size(circle)))
 ctx = Dict{Symbol,Any}(
@@ -96,7 +97,7 @@ ctx = Dict{Symbol,Any}(
 ```
 
 #### Lower, build the sheaf and solve
-```julia
+```@example tracking_demo
 # Resolve symbolic names, validate, and lower to a concrete problem
 lowered_si = lower_tracking_program(prog_si, ctx)
 prob_si    = lowered_si.problem          # a `TrackingProblem`
@@ -122,7 +123,7 @@ result_si = run_scenario("single‑integrator", prob_si, boundary_si, times;
 ```
 
 #### Plotting the agents and reference
-```julia
+```@example tracking_demo
 function animate_trajs(result; fps=15, filename="./tracking_animation.gif")
     # Prepare an empty plot that will be updated frame‑by‑frame
     agent_colors  = [:steelblue, :darkorange, :green, :crimson]
@@ -144,7 +145,6 @@ function animate_trajs(result; fps=15, filename="./tracking_animation.gif")
         p
     end
     gif(anim, filename, fps=fps)
-    # return filename
     return anim
 end
 
@@ -152,9 +152,11 @@ animate_trajs(result_si, filename="scenario_1.gif")
 ```
 ---
 
+![Scenario 1](../scenario1.gif)
+
 ## Consenus only in a projection
 
-```julia
+```@example tracking_demo
 prog = @tracking_problem begin
     # Spaces
     space(X) = R^2          # state space ℝ²
@@ -186,11 +188,13 @@ result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, 
 animate_trajs(result, filename="scenario2.gif")
 ```
 
+![Scenario 2](../scenario2.gif)
+
 ## Overconstrained Consensus
 
 The previous example is only supposed to impose the consensus at the last time step, but the agents still go to consensus immediately. I think this is because there is no tension between the consensus requirement and the tracking requirement. Let's add full rank tracking restriction maps to make tracking harder.
 
-```julia
+```@example tracking_demo
 prog = @tracking_problem begin
     # Spaces
     space(X) = R^2          # state space ℝ²
@@ -225,3 +229,5 @@ result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, 
 @show result.null_dim
 animate_trajs(result, filename="scenario3.gif")
 ```
+
+![Scenario 3](../scenario3.gif)
