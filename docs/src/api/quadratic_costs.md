@@ -4,5 +4,5 @@ Utilities for building and solving quadratic control‑cost problems in the
 `MultiAgentTracking` submodule.
 
 ```@autodocs
-Modules = [CellularSheaves.ControlSheaves.QuadraticCosts]
+Modules = [CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts]
 ```
