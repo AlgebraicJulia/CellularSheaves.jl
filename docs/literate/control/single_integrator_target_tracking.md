@@ -1,0 +1,228 @@
+## Single and Double Integrator Target Tracking (DSL Version)
+
+In this literate notebook we illustrate how the *TrackingDSL* macro‑based language in **CellularSheaves.jl** can be used to describe simple single‑ and double‑integrator tracking problems.  The DSL lets us declare the spaces, dynamics, graph topology, consensus, and tracking edges symbolically; the concrete numeric values are supplied later via a context dictionary.  After lowering the program we obtain a *time‑expanded* `EuclideanSheaf`; solving for its global sections (via harmonic extension) yields the optimal tracking controller.
+
+---
+
+### Imports
+```julia
+using LinearAlgebra
+using Plots
+using Graphs
+using CellularSheaves
+using CellularSheaves.ControlSheaves
+using CellularSheaves.ControlSheaves.TrackingDSL   # DSL utilities
+using CellularSheaves.ControlSheaves.MultiAgentTracking   # sheaf builder & solver
+```
+
+### Helper: smooth reference trajectory
+We keep the same sinusoidal reference used previously; it will be turned into a *pinned target* later.
+```julia
+"""
+    ref_curve(t; ω = 0.5, amp = 1.0)
+
+Return a 2‑dimensional reference position `p(t)` together with its first
+and second derivatives.  The trajectory is `p(t) = amp * [sin(ω*t), cos(ω*t)]`.
+"""
+function ref_curve(t; ω = 1.0, amp = 1.0)
+    p   = amp .* [sin.(ω*t), cos.(ω*t)]
+    dp  = amp*ω .* [cos.(ω*t), -sin.(ω*t)]
+    ddp = -amp*ω^2 .* [sin.(ω*t), cos.(ω*t)]
+    return p, dp, ddp
+end
+```
+---
+
+### 1️⃣ Single‑Integrator Tracking via the DSL
+We consider a single agent moving in the plane with dynamics
+`x_{k+1} = A·x_k + B·u_k`, where `A = I₂` and `B = h·I₂` (zero‑order‑hold with
+sampling period `h`).  The target follows the sinusoidal curve defined above.
+
+```julia
+# -------------------------------------------------------------------
+# 1️⃣ Declare the tracking program (symbolic)
+# -------------------------------------------------------------------
+prog_si = @tracking_problem begin
+    # Spaces
+    space(X) = R^2          # state space ℝ²
+    space(U) = R^2          # control space ℝ²
+
+    # Two agents and two targets
+    agent(a1; dynamics=(A,B), period=h)
+    agent(a2; dynamics=(A,B), period=h)
+    target(t1)
+    target(t2)
+
+    # Horizon and discrete time set
+    horizon(K)                # K will be bound in the context
+    times(Tall = 0:K)         # Tall = 0,…,K
+
+    # Consensus between the two agents at every timestep
+    consensus(c1; agents=(a1,a2), maps=(pi_x,pi_x), at=Tall)
+
+    # Each agent tracks its own target at every step
+    track(tr1; agent=a1, target=t1, maps=(pi_x,pi_x), at=Tall)
+    track(tr2; agent=a2, target=t2, maps=(pi_x,pi_x), at=Tall)
+
+end
+```
+
+#### Context with concrete matrices and parameters
+```julia
+nx = 2
+nu = 2
+h  = 0.5                                # sampling period
+K  = 100                                # horizon length (101 timesteps)
+times = 0:h:K*h
+Ac  = zeros(Float64, 2, 2)              # no drift
+Ac  = [0 1.0/20; 0.0 0]                      # spring motion in x1
+Bc  = Matrix{Float64}(I(2))                               # full actuation  
+Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
+x0_a1 = [1.0,  -1.0]                      # agent start
+x0_a2 = [-1.0,  1.0]                      # agent start
+p0, _, _ = ref_curve(0.0)               # target start (reference at t=0)
+circle, _, _ = ref_curve(times)         # target (reference at over whole domain
+circle = hcat(circle...)
+circle = hcat(circle, zeros(size(circle)))
+ctx = Dict{Symbol,Any}(
+    :h   => h,
+    :K   => K,
+    :A   => Ad,
+    :B   => Bd,
+    :x0_a1 => x0_a1,
+    :x0_a2 => x0_a2,
+    :p0  => p0,
+    :pi_x => state_projection_matrix([1,2], nx, nu)
+)
+```
+
+#### Lower, build the sheaf and solve
+```julia
+# Resolve symbolic names, validate, and lower to a concrete problem
+lowered_si = lower_tracking_program(prog_si, ctx)
+prob_si    = lowered_si.problem          # a `TrackingProblem`
+
+# Build the time‑expanded sheaf and run the harmonic‑extension solver
+# Boundary dictionary expects vertex → stalk vector.  The helper
+# `agent_vertex`/`target_vertex` translate (agent, time) into an integer.
+boundary_si = Dict(
+    agent_vertex(prob_si, 1, 0) => vcat(x0_a1, zeros(2)),   # state+control
+    agent_vertex(prob_si, 2, 0) => vcat(x0_a2, zeros(2)),   # state+control
+    target_vertex(prob_si, 1, 0) => vcat(p0, zeros(2)),
+    target_vertex(prob_si, 2, 0) => 2 .* vcat(p0, zeros(2)),
+)
+
+for t in 1:size(circle, 1)
+    boundary_si[target_vertex(prob_si, 1, t-1)] = circle[t, :]
+    boundary_si[target_vertex(prob_si, 2, t-1)] = 2 .* circle[t, :] + [1.0, 1.0, 0, 0]
+end
+
+shf = build_time_expanded_tracking_sheaf(prob_si)
+result_si = run_scenario("single‑integrator", prob_si, boundary_si, times;
+    y_col=1, z_col=2)
+```
+
+#### Plotting the agents and reference
+```julia
+function animate_trajs(result; fps=15, filename="./tracking_animation.gif")
+    # Prepare an empty plot that will be updated frame‑by‑frame
+    agent_colors  = [:steelblue, :darkorange, :green, :crimson]
+    agent_styles  = [:solid, :dash, :dashdot, :dot]
+    target_colors = [:gray, :black, :darkgreen, :purple]
+    anim = @animate for (step, t) in enumerate(result.times)
+        p = plot()
+        for (i, traj) in enumerate(result.agent_trajs)
+            # Plot the target
+            p_ref = hcat(result.target_trajs[i][1:step]...)'
+            plot!(p, p_ref[:, 1], p_ref[:, 2];
+                  marker=:star5, color=target_colors[i], label="T$i", ms=4, alpha=0.6)
+            # Plot the agent trajectory up to the current timestep
+            plot!(p, traj[1:step, 1], traj[1:step, 2];
+                  alpha=0.6, color=agent_colors[i], linestyle=agent_styles[i],
+                  label="A$i", marker=:circle, ms=4, xlim=(-2,4), ylim=(-2,4))
+        end
+        title!(p, "t = $(round(t; digits=2))")
+        p
+    end
+    gif(anim, filename, fps=fps)
+    # return filename
+    return anim
+end
+
+animate_trajs(result_si, filename="scenario_1.gif")
+```
+---
+
+## Consenus only in a projection
+
+```julia
+prog = @tracking_problem begin
+    # Spaces
+    space(X) = R^2          # state space ℝ²
+    space(U) = R^2          # control space ℝ²
+
+    # Two agents and two targets
+    agent(a1; dynamics=(A,B), period=h)
+    agent(a2; dynamics=(A,B), period=h)
+    target(t1)
+    target(t2)
+
+    # Horizon and discrete time set
+    horizon(K)                # K will be bound in the context
+    times(Tall = 0:K)         # Tall = 0,…,K
+
+    # Consensus between the two agents at final timestep
+    consensus(c1; agents=(a1,a2), maps=(pi_x1,pi_x1), at=Tall[end])
+
+    # Each agent tracks its own target at every timestep
+    track(tr1; agent=a1, target=t1, maps=(pi_x2,pi_x2), at=Tall)
+    track(tr2; agent=a2, target=t2, maps=(pi_x2,pi_x2), at=Tall)
+end
+ctx[:pi_x1] = state_projection_matrix([1], nx, nu)
+ctx[:pi_x2] = state_projection_matrix([2], nx, nu)
+lowered = lower_tracking_program(prog, ctx, consensus_weight=1/100)
+prob    = lowered.problem
+result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, z_col=2)
+@show result.null_dim
+animate_trajs(result, filename="scenario2.gif")
+```
+
+## Overconstrained Consensus
+
+The previous example is only supposed to impose the consensus at the last time step, but the agents still go to consensus immediately. I think this is because there is no tension between the consensus requirement and the tracking requirement. Let's add full rank tracking restriction maps to make tracking harder.
+
+```julia
+prog = @tracking_problem begin
+    # Spaces
+    space(X) = R^2          # state space ℝ²
+    space(U) = R^2          # control space ℝ²
+
+    # Two agents and two targets
+    agent(a1; dynamics=(A,B), period=h)
+    agent(a2; dynamics=(A,B), period=h)
+    target(t1)
+    target(t2)
+
+    # Horizon and discrete time set
+    horizon(K)                # K will be bound in the context
+    times(Tall = 0:K)         # Tall = 0,…,K
+
+    # Consensus between the two agents at a subset of timesteps
+    consensus(c1; agents=(a1,a2), maps=(pi_x2,pi_x2), at=25) # alignment in x2
+    consensus(c1; agents=(a1,a2), maps=(pi_x1,pi_x1), at=26) # alignment in x1
+    consensus(c1; agents=(a1,a2), maps=(pi_x1,pi_x1), at=90) # alignment in x1
+    consensus(c1; agents=(a1,a2), maps=(pi_x1,pi_x1), at=92) # alignment in x1
+
+    # Each agent tracks its own target at every timestep
+    track(tr1; agent=a1, target=t1, maps=(pi_x1,pi_x1), at=Tall)
+    track(tr2; agent=a2, target=t2, maps=(pi_x2,pi_x2), at=Tall)
+end
+ctx[:pi_x1] = state_projection_matrix([1], nx, nu)
+ctx[:pi_x2] = state_projection_matrix([2], nx, nu)
+ctx[:negpi_x1] = -state_projection_matrix([1], nx, nu)
+lowered = lower_tracking_program(prog, ctx, consensus_weight=1/100)
+prob    = lowered.problem
+result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, z_col=2)
+@show result.null_dim
+animate_trajs(result, filename="scenario3.gif")
+```
