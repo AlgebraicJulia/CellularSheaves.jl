@@ -42,7 +42,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.QuadraticCosts, CellularSheaves.AsynchSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
   draft=false,
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
@@ -95,6 +95,7 @@ makedocs(
       "api/trajectory_sheaves.md",
       "api/herding_platoon.md",
       "api/multi_agent_tracking.md",
+      "api/quadratic_costs.md",
       "api/asynch.md"
     ],
   ]

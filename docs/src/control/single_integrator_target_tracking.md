@@ -151,7 +151,7 @@ animate_trajs(result_si, filename="scenario_1.gif")
 ```
 ---
 
-![Scenario 1](../scenario1.gif)
+![Scenario 1](scenario_1.gif)
 
 ## Consensus only in a projection
 
@@ -187,7 +187,7 @@ result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, 
 animate_trajs(result, filename="scenario2.gif")
 ```
 
-![Scenario 2](../scenario2.gif)
+![Scenario 2](scenario2.gif)
 
 ## Overconstrained Consensus
 
@@ -229,4 +229,4 @@ result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, 
 animate_trajs(result, filename="scenario3.gif")
 ```
 
-![Scenario 3](../scenario3.gif)
+![Scenario 3](scenario3.gif)

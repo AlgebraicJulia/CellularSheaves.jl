@@ -53,9 +53,8 @@ Construct a global quadratic cost matrix `Q` using a user‑provided function
 `cost_func(agent_idx, t_step) -> Q_local`.
 
 * `prob` – the `TrackingProblem` describing the agents, dynamics, etc.
-* `cost_func` – optional function `(agent_idx, t_step) -> Q_local` where
-  `Q_local` is a `nu × nu` positive semidefinite matrix for that agent at that timestep.  If `nothing`
-  the function defaults to `control_weight * I(nu)`.
+* `cost_func` – a function `(agent_idx, t_step) -> Q_local` where
+  `Q_local` is a `nu × nu` positive semidefinite matrix for that agent at that timestep.
 
 The returned matrix has size `total_dim × total_dim` where `total_dim` is the
 length of the stacked vector of all stalk variables (states + controls) in the

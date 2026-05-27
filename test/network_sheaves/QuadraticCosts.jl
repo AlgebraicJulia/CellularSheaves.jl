@@ -1,8 +1,8 @@
 using Test
 using SparseArrays
 using LinearAlgebra
-using ..src.ControlSheaves.MultiAgentTracking: TrackingProblem, TrackingEdge, agent_vertex
-using ..src.ControlSheaves.QuadraticCost: build_control_cost_matrix, solve_quadratic_on_nullspace
+using CellularSheaves.ControlSheaves.MultiAgentTracking: TrackingProblem, TrackingEdge, agent_vertex
+using CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts: build_control_cost_matrix, solve_quadratic_on_basis
 
 # Helper to construct a minimal TrackingProblem with 1 agent, no targets
 function make_simple_prob(; k=2, nx=2, nu=2, control_weight=1.0)
@@ -51,7 +51,7 @@ end
     # Test solving on nullspace: use a trivial nullspace (vector of ones)
     N = ones(total_dim, 1)  # null_basis spanning constant offset
     z_harm = zeros(total_dim)
-    z_opt = solve_quadratic_on_nullspace(z_harm, N, Q)
+    z_opt = solve_quadratic_on_basis(z_harm, N, Q)
     @test length(z_opt) == total_dim
     @test norm(z_opt) ≈ 0.0
 end
