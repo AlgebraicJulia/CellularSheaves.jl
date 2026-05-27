@@ -93,8 +93,7 @@ function run_scenario(
     sheaf = build_time_expanded_tracking_sheaf(prob)
     z_harmonic, null_basis = harmonic_extension(sheaf, boundary)
     L  = sheaf_laplacian_matrix_direct(sheaf)
-    xv = Array(z_harmonic)
-    residual = sqrt(max(0.0, dot(xv, L * xv)))
+    z_harmonic_array = Array(z_harmonic)
     nd = size(null_basis, 2)
 
     # -------------------------------------------------------------------
@@ -105,11 +104,12 @@ function run_scenario(
     # constraints.  The heavy lifting is delegated to `QuadraticCost` utilities.
     if cost != 0.0
         Q = build_control_cost_matrix(prob, cost)
-        z_opt = solve_quadratic_on_basis(xv, null_basis, Q)
+        z_opt = solve_quadratic_on_basis(z_harmonic_array, null_basis, Q)
     else
         # No extra cost – just keep the harmonic solution.
-        z_opt = xv
+        z_opt = z_harmonic_array
     end
+    residual = sqrt(max(0.0, dot(z_opt, L * z_opt)))
 
     # -------------------------------------------------------------------
     # Extract trajectories from the (possibly) optimized solution
