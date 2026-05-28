@@ -4,12 +4,13 @@ version = "0.1.0"
 
 [deps]
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
-CellularSheaves = "<INSERT_CORE_UUID>"
+CellularSheaves = "bbe41592-74b8-4681-9d9c-4481e725304d"
 
 [weakdeps]
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d08b"
 DataFrames = "a93c6f00-79b5-5b4c-9076-73256443817f"
 JSON3 = "682c06a0-5104-5f33-8c0e-c7f934ab12c2"
 
-[extensions]
-CellularSheavesPlots = "src/ScenarioPlots.jl"
+[compat]
+Plots = "1"
+julia = "1.9"

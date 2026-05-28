@@ -123,31 +123,7 @@ result_si = run_scenario("single‑integrator", prob_si, boundary_si, times;
 
 #### Plotting the agents and reference
 ```@example tracking_demo
-function animate_trajs(result; fps=15, filename="./tracking_animation.gif")
-    # Prepare an empty plot that will be updated frame‑by‑frame
-    agent_colors  = [:steelblue, :darkorange, :green, :crimson]
-    agent_styles  = [:solid, :dash, :dashdot, :dot]
-    target_colors = [:gray, :black, :darkgreen, :purple]
-    anim = @animate for (step, t) in enumerate(result.times)
-        p = plot()
-        for (i, traj) in enumerate(result.agent_trajs)
-            # Plot the target
-            p_ref = hcat(result.target_trajs[i][1:step]...)'
-            plot!(p, p_ref[:, 1], p_ref[:, 2];
-                  marker=:star5, color=target_colors[i], label="T$i", ms=4, alpha=0.6)
-            # Plot the agent trajectory up to the current timestep
-            plot!(p, traj[1:step, 1], traj[1:step, 2];
-                  alpha=0.6, color=agent_colors[i], linestyle=agent_styles[i],
-                  label="A$i", marker=:circle, ms=4, xlim=(-2,4), ylim=(-2,4))
-        end
-        title!(p, "t = $(round(t; digits=2))")
-        p
-    end
-    gif(anim, filename, fps=fps)
-    return anim
-end
-
-animate_trajs(result_si, filename="scenario_1.gif")
+animate_tracking_xy(result_si; filename="scenario_1.gif")
 ```
 ---
 
@@ -184,7 +160,7 @@ lowered = lower_tracking_program(prog, ctx, consensus_weight=1/100)
 prob    = lowered.problem
 result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, z_col=2)
 @show result.null_dim
-animate_trajs(result, filename="scenario2.gif")
+animate_tracking_xy(result; filename="scenario2.gif")
 ```
 
 ![Scenario 2](scenario2.gif)
@@ -226,7 +202,7 @@ lowered = lower_tracking_program(prog, ctx, consensus_weight=1/100)
 prob    = lowered.problem
 result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, z_col=2)
 @show result.null_dim
-animate_trajs(result, filename="scenario3.gif")
+animate_tracking_xy(result; filename="scenario3.gif")
 ```
 
 ![Scenario 3](scenario3.gif)
