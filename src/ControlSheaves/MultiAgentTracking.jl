@@ -22,6 +22,7 @@ export selector_matrix, state_projection_matrix
 export agent_vertex, target_vertex
 export build_time_expanded_tracking_sheaf
 export generate_reference_trajectory, extract_state_trajectories, extract_target_trajectories, run_scenario
+export animate_tracking_xy
 
 # ---------------------------------------------------------------------------
 # Helper functions
@@ -121,5 +122,14 @@ function run_scenario(
     tt = isnothing(target_trajs) ? extract_target_trajectories(z_block, prob) : target_trajs
     return ScenarioResult(label, collect(times), trajs, tt, nd, residual, y_col, z_col)
 end
+
+"""
+    animate_tracking_xy(result; kwargs...)
+
+Create a 2D animation for a `ScenarioResult` with agent and target trajectories.
+This method is implemented by the optional plotting extension when `Plots` is
+loaded.
+"""
+function animate_tracking_xy end
 
 end # module MultiAgentTracking
