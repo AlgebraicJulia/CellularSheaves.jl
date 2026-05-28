@@ -219,7 +219,9 @@ end
 result1 = run_scenario("Scenario 1", prob1, bnd1, times;
     target_trajs = [traj_t1_s1, traj_t2_s1], y_col = IDX_Y, z_col = IDX_Z)
 
-plot(result1)
+animate_tracking_xy(result1; filename="quadrotor_scenario1.gif", x_col=IDX_Y, y_col=IDX_Z)
+
+# ![Scenario 1 animation](quadrotor_scenario1.gif)
 
 # ## Scenario 2: y-Consensus and z-Tracking, All Timesteps, Aligned Initial Conditions
 #
@@ -273,7 +275,9 @@ end
 result2 = run_scenario("Scenario 2", prob2, bnd2, times;
     target_trajs = [traj_bt1, traj_bt2], y_col = IDX_Y, z_col = IDX_Z)
 
-plot(result2)
+animate_tracking_xy(result2; filename="quadrotor_scenario2.gif", x_col=IDX_Y, y_col=IDX_Z)
+
+# ![Scenario 2 animation](quadrotor_scenario2.gif)
 
 # ## Scenario 3: y-Consensus and z-Tracking at the Last Timestep Only
 #
@@ -319,7 +323,9 @@ end
 result3 = run_scenario("Scenario 3", prob3, bnd3, times;
     target_trajs = [traj_bt1, traj_bt2], y_col = IDX_Y, z_col = IDX_Z)
 
-plot(result3)
+animate_tracking_xy(result3; filename="quadrotor_scenario3.gif", x_col=IDX_Y, y_col=IDX_Z)
+
+# ![Scenario 3 animation](quadrotor_scenario3.gif)
 
 # ## Scenario 4: Last-Timestep Constraints, Targets Not Aligned in y or z
 #
@@ -347,9 +353,11 @@ prog4 = @tracking_problem begin
     target(t1)
     target(t2)
     horizon(K)
-    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=t[end])
-    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=t[end])
-    track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=t[end])
+    time(K_tail = 30)
+    times(T_tail = K_tail:K)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=T_tail)
+    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=10:t[end])
+    track(tr2; agent=a2, target=t2, maps=(R_z,R_z), at=10:t[end])
 end
 ctx4 = Dict{Symbol,Any}(:K => k, :Ad => Ad, :Bd => Bd, :R_y => R_y, :R_z => R_z, :h => h)
 prob4 = lower_tracking_program(prog4, ctx4;
@@ -370,7 +378,9 @@ end
 result4 = run_scenario("Scenario 4", prob4, bnd4, times;
     target_trajs = [traj_bt1, traj_bt2_s4], y_col = IDX_Y, z_col = IDX_Z)
 
-plot(result4)
+animate_tracking_xy(result4; filename="quadrotor_scenario4.gif", x_col=IDX_Y, y_col=IDX_Z)
+
+# ![Scenario 4 animation](quadrotor_scenario4.gif)
 
 # ## Comparison: How Constraints Shape the Solution Space
 #
