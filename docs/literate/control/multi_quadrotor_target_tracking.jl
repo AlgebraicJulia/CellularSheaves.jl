@@ -1,7 +1,7 @@
 # # Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf
 #
 # This example uses a time-expanded sheaf to study how coordination constraints
-# determine the space of feasible agent trajectories.  Four scenarios are compared;
+# determine the space of feasible agent trajectories.  Five scenarios are compared;
 # the nullspace dimension of the restricted sheaf Laplacian measures how many
 # free degrees of freedom remain after constraints are imposed.
 #
@@ -77,12 +77,13 @@ IDX_PHIDT = 6   # roll angle ϕ̇
 
 # ## Common Setup
 #
-# All four scenarios use two agents and two targets over a 40-step horizon (2 s).
+# All five scenarios use two agents and two targets over a 40-step horizon (2 s).
 # The projection matrices are defined once and reused:
 #
 # - ``R_{yz}``: projects the ``(n_x + n_u)``-stalk onto ``(y, z)`` (Scenario 1).
 # - ``R_y``: projects onto ``y`` only (consensus in Scenarios 2–4).
 # - ``R_z``: projects onto ``z`` only (tracking in Scenarios 2–4).
+# - ``negR_y``: negative ``y`` projection used for mirrored consensus (Scenario 5).
 #
 # Each scenario is specified as a `@tracking_problem` DSL program.
 # The DSL declaratively names agents, targets, a time horizon, and the
@@ -98,14 +99,45 @@ times     = h .* collect(0:k)
 R_yz = state_projection_matrix([IDX_Y, IDX_Z], nx, nu)
 R_y  = state_projection_matrix([IDX_Y],         nx, nu)
 R_z  = state_projection_matrix([IDX_Z],         nx, nu)
+negR_y = -R_y
 
-# Bobbing targets used in Scenarios 2–4.
+# Bobbing targets used in Scenarios 2–5.
 # Both complete two full vertical cycles over the 2-second horizon.
 omega_2periods = 2π * 2 / (k * h)
 bt1 = BobbingTarget(0.0, 1.0, 0.3, omega_2periods)
 bt2 = BobbingTarget(0.0, 2.0, 0.3, omega_2periods)
 traj_bt1 = trajectory(bt1, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
 traj_bt2 = trajectory(bt2, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
+
+# Build boundary data with pinned agent initials (and optional terminal states)
+# plus pinned target trajectories.
+function build_boundary(
+    prob,
+    nu::Int;
+    agent_initials::Vector{Vector{Float64}},
+    target_trajs::Vector{Vector{Vector{Float64}}},
+    agent_terminals::Union{Nothing,Vector{Vector{Float64}}}=nothing,
+)
+    bnd = Dict{Int,Vector{Float64}}()
+
+    for (i, x0) in enumerate(agent_initials)
+        bnd[agent_vertex(prob, i, 0)] = vcat(x0, zeros(nu))
+    end
+
+    if !isnothing(agent_terminals)
+        for (i, xk) in enumerate(agent_terminals)
+            bnd[agent_vertex(prob, i, k)] = vcat(xk, zeros(nu))
+        end
+    end
+
+    for (j, traj) in enumerate(target_trajs)
+        for (t, x) in enumerate(traj)
+            bnd[target_vertex(prob, j, t - 1)] = x
+        end
+    end
+
+    return bnd
+end
 
 # ## Scenario 1: Full (y,z) Coordination at Every Timestep
 #
@@ -150,15 +182,11 @@ prob1 = lower_tracking_program(prog1, ctx1;
     include_target_dynamics=true, tracking_weight=5.0,
 ).problem
 
-bnd1 = Dict{Int,Vector{Float64}}()
-bnd1[agent_vertex(prob1, 1, 0)] = vcat(x0_a1_s1, zeros(nu))
-bnd1[agent_vertex(prob1, 2, 0)] = vcat(x0_a2_s1, zeros(nu))
-bnd1[agent_vertex(prob1, 1, k)] = vcat(xk_a1_s1, zeros(nu))
-bnd1[agent_vertex(prob1, 2, k)] = vcat(xk_a2_s1, zeros(nu))
-for t in 0:k
-    bnd1[target_vertex(prob1, 1, t)] = traj_t1_s1[t + 1]
-    bnd1[target_vertex(prob1, 2, t)] = traj_t2_s1[t + 1]
-end
+bnd1 = build_boundary(prob1, nu;
+    agent_initials=[x0_a1_s1, x0_a2_s1],
+    agent_terminals=[xk_a1_s1, xk_a2_s1],
+    target_trajs=[traj_t1_s1, traj_t2_s1],
+)
 
 result1 = run_scenario("Scenario 1", prob1, bnd1, times;
     target_trajs = [traj_t1_s1, traj_t2_s1], y_col = IDX_Y, z_col = IDX_Z)
@@ -178,8 +206,7 @@ animate_tracking_xy(result1; filename="quadrotor_scenario1.gif", x_col=IDX_Y, y_
 # the system is consistent: agents can agree in ``y`` while independently tracking
 # different altitudes.  A non-trivial nullspace often arises because
 # ``z`` (and all other state components) remain unconstrained by the consensus
-# edges.  The `TrackingEdge` API makes it natural to assign different projection
-# matrices to each agent–target pair.
+# edges. 
 #
 # Since all target vertices are pinned as boundary data, target dynamics edges
 # are omitted (`include_target_dynamics = false`).
@@ -208,13 +235,10 @@ prob2 = lower_tracking_program(prog2, ctx2;
 x0_a1_s2 = [0.0, traj_bt1[1][IDX_Z], 0.0, 0.0, traj_bt1[1][IDX_ZDT], 0.0]
 x0_a2_s2 = [0.0, traj_bt2[1][IDX_Z], 0.0, 0.0, traj_bt2[1][IDX_ZDT], 0.0]
 
-bnd2 = Dict{Int,Vector{Float64}}()
-bnd2[agent_vertex(prob2, 1, 0)] = vcat(x0_a1_s2, zeros(nu))
-bnd2[agent_vertex(prob2, 2, 0)] = vcat(x0_a2_s2, zeros(nu))
-for t in 0:k
-    bnd2[target_vertex(prob2, 1, t)] = traj_bt1[t + 1]
-    bnd2[target_vertex(prob2, 2, t)] = traj_bt2[t + 1]
-end
+bnd2 = build_boundary(prob2, nu;
+    agent_initials=[x0_a1_s2, x0_a2_s2],
+    target_trajs=[traj_bt1, traj_bt2],
+)
 
 result2 = run_scenario("Scenario 2", prob2, bnd2, times;
     target_trajs = [traj_bt1, traj_bt2], y_col = IDX_Y, z_col = IDX_Z)
@@ -256,13 +280,10 @@ prob3 = lower_tracking_program(prog3, ctx3;
 x0_a1_s3 = [-0.5, 0.5, 0.0, 0.0, 0.0, 0.0]
 x0_a2_s3 = [ 1.0, 1.5, 0.0, 0.0, 0.0, 0.0]
 
-bnd3 = Dict{Int,Vector{Float64}}()
-bnd3[agent_vertex(prob3, 1, 0)] = vcat(x0_a1_s3, zeros(nu))
-bnd3[agent_vertex(prob3, 2, 0)] = vcat(x0_a2_s3, zeros(nu))
-for t in 0:k
-    bnd3[target_vertex(prob3, 1, t)] = traj_bt1[t + 1]
-    bnd3[target_vertex(prob3, 2, t)] = traj_bt2[t + 1]
-end
+bnd3 = build_boundary(prob3, nu;
+    agent_initials=[x0_a1_s3, x0_a2_s3],
+    target_trajs=[traj_bt1, traj_bt2],
+)
 
 result3 = run_scenario("Scenario 3", prob3, bnd3, times;
     target_trajs = [traj_bt1, traj_bt2], y_col = IDX_Y, z_col = IDX_Z)
@@ -309,13 +330,10 @@ prob4 = lower_tracking_program(prog4, ctx4;
 x0_a1_s4 = [-0.5, 0.5, 0.0, 0.0, 0.0, 0.0]
 x0_a2_s4 = [ 1.0, 1.5, 0.0, 0.0, 0.0, 0.0]
 
-bnd4 = Dict{Int,Vector{Float64}}()
-bnd4[agent_vertex(prob4, 1, 0)] = vcat(x0_a1_s4, zeros(nu))
-bnd4[agent_vertex(prob4, 2, 0)] = vcat(x0_a2_s4, zeros(nu))
-for t in 0:k
-    bnd4[target_vertex(prob4, 1, t)] = traj_bt1[t + 1]
-    bnd4[target_vertex(prob4, 2, t)] = traj_bt2_s4[t + 1]
-end
+bnd4 = build_boundary(prob4, nu;
+    agent_initials=[x0_a1_s4, x0_a2_s4],
+    target_trajs=[traj_bt1, traj_bt2_s4],
+)
 
 result4 = run_scenario("Scenario 4", prob4, bnd4, times;
     target_trajs = [traj_bt1, traj_bt2_s4], y_col = IDX_Y, z_col = IDX_Z)
@@ -324,9 +342,55 @@ animate_tracking_xy(result4; filename="quadrotor_scenario4.gif", x_col=IDX_Y, y_
 
 # ![Scenario 4 animation](quadrotor_scenario4.gif)
 
+# ## Scenario 5: Tracking compound requirements
+# 
+# This scenario matches scenario 4 but requires the second agent to track in y and z.
+# The consensus edge forces alignment in y.
+
+prog5 = @tracking_problem begin
+    agent(a1; dynamics=(Ad, Bd), period=h)
+    agent(a2; dynamics=(Ad, Bd), period=h)
+    target(t1)
+    target(t2)
+    horizon(K)
+    time(K_tail = 30)
+    times(T_tail = K_tail:K)
+    times(Tall = 0:K)
+    consensus(c_mirror; agents=(a1,a2), maps=(R_y,R_y), at=T_tail)
+    track(tr1; agent=a1, target=t1, maps=(R_z,R_z), at=10:t[end])
+    track(tr2; agent=a2, target=t2, maps=(R_yz,R_yz), at=10:t[end])
+end
+ctx5 = Dict{Symbol,Any}(
+    :K => k,
+    :Ad => Ad,
+    :Bd => Bd,
+    :R_y => R_y,
+    :R_yz => R_yz,
+    :R_z => R_z,
+    :h => h,
+)
+prob5 = lower_tracking_program(prog5, ctx5;
+    tracking_weight=5.0,
+).problem
+
+x0_a1_s5 = [-1.0, traj_bt1[1][IDX_Z], 0.0, 0.0, traj_bt1[1][IDX_ZDT], 0.0]
+x0_a2_s5 = [ 1.0, traj_bt2_s4[1][IDX_Z], 0.0, 0.0, traj_bt2_s4[1][IDX_ZDT], 0.0]
+
+bnd5 = build_boundary(prob5, nu;
+    agent_initials=[x0_a1_s5, x0_a2_s5],
+    target_trajs=[traj_bt1, traj_bt2_s4],
+)
+
+result5 = run_scenario("Scenario 5", prob5, bnd5, times;
+    target_trajs = [traj_bt1, traj_bt2_s4], y_col = IDX_Y, z_col = IDX_Z)
+
+animate_tracking_xy(result5; filename="quadrotor_scenario5.gif", x_col=IDX_Y, y_col=IDX_Z)
+
+# ![Scenario 5 animation](quadrotor_scenario5.gif)
+
 # ## Comparison: How Constraints Shape the Solution Space
 #
-# The four scenarios are summarised below.  The nullspace dimension and
+# The five scenarios are summarised below.  The nullspace dimension and
 # Laplacian residual ``\|dz\|`` are displayed via the `ScenarioResult` show method.
 #
 # | Scenario | Consensus | Tracking | Active timesteps | Initial alignment |
@@ -335,6 +399,7 @@ animate_tracking_xy(result4; filename="quadrotor_scenario4.gif", x_col=IDX_Y, y_
 # | 2 | ``y``     | ``z``     | all ``0:k`` | aligned with targets |
 # | 3 | ``y``     | ``z``     | terminal ``k`` | unaligned; targets share ``y`` |
 # | 4 | ``y``     | ``z``     | consensus on ``K_tail:K``, tracking on ``10:K`` | unaligned; targets offset in ``y`` |
+# | 5 | ``y`` | ``z, yz`` | same as 4 | same as 4 |
 #
 # **Constraint density governs nullspace size.**
 # Scenario 1 is infeasible: the ``(y,z)`` consensus edge forces agents to share
@@ -360,13 +425,13 @@ animate_tracking_xy(result4; filename="quadrotor_scenario4.gif", x_col=IDX_Y, y_
 # misaligned; the minimum-energy harmonic path converges to the terminal constraint
 # while the large nullspace deforms it freely in the unconstrained directions.
 
-for r in (result1, result2, result3, result4)
+for r in (result1, result2, result3, result4, result5)
     show(stdout, MIME("text/plain"), r); println()
 end
 
-bar(["S1\n(y,z) all-t", "S2\ny/z all-t", "S3\ny/z last-t", "S4\ny/z last-t\n(mis-tgt)"],
-    [result1.null_dim, result2.null_dim, result3.null_dim, result4.null_dim];
+bar(["S1\n(y,z) all-t", "S2\ny/z all-t", "S3\ny/z last-t", "S4\nwindowed y/z", "S5\nmirror y"],
+    [result1.null_dim, result2.null_dim, result3.null_dim, result4.null_dim, result5.null_dim];
     ylabel = "Nullspace dimension",
     title  = "Nullspace dimension vs. coordination architecture",
     legend = false,
-    color  = [:steelblue, :darkorange, :green, :crimson])
+    color  = [:steelblue, :darkorange, :green, :crimson, :purple])
