@@ -22,10 +22,14 @@
 # four qualitatively different solution spaces whose nullspace dimensions tell
 # the story of the engineering constraints.
 #
-# The helper types (`TrackingEdge`, `TrackingProblem`, `BobbingTarget`,
-# `ScenarioResult`) and all solver utilities live in
-# `CellularSheaves.ControlSheaves.MultiAgentTracking` and can be reused by
-# other examples without copying code.
+# The problem-construction and solve utilities used below come from
+# `CellularSheaves.ControlSheaves.MultiAgentTracking`.
+#
+# - Problem specification is written with `@tracking_problem` from
+#   `CellularSheaves.ControlSheaves.TrackingDSL`.
+# - The solver pipeline is `lower_tracking_program -> run_scenario`.
+# - Animations are produced by `animate_tracking_xy`, implemented by the plotting
+#   extension when `Plots` is loaded.
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.MultiAgentTracking
@@ -69,64 +73,7 @@ IDX_Z   = 2   # altitude z
 IDX_PHI = 3   # roll angle φ
 IDX_YDT = 4   # ẏ
 IDX_ZDT = 5   # ż
-IDX_PHDT = 6  # φ̇
-
-# ## Plot Recipe
-#
-# A Plots.jl recipe renders a `ScenarioResult` as a two-panel ``y(t)`` / ``z(t)``
-# figure.  Agent trajectories use solid/dashed lines; target reference trajectories
-# are shown as dotted lines for comparison.
-
-@recipe function f(sr::ScenarioResult)
-    layout := (1, 2)
-    size := (800, 380)
-    plot_title := "$(sr.label): null dim = $(sr.null_dim),  ||dz|| = $(round(sr.residual; sigdigits=3))"
-    agent_colors  = [:steelblue, :darkorange, :green, :crimson]
-    agent_styles  = [:solid, :dash, :dashdot, :dot]
-    target_colors = [:gray, :black, :darkgreen, :purple]
-    for (i, traj) in enumerate(sr.agent_trajs)
-        @series begin
-            subplot   := 1
-            title     := "y(t)"
-            xlabel    := "t (s)"
-            ylabel    := "y (m)"
-            label     := "A$i"
-            lw        := 2
-            linecolor := agent_colors[i]
-            linestyle := agent_styles[i]
-            sr.times, traj[:, sr.y_col]
-        end
-        @series begin
-            subplot   := 2
-            title     := "z(t)"
-            xlabel    := "t (s)"
-            ylabel    := "z (m)"
-            label     := "A$i"
-            lw        := 2
-            linecolor := agent_colors[i]
-            linestyle := agent_styles[i]
-            sr.times, traj[:, sr.z_col]
-        end
-    end
-    for (j, traj_j) in enumerate(sr.target_trajs)
-        @series begin
-            subplot   := 1
-            label     := "T$j"
-            lw        := 1
-            linecolor := target_colors[j]
-            linestyle := :dot
-            sr.times, getindex.(traj_j, IDX_Y)
-        end
-        @series begin
-            subplot   := 2
-            label     := "T$j"
-            lw        := 1
-            linecolor := target_colors[j]
-            linestyle := :dot
-            sr.times, getindex.(traj_j, IDX_Z)
-        end
-    end
-end
+IDX_PHIDT = 6   # roll angle ϕ̇
 
 # ## Common Setup
 #
@@ -145,8 +92,6 @@ end
 # trajectories) is still supplied externally as a plain `Dict` — it varies
 # per scenario but never changes the sheaf topology.
 
-n_agents  = 2
-n_targets = 2
 k         = 40
 times     = h .* collect(0:k)
 
@@ -172,9 +117,8 @@ traj_bt2 = trajectory(bt2, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
 # at every step.  Since the two targets travel *different* ``(y, z)``
 # trajectories, the constraints "A1 tracks T1", "A2 tracks T2", and
 # "A1 agrees with A2 in ``(y,z)``" are **mutually incompatible** unless the
-# targets coincide.  The sheaf Laplacian has no kernel (null dim = 0) and
-# `harmonic_extension` returns the least-squares compromise with a nonzero
-# residual ``\|dz\| > 0``.
+# targets coincide.  The harmonic extension therefore computes a least-squares
+# compromise and typically reports a relatively large residual.
 
 x0_a1_s1 = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
 xk_a1_s1 = [2.0, 1.5, 0.0, 0.0, 0.0, 0.0]
@@ -232,7 +176,7 @@ animate_tracking_xy(result1; filename="quadrotor_scenario1.gif", x_col=IDX_Y, y_
 #
 # Because the two targets share ``y = 0`` and the consensus only constrains ``y``,
 # the system is consistent: agents can agree in ``y`` while independently tracking
-# different altitudes.  A non-trivial nullspace (null dim > 0) arises because
+# different altitudes.  A non-trivial nullspace often arises because
 # ``z`` (and all other state components) remain unconstrained by the consensus
 # edges.  The `TrackingEdge` API makes it natural to assign different projection
 # matrices to each agent–target pair.
@@ -327,25 +271,23 @@ animate_tracking_xy(result3; filename="quadrotor_scenario3.gif", x_col=IDX_Y, y_
 
 # ![Scenario 3 animation](quadrotor_scenario3.gif)
 
-# ## Scenario 4: Last-Timestep Constraints, Targets Not Aligned in y or z
+# ## Scenario 4: Windowed Late-Horizon Coordination with Offset Target
 #
-# Identical sheaf topology to Scenario 3, but Target 2 is now at ``y = 1.5`` m
-# instead of ``y = 0``.  The targets are **not** initially aligned with each other
-# in either ``y`` or ``z``.
+# This scenario changes both boundary data and constraint timing:
 #
-# Because the sheaf topology (which edges exist at which timesteps) is unchanged,
-# the restricted Laplacian's nullspace has the **same dimension** as Scenario 3.
-# The two harmonic extensions produce different trajectories, but they live in
-# equally large affine solution spaces, confirming that nullspace dimension is a
-# structural property of the coordination architecture, not of the boundary data.
+# - Target 2 is shifted to ``y = 1.5`` m.
+# - Consensus is active on a tail window (`T_tail = K_tail:K`).
+# - Tracking is active on `10:K`.
+#
+# Unlike Scenario 3, this is a different coordination architecture, so changes in
+# nullspace dimension are expected and interpreted as structural changes, not only
+# trajectory-level effects.
 
 bt2_s4 = BobbingTarget(1.5, 2.0, 0.3, omega_2periods)
 traj_bt2_s4 = trajectory(bt2_s4, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
 
-# The DSL program for Scenario 4 is **identical** to Scenario 3.
-# The different target trajectory (`traj_bt2_s4`) is boundary data supplied
-# externally — it never appears in the DSL program and does not change the
-# sheaf topology or nullspace dimension.
+# The DSL program below introduces explicit named time sets for the late-horizon
+# consensus and delayed tracking windows.
 
 prog4 = @tracking_problem begin
     agent(a1; dynamics=(Ad, Bd), period=h)
@@ -392,25 +334,25 @@ animate_tracking_xy(result4; filename="quadrotor_scenario4.gif", x_col=IDX_Y, y_
 # | 1 | ``(y,z)`` | ``(y,z)`` | all ``0:k`` | distinct endpoints |
 # | 2 | ``y``     | ``z``     | all ``0:k`` | aligned with targets |
 # | 3 | ``y``     | ``z``     | terminal ``k`` | unaligned; targets share ``y`` |
-# | 4 | ``y``     | ``z``     | terminal ``k`` | unaligned; targets offset in ``y`` |
+# | 4 | ``y``     | ``z``     | consensus on ``K_tail:K``, tracking on ``10:K`` | unaligned; targets offset in ``y`` |
 #
 # **Constraint density governs nullspace size.**
 # Scenario 1 is infeasible: the ``(y,z)`` consensus edge forces agents to share
 # the same trajectory in the ``yz``-plane, but tracking edges demand they follow
-# different targets.  The result is null dim = 0 with a nonzero least-squares
-# residual — the energy minimiser finds a compromise, not a feasible trajectory.
+# different targets.  The energy minimiser therefore finds a compromise, not an
+# exactly feasible trajectory.
 # Scenario 2 (only ``y`` consensus + ``z`` tracking, all timesteps) is consistent
-# and admits a family of solutions (null dim > 0) because fewer coordinates per
-# edge are constrained.
-# Restricting to the terminal timestep only (Scenarios 3–4) removes ``k`` sets of
-# constraints and dramatically enlarges the solution space.
+# and often admits a family of solutions because fewer coordinates per edge are
+# constrained.
+# Restricting constraints to selected timesteps (Scenarios 3–4) removes many
+# constraints and can substantially enlarge the solution space.
 #
 # **Nullspace dimension is a topological invariant.**
-# Scenarios 3 and 4 share the same sheaf topology (identical edge structure) and
-# therefore the same nullspace dimension, even though their target trajectories
-# differ.  The harmonic extensions produce different specific trajectories, but
-# they live in equally large affine spaces.  The nullspace dimension is a property
-# of the *coordination architecture*, not the *boundary data*.
+# Nullspace dimension is determined by the restricted Laplacian induced by the
+# chosen edge structure and time sets.  Holding the architecture fixed while
+# changing only boundary values changes trajectories but not this structural
+# dimension.  Changing timing sets or edge families (as in Scenario 4) can change
+# the dimension.
 #
 # **Feasibility is separate from trajectory shape.**
 # In Scenario 2, agents start consistent with all-time constraints, so the harmonic
