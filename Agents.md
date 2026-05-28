@@ -108,6 +108,7 @@ which is the authoritative reference for LDLt usage in this codebase.
 - Add `export` lines to `NetworkSheaves.jl`.
 - New test files go in `test/network_sheaves/` and are included from `test/runtests.jl`.
 - Do not add the package under test to the test dependencies `test/Project.toml`. This breaks the CI.
+- Prefer multiple dispatch over runtime case statements and union types. 
 
 ## Documentation Structure Conformance
 
@@ -194,3 +195,4 @@ We are working off the work of researchers such as Hansen, Ghrist, Curry, Riess,
   or be expressed as end of line comments.
 - **Do not use Java style getters and setters.** Prefer idiomatic julia names that do
   not contain the substrings get or set.
+- **Do not import modules inside of function definitions** Import and export expressions should only appear towards the top of a file.

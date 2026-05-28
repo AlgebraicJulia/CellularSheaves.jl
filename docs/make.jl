@@ -42,7 +42,8 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.AsynchSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
+  draft=false,
   format=Documenter.HTML(),
   sitename="CellularSheaves.jl",
   doctest=false,
@@ -64,7 +65,8 @@ makedocs(
         "generated/control/controlled_vehicle_platoon.md",
         "generated/control/controlled_planar_quadrotor.md",
         "generated/control/controlled_mass_spring_damper_chain.md",
-        "generated/control/multi_quadrotor_target_tracking.md"
+        "generated/control/multi_quadrotor_target_tracking.md",
+        "control/single_integrator_target_tracking.md"
         ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
@@ -93,6 +95,7 @@ makedocs(
       "api/trajectory_sheaves.md",
       "api/herding_platoon.md",
       "api/multi_agent_tracking.md",
+      "api/quadratic_costs.md",
       "api/asynch.md"
     ],
   ]
