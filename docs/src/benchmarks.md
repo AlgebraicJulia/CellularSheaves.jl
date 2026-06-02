@@ -57,5 +57,4 @@ The `bench/slurm_benchmarks.sh` launcher submits one `large` shard per array tas
 
 The latest checked-in benchmark report placeholder lives here:
 
-- [Generated benchmark report](generated/benchmark_report.md)
-- [Generated benchmark report](benchmark_report.md)
+- [Benchmark report placeholder](benchmark_report.md)
