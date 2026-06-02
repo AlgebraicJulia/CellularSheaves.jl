@@ -74,6 +74,37 @@ This package implements theory and algorithms from research on network sheaves, 
 
 See the [documentation](https://AlgebraicJulia.github.io/CellularSheaves.jl/dev) for worked examples, mathematical background, and the full API reference.
 
+## Benchmarking
+
+The package ships with a dedicated benchmark suite based on `BenchmarkTools.jl` and `PkgBenchmark.jl`. Benchmarks are kept out of the unit-test and docs-build paths and are organized into shardable tiers:
+
+- `*-small` for local smoke runs and GitHub Actions
+- `*-large` for SLURM or explicit local runs
+
+Set up the benchmark environment once:
+
+```julia
+julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+```
+
+Run the default local benchmark suite:
+
+```julia
+julia --project=bench bench/run_benchmarks.jl
+```
+
+Compare against `main` with `PkgBenchmark.jl`:
+
+```julia
+BENCHMARK_PROFILE=small BENCHMARK_BASELINE_REF=main julia --project=bench bench/compare_benchmarks.jl
+```
+
+Render an HTML/Markdown report from saved shard artifacts:
+
+```julia
+BENCHMARK_INPUT_DIR=bench/results BENCHMARK_OUTPUT_DIR=bench/results julia --project=bench bench/render_report.jl
+```
+
 ## Authors and Attribution
 
 CellularSheaves.jl was developed by **Tyler Hanks** and **James Fairbanks** as part of the [AlgebraicJulia](https://algebraicjulia.org) ecosystem.

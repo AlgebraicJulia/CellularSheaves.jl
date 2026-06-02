@@ -38,3 +38,4 @@ skills-lock.json
 
 # Benchmarking
 bench/results.json
+bench/results/

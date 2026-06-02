@@ -21,12 +21,27 @@ julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.i
 
 **Run benchmarks:**
 ```
-julia --project=bench bench/benchmarks.jl
+julia --project=bench bench/run_benchmarks.jl
 ```
 
-**Update baseline after an intentional perf change:**
+**Run one benchmark shard:**
 ```
-cp bench/results.json bench/baseline.json
+BENCHMARK_PROFILE=small BENCHMARK_SHARD=assembly-small julia --project=bench bench/run_benchmarks.jl
+```
+
+**Compare against a baseline ref:**
+```
+BENCHMARK_PROFILE=small BENCHMARK_BASELINE_REF=main julia --project=bench bench/compare_benchmarks.jl
+```
+
+**Render benchmark reports:**
+```
+BENCHMARK_INPUT_DIR=bench/results BENCHMARK_OUTPUT_DIR=bench/results julia --project=bench bench/render_report.jl
+```
+
+**Run large tiers on SLURM:**
+```
+bench/slurm_benchmarks.sh submit
 ```
 
 **Install docs dependencies (first time only):**

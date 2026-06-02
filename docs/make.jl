@@ -80,6 +80,10 @@ makedocs(
       "features/morphisms_and_pushforwards.md",
       "features/trajectory_and_control.md",
     ],
+    "Benchmarks"=>Any[
+      "benchmarks.md",
+      "benchmark_report.md",
+    ],
     "API Reference"=>Any[
       "api/index.md",
       "api/network_sheaves.md",
