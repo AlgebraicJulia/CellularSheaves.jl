@@ -87,23 +87,17 @@ Set up the benchmark environment once:
 julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
 ```
 
-Run the default local benchmark suite:
+Run the default local benchmark suite (writing artifacts under `bench/results`):
 
-```julia
-julia --project=bench bench/run_benchmarks.jl
-```
+    BENCHMARK_RESULT_DIR=bench/results julia --project=bench bench/run_benchmarks.jl
 
 Compare against `main` with `PkgBenchmark.jl`:
 
-```julia
-BENCHMARK_PROFILE=small BENCHMARK_BASELINE_REF=main julia --project=bench bench/compare_benchmarks.jl
-```
+    BENCHMARK_PROFILE=small BENCHMARK_BASELINE_REF=main julia --project=bench bench/compare_benchmarks.jl
 
 Render an HTML/Markdown report from saved shard artifacts:
 
-```julia
-BENCHMARK_INPUT_DIR=bench/results BENCHMARK_OUTPUT_DIR=bench/results julia --project=bench bench/render_report.jl
-```
+    BENCHMARK_INPUT_DIR=bench/results BENCHMARK_OUTPUT_DIR=bench/results julia --project=bench bench/render_report.jl
 
 ## Authors and Attribution
 
