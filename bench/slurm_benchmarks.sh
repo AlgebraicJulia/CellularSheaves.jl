@@ -28,7 +28,7 @@ case "${MODE}" in
     )"
     sbatch \
       --dependency="afterok:${shard_job_id}" \
-      --export=ALL,BENCHMARK_PROFILE="${PROFILE}",BENCHMARK_RESULT_DIR="${RESULT_DIR}",BENCHMARK_EXPECTED_SHARDS="${EXPECTED_SHARDS}",BENCHMARK_REPORT_MODE=summary \
+      --export=ALL,BENCHMARK_PROFILE="${PROFILE}",BENCHMARK_SLURM_PARENT_JOB_ID="${shard_job_id}",BENCHMARK_EXPECTED_SHARDS="${EXPECTED_SHARDS}",BENCHMARK_REPORT_MODE=summary \
       "$0" aggregate
     ;;
   run-array)
