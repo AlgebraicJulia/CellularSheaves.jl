@@ -5,7 +5,7 @@ set -euo pipefail
 LARGE_SHARDS=("assembly-large" "solver-large" "extension-large")
 
 MODE="${1:-submit}"
-RESULT_DIR="${BENCHMARK_RESULT_DIR:-bench/results/slurm/${SLURM_JOB_ID:-manual}}"
+RESULT_DIR="${BENCHMARK_RESULT_DIR:-bench/results/slurm/${BENCHMARK_SLURM_PARENT_JOB_ID:-${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}}}"
 PROFILE="${BENCHMARK_PROFILE:-large}"
 EXPECTED_SHARDS="$(IFS=,; echo "${LARGE_SHARDS[*]}")"
 
