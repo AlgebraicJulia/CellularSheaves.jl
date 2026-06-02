@@ -79,8 +79,19 @@ function selected_leaf_ids(profile::AbstractString, shard::AbstractString)
     sort!(unique!(vcat([copy(SHARD_MANIFEST[name]) for name in shard_names]...)))
 end
 
+function sizes_for_shards(shard_names::Vector{String})
+    needs_small = any(endswith(s, "-small") for s in shard_names)
+    needs_large = any(endswith(s, "-large") for s in shard_names)
+    needs_small && needs_large && return copy(ALL_SIZES)
+    needs_small && return copy(SMALL_SIZES)
+    needs_large && return copy(LARGE_SIZES)
+    return Int[]
+end
+
 function filtered_suite(profile::AbstractString, shard::AbstractString)
-    filter_suite(build_suite(), selected_leaf_ids(profile, shard))
+    shard_names = selected_shards(profile, shard)
+    sizes = sizes_for_shards(shard_names)
+    filter_suite(build_suite(sizes), selected_leaf_ids(profile, shard))
 end
 
 function filtered_suite_from_env()

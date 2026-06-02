@@ -19,39 +19,36 @@ const FACTORIES = Dict(
     "path" => make_path_sheaf,
 )
 
-const SHEAVES = Dict(
-    (family, n) => FACTORIES[family](n, STALK_DIM)
-    for family in GRAPH_FAMILIES
-    for n in ALL_SIZES
-)
-
 function boundary_fixture(family, n)
     v2 = family == "path" ? n : n ÷ 2
     Dict(1 => zeros(STALK_DIM), v2 => ones(STALK_DIM))
 end
 
-const HARMONIC_BOUNDARIES = Dict(
-    (family, n) => boundary_fixture(family, n)
-    for family in GRAPH_FAMILIES
-    for n in ALL_SIZES
-)
-
-const GLOBAL_SECTION_INPUTS = let rng = MersenneTwister(42)
-    Dict(
+function build_suite(sizes::Vector{Int}=ALL_SIZES)
+    sheaves = Dict(
+        (family, n) => FACTORIES[family](n, STALK_DIM)
+        for family in GRAPH_FAMILIES
+        for n in sizes
+    )
+    harmonic_boundaries = Dict(
+        (family, n) => boundary_fixture(family, n)
+        for family in GRAPH_FAMILIES
+        for n in sizes
+    )
+    rng = MersenneTwister(42)
+    global_section_inputs = Dict(
         (family, n) => randn(rng, STALK_DIM * n)
         for family in GRAPH_FAMILIES
-        for n in ALL_SIZES
+        for n in sizes
     )
-end
 
-function build_suite()
     suite = BenchmarkGroup()
 
     suite["coboundary_map"] = BenchmarkGroup()
     for family in GRAPH_FAMILIES
         suite["coboundary_map"][family] = BenchmarkGroup()
-        for n in ALL_SIZES
-            s = SHEAVES[(family, n)]
+        for n in sizes
+            s = sheaves[(family, n)]
             suite["coboundary_map"][family]["n$n"] = @benchmarkable coboundary_map($s)
         end
     end
@@ -60,8 +57,8 @@ function build_suite()
     suite["laplacian"]["matrix_direct"] = BenchmarkGroup()
     for family in GRAPH_FAMILIES
         suite["laplacian"]["matrix_direct"][family] = BenchmarkGroup()
-        for n in ALL_SIZES
-            s = SHEAVES[(family, n)]
+        for n in sizes
+            s = sheaves[(family, n)]
             suite["laplacian"]["matrix_direct"][family]["n$n"] = @benchmarkable sheaf_laplacian_matrix_direct($s)
         end
     end
@@ -69,9 +66,9 @@ function build_suite()
     suite["harmonic_extension"] = BenchmarkGroup()
     for family in GRAPH_FAMILIES
         suite["harmonic_extension"][family] = BenchmarkGroup()
-        for n in ALL_SIZES
-            s = SHEAVES[(family, n)]
-            boundary = HARMONIC_BOUNDARIES[(family, n)]
+        for n in sizes
+            s = sheaves[(family, n)]
+            boundary = harmonic_boundaries[(family, n)]
             suite["harmonic_extension"][family]["n$n"] = @benchmarkable harmonic_extension($s, $boundary)
         end
     end
@@ -80,9 +77,9 @@ function build_suite()
     suite["nearest_global_section"]["ldl"] = BenchmarkGroup()
     for family in GRAPH_FAMILIES
         suite["nearest_global_section"]["ldl"][family] = BenchmarkGroup()
-        for n in ALL_SIZES
-            s = SHEAVES[(family, n)]
-            x0 = GLOBAL_SECTION_INPUTS[(family, n)]
+        for n in sizes
+            s = sheaves[(family, n)]
+            x0 = global_section_inputs[(family, n)]
             suite["nearest_global_section"]["ldl"][family]["n$n"] = @benchmarkable nearest_global_section($s, $x0; method=:ldl)
         end
     end
