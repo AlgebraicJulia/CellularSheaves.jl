@@ -5,7 +5,7 @@ set -euo pipefail
 LARGE_SHARDS=("assembly-large" "solver-large" "extension-large")
 
 MODE="${1:-submit}"
-RESULT_DIR="${BENCHMARK_RESULT_DIR:-bench/results/slurm/${BENCHMARK_SLURM_PARENT_JOB_ID:-${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}}}"
+RESULT_DIR="${BENCHMARK_RESULT_DIR:-bench/results/slurm}"
 PROFILE="${BENCHMARK_PROFILE:-large}"
 EXPECTED_SHARDS="$(IFS=,; echo "${LARGE_SHARDS[*]}")"
 
@@ -28,7 +28,7 @@ case "${MODE}" in
     )"
     sbatch \
       --dependency="afterok:${shard_job_id}" \
-      --export=ALL,BENCHMARK_PROFILE="${PROFILE}",BENCHMARK_SLURM_PARENT_JOB_ID="${shard_job_id}",BENCHMARK_EXPECTED_SHARDS="${EXPECTED_SHARDS}",BENCHMARK_REPORT_MODE=summary \
+      --export=ALL,BENCHMARK_PROFILE="${PROFILE}",BENCHMARK_RESULT_DIR="${RESULT_DIR}",BENCHMARK_EXPECTED_SHARDS="${EXPECTED_SHARDS}",BENCHMARK_REPORT_MODE=summary \
       "$0" aggregate
     ;;
   run-array)

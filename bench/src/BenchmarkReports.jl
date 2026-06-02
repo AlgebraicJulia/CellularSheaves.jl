@@ -36,7 +36,7 @@ function parse_float_env(name::AbstractString, default::Float64)
 end
 
 function default_result_dir()
-    joinpath(@__DIR__, "..", "results", Dates.format(now(), "yyyymmdd-HHMMSS"))
+    joinpath(@__DIR__, "..", "results")
 end
 
 function ensure_dir(path::AbstractString)
