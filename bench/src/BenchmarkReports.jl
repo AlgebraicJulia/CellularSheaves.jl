@@ -179,7 +179,7 @@ function comparison_markdown(rows::Vector{Dict{String,Any}}, metadata::Dict{Stri
     String(take!(io))
 end
 
-function combined_summary_markdown(rows::Vector{Dict{String,Any}}, expected_shards::Vector{String}, completed_shards::Vector{String}, profile::AbstractString)
+function combined_summary_markdown(rows::Vector{Dict{String,Any}}, expected_shards::Vector, completed_shards::Vector, profile::AbstractString)
     missing = sort(setdiff(expected_shards, completed_shards))
     io = IOBuffer()
     println(io, "# Benchmark report")
@@ -203,7 +203,7 @@ function combined_summary_markdown(rows::Vector{Dict{String,Any}}, expected_shar
     String(take!(io))
 end
 
-function combined_comparison_markdown(rows::Vector{Dict{String,Any}}, expected_shards::Vector{String}, completed_shards::Vector{String}, profile::AbstractString)
+function combined_comparison_markdown(rows::Vector{Dict{String,Any}}, expected_shards::Vector, completed_shards::Vector, profile::AbstractString)
     missing = sort(setdiff(expected_shards, completed_shards))
     io = IOBuffer()
     println(io, "# Benchmark comparison report")
@@ -252,7 +252,7 @@ function report_html(title::AbstractString, table_headers::Vector{String}, table
     String(take!(io))
 end
 
-function combined_summary_html(rows::Vector{Dict{String,Any}}, expected_shards::Vector{String}, completed_shards::Vector{String}, profile::AbstractString)
+function combined_summary_html(rows::Vector{Dict{String,Any}}, expected_shards::Vector, completed_shards::Vector, profile::AbstractString)
     missing = sort(setdiff(expected_shards, completed_shards))
     table_rows = [
         [
@@ -279,7 +279,7 @@ function combined_summary_html(rows::Vector{Dict{String,Any}}, expected_shards::
     )
 end
 
-function combined_comparison_html(rows::Vector{Dict{String,Any}}, expected_shards::Vector{String}, completed_shards::Vector{String}, profile::AbstractString)
+function combined_comparison_html(rows::Vector{Dict{String,Any}}, expected_shards::Vector, completed_shards::Vector, profile::AbstractString)
     missing = sort(setdiff(expected_shards, completed_shards))
     table_rows = [
         [
@@ -331,7 +331,7 @@ function maybe_copy(path::AbstractString, env_name::AbstractString)
     destination
 end
 
-function render_summary_report!(input_dir::AbstractString, output_dir::AbstractString; expected_shards::Vector{String}=String[])
+function render_summary_report!(input_dir::AbstractString, output_dir::AbstractString; expected_shards::Vector=String[])
     files = summary_files(input_dir, "summary.json")
     isempty(files) && error("No summary.json files were found under $input_dir")
     rows = Dict{String,Any}[]
@@ -354,7 +354,7 @@ function render_summary_report!(input_dir::AbstractString, output_dir::AbstractS
     markdown_path, html_path
 end
 
-function render_comparison_report!(input_dir::AbstractString, output_dir::AbstractString; expected_shards::Vector{String}=String[])
+function render_comparison_report!(input_dir::AbstractString, output_dir::AbstractString; expected_shards::Vector=String[])
     files = summary_files(input_dir, "comparison_summary.json")
     isempty(files) && error("No comparison_summary.json files were found under $input_dir")
     rows = Dict{String,Any}[]
