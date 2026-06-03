@@ -209,8 +209,8 @@ animate_tracking_xy(result; filename="scenario3.gif")
 
 ## Transitive tracking
 
-This example shows that we can track targets via consensus. This scenario has a1 t1 in x1 and a2 track t2 in x2.
-Then a1 and a2 come to consensus in x2. This means that a1 will track a2 in x2 via its consensus with a2. 
+This example shows *transitive tracking* via consensus: agent `a1` tracks target `t1` in the `x1` coordinate, while agent `a2` tracks target `t2` in the `x2` coordinate.
+Then `a1` and `a2` enforce consensus in `x2`, so `a1` indirectly tracks `t2`’s `x2` coordinate through its agreement with `a2`.
 
 ```@example tracking_demo
 prog = @tracking_problem begin
@@ -226,7 +226,7 @@ prog = @tracking_problem begin
 
     # Horizon and discrete time set
     horizon(K)                # K will be bound in the context
-    times(Tall = 10:K)         # Tall = 0,…,K
+    times(Tall = 10:K)         # Tall = 10,…,K
 
     # Consensus between the two agents at a subset of timesteps
     consensus(c1; agents=(a1,a2), maps=(pi_x2,pi_x2), at=Tall) # alignment in x2
@@ -237,7 +237,6 @@ prog = @tracking_problem begin
 end
 ctx[:pi_x1] = state_projection_matrix([1], nx, nu)
 ctx[:pi_x2] = state_projection_matrix([2], nx, nu)
-ctx[:negpi_x1] = -state_projection_matrix([1], nx, nu)
 lowered = lower_tracking_program(prog, ctx, consensus_weight=1/100)
 prob    = lowered.problem
 result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, z_col=2)
