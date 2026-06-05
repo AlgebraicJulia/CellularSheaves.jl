@@ -376,6 +376,8 @@ for (res, col, wl) in zip([result2_w2, result2_w8, result2_wk],
 end
 p_z
 
+# The W=2 closed-loop animation in the ``y``-``z`` plane:
+
 animate_tracking_xy(result2_w2;
     filename="mpc_scenario2.gif", x_col=IDX_Y, y_col=IDX_Z,
     xlims=(-0.75, 0.75), ylims=(0.1, 2.6), fps=20)
