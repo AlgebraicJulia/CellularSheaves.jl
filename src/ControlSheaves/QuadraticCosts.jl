@@ -121,11 +121,9 @@ function solve_quadratic_on_basis(
         return copy(point)
     end
     N = basis
-    QN = N' * Q * N
-    rhs = - N' * Q * point
-    # Solve in a least-squares / minimum-norm sense so rank-deficient
-    # reduced Hessians from semidefinite control costs do not throw.
-    α_opt = pinv(QN) * rhs
+    QN = Matrix(N' * Q * N)
+    rhs = -(N' * Q * point)
+    α_opt = svd(QN) \ rhs
     return point + N * α_opt
 end
 
