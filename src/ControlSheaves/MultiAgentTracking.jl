@@ -87,20 +87,35 @@ function run_scenario(
     z_col::Int = 2,
     cost::Union{Number,Function}=1.0   # (agent, time) -> Q_control matrix or a number
 )
+    # -------------------------------------------------------------------
+    # Build the sheaf and obtain the harmonic‑extension solution
+    # -------------------------------------------------------------------
     sheaf = build_time_expanded_tracking_sheaf(prob)
     z_harmonic, null_basis = harmonic_extension(sheaf, boundary)
     L  = sheaf_laplacian_matrix_direct(sheaf)
     z_harmonic_array = Array(z_harmonic)
     nd = size(null_basis, 2)
 
+    # -------------------------------------------------------------------
+    # Optional quadratic control cost
+    # -------------------------------------------------------------------
+    # Build the global quadratic cost matrix (only on control components) and
+    # solve the reduced problem on the nullspace of the harmonic‑extension
+    # constraints.  The heavy lifting is delegated to `QuadraticCost` utilities.
     if cost != 0.0
         Q = build_control_cost_matrix(prob, cost)
         z_opt = solve_quadratic_on_basis(z_harmonic_array, null_basis, Q)
     else
+        # No extra cost – just keep the harmonic solution.
         z_opt = z_harmonic_array
     end
     residual = sqrt(max(0.0, dot(z_opt, L * z_opt)))
 
+    # -------------------------------------------------------------------
+    # Extract trajectories from the (possibly) optimized solution
+    # -------------------------------------------------------------------
+    # Re‑wrap the vector as a BlockVector so the existing extraction utilities
+    # can operate unchanged.
     z_block = BlockArray(z_opt, sheaf.vertex_stalks)
     trajs = extract_state_trajectories(z_block, prob)
     tt = isnothing(target_trajs) ? extract_target_trajectories(z_block, prob) : target_trajs

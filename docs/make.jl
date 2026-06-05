@@ -66,7 +66,9 @@ makedocs(
         "generated/control/controlled_planar_quadrotor.md",
         "generated/control/controlled_mass_spring_damper_chain.md",
         "control/single_integrator_target_tracking.md",
-        "generated/control/multi_quadrotor_target_tracking.md"
+        "generated/control/multi_quadrotor_target_tracking.md",
+        "generated/control/mpc_target_tracking.md"
+
         ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
