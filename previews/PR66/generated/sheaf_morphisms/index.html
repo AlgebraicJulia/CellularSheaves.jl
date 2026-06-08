@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Sheaf Morphisms · CellularSheaves.jl</title><meta name="title" content="Sheaf Morphisms · CellularSheaves.jl"/><meta property="og:title" content="Sheaf Morphisms · CellularSheaves.jl"/><meta property="twitter:title" content="Sheaf Morphisms · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../assets/documenter.js"></script><script src="../../search_index.js"></script><script src="../../siteinfo.js"></script><script src="../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../literate_example/">Code Example</a></li><li class="is-active"><a class="tocitem" href>Sheaf Morphisms</a><ul class="internal"><li><a class="tocitem" href="#Build-a-cycle-sheaf-by-adding-stalks-and-edges"><span>Build a cycle sheaf by adding stalks and edges</span></a></li><li><a class="tocitem" href="#Inspect-the-sheaf-Laplacian-and-nearest-global-section"><span>Inspect the sheaf Laplacian and nearest global section</span></a></li><li><a class="tocitem" href="#Compose-morphisms-using-the-library&#39;s-compose-function"><span>Compose morphisms using the library&#39;s <code>compose</code> function</span></a></li></ul></li><li><a class="tocitem" href="../nullspace/">Computing the Nullspace of the Sheaf Laplacian</a></li><li><a class="tocitem" href="../nearest_global_section_iterative/">Nearest Global Section: Iterative Method</a></li><li><a class="tocitem" href="../sheaf_laplacian_benchmarks/">Faster Sheaf Laplacians: Direct Block Assembly</a></li><li><a class="tocitem" href="../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li><li><a class="tocitem" href="../trajectory_sheaf/">Spring Oscillator: Four Colocation Methods Compared</a></li><li><input class="collapse-toggle" id="menuitem-2-8" type="checkbox"/><label class="tocitem" for="menuitem-2-8"><span class="docs-label">Control Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../control/simple_integrator/">Controlled Trajectory Examples: 0 — Scalar Integrator</a></li><li><a class="tocitem" href="../control/controlled_double_integrator/">Controlled Trajectory Examples: 1 — Double Integrator</a></li><li><a class="tocitem" href="../control/controlled_vehicle_platoon/">Controlled Trajectory Examples: 2 — Vehicle Platoon</a></li><li><a class="tocitem" href="../control/controlled_planar_quadrotor/">Controlled Trajectory Examples: 3 — Planar Quadrotor</a></li><li><a class="tocitem" href="../control/controlled_mass_spring_damper_chain/">Controlled Trajectory Examples: 4 — Mass-Spring-Damper Chain</a></li><li><a class="tocitem" href="../../control/single_integrator_target_tracking/">Single‑Integrator Target Tracking (DSL Version)</a></li><li><a class="tocitem" href="../control/multi_quadrotor_target_tracking/">Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-9" type="checkbox"/><label class="tocitem" for="menuitem-2-9"><span class="docs-label">Asynchronous Diffusion</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B</a></li><li><a class="tocitem" href="../asynch/step_size_comparison/">Step Size Comparison: Optimal vs. Conservative</a></li><li><a class="tocitem" href="../asynch/restriction_map_comparison/">Restriction Map Type Comparison</a></li><li><a class="tocitem" href="../asynch/orthogonal_projection/">Convergence Bounds vs. Maximum Delay B</a></li></ul></li></ul></li><li><span class="tocitem">Feature Guides</span><ul><li><a class="tocitem" href="../../features/core_sheaf_workflows/">Core Sheaf Workflows</a></li><li><a class="tocitem" href="../../features/morphisms_and_pushforwards/">Morphisms and Pushforwards</a></li><li><a class="tocitem" href="../../features/trajectory_and_control/">Trajectory and Control</a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../api/">API Reference</a></li><li><a class="tocitem" href="../../api/network_sheaves/">Network Sheaves</a></li><li><a class="tocitem" href="../../api/sheaf_interface/">Sheaf Interface</a></li><li><a class="tocitem" href="../../api/euclidean_sheaves/">Euclidean Sheaves</a></li><li><a class="tocitem" href="../../api/graph_homomorphisms/">Graph Homomorphisms</a></li><li><a class="tocitem" href="../../api/sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../api/pushforwards/">Pushforwards</a></li><li><a class="tocitem" href="../../api/pushouts/">Pushouts</a></li><li><a class="tocitem" href="../../api/dsl/">Cellular Sheaf DSL</a></li><li><a class="tocitem" href="../../api/block_sparse_arrays/">Block Sparse Arrays</a></li><li><a class="tocitem" href="../../api/potential_sheaves/">Potential Sheaves</a></li><li><a class="tocitem" href="../../api/trajectory_sheaves/">Trajectory Sheaves</a></li><li><a class="tocitem" href="../../api/herding_platoon/">Herding Platoon Utilities</a></li><li><a class="tocitem" href="../../api/multi_agent_tracking/">Multi-Agent Tracking</a></li><li><a class="tocitem" href="../../api/quadratic_costs/">Quadratic Costs</a></li><li><a class="tocitem" href="../../api/asynch/">Asynchronous Sheaf Diffusion</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li class="is-active"><a href>Sheaf Morphisms</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Sheaf Morphisms</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/literate/sheaf_morphisms.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Sheaf-Morphisms"><a class="docs-heading-anchor" href="#Sheaf-Morphisms">Sheaf Morphisms</a><a id="Sheaf-Morphisms-1"></a><a class="docs-heading-anchor-permalink" href="#Sheaf-Morphisms" title="Permalink"></a></h1><p>This example demonstrates constructing sheaf morphisms between Euclidean sheaves built over a cycle graph, including checking the naturality condition and composing morphisms.</p><p>The types <code>SheafMorphism</code> and <code>ComplexMorphism</code>, together with <code>is_morphism</code> and <code>compose</code>, are part of the <code>CellularSheaves</code> package — they do not need to be defined here.</p><pre><code class="language-julia hljs">using CellularSheaves
+using LinearAlgebra</code></pre><h2 id="Build-a-cycle-sheaf-by-adding-stalks-and-edges"><a class="docs-heading-anchor" href="#Build-a-cycle-sheaf-by-adding-stalks-and-edges">Build a cycle sheaf by adding stalks and edges</a><a id="Build-a-cycle-sheaf-by-adding-stalks-and-edges-1"></a><a class="docs-heading-anchor-permalink" href="#Build-a-cycle-sheaf-by-adding-stalks-and-edges" title="Permalink"></a></h2><p>Instead of first creating a Graph and calling <code>sheaf_from_graph</code>, we instantiate an empty Euclidean sheaf and populate it using <code>add_vertex_stalk!</code> and <code>add_sheaf_edge!</code>.</p><pre><code class="language-julia hljs">n = 6
+stalk_dim = 3</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3</code></pre><p>Start with an empty Euclidean sheaf (no vertex stalks)</p><pre><code class="language-julia hljs">F = EuclideanSheaf{Float64}(Int[])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">A network sheaf with 0 vertex stalks and 0 edge stalks.
+</code></pre><p>Add <code>n</code> vertex stalks of dimension <code>stalk_dim</code>.</p><pre><code class="language-julia hljs">for i in 1:n
+    add_vertex_stalk!(F, stalk_dim)
+end</code></pre><p>Add edges to form a cycle. Restriction maps are <code>stalk_dim x stalk_dim</code> identity matrices, so each edge stalk also has dimension <code>stalk_dim</code>.</p><pre><code class="language-julia hljs">for i in 1:n
+    v1 = i
+    v2 = (i % n) + 1
+    rm = Matrix{Float64}(I, stalk_dim, stalk_dim) # Identity map as restriction map
+    add_sheaf_edge!(F, v1, v2, rm, rm)
+end
+
+println(F)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">A network sheaf with 6 vertex stalks and 6 edge stalks.</code></pre><h2 id="Inspect-the-sheaf-Laplacian-and-nearest-global-section"><a class="docs-heading-anchor" href="#Inspect-the-sheaf-Laplacian-and-nearest-global-section">Inspect the sheaf Laplacian and nearest global section</a><a id="Inspect-the-sheaf-Laplacian-and-nearest-global-section-1"></a><a class="docs-heading-anchor-permalink" href="#Inspect-the-sheaf-Laplacian-and-nearest-global-section" title="Permalink"></a></h2><pre><code class="language-julia hljs">L = sheaf_laplacian_matrix(F)
+println(&quot;Sheaf Laplacian is a &quot;, size(L, 1), &quot; x &quot;, size(L, 2), &quot; matrix.&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Sheaf Laplacian is a 18 x 18 matrix.</code></pre><p>Start from a random 0-cochain and project to the nearest global section</p><pre><code class="language-julia hljs">x0 = rand(sum(vertex_stalks(F)))
+gs = try
+    nearest_global_section(F, x0)
+catch e
+    println(&quot;Could not compute nearest global section during docs build: &quot;, e)
+    zeros(length(x0))
+end
+println(&quot;Norm of coboundary on nearest global section: &quot;, norm(coboundary_map(F) * gs))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Norm of coboundary on nearest global section: 8.622742084803179e-15</code></pre><p>The printed zero (or tiny numerical value) above indicates <code>gs</code> is close to a true global section.</p><p>Start with an empty Euclidean sheaf (no vertex stalks)</p><pre><code class="language-julia hljs">G = EuclideanSheaf{Float64}(Int[])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">A network sheaf with 0 vertex stalks and 0 edge stalks.
+</code></pre><p>Add <code>n</code> vertex stalks of dimension <code>stalk_dim</code>.</p><pre><code class="language-julia hljs">for i in 1:n
+    add_vertex_stalk!(G, stalk_dim)
+end</code></pre><p>Add edges to form a cycle. Restriction maps are <code>(stalk_dim - 1) x stalk_dim</code>, so each edge stalk has dimension <code>stalk_dim</code> - 1.</p><pre><code class="language-julia hljs">for i in 1:n
+    v1 = i
+    v2 = (i % n) + 1
+    rm = Matrix{Float64}(I, stalk_dim - 1, stalk_dim)
+    add_sheaf_edge!(G, v1, v2, rm, rm)
+end
+
+println(G)
+
+Vmap = collect(1:n)
+Emap = collect(1:n)
+Vmaps = [Matrix{Float64}(I, stalk_dim, stalk_dim) for i in 1:n]
+Emaps = [Matrix{Float64}(I, stalk_dim - 1, stalk_dim) for i in 1:n]
+
+spec = SheafMorphism(Vmap, Emap, Vmaps, Emaps)
+cm = ComplexMorphism(F, G, spec)
+
+is_morphism(cm, F, G)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">true</code></pre><p>The morphism condition holds, so the coboundary maps commute with the morphism matrices.</p><pre><code class="language-julia hljs">dF = coboundary_map(F)
+dG = coboundary_map(G)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">12×18 BlockSparseMatrixCSC{Float64, Int64}:
+ 1.0  0.0  0.0  -1.0  -0.0  -0.0   0.0  …   0.0   0.0   0.0   0.0   0.0   0.0
+ 0.0  1.0  0.0  -0.0  -1.0  -0.0   0.0      0.0   0.0   0.0   0.0   0.0   0.0
+ 1.0  0.0  0.0   0.0   0.0   0.0   0.0      0.0   0.0   0.0  -1.0  -0.0  -0.0
+ 0.0  1.0  0.0   0.0   0.0   0.0   0.0      0.0   0.0   0.0  -0.0  -1.0  -0.0
+ 0.0  0.0  0.0   1.0   0.0   0.0  -1.0      0.0   0.0   0.0   0.0   0.0   0.0
+ 0.0  0.0  0.0   0.0   1.0   0.0  -0.0  …   0.0   0.0   0.0   0.0   0.0   0.0
+ 0.0  0.0  0.0   0.0   0.0   0.0   1.0      0.0   0.0   0.0   0.0   0.0   0.0
+ 0.0  0.0  0.0   0.0   0.0   0.0   0.0      0.0   0.0   0.0   0.0   0.0   0.0
+ 0.0  0.0  0.0   0.0   0.0   0.0   0.0     -1.0  -0.0  -0.0   0.0   0.0   0.0
+ 0.0  0.0  0.0   0.0   0.0   0.0   0.0     -0.0  -1.0  -0.0   0.0   0.0   0.0
+ 0.0  0.0  0.0   0.0   0.0   0.0   0.0  …   1.0   0.0   0.0  -1.0  -0.0  -0.0
+ 0.0  0.0  0.0   0.0   0.0   0.0   0.0      0.0   1.0   0.0  -0.0  -1.0  -0.0</code></pre><p>Build a third sheaf H on the same graph topology but with 1-dimensional edge stalks. Vertex stalks match G (<code>stalk_dim</code> each). Edge restriction maps are <code>1 x stalk_dim</code> projection matrices that pick the first coordinate.</p><pre><code class="language-julia hljs">H = EuclideanSheaf{Float64}(Int[])
+for i in 1:n
+  add_vertex_stalk!(H, stalk_dim)
+end
+for i in 1:n
+  v1 = i
+  v2 = (i % n) + 1
+  rmH = zeros(1, stalk_dim)  # restriction: project vertex R^d -&gt; R^1 by taking first coordinate
+  rmH[1,1] = 1.0
+  add_sheaf_edge!(H, v1, v2, rmH, rmH)
+end
+
+println(H)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">A network sheaf with 6 vertex stalks and 6 edge stalks.</code></pre><p>Build a SheafMorphism spec from G -&gt; H. Vertex maps are identity (3x3), edge maps project G&#39;s edge stalk (<code>size = stalk_dim - 1</code>) to H&#39;s edge stalk (1)</p><pre><code class="language-julia hljs">Vmap_GH = collect(1:n)
+Emap_GH = collect(1:n)
+Vmaps_GH = [Matrix{Float64}(I, stalk_dim, stalk_dim) for i in 1:n]
+edimsG = edge_stalk_dimensions(G)
+Emaps_GH = [zeros(1, edimsG[i]) for i in 1:length(edimsG)]
+for i in 1:length(edimsG)
+  Emaps_GH[i][1,1] = 1.0  # project to first coordinate of G&#39;s edge stalk
+end
+
+specGH = make_sheaf_morphism_spec(Vmap_GH, Emap_GH, Vmaps_GH, Emaps_GH)
+cmGH = ComplexMorphism(G, H, specGH)
+
+is_morphism(cmGH, G, H)
+
+dH = coboundary_map(H)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">6×18 BlockSparseMatrixCSC{Float64, Int64}:
+ 1.0  0.0  0.0  -1.0  -0.0  -0.0   0.0  …   0.0   0.0   0.0   0.0   0.0   0.0
+ 1.0  0.0  0.0   0.0   0.0   0.0   0.0      0.0   0.0   0.0  -1.0  -0.0  -0.0
+ 0.0  0.0  0.0   1.0   0.0   0.0  -1.0      0.0   0.0   0.0   0.0   0.0   0.0
+ 0.0  0.0  0.0   0.0   0.0   0.0   1.0      0.0   0.0   0.0   0.0   0.0   0.0
+ 0.0  0.0  0.0   0.0   0.0   0.0   0.0     -1.0  -0.0  -0.0   0.0   0.0   0.0
+ 0.0  0.0  0.0   0.0   0.0   0.0   0.0  …   1.0   0.0   0.0  -1.0  -0.0  -0.0</code></pre><h2 id="Compose-morphisms-using-the-library&#39;s-compose-function"><a class="docs-heading-anchor" href="#Compose-morphisms-using-the-library&#39;s-compose-function">Compose morphisms using the library&#39;s <code>compose</code> function</a><a id="Compose-morphisms-using-the-library&#39;s-compose-function-1"></a><a class="docs-heading-anchor-permalink" href="#Compose-morphisms-using-the-library&#39;s-compose-function" title="Permalink"></a></h2><p>Compose the structured specs F -&gt; G and G -&gt; H to get a spec for F -&gt; H.</p><pre><code class="language-julia hljs">composite_morphism = ComplexMorphism(F, H, compose(spec, specGH))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">ComplexMorphism([1.0 0.0 … 0.0 0.0; 0.0 1.0 … 0.0 0.0; … ; 0.0 0.0 … 1.0 0.0; 0.0 0.0 … 0.0 1.0], [1.0 0.0 … 0.0 0.0; 0.0 0.0 … 0.0 0.0; … ; 0.0 0.0 … 0.0 0.0; 0.0 0.0 … 0.0 0.0])</code></pre><p>The V component is</p><pre><code class="language-julia hljs">composite_morphism.V</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">6×6-blocked 18×18 BlockMatrix{Float64}:
+ 1.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0  …  0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  1.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  0.0  1.0  │  0.0  0.0  0.0  │  0.0  0.0
+ ───────────────┼─────────────────┼──────────     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  1.0  0.0  0.0  │  0.0  0.0     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  1.0  0.0  │  0.0  0.0     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  0.0  1.0  │  0.0  0.0
+ ───────────────┼─────────────────┼──────────  …  0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  1.0  0.0     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  1.0     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0
+ ───────────────┼─────────────────┼──────────     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0  …  0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0
+ ───────────────┼─────────────────┼──────────     1.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0     0.0  1.0  0.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0     0.0  0.0  1.0  │  0.0  0.0  0.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0
+ ───────────────┼─────────────────┼──────────     0.0  0.0  0.0  │  1.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0  …  0.0  0.0  0.0  │  0.0  1.0  0.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0     0.0  0.0  0.0  │  0.0  0.0  1.0  │  0.0
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0     0.0  0.0  0.0  │  0.0  0.0  0.0  │  1.0</code></pre><p>The E component is</p><pre><code class="language-julia hljs">composite_morphism.E</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">6×6-blocked 6×18 BlockMatrix{Float64}:
+ 1.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0
+ ───────────────┼─────────────────┼──────────  …  0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  1.0  0.0  0.0  │  0.0  0.0
+ ───────────────┼─────────────────┼──────────     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  1.0  0.0
+ ───────────────┼─────────────────┼──────────     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0
+ ───────────────┼─────────────────┼──────────     0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0
+ ───────────────┼─────────────────┼──────────     0.0  1.0  0.0  │  0.0  0.0  0.0  │  0.0
+ ───────────────┼─────────────────┼─────
+ 0.0  0.0  0.0  │  0.0  0.0  0.0  │  0.0  0.0  …  0.0  0.0  0.0  │  0.0  1.0  0.0  │  0.0</code></pre><p>The composite is supposed to be the same as the result of directly multiplying the ComplexMorphism matrices:</p><pre><code class="language-julia hljs">ϕ = compose(cm, cmGH)
+norm(ϕ.V - composite_morphism.V)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">0.0</code></pre><p>and the E component is</p><pre><code class="language-julia hljs">norm(ϕ.E - composite_morphism.E)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">0.0</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../literate_example/">« Code Example</a><a class="docs-footer-nextpage" href="../nullspace/">Computing the Nullspace of the Sheaf Laplacian »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Monday 8 June 2026 21:24">Monday 8 June 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
