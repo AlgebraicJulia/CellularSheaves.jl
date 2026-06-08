@@ -27,10 +27,10 @@ julia> V = [
 
 julia> S = sheaf(I, J, V)
 {4, 8} Sheaf{Float64, Int64}:
- 0  1  0  2
- 1  0  1  0
- 0  1  0  1
- 2  0  1  0
+ 1  1  0  2
+ 1  2  1  0
+ 0  1  1  1
+ 2  0  1  2
 ```
 
 Compute its coboundary matrix using the function `coboundary`.

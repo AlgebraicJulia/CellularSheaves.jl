@@ -896,6 +896,8 @@ function show_sheaf_dense(io::IO, S::Sheaf)
     M = FMatrix{Int}(undef, nvtx, nvtx); fill!(M, 0)
 
     for v in vtxs(S)
+        M[v, v] = ncols(S, v)
+
         for e in srcrange(S, v)
             u = S.tgt[e]
             M[u, v] = nrows(S, e)
