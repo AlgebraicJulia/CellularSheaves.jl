@@ -4,6 +4,8 @@ module CellularSheaves
 
 using Reexport
 
+include("Sheaves.jl/src/Sheaves.jl")
+
 include("network_sheaves/NetworkSheaves.jl")
 @reexport using .NetworkSheaves
 

@@ -4,6 +4,11 @@ using Test
   include("aqua.jl")
 end
 
+@testset "Sheaves" begin
+  include("sparse_block_matrix.jl")
+  include("sheaf.jl")
+end
+
 @testset "Network Sheaves" begin
   include("network_sheaves/Asynch.jl")
   include("network_sheaves/ADT.jl")

@@ -28,6 +28,8 @@ sysimage.so
 
 # Misc. System Files
 .DS_Store
+*.swp
+*.swo
 .vscode
 .ipynb_checkpoints
 
