@@ -20,7 +20,7 @@ include("sheaf.jl")
 include("sheaf_edge_iter.jl")
 
 function Multifrontal.ChordalLDLt(A::SparseBlockMatrix; kw...)
-    return ChordalLDLt(sparse(A); kw...)
+    return Multifrontal.ChordalLDLt(sparse(A); kw...)
 end
 
 function Multifrontal.ChordalLDLt(A::HermOrSymSparseBlockMatrix; kw...)

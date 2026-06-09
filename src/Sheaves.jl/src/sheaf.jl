@@ -3,7 +3,7 @@
 ############################################################################################
 
 """
-    Sheaf{T, I}
+    Sheaf{T, I} <: AbstractGraph{I}
 
 A cellular sheaf. Construct one using [`sheaf`](@ref).
 """
@@ -195,7 +195,7 @@ Each triple `(u, v, A) ∈ zip(I, J, V)` represents an
 oriented edge ``(u, v)`` and a restriction map ``A``
 from ``u`` to ``v``. Each edge ``\\{u, v\\}`` should
 appear twice: once as ``(u, v)`` and once as ``(v, u)``.
-Duplicates are ignored.
+Duplicates are summed.
 
 The optional fourth argument `n` specifies the number
 of vertices in the sheaf.
