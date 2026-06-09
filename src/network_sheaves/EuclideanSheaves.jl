@@ -615,6 +615,27 @@ function ldlt_pinv_solve!(out::AbstractVector, F, b::AbstractVector, w::Abstract
     return out
 end
 
+"""    ldlt_pinv_solve(F, B::AbstractMatrix; tol=nothing) -> Matrix
+
+Apply the pseudoinverse of the factorized matrix to every column of `B`, i.e.
+return a dense matrix whose `j`-th column is `ldlt_pinv_solve(F, B[:, j])`.  This
+is the multiple-right-hand-side form used to build harmonic-extension operators
+(`X = M⁺ B`); the `out`/`w` scratch buffers are shared across columns.
+"""
+function ldlt_pinv_solve(F, B::AbstractMatrix; tol=nothing)
+    nI = size(B, 1)
+    X      = Matrix{Float64}(undef, nI, size(B, 2))
+    colbuf = Vector{Float64}(undef, nI)
+    wbuf   = Vector{Float64}(undef, nI)
+    outbuf = Vector{Float64}(undef, nI)
+    for j in axes(B, 2)
+        colbuf .= @view B[:, j]
+        ldlt_pinv_solve!(outbuf, F, colbuf, wbuf; tol=tol)
+        @inbounds X[:, j] = outbuf
+    end
+    return X
+end
+
 """    nullspace_ldlt(X::AbstractMatrix; tol=nothing) -> Matrix
 
 Compute a basis for the nullspace of the symmetric positive-semidefinite matrix `X`

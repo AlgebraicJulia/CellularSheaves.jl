@@ -201,6 +201,61 @@ function _apply_first_control(
     end
 end
 
+# Single source of truth for the window-sheaf boundary ordering.  Visits every
+# pinned block in canonical order — each agent's initial state, then every target
+# stalk by timestep — calling `f(dofs, dest, vals)`: `dofs` are the block's
+# columns in the global Laplacian, `dest` its slice of the packed boundary vector
+# `x_B`, and `vals` the pinned values (`nothing` at operator-build time, when only
+# the DOF layout is needed).  Both `_window_boundary_dofs` and
+# `_fill_boundary_vector!` route through this, so their orderings cannot drift.
+function _foreach_window_boundary(f, prob::TrackingProblem, stalks::AbstractVector{<:Integer};
+                                  x_agents=nothing, targets=nothing)
+    offsets = [0; cumsum(stalks)]
+    pos = 0
+    for i in 1:prob.n_agents
+        v   = agent_vertex(prob, i, 0)
+        nxi = size(prob.Ad[i], 1)
+        vals = isnothing(x_agents) ? nothing : view(x_agents[i], 1:nxi)
+        f(offsets[v]+1 : offsets[v]+nxi, pos+1 : pos+nxi, vals)
+        pos += nxi
+    end
+    for ts in 0:prob.k, j in 1:prob.n_targets
+        v  = target_vertex(prob, j, ts)
+        nd = stalks[v]
+        vals = isnothing(targets) ? nothing : targets[j][ts + 1]
+        f(offsets[v]+1 : offsets[v]+nd, pos+1 : pos+nd, vals)
+        pos += nd
+    end
+    return nothing
+end
+
+# Boundary DOFs of a window sheaf in canonical order (agent initial states, then
+# target stalks by timestep), derived from `_foreach_window_boundary` so it stays
+# aligned with the `x_B` packing by construction.
+function _window_boundary_dofs(prob::TrackingProblem, stalks::AbstractVector{<:Integer})
+    dofs = Int[]
+    _foreach_window_boundary((d, _dest, _vals) -> append!(dofs, d), prob, stalks)
+    return dofs
+end
+
+# Pack the boundary values into `x_B` in the same canonical order, sharing
+# `_foreach_window_boundary` with `_window_boundary_dofs` so the operator's
+# columns and `x_B` stay aligned.
+function _fill_boundary_vector!(x_B, prob::TrackingProblem, stalks, x_agents, targets)
+    _foreach_window_boundary(prob, stalks; x_agents=x_agents, targets=targets) do _dofs, dest, vals
+        copyto!(view(x_B, dest), vals)
+    end
+    return x_B
+end
+
+# Shared tail of both solver paths: window Laplacian energy of the section and the
+# first applied control advancing each agent one step.
+function _finish_step(local_prob::TrackingProblem, z, L, stalks)
+    residual = sqrt(max(0.0, dot(z, L * z)))
+    x_now    = _apply_first_control(local_prob, z, stalks)
+    return x_now, residual
+end
+
 
 # ---------------------------------------------------------------------------
 # Cost-optimal harmonic extension operator (cached MPC core)
@@ -234,25 +289,13 @@ Factorize the window Laplacian once and fold in the control-cost nullspace
 projection to produce a dense operator `M` so each MPC step is `M * x_B`.
 """
 function tracking_extension_operator(window_prob::TrackingProblem; cost::Union{Number,Function}=1.0)
-    W       = window_prob.k
-    sheaf   = build_time_expanded_tracking_sheaf(window_prob; state_only_initial=true)
-    L       = sheaf_laplacian_matrix_direct(sheaf)
-    stalks  = sheaf.vertex_stalks
-    offsets = [0; cumsum(stalks)]
-    n       = size(L, 1)
-    nx      = [size(window_prob.Ad[i], 1) for i in 1:window_prob.n_agents]
+    W      = window_prob.k
+    sheaf  = build_time_expanded_tracking_sheaf(window_prob; state_only_initial=true)
+    L      = sheaf_laplacian_matrix_direct(sheaf)
+    stalks = sheaf.vertex_stalks
 
-    boundary = Int[]
-    for i in 1:window_prob.n_agents
-        v = agent_vertex(window_prob, i, 0)
-        for c in 1:nx[i]; push!(boundary, offsets[v] + c); end
-    end
-    for j in 1:window_prob.n_targets, t in 0:W
-        v = target_vertex(window_prob, j, t)
-        for c in 1:stalks[v]; push!(boundary, offsets[v] + c); end
-    end
-    sort!(boundary)
-    interior = setdiff(1:n, boundary)
+    boundary = _window_boundary_dofs(window_prob, stalks)
+    interior = setdiff(1:size(L, 1), boundary)
 
     # L is already sparse, so indexing it with index vectors returns sparse
     # blocks — no explicit `sparse(...)` needed (asserted by a unit test).
@@ -262,18 +305,15 @@ function tracking_extension_operator(window_prob::TrackingProblem; cost::Union{N
     tol  = sqrt(eps(Float64)) * max(1.0, maximum(i -> abs(F.D[i,i]), 1:size(F.D,1); init=0.0))
     _, N = ldlt_pseudoinverse_and_null(F, zeros(length(interior)); tol=tol)
 
-    H = Matrix{Float64}(undef, length(interior), length(boundary))
-    for col in axes(L_IB, 2)
-        H[:, col] = ldlt_pinv_solve(F, -Vector(L_IB[:, col]); tol=tol)
-    end
+    # Harmonic response to every boundary DOF: H = -L_II⁺ L_IB (pinv, many RHS).
+    H = ldlt_pinv_solve(F, L_IB; tol=tol)
+    H .*= -1
 
     if size(N, 2) > 0 && !(cost isa Number && iszero(cost))
         Q_II   = Matrix(build_control_cost_matrix(window_prob, stalks, cost)[interior, interior])
         NtQ_II = N' * Q_II
         Fq     = ldlt!(DenseLDLtPivoted(NtQ_II * N), RowMaximum(); check=false)
-        rhs    = NtQ_II * H
-        coeff  = similar(rhs)
-        for col in axes(rhs, 2); coeff[:, col] = ldlt_pinv_solve(Fq, rhs[:, col]); end
+        coeff  = ldlt_pinv_solve(Fq, NtQ_II * H)
         M = H - N * coeff
     else
         M = H
@@ -282,13 +322,23 @@ function tracking_extension_operator(window_prob::TrackingProblem; cost::Union{N
     return WindowSolverCache(M, boundary, interior, stalks, L, size(N, 2), W)
 end
 
-function (op::WindowSolverCache)(x_B::AbstractVector)
+"""
+    mul!(z, op::WindowSolverCache, x_B) -> z
+
+Apply the cached operator in place: scatter the boundary values `x_B` and write
+the harmonic interior `M * x_B` directly into `z` (length `sum(op.stalks)`),
+allocating nothing.
+"""
+function LinearAlgebra.mul!(z::AbstractVector, op::WindowSolverCache, x_B::AbstractVector)
     @argcheck length(x_B) == length(op.boundary)
-    z = zeros(sum(op.stalks))
+    @argcheck length(z) == sum(op.stalks)
+    fill!(z, 0.0)
     z[op.boundary] = x_B
-    z[op.interior] = op.M * x_B
+    mul!(view(z, op.interior), op.M, x_B)
     return z
 end
+
+(op::WindowSolverCache)(x_B::AbstractVector) = mul!(zeros(sum(op.stalks)), op, x_B)
 
 _uniform_activation(ts, k::Int) = isempty(ts) || sort(unique(ts)) == collect(0:k)
 
@@ -352,6 +402,8 @@ function run_mpc_scenario(
         end
     end
     ops      = Dict{Int,WindowSolverCache}()
+    xbufs    = Dict{Int,Vector{Float64}}()   # reused boundary vectors, by window length
+    zbufs    = Dict{Int,Vector{Float64}}()   # reused full sections, by window length
     nd       = 0
     residual = 0.0
 
@@ -363,15 +415,11 @@ function run_mpc_scenario(
         if use_cached && get(window_counts, t_end - t, 0) >= 2
             op = get!(ops, t_end - t) do; tracking_extension_operator(local_prob; cost=cost); end
             t == 0 && (nd = op.null_dim)
-            x_B = Vector{Float64}(undef, length(op.boundary))
-            p = 1
-            for i in 1:prob.n_agents, c in 1:nx[i]; x_B[p] = x_now[i][c]; p += 1; end
-            for ts in 0:op.window, j in 1:prob.n_targets
-                for c in eachindex(local_targets[j][ts+1]); x_B[p] = local_targets[j][ts+1][c]; p += 1; end
-            end
-            z        = op(x_B)
-            residual = sqrt(max(0.0, dot(z, op.laplacian * z)))
-            x_now    = _apply_first_control(local_prob, z, op.stalks)
+            x_B = get!(() -> Vector{Float64}(undef, length(op.boundary)), xbufs, t_end - t)
+            _fill_boundary_vector!(x_B, local_prob, op.stalks, x_now, local_targets)
+            z = get!(() -> Vector{Float64}(undef, sum(op.stalks)), zbufs, t_end - t)
+            mul!(z, op, x_B)
+            x_now, residual = _finish_step(local_prob, z, op.laplacian, op.stalks)
         else
             sheaf    = build_time_expanded_tracking_sheaf(local_prob; state_only_initial=true)
             boundary = _assemble_boundary(local_prob, x_now, local_targets)
@@ -380,10 +428,8 @@ function run_mpc_scenario(
             if cost != 0.0
                 z_arr = solve_quadratic_on_basis(z_arr, N, build_control_cost_matrix(local_prob, sheaf.vertex_stalks, cost))
             end
-            L        = sheaf_laplacian_matrix_direct(sheaf)
             t == 0 && (nd = size(N, 2))
-            residual = sqrt(max(0.0, dot(z_arr, L * z_arr)))
-            x_now    = _apply_first_control(local_prob, z_arr, sheaf.vertex_stalks)
+            x_now, residual = _finish_step(local_prob, z_arr, sheaf_laplacian_matrix_direct(sheaf), sheaf.vertex_stalks)
         end
 
         for i in 1:prob.n_agents; agent_trajs[i][t+2, :] = x_now[i]; end

@@ -164,6 +164,16 @@ using BlockArrays
         @test op.laplacian[op.interior, op.boundary] isa SparseMatrixCSC
     end
 
+    @testset "WindowSolverCache — mul! matches the call form" begin
+        op  = tracking_extension_operator(prob; cost=1.0)
+        x_B = randn(length(op.boundary))
+        z   = Vector{Float64}(undef, sum(op.stalks))
+        mul!(z, op, x_B)
+        @test z ≈ op(x_B)
+        @test z[op.boundary] ≈ x_B
+        @test_throws Exception mul!(zeros(sum(op.stalks) + 1), op, x_B)
+    end
+
     @testset "run_mpc_scenario — solver=:naive default-equivalent on inhomogeneous problem" begin
         # Tracking active only at the terminal step → not time-homogeneous, so the
         # cached default must transparently fall back to the naive path.
