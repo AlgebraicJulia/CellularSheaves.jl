@@ -2,6 +2,7 @@ using Test
 using CellularSheaves
 using CellularSheaves.ControlSheaves.MultiAgentTracking
 using LinearAlgebra
+using SparseArrays
 using BlockArrays
 
 @testset "MultiAgentTrackingMPC" begin
@@ -141,6 +142,15 @@ using BlockArrays
         L_IB = op.laplacian[op.interior, op.boundary]
         g = L_II * z[op.interior] + L_IB * x_B
         @test norm(L_II * g) < 1e-6
+    end
+
+    @testset "tracking_extension_operator — Laplacian blocks stay sparse" begin
+        op = tracking_extension_operator(prob; cost=1.0)
+        @test op.laplacian isa SparseMatrixCSC
+        # Indexing the sparse Laplacian with index vectors must keep the blocks
+        # sparse (the operator build relies on this instead of converting).
+        @test op.laplacian[op.interior, op.interior] isa SparseMatrixCSC
+        @test op.laplacian[op.interior, op.boundary] isa SparseMatrixCSC
     end
 
     @testset "run_mpc_scenario — solver=:naive default-equivalent on inhomogeneous problem" begin

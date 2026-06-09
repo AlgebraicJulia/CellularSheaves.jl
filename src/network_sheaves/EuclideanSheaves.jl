@@ -641,11 +641,12 @@ function ldlt_pseudoinverse_and_null(M, b; tol=nothing)
     end
     null_vecs = P \ (Lfac' \ U)
 
-    c = P' \ b
-    z = Lfac \ c
+    # Particular solution via pseudoinverse: suppress null directions in D
+    c = P' \ b                          # permute rhs
+    z = Lfac \ c                        # forward solve
     w = zeros(n)
-    ldiv_diag_pinv!(w, D, z, threshold)
-    x_p = P \ (Lfac' \ w)
+    ldiv_diag_pinv!(w, D, z, threshold) # D⁺ on free directions only
+    x_p = P \ (Lfac' \ w)               # back solve + undo permutation
 
     return x_p, null_vecs
 end

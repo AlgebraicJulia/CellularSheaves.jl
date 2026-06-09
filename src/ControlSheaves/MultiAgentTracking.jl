@@ -27,7 +27,7 @@ export build_time_expanded_tracking_sheaf
 export generate_reference_trajectory, extract_state_trajectories, extract_target_trajectories, run_scenario
 export animate_tracking_xy
 export run_mpc_scenario
-export TrackingExtension, tracking_extension_operator
+export WindowSolverCache, tracking_extension_operator
 export window_targets, window_problem
 
 
@@ -211,16 +211,17 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    TrackingExtension
+    WindowSolverCache
 
-Precomputed operator for the cost-optimal harmonic extension of a fixed window sheaf.
-Each MPC step reduces to `z[interior] = M * x_B` — a single dense matvec.
+Reusable solver state for the cost-optimal harmonic extension of a fixed window
+sheaf, built once per window length and cached across MPC steps.  Each step then
+reduces to `z[interior] = M * x_B` — a single dense matvec.
 Construct with [`tracking_extension_operator`](@ref).
 
 Fields: `M` (interior×boundary), `boundary`/`interior` (DOF index vectors),
 `stalks`, `laplacian` (for energy), `null_dim`, `window`.
 """
-struct TrackingExtension
+struct WindowSolverCache
     M         :: Matrix{Float64}
     boundary  :: Vector{Int}
     interior  :: Vector{Int}
@@ -231,7 +232,7 @@ struct TrackingExtension
 end
 
 """
-    tracking_extension_operator(window_prob; cost=1.0) -> TrackingExtension
+    tracking_extension_operator(window_prob; cost=1.0) -> WindowSolverCache
 
 Factorize the window Laplacian once and fold in the control-cost nullspace
 projection to produce a dense operator `M` so each MPC step is `M * x_B`.
@@ -257,8 +258,10 @@ function tracking_extension_operator(window_prob::TrackingProblem; cost::Union{N
     sort!(boundary)
     interior = setdiff(1:n, boundary)
 
-    L_II = sparse(L[interior, interior])
-    L_IB = sparse(L[interior, boundary])
+    # L is already sparse, so indexing it with index vectors returns sparse
+    # blocks — no explicit `sparse(...)` needed (asserted by a unit test).
+    L_II = L[interior, interior]
+    L_IB = L[interior, boundary]
     F    = ldlt!(ChordalLDLt(L_II), RowMaximum(); check=false)
     tol  = sqrt(eps(Float64)) * max(1.0, maximum(i -> abs(F.D[i,i]), 1:size(F.D,1); init=0.0))
     _, N = ldlt_pseudoinverse_and_null(F, zeros(length(interior)); tol=tol)
@@ -280,10 +283,10 @@ function tracking_extension_operator(window_prob::TrackingProblem; cost::Union{N
         M = H
     end
 
-    return TrackingExtension(M, boundary, interior, stalks, sparse(L), size(N, 2), W)
+    return WindowSolverCache(M, boundary, interior, stalks, L, size(N, 2), W)
 end
 
-function (op::TrackingExtension)(x_B::AbstractVector)
+function (op::WindowSolverCache)(x_B::AbstractVector)
     @argcheck length(x_B) == length(op.boundary)
     z = zeros(sum(op.stalks))
     z[op.boundary] = x_B
@@ -299,7 +302,7 @@ _uniform_activation(ts, k::Int) = isempty(ts) || sort(unique(ts)) == collect(0:k
 
 Receding-horizon MPC: at each step `t` solves the sheaf QP on `[t, min(t+window,k)]`,
 applies the first control, and advances agent dynamics.  `solver=:cached` reuses a
-[`TrackingExtension`](@ref) for recurring window lengths; falls back to `:naive` on
+[`WindowSolverCache`](@ref) for recurring window lengths; falls back to `:naive` on
 inhomogeneous problems.
 """
 function run_mpc_scenario(
@@ -340,7 +343,7 @@ function run_mpc_scenario(
             window_counts[w] = get(window_counts, w, 0) + 1
         end
     end
-    ops      = Dict{Int,TrackingExtension}()
+    ops      = Dict{Int,WindowSolverCache}()
     nd       = 0
     residual = 0.0
 
