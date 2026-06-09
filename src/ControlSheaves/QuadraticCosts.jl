@@ -24,9 +24,10 @@ module QuadraticCosts
 
 using SparseArrays
 using LinearAlgebra
+using CliqueTrees.Multifrontal
 using ..MultiAgentTracking: TrackingProblem, agent_vertex, extract_state_trajectories,
     extract_target_trajectories, build_time_expanded_tracking_sheaf
-using ....NetworkSheaves: sheaf_laplacian_matrix_direct
+using ....NetworkSheaves: sheaf_laplacian_matrix_direct, ldlt_pinv_solve
 
 export build_control_cost_matrix, solve_quadratic_on_basis
 
@@ -102,7 +103,11 @@ function solve_quadratic_on_basis(
     N = basis
     QN = Matrix(N' * Q * N)
     rhs = -(N' * Q * point)
-    α_opt = svd(QN) \ rhs
+    # The reduced Hessian N'QN is symmetric PSD and can be rank-deficient when the
+    # control cost is only semidefinite.  Solve via the LDLt pseudoinverse
+    # (min-norm, won't throw on null pivots) rather than a dense SVD.
+    Fq = ldlt!(DenseLDLtPivoted(QN), RowMaximum(); check=false)
+    α_opt = ldlt_pinv_solve(Fq, rhs)
     return point + N * α_opt
 end
 

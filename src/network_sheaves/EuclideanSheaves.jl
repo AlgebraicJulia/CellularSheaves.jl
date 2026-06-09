@@ -5,7 +5,7 @@ module EuclideanSheaves
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_laplacian_matrix_direct,
     restricted_laplacian_blocks, sheaf_from_graph, energy_function,
     nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
-    ldlt_pseudoinverse_and_null, ldiv_diag_pinv!, ldiv_diag_pinv, ldlt_pinv_solve, HarmonicExtensionLDLDiagnostics,
+    ldlt_pseudoinverse_and_null, ldiv_diag_pinv!, ldiv_diag_pinv, ldlt_pinv_solve, ldlt_pinv_solve!, HarmonicExtensionLDLDiagnostics,
     HarmonicExtensionSVDDiagnostics, harmonic_extension_ldl_diagnostics,
     harmonic_extension_svd_diagnostics, zero_sheaf, constant_sheaf, cycle_sheaf
 
@@ -575,14 +575,44 @@ against the same (possibly singular) matrix — e.g. building a harmonic-extensi
 operator column by column.
 """
 function ldlt_pinv_solve(F, b::AbstractVector; tol=nothing)
+    return ldlt_pinv_solve!(similar(b), F, b, similar(b); tol=tol)
+end
+
+"""    ldlt_pinv_solve!(out, F, b, w; tol=nothing) -> out
+
+In-place form of [`ldlt_pinv_solve`](@ref).  Writes the pseudoinverse solution
+into `out`, using `w` as scratch; both must have length `size(F.D, 1)` and be
+distinct from `b`.  Reusing `out`/`w` across repeated solves against the same
+factorization `F` allocates nothing on the caller's side, which is what makes a
+column-by-column operator build cheap.
+
+For ``F = P^\\mathsf{T} L D L^\\mathsf{T} P`` the result is the closed form
+
+```math
+x = P\\,\\bigl(L^\\mathsf{T} \\backslash\\, D^{+} (L \\backslash (P^\\mathsf{T} b))\\bigr),
+```
+
+read right-to-left: permute `b`, forward solve `L`, apply the diagonal
+pseudoinverse `D⁺` (zeroing null pivots), back solve `Lᵀ`, undo the permutation.
+The permutations are gathers through `F.P.perm` / `F.P.invp`; the triangular
+solves and `D⁺` run in place via `ldiv!` and [`ldiv_diag_pinv!`](@ref).
+"""
+function ldlt_pinv_solve!(out::AbstractVector, F, b::AbstractVector, w::AbstractVector; tol=nothing)
     D = F.D
     n = size(D, 1)
     threshold = isnothing(tol) ?
         _default_ldlt_nullity_threshold(maximum(i -> abs(D[i, i]), 1:n; init=0.0)) : tol
-    c = F.P' \ b
-    z = F.L \ c
-    w = ldiv_diag_pinv(D, z, threshold)
-    return F.P \ (F.L' \ w)
+    perm = F.P.perm; invp = F.P.invp
+    @inbounds for i in 1:n
+        out[i] = b[perm[i]]                # out = P' \ b  (permute rhs)
+    end
+    ldiv!(F.L, out)                        # forward solve, in place
+    ldiv_diag_pinv!(w, D, out, threshold)  # D⁺ on free directions only
+    ldiv!(F.L', w)                         # back solve, in place
+    @inbounds for i in 1:n
+        out[i] = w[invp[i]]                # out = P \ y  (undo permutation)
+    end
+    return out
 end
 
 """    nullspace_ldlt(X::AbstractMatrix; tol=nothing) -> Matrix
