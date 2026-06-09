@@ -179,7 +179,7 @@ end
 @recipe function f(sr::ScenarioResult)
     layout := (1, 2)
     size := (800, 380)
-    plot_title := "$(sr.label): null dim = $(sr.null_dim),  ||dz|| = $(round(sr.residual; sigdigits=3))"
+    plot_title := "$(sr.label): null dim = $(sr.null_dim),  ||dz|| = $(@sprintf("%.3e", sr.residual))"
     agent_colors  = [:steelblue, :darkorange, :green, :crimson]
     agent_styles  = [:solid, :dash, :dashdot, :dot]
     target_colors = [:gray, :black, :darkgreen, :purple]
@@ -287,7 +287,7 @@ anim1 = @animate for t_idx in 1:k+1
             (1, result1_ol,  "Open-loop"),
             (2, result1_mpc, "MPC (W=k)"))
         sp = p[panel]
-        plot!(sp; title="$title_str  —  t = $(round(times[t_idx]; digits=2))",
+        plot!(sp; title="$title_str  —  t = $(@sprintf("%.3f", times[t_idx]))",
               xlabel="y (m)", ylabel=(panel == 1 ? "z (m)" : ""),
               xlims=(-0.65, 0.65), ylims=(0.7, 2.4),
               legend=:outerright, aspect_ratio=:equal)
