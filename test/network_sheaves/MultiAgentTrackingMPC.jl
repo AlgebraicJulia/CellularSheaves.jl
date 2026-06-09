@@ -46,9 +46,10 @@ using BlockArrays
         @test all(i -> size(result.agent_trajs[i]) == (k + 1, nx), 1:n_agents)
         @test length(result.target_trajs) == n_targets
         @test result.residual >= 0.0
-        # null_dim is the interior-nullspace dimension of the planning window
-        # (free coordination DOFs after pinning agent initials + targets).
-        @test result.null_dim == 2
+        # null_dim is the interior-nullspace dimension of the planning window.
+        # The reindexed window sheaf has no dangling terminal control, so with
+        # this fixture the cost fully determines the interior (null_dim == 0).
+        @test result.null_dim == 0
     end
 
     @testset "run_mpc_scenario — initial states equal x0_agents" begin
@@ -110,6 +111,16 @@ using BlockArrays
             "bad", prob, x0_agents, target_trajs, times; window=k, solver=:bogus)
     end
 
+    @testset "run_mpc_scenario — bad initial/target dimensions throw ArgumentError" begin
+        # Wrong agent initial-state length (nx=2 expected).
+        @test_throws ArgumentError run_mpc_scenario(
+            "bad", prob, [[0.0], x0_agents[2]], target_trajs, times; window=k)
+        # Wrong target stalk length (target stalk is nx+nu=3 here).
+        bad_targets = [target_trajs[1], [Float64[0.0, 0.0] for _ in 0:k]]
+        @test_throws ArgumentError run_mpc_scenario(
+            "bad", prob, x0_agents, bad_targets, times; window=k)
+    end
+
     @testset "run_mpc_scenario — cached and naive agree (homogeneous problem)" begin
         for W in (1, 3, k)
             res_c = run_mpc_scenario("c", prob, x0_agents, target_trajs, times;
@@ -129,7 +140,7 @@ using BlockArrays
         @test length(op.boundary) + length(op.interior) == n_tot
         @test size(op.M) == (length(op.interior), length(op.boundary))
         @test op.window == k
-        @test op.null_dim == 2
+        @test op.null_dim == 0
 
         x_B = randn(length(op.boundary))
         z = op(x_B)

@@ -914,34 +914,6 @@ function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVect
     return BlockArray(x, s.vertex_stalks), null_basis
 end
 
-# Overload that pins individual stalk components rather than whole vertices.
-# Works directly on the flat Laplacian since the vertex-level helpers above
-# cannot express partial pinning.
-function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,Float64})
-    L     = sheaf_laplacian_matrix_direct(s)
-    n     = size(L, 1)
-    B_idx = sort!(collect(keys(boundary)))
-    I_idx = setdiff(1:n, B_idx)
-    x_B   = [boundary[i] for i in B_idx]
-
-    if isempty(B_idx)
-        b = zeros(length(I_idx))
-    else
-        b = -Vector(L[I_idx, B_idx] * x_B)
-    end
-
-    x_interior, null_interior = ldlt_pseudoinverse_and_null(
-        ldlt!(ChordalLDLt(L[I_idx, I_idx]), RowMaximum(); check=false), b)
-
-    x        = zeros(n)
-    x[I_idx] = x_interior
-    x[B_idx] = x_B
-
-    null_basis          = zeros(n, size(null_interior, 2))
-    null_basis[I_idx,:] = null_interior
-
-    return BlockArray(x, s.vertex_stalks), null_basis
-end
 
 
 end # EuclideanSheaves

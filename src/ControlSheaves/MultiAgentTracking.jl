@@ -80,7 +80,7 @@ and 2, matching the planar-quadrotor model convention.
 function run_scenario(
     label::String,
     prob::TrackingProblem,
-    boundary::Union{Dict{Int,Vector{Float64}}, Dict{Int,Float64}},
+    boundary::Dict{Int,Vector{Float64}},
     times::AbstractVector{<:Real};
     target_trajs::Union{Nothing,Vector{Vector{Vector{Float64}}}} = nothing,
     y_col::Int = 1,
@@ -103,7 +103,7 @@ function run_scenario(
     # solve the reduced problem on the nullspace of the harmonic‑extension
     # constraints.  The heavy lifting is delegated to `QuadraticCost` utilities.
     if cost != 0.0
-        Q = build_control_cost_matrix(prob, cost)
+        Q = build_control_cost_matrix(prob, sheaf.vertex_stalks, cost)
         z_opt = solve_quadratic_on_basis(z_harmonic_array, null_basis, Q)
     else
         # No extra cost – just keep the harmonic solution.
@@ -149,35 +149,30 @@ function window_problem(prob::TrackingProblem, t::Int, t_end::Int)
 end
 
 """
-    _assemble_boundary(prob, sheaf, x_agents, target_window) -> Dict{Int,Float64}
+    _assemble_boundary(prob, x_agents, target_window) -> Dict{Int,Vector{Float64}}
 
-Build the DOF-indexed boundary dictionary for `harmonic_extension`:
-- Agent `i`'s state at the window's first timestep is pinned to `x_agents[i]`.
+Build the vertex-indexed boundary dictionary for `harmonic_extension` over the
+MPC-window sheaf (built with `state_only_initial = true`):
+- Agent `i`'s state-only vertex at the window's first timestep is pinned to `x_agents[i]`.
 - Target `j`'s full stalk at each timestep is pinned to `target_window[j][t+1]`.
 
-`sheaf` must be the sheaf built from `prob` (used for stalk offsets).
+Both are full-vertex pins, so this returns a `Dict{Int,Vector{Float64}}`; the
+target stalk dimensions are checked by `harmonic_extension`.
 `target_window` must have `prob.k + 1` samples per target.
 """
 function _assemble_boundary(
     prob::TrackingProblem,
-    sheaf::EuclideanSheaf,
     x_agents::Vector{Vector{Float64}},
     target_window::Vector{Vector{Vector{Float64}}},
 )
-    offsets = [0; cumsum(sheaf.vertex_stalks)]
-    pinned  = Dict{Int,Float64}()
+    pinned = Dict{Int,Vector{Float64}}()
     for i in 1:prob.n_agents
-        va = agent_vertex(prob, i, 0)
-        for c in 1:size(prob.Ad[i], 1)
-            pinned[offsets[va] + c] = x_agents[i][c]
-        end
+        nx_i = size(prob.Ad[i], 1)
+        @argcheck length(x_agents[i]) == nx_i "x_agents[$i] must have length nx=$nx_i, got $(length(x_agents[i]))"
+        pinned[agent_vertex(prob, i, 0)] = x_agents[i]
     end
     for j in 1:prob.n_targets, ts in 0:prob.k
-        vt  = target_vertex(prob, j, ts)
-        val = target_window[j][ts + 1]
-        for c in 1:length(val)
-            pinned[offsets[vt] + c] = val[c]
-        end
+        pinned[target_vertex(prob, j, ts)] = target_window[j][ts + 1]
     end
     return pinned
 end
@@ -185,9 +180,11 @@ end
 """
     _apply_first_control(window_prob, z_opt, stalks) -> Vector{Vector{Float64}}
 
-Extract the control at the window's first timestep from `z_opt` and advance
-each agent's dynamics: `x_{t+1} = Ad_i * x_t + Bd_i * u_t`.
-The agent state `x_t` is read from the section (it was pinned when the window was solved).
+Advance each agent one step using the first decision control of the window.
+In the reindexed window sheaf the initial vertex (`t=0`) is state-only and the
+control `u_1` on vertex `t=1` drives the first transition, so this computes
+`x_{t+1} = Ad_i * x_0 + Bd_i * u_1`.  Both `x_0` (the pinned initial state) and
+`u_1` are read from the section.
 """
 function _apply_first_control(
     window_prob::TrackingProblem,
@@ -196,12 +193,11 @@ function _apply_first_control(
 )
     z_block = BlockArray(z_opt, stalks)
     return map(1:window_prob.n_agents) do i
-        stalk = Array(z_block[Block(agent_vertex(window_prob, i, 0))])
-        nx_i  = size(window_prob.Ad[i], 1)
-        nu_i  = size(window_prob.Bd[i], 2)
-        x_t   = stalk[1:nx_i]
-        u_t   = stalk[nx_i+1 : nx_i+nu_i]
-        window_prob.Ad[i] * x_t + window_prob.Bd[i] * u_t
+        nx_i = size(window_prob.Ad[i], 1)
+        nu_i = size(window_prob.Bd[i], 2)
+        x_0  = Array(z_block[Block(agent_vertex(window_prob, i, 0))])[1:nx_i]
+        u_1  = Array(z_block[Block(agent_vertex(window_prob, i, 1))])[nx_i+1 : nx_i+nu_i]
+        window_prob.Ad[i] * x_0 + window_prob.Bd[i] * u_1
     end
 end
 
@@ -239,7 +235,7 @@ projection to produce a dense operator `M` so each MPC step is `M * x_B`.
 """
 function tracking_extension_operator(window_prob::TrackingProblem; cost::Union{Number,Function}=1.0)
     W       = window_prob.k
-    sheaf   = build_time_expanded_tracking_sheaf(window_prob)
+    sheaf   = build_time_expanded_tracking_sheaf(window_prob; state_only_initial=true)
     L       = sheaf_laplacian_matrix_direct(sheaf)
     stalks  = sheaf.vertex_stalks
     offsets = [0; cumsum(stalks)]
@@ -272,7 +268,7 @@ function tracking_extension_operator(window_prob::TrackingProblem; cost::Union{N
     end
 
     if size(N, 2) > 0 && !(cost isa Number && iszero(cost))
-        Q_II   = Matrix(build_control_cost_matrix(window_prob, cost)[interior, interior])
+        Q_II   = Matrix(build_control_cost_matrix(window_prob, stalks, cost)[interior, interior])
         NtQ_II = N' * Q_II
         Fq     = ldlt!(DenseLDLtPivoted(NtQ_II * N), RowMaximum(); check=false)
         rhs    = NtQ_II * H
@@ -326,6 +322,18 @@ function run_mpc_scenario(
     for j in 1:prob.n_targets
         @argcheck length(target_trajs[j]) >= k + 1 "target_trajs[$j] must have >= k+1=$(k+1) elements, got $(length(target_trajs[j]))"
     end
+    # Per-entity dimension checks (cover both the cached and naive paths, which
+    # otherwise surface mismatches as opaque BoundsErrors deeper in the solve).
+    for i in 1:prob.n_agents
+        nx_i = size(prob.Ad[i], 1)
+        @argcheck length(x0_agents[i]) == nx_i "x0_agents[$i] must have length nx=$nx_i, got $(length(x0_agents[i]))"
+    end
+    for j in 1:prob.n_targets
+        nstalk = size(prob.target_Ad[j], 1) + size(prob.target_Bd[j], 2)
+        for s in 1:(k + 1)
+            @argcheck length(target_trajs[j][s]) == nstalk "target_trajs[$j][$s] must have length $nstalk (target stalk), got $(length(target_trajs[j][s]))"
+        end
+    end
 
     use_cached = solver === :cached &&
                  _uniform_activation(prob.consensus_timesteps, k) &&
@@ -365,12 +373,12 @@ function run_mpc_scenario(
             residual = sqrt(max(0.0, dot(z, op.laplacian * z)))
             x_now    = _apply_first_control(local_prob, z, op.stalks)
         else
-            sheaf    = build_time_expanded_tracking_sheaf(local_prob)
-            boundary = _assemble_boundary(local_prob, sheaf, x_now, local_targets)
+            sheaf    = build_time_expanded_tracking_sheaf(local_prob; state_only_initial=true)
+            boundary = _assemble_boundary(local_prob, x_now, local_targets)
             z, N     = harmonic_extension(sheaf, boundary)
             z_arr    = Array(z)
             if cost != 0.0
-                z_arr = solve_quadratic_on_basis(z_arr, N, build_control_cost_matrix(local_prob, cost))
+                z_arr = solve_quadratic_on_basis(z_arr, N, build_control_cost_matrix(local_prob, sheaf.vertex_stalks, cost))
             end
             L        = sheaf_laplacian_matrix_direct(sheaf)
             t == 0 && (nd = size(N, 2))
