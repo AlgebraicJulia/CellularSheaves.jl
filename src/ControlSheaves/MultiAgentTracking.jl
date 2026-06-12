@@ -29,7 +29,6 @@ export animate_tracking_xy
 export run_mpc_scenario
 export WindowSolverCache, tracking_extension_operator
 export window_targets, window_problem
-export solve_mpc_step
 
 
 # ---------------------------------------------------------------------------

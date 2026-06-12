@@ -150,31 +150,12 @@ times = h .* collect(0:k)
 
 R_yz = state_projection_matrix([IDX_Y, IDX_Z], nx, nu)
 R_y  = state_projection_matrix([IDX_Y],         nx, nu)
-R_z  = state_projection_matrix([IDX_Z],         nx, nu)
 
 omega = 2π * 2 / (k * h)
 bt1   = BobbingTarget(-0.3, 1.2,  0.3, omega)
 bt2   = BobbingTarget( 0.3, 1.8, -0.3, omega)
 traj_bt1 = trajectory(bt1, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
 traj_bt2 = trajectory(bt2, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
-
-function build_boundary(
-    prob,
-    nu::Int;
-    agent_initials::Vector{Vector{Float64}},
-    target_trajs::Vector{Vector{Vector{Float64}}},
-)
-    bnd = Dict{Int,Vector{Float64}}()
-    for (i, x0) in enumerate(agent_initials)
-        bnd[agent_vertex(prob, i, 0)] = vcat(x0, zeros(nu))
-    end
-    for (j, traj) in enumerate(target_trajs)
-        for (t, x) in enumerate(traj)
-            bnd[target_vertex(prob, j, t - 1)] = x
-        end
-    end
-    return bnd
-end
 
 @recipe function f(sr::ScenarioResult)
     layout := (1, 2)
@@ -236,18 +217,22 @@ end
 # example.
 #
 # **When open-loop and MPC agree.**
-# The two solvers agree to machine precision only on feasible problems, where
-# tracking constraints can be satisfied with zero Laplacian energy and the
-# dynamics edges carry zero residual.  On such problems the harmonic section
-# satisfies ``x_{t+1} = A_d x_t + B_d u_t`` exactly at every vertex.
+# The two solvers agree to machine precision only on sheaf-consistent problems,
+# where all tracking, consensus, and dynamics constraints can be satisfied
+# simultaneously.  On such problems the harmonic section has zero Laplacian energy
+# and ``x_{t+1} = A_d x_t + B_d u_t`` holds exactly at every vertex.
 #
 # **When they differ.**
-# Here the problem is infeasible: a sinusoidal altitude cannot be exactly
-# tracked by the quadrotor dynamics, so the harmonic extension is a
-# minimum-energy compromise in which the dynamics edges carry small but nonzero
-# residual.  The open-loop extractor reads the sheaf directly while MPC enforces
-# the true dynamics at every step.  The trajectories are close but not
-# identical — both are valid answers to slightly different questions.
+# The nonzero residual is not caused by the dynamics being infeasible — it arises
+# from a *structural* contradiction between the consensus and tracking edges:
+# `consensus` demands ``R_y x_{a_1}(t) = R_y x_{a_2}(t)`` at every step, while
+# each `track` edge pulls its agent toward a target at a *different* lateral
+# position.  Since the two targets are not at the same ``y`` coordinate, no global
+# section can satisfy both constraints exactly, so the harmonic extension is a
+# minimum-energy compromise over the consensus and tracking edges.  The open-loop
+# extractor reads this compromise directly from the sheaf; MPC additionally
+# enforces the true dynamics at every step, so the two trajectories are close but
+# not identical.
 
 prog1 = @tracking_problem begin
     agent(a1; dynamics=(Ad, Bd), period=h)
@@ -266,8 +251,13 @@ prob1 = lower_tracking_program(prog1, ctx1; tracking_weight=5.0, consensus_weigh
 x0_a1_s1 = [0.0, traj_bt1[1][IDX_Z], 0.0, 0.0, traj_bt1[1][IDX_ZDT], 0.0]
 x0_a2_s1 = [0.0, traj_bt2[1][IDX_Z], 0.0, 0.0, traj_bt2[1][IDX_ZDT], 0.0]
 
-bnd1        = build_boundary(prob1, nu; agent_initials=[x0_a1_s1, x0_a2_s1],
-                             target_trajs=[traj_bt1, traj_bt2])
+bnd1 = Dict{Int,Vector{Float64}}()
+for (i, x0) in enumerate([x0_a1_s1, x0_a2_s1])
+    bnd1[agent_vertex(prob1, i, 0)] = vcat(x0, zeros(nu))
+end
+for (j, traj) in enumerate([traj_bt1, traj_bt2]), (t, x) in enumerate(traj)
+    bnd1[target_vertex(prob1, j, t - 1)] = x
+end
 result1_ol  = run_scenario("open-loop", prob1, bnd1, times;
                            target_trajs=[traj_bt1, traj_bt2], y_col=IDX_Y, z_col=IDX_Z)
 result1_mpc = run_mpc_scenario("MPC (W=k)", prob1, [x0_a1_s1, x0_a2_s1],
@@ -316,14 +306,17 @@ nothing #hide
 #
 # Both agents start at ``(y=0, z=0.35)``, well below and between their targets.
 # Target 1 is at ``y=-0.35, z=1.2`` and Target 2 at ``y=+0.35, z=1.8``; both
-# complete 3.5 vertical bob cycles over the horizon.  There is no consensus
-# edge — agents independently optimize toward their targets in full ``(y,z)``.
+# complete 3.5 vertical bob cycles over the horizon.  A ``y``-consensus edge
+# keeps the agents laterally close while ``(y,z)``-tracking pulls each agent
+# toward its own target at opposite lateral positions — the same structural
+# tension as Scenario 1, which makes window size matter.
 #
 # **Planning horizon controls reactivity.**
 # A shorter window means the controller optimizes over fewer future steps.  At
 # ``W=2`` the controller is essentially greedy, reacting to the current target
-# position without anticipating the next bob.  At ``W=k`` it plans over the
-# full horizon, producing a smoother approach.  Three window sizes are compared.
+# position without anticipating the next bob or the consensus constraint.  At
+# ``W=k`` it plans over the full horizon, finding a smoother compromise between
+# tracking and lateral agreement.  Three window sizes are compared.
 
 omega_fast = 2π * 3.5 / (k * h)
 bt1_s2     = BobbingTarget(-0.35, 1.2,  0.45, omega_fast)
@@ -338,43 +331,29 @@ prog2 = @tracking_problem begin
     target(t2)
     horizon(K)
     times(Tall = 0:K)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
     track(tr1; agent=a1, target=t1, maps=(R_yz,R_yz), at=Tall)
     track(tr2; agent=a2, target=t2, maps=(R_yz,R_yz), at=Tall)
 end
-ctx2  = Dict{Symbol,Any}(:K => k, :Ad => Ad, :Bd => Bd, :R_yz => R_yz, :h => h)
-prob2 = lower_tracking_program(prog2, ctx2; tracking_weight=5.0).problem
+ctx2  = Dict{Symbol,Any}(:K => k, :Ad => Ad, :Bd => Bd, :R_y => R_y, :R_yz => R_yz, :h => h)
+prob2 = lower_tracking_program(prog2, ctx2; tracking_weight=5.0, consensus_weight=0.8).problem
 
 x0_s2 = [[0.0, 0.35, 0.0, 0.0, 0.0, 0.0],
           [0.0, 0.35, 0.0, 0.0, 0.0, 0.0]]
 
 result2_w2 = run_mpc_scenario("MPC W=2", prob2, x0_s2, [traj_s2_1, traj_s2_2], times;
                               window=2, cost=1.0, y_col=IDX_Y, z_col=IDX_Z)
-result2_w8 = run_mpc_scenario("MPC W=8", prob2, x0_s2, [traj_s2_1, traj_s2_2], times;
-                              window=8, cost=1.0, y_col=IDX_Y, z_col=IDX_Z)
 result2_wk = run_mpc_scenario("MPC W=k", prob2, x0_s2, [traj_s2_1, traj_s2_2], times;
                               window=k, cost=1.0, y_col=IDX_Y, z_col=IDX_Z)
 
 show(stdout, MIME("text/plain"), result2_w2); println()
 show(stdout, MIME("text/plain"), result2_wk); println()
 
-# Altitude z(t) by window size.  Color encodes the window size; solid/dashed
-# lines distinguish the two agents:
-
-p_z = plot(title="Scenario 2 — altitude z(t) by window size",
-           xlabel="t (s)", ylabel="z (m)", legend=:topright,
-           size=(820, 360), grid=true, gridalpha=0.25)
-for (j, traj) in enumerate([traj_s2_1, traj_s2_2])
-    plot!(p_z, times, getindex.(traj, IDX_Z);
-          color=:gray60, lw=1, ls=:dot, alpha=0.6, label=(j == 1 ? "targets" : ""))
-end
-for (res, col, wl) in zip([result2_w2, result2_w8, result2_wk],
-                           [:steelblue, :darkorange, :green], ["W=2", "W=8", "W=k"])
-    for i in 1:2
-        plot!(p_z, times, res.agent_trajs[i][:, IDX_Z];
-              color=col, lw=2, ls=(i == 1 ? :solid : :dash), label="A$i $wl")
-    end
-end
-p_z
+# The null dimension of the window Laplacian grows with planning horizon.
+# At ``W=2`` there are 2 free coordination directions; at ``W=k`` there are 11.
+# Each extra null dimension is an additional degree of freedom in the consensus–tracking
+# compromise that the control cost must resolve.  With `cost=1.0` the cost-optimal
+# representative is unique regardless of null dimension.
 
 # The W=2 closed-loop animation in the ``y``-``z`` plane:
 
@@ -402,7 +381,9 @@ op = tracking_extension_operator(window_problem(prob2, 0, 5); cost=1.0)
 # The cached controller amortizes a single ``L_{II}`` factorization over every
 # full-window step.  Steps near the end of the horizon use shorter unique windows
 # and fall back to the naive path, but for a long horizon these are a small
-# fraction of all steps.
+# fraction of all steps.  At ``W=k`` every step uses a distinct-length window so
+# the cache never reuses its operator, and the two solvers are equivalent (speedup
+# ``\approx 1\times``).
 
 Ws       = [2, 4, 8, 16, 32]
 t_naive  = Float64[]
@@ -438,4 +419,5 @@ for (i, s) in enumerate(speedups)
     annotate!(p_speed[2], i - 0.5, s + maximum(speedups) * 0.05,
               text(@sprintf("%.1f x", s), 9, :center, :steelblue))
 end
+hline!(p_speed[2], [1.0]; color=:gray50, lw=1, ls=:dash, label="")
 p_speed
