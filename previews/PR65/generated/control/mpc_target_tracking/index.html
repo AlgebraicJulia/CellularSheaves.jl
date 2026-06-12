@@ -50,7 +50,7 @@ using Plots</code></pre><h2 id="Sliding-Window-Structure"><a class="docs-heading
     annotate!(p, t_now + W_d/2, 0.28,   text(&quot;dynamics (A_d, B_d)&quot;, 8, :center, :gray40))
     annotate!(p, t_end + 1.0, (ay+ty)/2, text(&quot;tracking\nedge&quot;, 7, :center, :gray50))
     p
-end</code></pre><img src="c7038e94.svg" alt="Example block output"/><h2 id="Planar-Quadrotor-Dynamics"><a class="docs-heading-anchor" href="#Planar-Quadrotor-Dynamics">Planar Quadrotor Dynamics</a><a id="Planar-Quadrotor-Dynamics-1"></a><a class="docs-heading-anchor-permalink" href="#Planar-Quadrotor-Dynamics" title="Permalink"></a></h2><p>State: <span>$x = [y, z, \varphi, \dot y, \dot z, \dot\varphi]$</span>. The linearisation is taken around the hover trim condition. Dynamics, projection matrices, bobbing targets, and helper utilities are set up identically to the open-loop example.</p><pre><code class="language-julia hljs">g      = 9.81
+end</code></pre><img src="a09b1ef0.svg" alt="Example block output"/><h2 id="Planar-Quadrotor-Dynamics"><a class="docs-heading-anchor" href="#Planar-Quadrotor-Dynamics">Planar Quadrotor Dynamics</a><a id="Planar-Quadrotor-Dynamics-1"></a><a class="docs-heading-anchor-permalink" href="#Planar-Quadrotor-Dynamics" title="Permalink"></a></h2><p>State: <span>$x = [y, z, \varphi, \dot y, \dot z, \dot\varphi]$</span>. The linearisation is taken around the hover trim condition. Dynamics, projection matrices, bobbing targets, and helper utilities are set up identically to the open-loop example.</p><pre><code class="language-julia hljs">g      = 9.81
 m_veh  = 0.5
 I_quad = 0.01
 ell    = 0.25
@@ -83,31 +83,12 @@ times = h .* collect(0:k)
 
 R_yz = state_projection_matrix([IDX_Y, IDX_Z], nx, nu)
 R_y  = state_projection_matrix([IDX_Y],         nx, nu)
-R_z  = state_projection_matrix([IDX_Z],         nx, nu)
 
 omega = 2π * 2 / (k * h)
 bt1   = BobbingTarget(-0.3, 1.2,  0.3, omega)
 bt2   = BobbingTarget( 0.3, 1.8, -0.3, omega)
 traj_bt1 = trajectory(bt1, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
 traj_bt2 = trajectory(bt2, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
-
-function build_boundary(
-    prob,
-    nu::Int;
-    agent_initials::Vector{Vector{Float64}},
-    target_trajs::Vector{Vector{Vector{Float64}}},
-)
-    bnd = Dict{Int,Vector{Float64}}()
-    for (i, x0) in enumerate(agent_initials)
-        bnd[agent_vertex(prob, i, 0)] = vcat(x0, zeros(nu))
-    end
-    for (j, traj) in enumerate(target_trajs)
-        for (t, x) in enumerate(traj)
-            bnd[target_vertex(prob, j, t - 1)] = x
-        end
-    end
-    return bnd
-end
 
 @recipe function f(sr::ScenarioResult)
     layout := (1, 2)
@@ -158,7 +139,7 @@ end
             sr.times, getindex.(traj_j, IDX_Z)
         end
     end
-end</code></pre><h2 id="Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC"><a class="docs-heading-anchor" href="#Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC">Scenario 1: Bobbing Targets, Open-Loop vs. MPC</a><a id="Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC" title="Permalink"></a></h2><p>Two agents track vertically bobbing targets at opposite lateral positions (T1 at <span>$y=-0.3$</span>, T2 at <span>$y=+0.3$</span>) with anti-phase bobs.  A <span>$y$</span>-consensus edge keeps the agents laterally close while <span>$(y,z)$</span>-tracking pulls each agent toward its own target.  The setup matches Scenario 2 of the open-loop example.</p><p><strong>When open-loop and MPC agree.</strong> The two solvers agree to machine precision only on feasible problems, where tracking constraints can be satisfied with zero Laplacian energy and the dynamics edges carry zero residual.  On such problems the harmonic section satisfies <span>$x_{t+1} = A_d x_t + B_d u_t$</span> exactly at every vertex.</p><p><strong>When they differ.</strong> Here the problem is infeasible: a sinusoidal altitude cannot be exactly tracked by the quadrotor dynamics, so the harmonic extension is a minimum-energy compromise in which the dynamics edges carry small but nonzero residual.  The open-loop extractor reads the sheaf directly while MPC enforces the true dynamics at every step.  The trajectories are close but not identical — both are valid answers to slightly different questions.</p><pre><code class="language-julia hljs">prog1 = @tracking_problem begin
+end</code></pre><h2 id="Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC"><a class="docs-heading-anchor" href="#Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC">Scenario 1: Bobbing Targets, Open-Loop vs. MPC</a><a id="Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC" title="Permalink"></a></h2><p>Two agents track vertically bobbing targets at opposite lateral positions (T1 at <span>$y=-0.3$</span>, T2 at <span>$y=+0.3$</span>) with anti-phase bobs.  A <span>$y$</span>-consensus edge keeps the agents laterally close while <span>$(y,z)$</span>-tracking pulls each agent toward its own target.  The setup matches Scenario 2 of the open-loop example.</p><p><strong>When open-loop and MPC agree.</strong> The two solvers agree to machine precision only on sheaf-consistent problems, where all tracking, consensus, and dynamics constraints can be satisfied simultaneously.  On such problems the harmonic section has zero Laplacian energy and <span>$x_{t+1} = A_d x_t + B_d u_t$</span> holds exactly at every vertex.</p><p><strong>When they differ.</strong> The nonzero residual is not caused by the dynamics being infeasible — it arises from a <em>structural</em> contradiction between the consensus and tracking edges: <code>consensus</code> demands <span>$R_y x_{a_1}(t) = R_y x_{a_2}(t)$</span> at every step, while each <code>track</code> edge pulls its agent toward a target at a <em>different</em> lateral position.  Since the two targets are not at the same <span>$y$</span> coordinate, no global section can satisfy both constraints exactly, so the harmonic extension is a minimum-energy compromise over the consensus and tracking edges.  The open-loop extractor reads this compromise directly from the sheaf; MPC additionally enforces the true dynamics at every step, so the two trajectories are close but not identical.</p><pre><code class="language-julia hljs">prog1 = @tracking_problem begin
     agent(a1; dynamics=(Ad, Bd), period=h)
     agent(a2; dynamics=(Ad, Bd), period=h)
     target(t1)
@@ -175,8 +156,13 @@ prob1 = lower_tracking_program(prog1, ctx1; tracking_weight=5.0, consensus_weigh
 x0_a1_s1 = [0.0, traj_bt1[1][IDX_Z], 0.0, 0.0, traj_bt1[1][IDX_ZDT], 0.0]
 x0_a2_s1 = [0.0, traj_bt2[1][IDX_Z], 0.0, 0.0, traj_bt2[1][IDX_ZDT], 0.0]
 
-bnd1        = build_boundary(prob1, nu; agent_initials=[x0_a1_s1, x0_a2_s1],
-                             target_trajs=[traj_bt1, traj_bt2])
+bnd1 = Dict{Int,Vector{Float64}}()
+for (i, x0) in enumerate([x0_a1_s1, x0_a2_s1])
+    bnd1[agent_vertex(prob1, i, 0)] = vcat(x0, zeros(nu))
+end
+for (j, traj) in enumerate([traj_bt1, traj_bt2]), (t, x) in enumerate(traj)
+    bnd1[target_vertex(prob1, j, t - 1)] = x
+end
 result1_ol  = run_scenario(&quot;open-loop&quot;, prob1, bnd1, times;
                            target_trajs=[traj_bt1, traj_bt2], y_col=IDX_Y, z_col=IDX_Z)
 result1_mpc = run_mpc_scenario(&quot;MPC (W=k)&quot;, prob1, [x0_a1_s1, x0_a2_s1],
@@ -187,13 +173,13 @@ show(stdout, MIME(&quot;text/plain&quot;), result1_ol);  println()
 show(stdout, MIME(&quot;text/plain&quot;), result1_mpc); println()</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">ScenarioResult:
   label    : open-loop
   null dim : 16
-  ||dz||   : 3.118
+  ||dz||   : 3.117
   agents   : 2
   targets  : 2
 ScenarioResult:
   label    : MPC (W=k)
   null dim : 11
-  ||dz||   : 0.8652
+  ||dz||   : 0.6606
   agents   : 2
   targets  : 2</code></pre><p>The side-by-side animation shows open-loop (left) and MPC <span>$W=k$</span> (right) in the <span>$y$</span>-<span>$z$</span> plane.  Target trails are shown as scatter dots; agent paths accumulate as the simulation advances.</p><pre><code class="language-julia hljs">anim1 = @animate for t_idx in 1:k+1
     p = plot(layout=(1, 2), size=(900, 440), link=:both)
@@ -221,7 +207,7 @@ ScenarioResult:
     end
     p
 end
-gif(anim1, &quot;mpc_side_by_side.gif&quot;; fps=20)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">[ Info: Saved animation to /home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/build/generated/control/mpc_side_by_side.gif</code></pre><p><img src="../mpc_side_by_side.gif" alt="Open-loop vs MPC (W=k)"/></p><h2 id="Scenario-2:-Effect-of-Planning-Horizon"><a class="docs-heading-anchor" href="#Scenario-2:-Effect-of-Planning-Horizon">Scenario 2: Effect of Planning Horizon</a><a id="Scenario-2:-Effect-of-Planning-Horizon-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-2:-Effect-of-Planning-Horizon" title="Permalink"></a></h2><p>Both agents start at <span>$(y=0, z=0.35)$</span>, well below and between their targets. Target 1 is at <span>$y=-0.35, z=1.2$</span> and Target 2 at <span>$y=+0.35, z=1.8$</span>; both complete 3.5 vertical bob cycles over the horizon.  There is no consensus edge — agents independently optimize toward their targets in full <span>$(y,z)$</span>.</p><p><strong>Planning horizon controls reactivity.</strong> A shorter window means the controller optimizes over fewer future steps.  At <span>$W=2$</span> the controller is essentially greedy, reacting to the current target position without anticipating the next bob.  At <span>$W=k$</span> it plans over the full horizon, producing a smoother approach.  Three window sizes are compared.</p><pre><code class="language-julia hljs">omega_fast = 2π * 3.5 / (k * h)
+gif(anim1, &quot;mpc_side_by_side.gif&quot;; fps=20)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">[ Info: Saved animation to /home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/build/generated/control/mpc_side_by_side.gif</code></pre><p><img src="../mpc_side_by_side.gif" alt="Open-loop vs MPC (W=k)"/></p><h2 id="Scenario-2:-Effect-of-Planning-Horizon"><a class="docs-heading-anchor" href="#Scenario-2:-Effect-of-Planning-Horizon">Scenario 2: Effect of Planning Horizon</a><a id="Scenario-2:-Effect-of-Planning-Horizon-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-2:-Effect-of-Planning-Horizon" title="Permalink"></a></h2><p>Both agents start at <span>$(y=0, z=0.35)$</span>, well below and between their targets. Target 1 is at <span>$y=-0.35, z=1.2$</span> and Target 2 at <span>$y=+0.35, z=1.8$</span>; both complete 3.5 vertical bob cycles over the horizon.  A <span>$y$</span>-consensus edge keeps the agents laterally close while <span>$(y,z)$</span>-tracking pulls each agent toward its own target at opposite lateral positions — the same structural tension as Scenario 1, which makes window size matter.</p><p><strong>Planning horizon controls reactivity.</strong> A shorter window means the controller optimizes over fewer future steps.  At <span>$W=2$</span> the controller is essentially greedy, reacting to the current target position without anticipating the next bob or the consensus constraint.  At <span>$W=k$</span> it plans over the full horizon, finding a smoother compromise between tracking and lateral agreement.  Three window sizes are compared.</p><pre><code class="language-julia hljs">omega_fast = 2π * 3.5 / (k * h)
 bt1_s2     = BobbingTarget(-0.35, 1.2,  0.45, omega_fast)
 bt2_s2     = BobbingTarget( 0.35, 1.8, -0.45, omega_fast)
 traj_s2_1  = trajectory(bt1_s2, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
@@ -234,19 +220,18 @@ prog2 = @tracking_problem begin
     target(t2)
     horizon(K)
     times(Tall = 0:K)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
     track(tr1; agent=a1, target=t1, maps=(R_yz,R_yz), at=Tall)
     track(tr2; agent=a2, target=t2, maps=(R_yz,R_yz), at=Tall)
 end
-ctx2  = Dict{Symbol,Any}(:K =&gt; k, :Ad =&gt; Ad, :Bd =&gt; Bd, :R_yz =&gt; R_yz, :h =&gt; h)
-prob2 = lower_tracking_program(prog2, ctx2; tracking_weight=5.0).problem
+ctx2  = Dict{Symbol,Any}(:K =&gt; k, :Ad =&gt; Ad, :Bd =&gt; Bd, :R_y =&gt; R_y, :R_yz =&gt; R_yz, :h =&gt; h)
+prob2 = lower_tracking_program(prog2, ctx2; tracking_weight=5.0, consensus_weight=0.8).problem
 
 x0_s2 = [[0.0, 0.35, 0.0, 0.0, 0.0, 0.0],
           [0.0, 0.35, 0.0, 0.0, 0.0, 0.0]]
 
 result2_w2 = run_mpc_scenario(&quot;MPC W=2&quot;, prob2, x0_s2, [traj_s2_1, traj_s2_2], times;
                               window=2, cost=1.0, y_col=IDX_Y, z_col=IDX_Z)
-result2_w8 = run_mpc_scenario(&quot;MPC W=8&quot;, prob2, x0_s2, [traj_s2_1, traj_s2_2], times;
-                              window=8, cost=1.0, y_col=IDX_Y, z_col=IDX_Z)
 result2_wk = run_mpc_scenario(&quot;MPC W=k&quot;, prob2, x0_s2, [traj_s2_1, traj_s2_2], times;
                               window=k, cost=1.0, y_col=IDX_Y, z_col=IDX_Z)
 
@@ -254,29 +239,15 @@ show(stdout, MIME(&quot;text/plain&quot;), result2_w2); println()
 show(stdout, MIME(&quot;text/plain&quot;), result2_wk); println()</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">ScenarioResult:
   label    : MPC W=2
   null dim : 2
-  ||dz||   : 2.471e-5
+  ||dz||   : 0.7707
   agents   : 2
   targets  : 2
 ScenarioResult:
   label    : MPC W=k
-  null dim : 8
-  ||dz||   : 0.003643
+  null dim : 11
+  ||dz||   : 0.8014
   agents   : 2
-  targets  : 2</code></pre><p>Altitude z(t) by window size.  Color encodes the window size; solid/dashed lines distinguish the two agents:</p><pre><code class="language-julia hljs">p_z = plot(title=&quot;Scenario 2 — altitude z(t) by window size&quot;,
-           xlabel=&quot;t (s)&quot;, ylabel=&quot;z (m)&quot;, legend=:topright,
-           size=(820, 360), grid=true, gridalpha=0.25)
-for (j, traj) in enumerate([traj_s2_1, traj_s2_2])
-    plot!(p_z, times, getindex.(traj, IDX_Z);
-          color=:gray60, lw=1, ls=:dot, alpha=0.6, label=(j == 1 ? &quot;targets&quot; : &quot;&quot;))
-end
-for (res, col, wl) in zip([result2_w2, result2_w8, result2_wk],
-                           [:steelblue, :darkorange, :green], [&quot;W=2&quot;, &quot;W=8&quot;, &quot;W=k&quot;])
-    for i in 1:2
-        plot!(p_z, times, res.agent_trajs[i][:, IDX_Z];
-              color=col, lw=2, ls=(i == 1 ? :solid : :dash), label=&quot;A$i $wl&quot;)
-    end
-end
-p_z</code></pre><img src="b7631452.svg" alt="Example block output"/><p>The W=2 closed-loop animation in the <span>$y$</span>-<span>$z$</span> plane:</p><pre><code class="language-julia hljs">animate_tracking_xy(result2_w2;
+  targets  : 2</code></pre><p>The null dimension of the window Laplacian grows with planning horizon. At <span>$W=2$</span> there are 2 free coordination directions; at <span>$W=k$</span> there are 11. Each extra null dimension is an additional degree of freedom in the consensus–tracking compromise that the control cost must resolve.  With <code>cost=1.0</code> the cost-optimal representative is unique regardless of null dimension.</p><p>The W=2 closed-loop animation in the <span>$y$</span>-<span>$z$</span> plane:</p><pre><code class="language-julia hljs">animate_tracking_xy(result2_w2;
     filename=&quot;mpc_scenario2.gif&quot;, x_col=IDX_Y, y_col=IDX_Z,
     xlims=(-0.75, 0.75), ylims=(0.1, 2.6), fps=20)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">[ Info: Saved animation to /home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/build/generated/control/mpc_scenario2.gif</code></pre><p><img src="../mpc_scenario2.gif" alt="Scenario 2 animation (W=2)"/></p><h2 id="The-Cached-Extension-Operator"><a class="docs-heading-anchor" href="#The-Cached-Extension-Operator">The Cached Extension Operator</a><a id="The-Cached-Extension-Operator-1"></a><a class="docs-heading-anchor-permalink" href="#The-Cached-Extension-Operator" title="Permalink"></a></h2><p><code>tracking_extension_operator</code> factorizes <span>$L_{II}$</span> once for a given window length and folds in the control-cost nullspace projection to produce a dense operator <span>$M$</span> such that each MPC step reduces to <code>M * x_B</code>.</p><pre><code class="language-julia hljs">op = tracking_extension_operator(window_problem(prob2, 0, 5); cost=1.0)
 @printf(&quot;boundary DOFs       : %d\n&quot;, length(op.boundary))
@@ -284,8 +255,8 @@ p_z</code></pre><img src="b7631452.svg" alt="Example block output"/><p>The W=2 c
 @printf(&quot;null_dim (ker L_II) : %d\n&quot;, op.null_dim)
 @printf(&quot;M size              : %d x %d\n&quot;, size(op.M)...)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">boundary DOFs       : 108
 interior DOFs       : 80
-null_dim (ker L_II) : 6
-M size              : 80 x 108</code></pre><h2 id="Speedup:-Cached-vs.-Naive"><a class="docs-heading-anchor" href="#Speedup:-Cached-vs.-Naive">Speedup: Cached vs. Naive</a><a id="Speedup:-Cached-vs.-Naive-1"></a><a class="docs-heading-anchor-permalink" href="#Speedup:-Cached-vs.-Naive" title="Permalink"></a></h2><p>The cached controller amortizes a single <span>$L_{II}$</span> factorization over every full-window step.  Steps near the end of the horizon use shorter unique windows and fall back to the naive path, but for a long horizon these are a small fraction of all steps.</p><pre><code class="language-julia hljs">Ws       = [2, 4, 8, 16, 32]
+null_dim (ker L_II) : 7
+M size              : 80 x 108</code></pre><h2 id="Speedup:-Cached-vs.-Naive"><a class="docs-heading-anchor" href="#Speedup:-Cached-vs.-Naive">Speedup: Cached vs. Naive</a><a id="Speedup:-Cached-vs.-Naive-1"></a><a class="docs-heading-anchor-permalink" href="#Speedup:-Cached-vs.-Naive" title="Permalink"></a></h2><p>The cached controller amortizes a single <span>$L_{II}$</span> factorization over every full-window step.  Steps near the end of the horizon use shorter unique windows and fall back to the naive path, but for a long horizon these are a small fraction of all steps.  At <span>$W=k$</span> every step uses a distinct-length window so the cache never reuses its operator, and the two solvers are equivalent (speedup <span>$\approx 1\times$</span>).</p><pre><code class="language-julia hljs">Ws       = [2, 4, 8, 16, 32]
 t_naive  = Float64[]
 t_cached = Float64[]
 for W in Ws
@@ -319,4 +290,5 @@ for (i, s) in enumerate(speedups)
     annotate!(p_speed[2], i - 0.5, s + maximum(speedups) * 0.05,
               text(@sprintf(&quot;%.1f x&quot;, s), 9, :center, :steelblue))
 end
-p_speed</code></pre><img src="a6029810.svg" alt="Example block output"/></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../multi_quadrotor_target_tracking/">« Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a><a class="docs-footer-nextpage" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 9 June 2026 21:06">Tuesday 9 June 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+hline!(p_speed[2], [1.0]; color=:gray50, lw=1, ls=:dash, label=&quot;&quot;)
+p_speed</code></pre><img src="ca0e7e87.svg" alt="Example block output"/></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../multi_quadrotor_target_tracking/">« Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a><a class="docs-footer-nextpage" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Friday 12 June 2026 06:18">Friday 12 June 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
