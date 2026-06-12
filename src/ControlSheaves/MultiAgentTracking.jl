@@ -29,6 +29,7 @@ export animate_tracking_xy
 export run_mpc_scenario
 export WindowSolverCache, tracking_extension_operator
 export window_targets, window_problem
+export solve_mpc_step
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +281,7 @@ struct WindowSolverCache
     laplacian :: SparseMatrixCSC{Float64,Int}
     null_dim  :: Int
     window    :: Int
+    scratch   :: Vector{Float64}
 end
 
 """
@@ -306,20 +308,28 @@ function tracking_extension_operator(window_prob::TrackingProblem; cost::Union{N
     _, N = ldlt_pseudoinverse_and_null(F, zeros(length(interior)); tol=tol)
 
     # Harmonic response to every boundary DOF: H = -L_II⁺ L_IB (pinv, many RHS).
-    H = ldlt_pinv_solve(F, L_IB; tol=tol)
+    # `H` is dense `n_I × n_B`, so densifying `L_IB` here costs no extra order of
+    # memory and avoids sparse-column scalar getindex in the per-column solve.
+    H = ldlt_pinv_solve(F, Matrix(L_IB); tol=tol)
     H .*= -1
 
     if size(N, 2) > 0 && !(cost isa Number && iszero(cost))
-        Q_II   = Matrix(build_control_cost_matrix(window_prob, stalks, cost)[interior, interior])
+        # Keep the interior cost block sparse — only the small `nd × n_I` product
+        # `NtQ_II` is materialized dense, never the full `n_I × n_I` matrix.
+        Q_II   = build_control_cost_matrix(window_prob, stalks, cost)[interior, interior]
         NtQ_II = N' * Q_II
-        Fq     = ldlt!(DenseLDLtPivoted(NtQ_II * N), RowMaximum(); check=false)
-        coeff  = ldlt_pinv_solve(Fq, NtQ_II * H)
+        NtQN   = NtQ_II * N
+        Fq     = ldlt!(DenseLDLtPivoted(NtQN), RowMaximum(); check=false)
+        nd_q   = size(N, 2)
+        tol_q  = nd_q * eps(Float64) * max(1.0, maximum(i -> abs(Fq.D[i,i]), 1:nd_q; init=0.0))
+        coeff  = ldlt_pinv_solve(Fq, NtQ_II * H; tol=tol_q)
         M = H - N * coeff
     else
         M = H
     end
 
-    return WindowSolverCache(M, boundary, interior, stalks, L, size(N, 2), W)
+    return WindowSolverCache(M, boundary, interior, stalks, L, size(N, 2), W,
+                             Vector{Float64}(undef, length(interior)))
 end
 
 """
@@ -334,7 +344,8 @@ function LinearAlgebra.mul!(z::AbstractVector, op::WindowSolverCache, x_B::Abstr
     @argcheck length(z) == sum(op.stalks)
     fill!(z, 0.0)
     z[op.boundary] = x_B
-    mul!(view(z, op.interior), op.M, x_B)
+    mul!(op.scratch, op.M, x_B)
+    z[op.interior] = op.scratch
     return z
 end
 

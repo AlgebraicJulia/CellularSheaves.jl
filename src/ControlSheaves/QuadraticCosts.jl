@@ -103,11 +103,10 @@ function solve_quadratic_on_basis(
     N = basis
     QN = Matrix(N' * Q * N)
     rhs = -(N' * Q * point)
-    # The reduced Hessian N'QN is symmetric PSD and can be rank-deficient when the
-    # control cost is only semidefinite.  Solve via the LDLt pseudoinverse
-    # (min-norm, won't throw on null pivots) rather than a dense SVD.
-    Fq = ldlt!(DenseLDLtPivoted(QN), RowMaximum(); check=false)
-    α_opt = ldlt_pinv_solve(Fq, rhs)
+    nd    = size(N, 2)
+    Fq    = ldlt!(DenseLDLtPivoted(QN), RowMaximum(); check=false)
+    tol_q = nd * eps(Float64) * max(1.0, maximum(i -> abs(Fq.D[i,i]), 1:nd; init=0.0))
+    α_opt = ldlt_pinv_solve(Fq, rhs; tol=tol_q)
     return point + N * α_opt
 end
 
