@@ -1,6 +1,7 @@
 using Test
 using CellularSheaves
 using CellularSheaves.ControlSheaves.MultiAgentTracking
+using CellularSheaves.TrajectorySheaves: continuous_to_discrete_zoh
 using LinearAlgebra
 using SparseArrays
 using BlockArrays
@@ -190,6 +191,63 @@ using BlockArrays
                                        window=4, cost=1.0, solver=:naive)
         for i in 1:n_agents
             @test res_default.agent_trajs[i] ≈ res_naive.agent_trajs[i] atol=1e-10
+        end
+    end
+
+    @testset "run_mpc_scenario — cached and naive agree on planar-quadrotor docs scenario" begin
+        g = 9.81
+        m_veh = 0.5
+        I_quad = 0.01
+        ell = 0.25
+
+        Ac = [0.0  0.0   0.0   1.0  0.0  0.0;
+              0.0  0.0   0.0   0.0  1.0  0.0;
+              0.0  0.0   0.0   0.0  0.0  1.0;
+              0.0  0.0  -g     0.0  0.0  0.0;
+              0.0  0.0   0.0   0.0  0.0  0.0;
+              0.0  0.0   0.0   0.0  0.0  0.0]
+        Bc = [0.0               0.0;
+              0.0               0.0;
+              0.0               0.0;
+              0.0               0.0;
+              1.0 / m_veh       1.0 / m_veh;
+              ell / (2I_quad)  -ell / (2I_quad)]
+
+        hq = 0.05
+        Adq, Bdq = continuous_to_discrete_zoh(Ac, Bc, hq)
+        nxq, nuq = size(Adq, 1), size(Bdq, 2)
+        kq = 12
+        timesq = hq .* collect(0:kq)
+        idx_y, idx_z, idx_zdt = 1, 2, 5
+        R_yz_q = state_projection_matrix([idx_y, idx_z], nxq, nuq)
+
+        omega = 2π * 2 / (kq * hq)
+        target_trajs_q = [
+            trajectory(BobbingTarget(-0.35, 1.2,  0.30, omega), 0:kq, hq, nxq, nuq, idx_y, idx_z, idx_zdt),
+            trajectory(BobbingTarget( 0.35, 1.8, -0.30, omega), 0:kq, hq, nxq, nuq, idx_y, idx_z, idx_zdt),
+        ]
+        prob_q = TrackingProblem(
+            2, 2, kq,
+            [Adq, Adq], [Bdq, Bdq], [Adq, Adq], [Bdq, Bdq],
+            Tuple{Int,Int}[],
+            [TrackingEdge(1, 1, R_yz_q, R_yz_q), TrackingEdge(2, 2, R_yz_q, R_yz_q)],
+            R_yz_q,
+            Int[], collect(0:kq),
+            false, 0.0, 5.0,
+        )
+        x0_q = [[0.0, 0.35, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.35, 0.0, 0.0, 0.0, 0.0]]
+
+        for W in (2, 6, kq)
+            res_cached = run_mpc_scenario("cached", prob_q, x0_q, target_trajs_q, timesq;
+                                          window=W, cost=1.0, solver=:cached)
+            res_naive = run_mpc_scenario("naive", prob_q, x0_q, target_trajs_q, timesq;
+                                         window=W, cost=1.0, solver=:naive)
+            @test res_cached.null_dim == res_naive.null_dim
+            @test res_cached.residual ≈ res_naive.residual atol=1e-6
+            for i in 1:2
+                @test res_cached.agent_trajs[i] ≈ res_naive.agent_trajs[i] atol=1e-5
+            end
         end
     end
 
