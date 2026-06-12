@@ -544,94 +544,57 @@ end
 
 _default_ldlt_nullity_threshold(max_abs::Real) = sqrt(eps(Float64)) * max(1.0, Float64(max_abs))
 
-function ldiv_diag_pinv!(u, D, b, tol)
-    for i in eachindex(u)
-        d = D[i, i]
-        if abs(d) > tol
-            u[i] = b[i] / d
-        else
-            u[i] = zero(eltype(u))
-        end
+function ldiv_diag_pinv!(u, d::AbstractVector, b, tol)
+    @inbounds for i in eachindex(u)
+        di = d[i]
+        u[i] = di > tol ? b[i] / di : zero(eltype(u))
     end
     return u
 end
 
+ldiv_diag_pinv!(u, D::Diagonal, b, tol) = ldiv_diag_pinv!(u, D.diag, b, tol)
 ldiv_diag_pinv(D, b, tol) = ldiv_diag_pinv!(similar(b), D, b, tol)
 
-"""    ldlt_pinv_solve(F, b; tol=nothing) -> x
 
-Apply the Moore–Penrose pseudoinverse of a symmetric positive-semidefinite
-matrix to the vector `b`, using a precomputed factorization
-``F = P^\\mathsf{T} L D L^\\mathsf{T} P`` (either `ChordalLDLt` or
-`DenseLDLtPivoted` from `CliqueTrees.Multifrontal`).
-
-Null pivots — diagonal entries of `D` with ``|D_{ii}| \\le`` `tol` — are zeroed
-in the diagonal solve, so the result is the minimum-norm solution lying in the
-range of the factorized matrix.  When `tol` is `nothing` it defaults to
-``\\sqrt{\\varepsilon} \\max(1, \\|D\\|_\\infty)``.
-
-Because `F` is reused, this is the per-application kernel for repeated solves
-against the same (possibly singular) matrix — e.g. building a harmonic-extension
-operator column by column.
-"""
-function ldlt_pinv_solve(F, b::AbstractVector; tol=nothing)
-    return ldlt_pinv_solve!(similar(b), F, b, similar(b); tol=tol)
+function ldlt_pinv_solve!(out::AbstractVector, F, b::AbstractVector, w::AbstractVector; tol=nothing)
+    d = F.d
+    perm = F.perm
+    invp = F.invp
+    n = length(d)
+    R = real(eltype(d))
+    τ = tol === nothing ? sqrt(eps(R)) * max(one(R), maximum(abs, d; init=zero(R))) : tol
+    @inbounds for i in 1:n; out[i] = b[perm[i]]; end
+    ldiv!(F.L, out)
+    ldiv_diag_pinv!(w, d, out, τ)       # D⁺ on free directions only
+    ldiv!(F.L', w)
+    @inbounds for i in 1:n; out[i] = w[invp[i]]; end
+    return out
 end
 
-"""    ldlt_pinv_solve!(out, F, b, w; tol=nothing) -> out
-
-In-place form of [`ldlt_pinv_solve`](@ref).  Writes the pseudoinverse solution
-into `out`, using `w` as scratch; both must have length `size(F.D, 1)` and be
-distinct from `b`.  Reusing `out`/`w` across repeated solves against the same
-factorization `F` allocates nothing on the caller's side, which is what makes a
-column-by-column operator build cheap.
-
-For ``F = P^\\mathsf{T} L D L^\\mathsf{T} P`` the result is the closed form
-
-```math
-x = P\\,\\bigl(L^\\mathsf{T} \\backslash\\, D^{+} (L \\backslash (P^\\mathsf{T} b))\\bigr),
-```
-
-read right-to-left: permute `b`, forward solve `L`, apply the diagonal
-pseudoinverse `D⁺` (zeroing null pivots), back solve `Lᵀ`, undo the permutation.
-The permutations are gathers through `F.P.perm` / `F.P.invp`; the triangular
-solves and `D⁺` run in place via `ldiv!` and [`ldiv_diag_pinv!`](@ref).
-"""
-function ldlt_pinv_solve!(out::AbstractVector, F, b::AbstractVector, w::AbstractVector; tol=nothing)
-    D = F.D
-    n = size(D, 1)
-    threshold = isnothing(tol) ?
-        _default_ldlt_nullity_threshold(maximum(i -> abs(D[i, i]), 1:n; init=0.0)) : tol
-    perm = F.P.perm; invp = F.P.invp
-    @inbounds for i in 1:n
-        out[i] = b[perm[i]]                # out = P' \ b  (permute rhs)
-    end
-    ldiv!(F.L, out)                        # forward solve, in place
-    ldiv_diag_pinv!(w, D, out, threshold)  # D⁺ on free directions only
-    ldiv!(F.L', w)                         # back solve, in place
-    @inbounds for i in 1:n
-        out[i] = w[invp[i]]                # out = P \ y  (undo permutation)
-    end
-    return out
+function ldlt_pinv_solve(F, b::AbstractVector; tol=nothing)
+    n = size(F, 1)
+    out = Vector{float(eltype(b))}(undef, n)
+    w = Vector{float(eltype(b))}(undef, n)
+    return ldlt_pinv_solve!(out, F, b, w; tol=tol)
 end
 
 """    ldlt_pinv_solve(F, B::AbstractMatrix; tol=nothing) -> Matrix
 
 Apply the pseudoinverse of the factorized matrix to every column of `B`, i.e.
-return a dense matrix whose `j`-th column is `ldlt_pinv_solve(F, B[:, j])`.  This
-is the multiple-right-hand-side form used to build harmonic-extension operators
-(`X = M⁺ B`); the `out`/`w` scratch buffers are shared across columns.
+return a dense matrix whose `j`-th column is `ldlt_pinv_solve(F, B[:, j])`.
+The `out`/`w` scratch buffers are shared across columns.
 """
 function ldlt_pinv_solve(F, B::AbstractMatrix; tol=nothing)
-    nI = size(B, 1)
-    X      = Matrix{Float64}(undef, nI, size(B, 2))
-    colbuf = Vector{Float64}(undef, nI)
-    wbuf   = Vector{Float64}(undef, nI)
-    outbuf = Vector{Float64}(undef, nI)
-    for j in axes(B, 2)
-        colbuf .= @view B[:, j]
-        ldlt_pinv_solve!(outbuf, F, colbuf, wbuf; tol=tol)
-        @inbounds X[:, j] = outbuf
+    n = size(F, 1)
+    T = float(eltype(B))
+    X = Matrix{T}(undef, n, size(B, 2))
+    col = Vector{T}(undef, n)
+    out = Vector{T}(undef, n)
+    w = Vector{T}(undef, n)
+    @inbounds for j in axes(B, 2)
+        for i in 1:n; col[i] = B[i, j]; end
+        ldlt_pinv_solve!(out, F, col, w; tol=tol)
+        for i in 1:n; X[i, j] = out[i]; end
     end
     return X
 end
@@ -696,7 +659,7 @@ function ldlt_pseudoinverse_and_null(M, b; tol=nothing)
     c = P' \ b                          # permute rhs
     z = Lfac \ c                        # forward solve
     w = zeros(n)
-    ldiv_diag_pinv!(w, D, z, threshold) # D⁺ on free directions only
+    ldiv_diag_pinv!(w, D.diag, z, threshold)
     x_p = P \ (Lfac' \ w)               # back solve + undo permutation
 
     return x_p, null_vecs
