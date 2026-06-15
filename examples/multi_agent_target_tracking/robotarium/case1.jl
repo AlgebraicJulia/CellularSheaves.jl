@@ -1,10 +1,9 @@
-# to run at the robotarium, multi-agent multi-target tracking
-# we are going to be able to run this code on the robotarium, but some simulations will have to be done first
-# to test the tracking algorithm before deploying it on the robotarium, we will need to simulate the environment and the targets. 
-# The robotarium is a rectangular arena where the agents can move around and track the targets.
-# the targets are going to be able to move around the arena (in 2D) and the agents will be attach to a line (1D), 
-# which have a beginning and an end. and will be able to move along the lines to tracki the targets as close as possible.
-# We can use a simple 2D simulation where the targets move in a random walk and the agents try to track them using a simple nearest neighbor algorithm.
+# Single-agent, single-target tracking simulation for eventual Robotarium use.
+#
+# The target moves in a two-dimensional rectangular arena using a
+# correlated random walk. The agent is constrained to move along a
+# horizontal line and uses a sheaf-Laplacian control law to track the
+# target's x-coordinate.
 
 using LinearAlgebra
 using Random
@@ -21,29 +20,12 @@ mutable struct MovingAgent
     velocity::Vector{Float64}
 end
 
-# Define rectangular arena dimensions
-# arena_width = 10.0
-# arena_height = 10.0
-
-# Define the number of agents and targets
-# num_agents = 1
-# num_targets = 1
-
-# scenario 1: one agent moving along an horizontal line, one target moving in a random walk
-"""
-Vertex 1: horizontal agent position in R² but only moving along a horizontal line (y = constant)
-Vertex 2: target position in R²
-
-The edge stalk is R and compares only the x-coordinates.
-"""
-
-# Function to initialize a random target
+# target dynamics
 function initialize_random_target(;
-    arena_width = 10.0,
-    arena_height = 10.0,
-    speed = 0.5
-    )
-    
+    arena_width::Float64,
+    arena_height::Float64,
+    speed::Float64
+)
     position = [
         rand() * arena_width,
         rand() * arena_height
@@ -57,18 +39,18 @@ function initialize_random_target(;
     ]
 
     return Target(position, velocity)
-    # ex this has a form of
 end
 
 
 function update_random_target!(
     target::Target,
     dt::Float64;
-    arena_width = 10.0,
-    arena_height = 10.0,
-    turning_noise = 0.4
+    arena_width::Float64,
+    arena_height::Float64,
+    turning_noise::Float64
     )
-    
+
+    # Randomly perturb the target's direction.
     angle_noise = turning_noise * sqrt(dt) * randn()
 
     rotation = [
@@ -78,10 +60,10 @@ function update_random_target!(
 
     target.velocity .= rotation * target.velocity
 
-    # Update the position
+    # Update target position.
     target.position .+= dt .* target.velocity
 
-    # rebound at the horizontal boundaries
+    # Reflect from the left and right boundaries.
     if target.position[1] < 0.0
         target.position[1] = -target.position[1]
         target.velocity[1] *= -1
@@ -90,7 +72,7 @@ function update_random_target!(
         target.velocity[1] *= -1
     end
 
-    # rebound at the vertical boundaries
+    # Reflect from the lower and upper boundaries.
     if target.position[2] < 0.0
         target.position[2] = -target.position[2]
         target.velocity[2] *= -1
@@ -103,19 +85,26 @@ function update_random_target!(
 end
 
 
+"""
+Construct a sheaf with two vertices.
+Vertex 1: Agent position in ℝ².
+Vertex 2: Target position in ℝ².
+
+The edge stalk is ℝ. Both restriction maps extract only the x-coordinate, so the sheaf measures 
+horizontal disagreement.
+"""
 function build_horizontal_tracking_sheaf()
-    # Two vertices, each with a 2-dimensional stalk
+    # Two vertices, each with a two-dimensional stalk.
     sheaf = EuclideanSheaf{Float64}([2, 2])
 
-    # R² -> R
-    # Extract only the x-coordinate
+    # Restriction maps ℝ² → ℝ.
     R_agent = [1.0 0.0]
     R_target = [1.0 0.0]
 
     add_sheaf_edge!(
         sheaf,
-        1,          # agent vertex
-        2,          # target vertex
+        1,
+        2,
         R_agent,
         R_target
     )
@@ -123,67 +112,42 @@ function build_horizontal_tracking_sheaf()
     return sheaf
 end
 
-# z = [
-#     agent.position[1],
-#     agent.position[2],
-#     target.position[1],
-#     target.position[2]
-# ]
-
 function horizontal_sheaf_control(
-    sheaf::EuclideanSheaf,
+    δ::Matrix{Float64},
     agent::MovingAgent,
     target::Target;
-    gain::Float64 = 1.5
+    gain::Float64
 )
-    # 0-cochain: agent stalk followed by target stalk
+    # the coboundary map is computed outside since it is constant and won't change during the simulation
     z = vcat(agent.position, target.position)
-    # ex: z = [agent_x, agent_y, target_x, target_y]
-
-    # CellularSheaves.jl coboundary operator
-    δ = coboundary_map(sheaf)
-
-    # Sheaf Laplacian:
-    # Lz = δ'δz
     Lz = δ' * (δ * z)
 
-    # First two entries correspond to the agent vertex stalk
     agent_laplacian = Lz[1:2]
 
-    # Negative gradient of the sheaf disagreement energy
     control = -gain .* agent_laplacian
 
     return collect(control)
 end
 
+
+# agent dynamics
 function update_horizontal_agent!(
-    agent,
-    target,
-    tracking_sheaf,
-    dt;
-    y_track = y_track,
-    gain = 1.5,
-    max_speed = 1.2,
-    arena_width = arena_width
+    agent::MovingAgent,
+    target::Target,
+    sheaf::EuclideanSheaf,
+    dt::Float64;
+    gain::Float64,
+    max_speed::Float64,
+    arena_width::Float64
 )
-    # Control produced by the actual sheaf Laplacian
-    unconstrained_control = horizontal_sheaf_control(
+    constrained_control = horizontal_sheaf_control(
         sheaf,
         agent,
         target;
         gain = gain
     )
 
-    # Allowed tangent direction for y = constant
-    P_horizontal = [
-        1.0 0.0
-        0.0 0.0
-    ]
-
-    constrained_control =
-        P_horizontal * unconstrained_control
-
-    # Limit speed
+    # Limit the magnitude of the agent's velocity.
     speed = norm(constrained_control)
 
     if speed > max_speed
@@ -192,16 +156,21 @@ function update_horizontal_agent!(
 
     agent.velocity .= constrained_control
     agent.position .+= dt .* agent.velocity
+    
+    # Enforce the left and right arena boundaries.
+    if agent.position[1] <= 0.0
+        agent.position[1] = 0.0
 
-    # Arena and track constraints
-    agent.position[1] = clamp(
-        agent.position[1],
-        0.0,
-        arena_width
-    )
+        if agent.velocity[1] < 0.0
+            agent.velocity[1] = 0.0
+        end
+    elseif agent.position[1] >= arena_width
+        agent.position[1] = arena_width
 
-    agent.position[2] = y_track
-    agent.velocity[2] = 0.0
+        if agent.velocity[1] > 0.0
+            agent.velocity[1] = 0.0
+        end
+    end
 
     return nothing
 end
@@ -214,10 +183,16 @@ y_track = 3.0
 dt = 0.1
 num_steps = 400
 
+target_speed = 0.8
+turning_noise = 0.6
+
+control_gain = 1.5
+agent_max_speed = 1.2
+
 target = initialize_random_target(
     arena_width = arena_width,
     arena_height = arena_height,
-    speed = 0.8
+    speed = target_speed
 )
 
 agent = MovingAgent(
@@ -227,67 +202,61 @@ agent = MovingAgent(
 
 tracking_sheaf = build_horizontal_tracking_sheaf()
 
+# The sheaf does not change during the simulation
+δ = coboundary_map(tracking_sheaf)
+L = sheaf_laplacian_matrix(tracking_sheaf)
+
 target_x_history = Float64[]
 target_y_history = Float64[]
 
-sheaf_residual_history = Float64[]
-
 animation = @animate for _ in 1:num_steps
-
     update_random_target!(
         target,
         dt;
         arena_width = arena_width,
         arena_height = arena_height,
-        turning_noise = 0.6
+        turning_noise = turning_noise
     )
 
     update_horizontal_agent!(
         agent,
         target,
         tracking_sheaf,
-        dt;
-        y_track = y_track,
-        gain = 1.5,
-        max_speed = 1.2,
+        dt,
+        gain = control_gain,
+        max_speed = agent_max_speed,
         arena_width = arena_width
     )
 
     push!(target_x_history, target.position[1])
     push!(target_y_history, target.position[2])
 
-    # Actual sheaf inconsistency δz
-    z = vcat(agent.position, target.position)
-    δ = coboundary_map(tracking_sheaf)
-    residual = norm(δ * z)
-
-    push!(sheaf_residual_history, residual)
-
     plot(
-        xlims = (0, arena_width),
-        ylims = (0, arena_height),
+        xlims = (0.0, arena_width),
+        ylims = (0.0, arena_height),
         aspect_ratio = :equal,
         xlabel = "x",
         ylabel = "y",
-        title = "Horizontal tracking using CellularSheaves.jl",
-        legend = :topright
+        title = "Target Tracking with 1 Target and 1 Agent",
+        legend = :outertopright
     )
 
-    # Rectangle boundary
+    # Arena boundary
     plot!(
         [0.0, arena_width, arena_width, 0.0, 0.0],
         [0.0, 0.0, arena_height, arena_height, 0.0];
         linewidth = 2,
-        label = "Arena"
+        label = false
     )
 
-    # Horizontal track
+    # Horizontal agent track
     plot!(
         [0.0, arena_width],
         [y_track, y_track];
         linestyle = :dash,
         linewidth = 2,
-        label = "Agent track: y = 3"
+        color = "#3A6EA5",
+        label = false
     )
 
     # Target trajectory
@@ -295,19 +264,16 @@ animation = @animate for _ in 1:num_steps
         target_x_history,
         target_y_history;
         linewidth = 1.5,
+        color = "#D4A017",
         label = "Target trajectory"
     )
 
-    # Geometric target projection onto the track
-    projected_target = [
-        target.position[1],
-        y_track
-    ]
-
+    # Vertical projection of the target onto the agent's track
     plot!(
-        [target.position[1], projected_target[1]],
-        [target.position[2], projected_target[2]];
+        [target.position[1], target.position[1]],
+        [target.position[2], y_track];
         linestyle = :dot,
+        color = "#D4A017",
         label = false
     )
 
@@ -315,6 +281,7 @@ animation = @animate for _ in 1:num_steps
         [target.position[1]],
         [target.position[2]];
         markersize = 8,
+        color = "#D4A017",
         label = "Target"
     )
 
@@ -322,21 +289,19 @@ animation = @animate for _ in 1:num_steps
         [agent.position[1]],
         [agent.position[2]];
         markersize = 8,
+        color = "#3A6EA5",
         label = "Agent"
     )
 end
 
-gif(
+mp4(
     animation,
-    "horizontal_sheaf_tracking.gif";
+    "case1.mp4";
     fps = 30
 )
 
-δ = Matrix(coboundary_map(tracking_sheaf))
-L = Matrix(sheaf_laplacian_matrix(tracking_sheaf))
-
 println("Coboundary map:")
-display(δ)
+display(Matrix(δ))
 
 println("Sheaf Laplacian:")
-display(L)
+display(Matrix(L))
