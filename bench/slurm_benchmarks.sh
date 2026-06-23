@@ -2,11 +2,11 @@
 
 set -euo pipefail
 
-LARGE_SHARDS=("assembly-large" "solver-large" "extension-large")
-
+# LARGE_SHARDS=("assembly-large" "solver-large" "extension-large")
+LARGE_SHARDS=("assembly-small" "solver-small" "extension-small" "assembly-large" "solver-large" "extension-large")
 MODE="${1:-submit}"
 RESULT_DIR="${BENCHMARK_RESULT_DIR:-bench/results/slurm}"
-PROFILE="${BENCHMARK_PROFILE:-large}"
+PROFILE="${BENCHMARK_PROFILE:-full}"
 EXPECTED_SHARDS="$(IFS=,; echo "${LARGE_SHARDS[*]}")"
 
 run_shard() {
