@@ -86,8 +86,22 @@ target_vertex(prob::TrackingProblem, j::Int, t::Int) =
 # Sheaf construction
 # ---------------------------------------------------------------------------
 
+# Restriction maps for the agent dynamics edge agent(i,t) ↔ agent(i,t+1).
+# Default:            source [A B], destination [I 0]  ⟹  x_{t+1} = A x_t + B u_t.
+# state_only_initial: controls reindexed so u_{t+1} produces x_{t+1} — source
+#   [A 0] (or just [A] at the state-only t=0 vertex), destination [I −B].
+function _agent_dynamics_maps(Ad, Bd, t::Int, state_only_initial::Bool)
+    nx, nu = size(Ad, 1), size(Bd, 2)
+    if state_only_initial
+        src_map = t == 0 ? Matrix(Ad) : hcat(Matrix(Ad), zeros(nx, nu))
+        return src_map, hcat(Matrix{Float64}(I, nx, nx), -Matrix(Bd))
+    else
+        return hcat(Matrix(Ad), Matrix(Bd)), hcat(Matrix{Float64}(I, nx, nx), zeros(nx, nu))
+    end
+end
+
 """
-    build_time_expanded_tracking_sheaf(prob::TrackingProblem)
+    build_time_expanded_tracking_sheaf(prob::TrackingProblem; state_only_initial=false)
 
 Construct the time-expanded `EuclideanSheaf` from a `TrackingProblem`.
 
@@ -106,8 +120,18 @@ Four edge families are added in order:
 Restriction maps for consensus and tracking edges are pre-scaled by
 `sqrt(consensus_weight)` and `sqrt(tracking_weight)` respectively so that the
 resulting Laplacian is `weight * R' * R`.
+
+When `state_only_initial = true` the initial agent vertices (`t = 0`) carry
+**state only** (no control), and the control is reindexed so that `u_t` produces
+`x_t`: the agent dynamics edge reads `A·x_t` from the source and `x_{t+1} − B·u_{t+1}`
+from the destination, encoding `x_{t+1} = A·x_t + B·u_{t+1}`. Consensus/tracking
+restriction maps at `t = 0` are then truncated to the agent's state columns
+(exact, since those columns multiplied the now-absent control block by zero).
+This makes the initial condition a clean full-vertex pin and is the form used by
+the MPC window solver; the resulting optimal trajectory is identical to the
+default form, which keeps `(x_0, u_0)` on the first vertex.
 """
-function build_time_expanded_tracking_sheaf(prob::TrackingProblem)
+function build_time_expanded_tracking_sheaf(prob::TrackingProblem; state_only_initial::Bool=false)
     @argcheck prob.consensus_weight >= 0 "consensus_weight must be non-negative, got $(prob.consensus_weight)"
     @argcheck prob.tracking_weight  >= 0 "tracking_weight must be non-negative, got $(prob.tracking_weight)"
     @argcheck all(t -> 0 <= t <= prob.k, prob.consensus_timesteps) "all consensus_timesteps must be in 0:$(prob.k), got $(prob.consensus_timesteps)"
@@ -128,11 +152,13 @@ function build_time_expanded_tracking_sheaf(prob::TrackingProblem)
         @argcheck size(prob.target_Bd[j], 1) == size(prob.target_Ad[j], 1) "target_Bd[$j] rows must match target_Ad[$j] rows, got $(size(prob.target_Bd[j],1)) vs $(size(prob.target_Ad[j],1))"
     end
 
-    # Allocate heterogeneous stalk sizes for every vertex (agents + targets)
+    # Allocate heterogeneous stalk sizes for every vertex (agents + targets).
+    # With state_only_initial the t=0 agent vertices hold state only (no control).
     n_per_t = prob.n_agents + prob.n_targets
     stalk_sizes = Vector{Int}(undef, (prob.k + 1) * n_per_t)
     for t in 0:prob.k, i in 1:prob.n_agents
-        stalk_sizes[t * n_per_t + i] = size(prob.Ad[i], 1) + size(prob.Bd[i], 2)
+        nx_i = size(prob.Ad[i], 1); nu_i = size(prob.Bd[i], 2)
+        stalk_sizes[t * n_per_t + i] = (state_only_initial && t == 0) ? nx_i : nx_i + nu_i
     end
     for t in 0:prob.k, j in 1:prob.n_targets
         stalk_sizes[t * n_per_t + prob.n_agents + j] = size(prob.target_Ad[j], 1) + size(prob.target_Bd[j], 2)
@@ -141,14 +167,11 @@ function build_time_expanded_tracking_sheaf(prob::TrackingProblem)
 
     # Agent dynamics edges (per-agent)
     for i in 1:prob.n_agents
-        Ad_i = prob.Ad[i]; Bd_i = prob.Bd[i]
-        nx_i = size(Ad_i, 1); nu_i = size(Bd_i, 2)
-        now_map  = hcat(Matrix(Ad_i), Matrix(Bd_i))
-        next_map = hcat(Matrix{Float64}(I, nx_i, nx_i), zeros(nx_i, nu_i))
         for t in 0:prob.k-1
+            src_map, dst_map = _agent_dynamics_maps(prob.Ad[i], prob.Bd[i], t, state_only_initial)
             add_sheaf_edge!(sheaf,
                 agent_vertex(prob, i, t), agent_vertex(prob, i, t + 1),
-                now_map, next_map)
+                src_map, dst_map)
         end
     end
 
@@ -167,18 +190,23 @@ function build_time_expanded_tracking_sheaf(prob::TrackingProblem)
         end
     end
 
+    # In window mode the t=0 agent stalk is state-only, so its restriction maps
+    # drop the (now absent) control columns; otherwise they are used as given.
+    agent_restr(R, i, t) = (state_only_initial && t == 0) ? R[:, 1:size(prob.Ad[i], 1)] : R
     cscale = sqrt(prob.consensus_weight)
     tscale = sqrt(prob.tracking_weight)
     for t in prob.consensus_timesteps, (i, j) in prob.agent_edges
         add_sheaf_edge!(sheaf,
             agent_vertex(prob, i, t), agent_vertex(prob, j, t),
-            cscale * prob.consensus_restriction, cscale * prob.consensus_restriction)
+            cscale * agent_restr(prob.consensus_restriction, i, t),
+            cscale * agent_restr(prob.consensus_restriction, j, t))
     end
     for t in prob.tracking_timesteps, te in prob.tracking_edges
         add_sheaf_edge!(sheaf,
             agent_vertex(prob, te.agent_index, t),
             target_vertex(prob, te.target_index, t),
-            tscale * te.agent_restriction, tscale * te.target_restriction)
+            tscale * agent_restr(te.agent_restriction, te.agent_index, t),
+            tscale * te.target_restriction)
     end
     return sheaf
 end

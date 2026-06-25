@@ -1003,7 +1003,7 @@ function optimal_control_trajectory(ts::ControlledTrajectorySheaf{T},
 
     # Step 3: Solve using ChordalLDLt pseudoinverse.
     Rred_sparse = sparse(Rred)
-    M_ldlt      = ldlt!(ChordalLDLt(Rred_sparse), RowMaximum())
+    M_ldlt      = ldlt!(ChordalLDLt(Rred_sparse), RowMaximum(); check=false)
 
     # Cheap convexity check: for a symmetric matrix, a negative LDL pivot
     # certifies that the reduced Hessian is not positive semidefinite.
