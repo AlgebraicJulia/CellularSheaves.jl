@@ -30,9 +30,11 @@ end
 
 @testset "QuadraticCost utilities" begin
     prob = make_simple_prob(k=2, nx=2, nu=2, control_weight=2.0)
+    # Stalk layout of the (default) time-expanded sheaf: nx+nu per agent vertex.
+    stalks = [size(prob.Ad[1],1) + size(prob.Bd[1],2) for _ in 0:prob.k]
     # Build Q with simple 2-norm weight (2.0 * I)
-    Q = build_control_cost_matrix(prob, 2.0)
-    total_dim = sum([ (size(prob.Ad[1],1)+size(prob.Bd[1],2)) for _ in 0:prob.k ])
+    Q = build_control_cost_matrix(prob, stalks, 2.0)
+    total_dim = sum(stalks)
     @test size(Q) == (total_dim, total_dim)
     # Expected control indices for each time step
     control_idxs = Int[]

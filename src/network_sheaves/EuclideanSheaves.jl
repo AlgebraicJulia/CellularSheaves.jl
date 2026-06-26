@@ -5,7 +5,7 @@ module EuclideanSheaves
 export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_laplacian_matrix_direct,
     restricted_laplacian_blocks, sheaf_from_graph, energy_function,
     nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
-    ldlt_pseudoinverse_and_null, HarmonicExtensionLDLDiagnostics,
+    ldlt_pseudoinverse_and_null, ldiv_diag_pinv!, ldiv_diag_pinv, ldlt_pinv_solve, ldlt_pinv_solve!, HarmonicExtensionLDLDiagnostics,
     HarmonicExtensionSVDDiagnostics, harmonic_extension_ldl_diagnostics,
     harmonic_extension_svd_diagnostics, zero_sheaf, constant_sheaf, cycle_sheaf
 
@@ -544,6 +544,61 @@ end
 
 _default_ldlt_nullity_threshold(max_abs::Real) = sqrt(eps(Float64)) * max(1.0, Float64(max_abs))
 
+function ldiv_diag_pinv!(u, d::AbstractVector, b, tol)
+    @inbounds for i in eachindex(u)
+        di = d[i]
+        u[i] = di > tol ? b[i] / di : zero(eltype(u))
+    end
+    return u
+end
+
+ldiv_diag_pinv!(u, D::Diagonal, b, tol) = ldiv_diag_pinv!(u, D.diag, b, tol)
+ldiv_diag_pinv(D, b, tol) = ldiv_diag_pinv!(similar(b), D, b, tol)
+
+
+function ldlt_pinv_solve!(out::AbstractVector, F, b::AbstractVector, w::AbstractVector; tol=nothing)
+    d = F.d
+    perm = F.perm
+    invp = F.invp
+    n = length(d)
+    R = real(eltype(d))
+    τ = tol === nothing ? sqrt(eps(R)) * max(one(R), maximum(abs, d; init=zero(R))) : tol
+    @inbounds for i in 1:n; out[i] = b[perm[i]]; end
+    ldiv!(F.L, out)
+    ldiv_diag_pinv!(w, d, out, τ)       # D⁺ on free directions only
+    ldiv!(F.L', w)
+    @inbounds for i in 1:n; out[i] = w[invp[i]]; end
+    return out
+end
+
+function ldlt_pinv_solve(F, b::AbstractVector; tol=nothing)
+    n = size(F, 1)
+    out = Vector{float(eltype(b))}(undef, n)
+    w = Vector{float(eltype(b))}(undef, n)
+    return ldlt_pinv_solve!(out, F, b, w; tol=tol)
+end
+
+"""    ldlt_pinv_solve(F, B::AbstractMatrix; tol=nothing) -> Matrix
+
+Apply the pseudoinverse of the factorized matrix to every column of `B`, i.e.
+return a dense matrix whose `j`-th column is `ldlt_pinv_solve(F, B[:, j])`.
+The `out`/`w` scratch buffers are shared across columns.
+"""
+function ldlt_pinv_solve(F, B::AbstractMatrix; tol=nothing)
+    n = size(F, 1)
+    T = float(eltype(B))
+    X = Matrix{T}(undef, n, size(B, 2))
+    col = Vector{T}(undef, n)
+    out = Vector{T}(undef, n)
+    w = Vector{T}(undef, n)
+    @inbounds for j in axes(B, 2)
+        for i in 1:n; col[i] = B[i, j]; end
+        ldlt_pinv_solve!(out, F, col, w; tol=tol)
+        for i in 1:n; X[i, j] = out[i]; end
+    end
+    return X
+end
+
 """    nullspace_ldlt(X::AbstractMatrix; tol=nothing) -> Matrix
 
 Compute a basis for the nullspace of the symmetric positive-semidefinite matrix `X`
@@ -557,7 +612,7 @@ directions; the corresponding columns of `P^{-1} (L^\\mathsf{T})^{-1}` form the
 returned basis matrix.
 """
 function nullspace_ldlt(X::AbstractMatrix; tol=nothing)
-    M = ldlt!(ChordalLDLt(X), RowMaximum())
+    M = ldlt!(ChordalLDLt(X), RowMaximum(); check=false)
     D = M.D; L = M.L; P = M.P
     max_abs = maximum(i -> abs(D[i, i]), 1:size(D, 1); init=0.0)
     threshold = isnothing(tol) ? _default_ldlt_nullity_threshold(max_abs) : tol
@@ -601,13 +656,11 @@ function ldlt_pseudoinverse_and_null(M, b; tol=nothing)
     null_vecs = P \ (Lfac' \ U)
 
     # Particular solution via pseudoinverse: suppress null directions in D
-    c = P' \ b          # permute rhs
-    z = Lfac \ c        # forward solve
+    c = P' \ b                          # permute rhs
+    z = Lfac \ c                        # forward solve
     w = zeros(n)
-    for i in setdiff(1:n, null_idx)
-        w[i] = z[i] / D[i, i]  # D⁺ on free directions only
-    end
-    x_p = P \ (Lfac' \ w)  # back solve + undo permutation
+    ldiv_diag_pinv!(w, D.diag, z, threshold)
+    x_p = P \ (Lfac' \ w)               # back solve + undo permutation
 
     return x_p, null_vecs
 end
@@ -733,7 +786,7 @@ function harmonic_extension_ldl_diagnostics(s::EuclideanSheaf,
             0.0, 0.0, 0.0, 0.0, Inf, Float64[], Float64[], Float64[])
     end
 
-    M = ldlt!(ChordalLDLt(L_II), RowMaximum())
+    M = ldlt!(ChordalLDLt(L_II), RowMaximum(); check=false)
     pivots = [M.D[i, i] for i in 1:size(M.D, 1)]
     abs_pivots = abs.(pivots)
     max_abs = maximum(abs_pivots; init=0.0)
@@ -861,7 +914,7 @@ function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVect
     end
 
     x_interior, null_interior = ldlt_pseudoinverse_and_null(
-        ldlt!(ChordalLDLt(L_II), RowMaximum()), b)
+        ldlt!(ChordalLDLt(L_II), RowMaximum(); check=false), b)
 
     x        = zeros(n_total)
     x[I_idx] = x_interior
@@ -874,6 +927,7 @@ function harmonic_extension(s::EuclideanSheaf, boundary::Dict{Int,<:AbstractVect
 
     return BlockArray(x, s.vertex_stalks), null_basis
 end
+
 
 
 end # EuclideanSheaves

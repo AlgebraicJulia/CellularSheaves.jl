@@ -206,3 +206,42 @@ animate_tracking_xy(result; filename="scenario3.gif")
 ```
 
 ![Scenario 3](scenario3.gif)
+
+## Transitive tracking
+
+This example shows *transitive tracking* via consensus: agent `a1` tracks target `t1` in the `x1` coordinate, while agent `a2` tracks target `t2` in the `x2` coordinate.
+Then `a1` and `a2` enforce consensus in `x2`, so `a1` indirectly tracks `t2`’s `x2` coordinate through its agreement with `a2`.
+
+```@example tracking_demo
+prog = @tracking_problem begin
+    # Spaces
+    space(X) = R^2          # state space ℝ²
+    space(U) = R^2          # control space ℝ²
+
+    # Two agents and two targets
+    agent(a1; dynamics=(A,B), period=h)
+    agent(a2; dynamics=(A,B), period=h)
+    target(t1)
+    target(t2)
+
+    # Horizon and discrete time set
+    horizon(K)                # K will be bound in the context
+    times(Tall = 10:K)         # Tall = 10,…,K
+
+    # Consensus between the two agents at a subset of timesteps
+    consensus(c1; agents=(a1,a2), maps=(pi_x2,pi_x2), at=Tall) # alignment in x2
+
+    # Each agent tracks its own target at every timestep
+    track(tr1; agent=a1, target=t1, maps=(pi_x1,pi_x1), at=Tall)
+    track(tr2; agent=a2, target=t2, maps=(pi_x2,pi_x2), at=Tall)
+end
+ctx[:pi_x1] = state_projection_matrix([1], nx, nu)
+ctx[:pi_x2] = state_projection_matrix([2], nx, nu)
+lowered = lower_tracking_program(prog, ctx, consensus_weight=1/100)
+prob    = lowered.problem
+result = run_scenario("projected-consensus", prob, boundary_si, times; y_col=1, z_col=2)
+@show result.null_dim
+animate_tracking_xy(result; filename="scenario4.gif")
+```
+
+![Scenario 4](scenario4.gif)
