@@ -1,8 +1,8 @@
 module NetworkSheaves
 
 using Reexport
+using ..BlockSparseArrays
 
-include("BlockSparseArrays.jl")
 include("SheafInterface.jl")
 include("EuclideanSheaves.jl")
 include("PotentialSheaves.jl")
@@ -15,7 +15,7 @@ include("Pushouts.jl")
 include("TrajectorySheaf.jl")
 include("asynch/AsynchSheaves.jl")
 
-@reexport using .BlockSparseArrays
+@reexport using ..BlockSparseArrays
 @reexport using .SheafInterface
 @reexport using .EuclideanSheaves
 @reexport using .PotentialSheaves

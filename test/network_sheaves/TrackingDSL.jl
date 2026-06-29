@@ -406,8 +406,8 @@ const _Q_R_Z  = MAT.state_projection_matrix([2],    _Q_NX, _Q_NU)
     @test ne(sheaf_dsl.underlying_graph) == ne(sheaf_ref.underlying_graph)
 
     # Verify Laplacian dimensions match
-    L_dsl = sheaf_laplacian_matrix_direct(sheaf_dsl)
-    L_ref = sheaf_laplacian_matrix_direct(sheaf_ref)
+    L_dsl = sparse(sheaf_laplacian_matrix(sheaf_dsl))
+    L_ref = sparse(sheaf_laplacian_matrix(sheaf_ref))
     @test size(L_dsl) == size(L_ref)
     @test L_dsl ≈ L_ref
 end
@@ -590,8 +590,8 @@ end
     @test ne(s3.underlying_graph) == ne(s4.underlying_graph)
 
     # Same Laplacian → same nullspace dimension
-    L3 = sheaf_laplacian_matrix_direct(s3)
-    L4 = sheaf_laplacian_matrix_direct(s4)
+    L3 = sparse(sheaf_laplacian_matrix(s3))
+    L4 = sparse(sheaf_laplacian_matrix(s4))
     @test size(L3) == size(L4)
     @test L3 ≈ L4
 end
