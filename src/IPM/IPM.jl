@@ -32,7 +32,6 @@ import CommonSolve
 
 include("utils.jl")
 include("cone/cone.jl")
-include("sheaf.jl")
 include("kkt/kkt.jl")
 include("scaling.jl")
 include("ipm/ipm.jl")
