@@ -2,7 +2,7 @@
 module EuclideanSheaves
 
 
-export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix, sheaf_laplacian_matrix_direct,
+export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix,
     restricted_laplacian_blocks, sheaf_from_graph, energy_function,
     nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
     ldlt_pseudoinverse_and_null, ldiv_diag_pinv!, ldiv_diag_pinv, ldlt_pinv_solve, ldlt_pinv_solve!, HarmonicExtensionLDLDiagnostics,
@@ -256,6 +256,9 @@ function coboundary_map(s::EuclideanSheaf{T}) where T
     J = Int64[]
     V = Matrix{T}[]
 
+    # Row sizes = edge stalk dimensions
+    R = Int64[]
+
     for (e_idx, e) in enumerate(edges(s.underlying_graph))
         i = src(e)
         j = dst(e)
@@ -265,8 +268,13 @@ function coboundary_map(s::EuclideanSheaf{T}) where T
         push!(J, i, j)
         push!(I, e_idx, e_idx)
         push!(V, rm1, -rm2)
+        push!(R, size(rm1, 1))  # edge stalk dimension
     end
-    return blocksparse(I, J, V)
+
+    # Column sizes = vertex stalk dimensions
+    C = s.vertex_stalks
+
+    return blocksparse(I, J, V, R, C)
 end
 
 function sheaf_laplacian(s::EuclideanSheaf)
@@ -286,64 +294,6 @@ a cochain to the nearest global section.
 function sheaf_laplacian_matrix(s::EuclideanSheaf)
     B = coboundary_map(s)
     return B' * B
-end
-
-"""    sheaf_laplacian_matrix_direct(s::EuclideanSheaf) -> SparseMatrixCSC
-
-Assemble the sheaf Laplacian ``L = d^\\mathsf{T} d`` directly from the restriction
-maps of `s`, **without forming the coboundary matrix** ``d``.
-
-For each edge ``e = (u, v)`` the following block contributions are accumulated:
-
-```
-L_{u,u} += ρ_{u→e}^T ρ_{u→e}
-L_{v,v} += ρ_{v→e}^T ρ_{v→e}
-L_{u,v} += -ρ_{u→e}^T ρ_{v→e}
-L_{v,u} += -ρ_{v→e}^T ρ_{u→e}
-```
-
-This avoids constructing the ``(\\sum d_e) \\times (\\sum d_v)`` coboundary matrix
-and the subsequent matrix multiply, saving both time and memory for large sheaves.
-The result is numerically identical to `sheaf_laplacian_matrix`.
-"""
-function sheaf_laplacian_matrix_direct(s::EuclideanSheaf{T}) where T
-    n_total = sum(s.vertex_stalks)
-    offsets = [0; cumsum(s.vertex_stalks)]
-
-    II = Int[]
-    JJ = Int[]
-    VV = T[]
-
-    for e in edges(s.underlying_graph)
-        u, v = src(e), dst(e)
-        ρ_u = s.restriction_maps[u => v]   # d_e × d_u
-        ρ_v = s.restriction_maps[v => u]   # d_e × d_v
-        du  = s.vertex_stalks[u]
-        dv  = s.vertex_stalks[v]
-        ou  = offsets[u]
-        ov  = offsets[v]
-
-        # Diagonal block for u: ρ_u' * ρ_u
-        Duu = ρ_u' * ρ_u
-        for j in 1:du, i in 1:du
-            push!(II, ou + i); push!(JJ, ou + j); push!(VV, Duu[i, j])
-        end
-
-        # Diagonal block for v: ρ_v' * ρ_v
-        Dvv = ρ_v' * ρ_v
-        for j in 1:dv, i in 1:dv
-            push!(II, ov + i); push!(JJ, ov + j); push!(VV, Dvv[i, j])
-        end
-
-        # Off-diagonal blocks: -ρ_u' * ρ_v  and its transpose -ρ_v' * ρ_u
-        Duv = -(ρ_u' * ρ_v)
-        for j in 1:dv, i in 1:du
-            push!(II, ou + i); push!(JJ, ov + j); push!(VV,  Duv[i, j])
-            push!(II, ov + j); push!(JJ, ou + i); push!(VV,  Duv[i, j])
-        end
-    end
-
-    return sparse(II, JJ, VV, n_total, n_total)
 end
 
 """    restricted_laplacian_blocks(s::EuclideanSheaf,
@@ -611,17 +561,13 @@ whose absolute diagonal value is at or below `tol` (default:
 directions; the corresponding columns of `P^{-1} (L^\\mathsf{T})^{-1}` form the
 returned basis matrix.
 """
-function nullspace_ldlt(X::AbstractMatrix; tol=nothing)
-    M = ldlt!(ChordalLDLt(X), RowMaximum(); check=false)
-    D = M.D; L = M.L; P = M.P
-    max_abs = maximum(i -> abs(D[i, i]), 1:size(D, 1); init=0.0)
-    threshold = isnothing(tol) ? _default_ldlt_nullity_threshold(max_abs) : tol
-    ind = findall(i -> abs(D[i, i]) <= threshold, 1:size(D, 1))
-    U = zeros(size(D, 1), length(ind))
-    for j in eachindex(ind)
-        U[ind[j], j] = 1
+function nullspace_ldlt(X::AbstractMatrix{T}; tol=nothing) where T
+    F = ldlt!(ChordalLDLt(X), RowMaximum(); check=false)
+    if isnothing(tol)
+        return nullspace(F; rtol=sqrt(eps(T)))
+    else
+        return nullspace(F; atol=tol)
     end
-    return P \ (L' \ U)
 end
 
 """    nullspace_ldlt(s::EuclideanSheaf; tol=nothing) -> Matrix
@@ -632,7 +578,7 @@ Convenience overload: computes the sheaf Laplacian ``L = d^\\mathsf{T} d`` (wher
 The returned columns form a basis for the space of *global sections* of `s`.
 """
 function nullspace_ldlt(s::EuclideanSheaf; tol=nothing)
-    return nullspace_ldlt(sheaf_laplacian_matrix_direct(s); tol=tol)
+    return nullspace_ldlt(sheaf_laplacian_matrix(s); tol=tol)
 end
 
 # Private helper: given a ChordalLDLt factorization `M` of a symmetric

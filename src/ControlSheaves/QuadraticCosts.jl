@@ -27,7 +27,7 @@ using LinearAlgebra
 using CliqueTrees.Multifrontal
 using ..MultiAgentTracking: TrackingProblem, agent_vertex, extract_state_trajectories,
     extract_target_trajectories, build_time_expanded_tracking_sheaf
-using ....NetworkSheaves: sheaf_laplacian_matrix_direct, ldlt_pinv_solve
+using ....NetworkSheaves: sheaf_laplacian_matrix, ldlt_pinv_solve
 
 export build_control_cost_matrix, solve_quadratic_on_basis
 

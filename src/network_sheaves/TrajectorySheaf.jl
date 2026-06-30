@@ -692,7 +692,7 @@ function feasible_control_trajectory_basis(ts::ControlledTrajectorySheaf{T},
     # Check that the endpoints are reachable: a feasible trajectory must satisfy
     # the discrete dynamics, i.e. the coboundary residual must be zero.
     x_p_vec  = Array(x_p_internal)
-    d_mat    = sparse(coboundary_map(ts.sheaf))
+    d_mat    = coboundary_map(ts.sheaf)
     residual = norm(d_mat * x_p_vec)
     if residual > sqrt(eps(T)) * (1 + norm(x_p_vec))
         throw(ArgumentError(
