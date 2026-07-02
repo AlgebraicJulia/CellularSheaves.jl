@@ -351,32 +351,37 @@ end
 # Benchmark: Sheaf IPM vs Mosek (T-junction LP path)
 # =====================================================================
 
-function run_tjunction_benchmark(; optimizer = nothing, dual_optimizer = nothing, nwarmup::Int = 2, nruns::Int = 5)
+function run_tjunction_benchmark(; optimizer = nothing, dual_optimizer = nothing, solver_name::String = "Mosek", nwarmup::Int = 2, nruns::Int = 5)
     optimizer === nothing && error("Pass optimizer, e.g. run_tjunction_benchmark(optimizer=Mosek.Optimizer)")
-    # (Mx, My, refine_list, label)
+    # (Mx, My, refine_list, label, raug)
     cases = [
-        (3, 3, [(2, 2)], "3x3 center"),
-        (4, 4, [(2, 2), (3, 3)], "4x4 diag"),
-        (4, 4, [(2, 2), (2, 3), (3, 2), (3, 3)], "4x4 block"),
-        (6, 6, [(3, 3), (3, 4), (4, 3), (4, 4)], "6x6 block"),
-        (8, 8, [(i, j) for i in 3:6, j in 3:6], "8x8 4x4blk"),
+        (3, 3, [(2, 2)], "3x3 center",  1e5),
+        (4, 4, [(2, 2), (3, 3)], "4x4 diag",  1e5),
+        (4, 4, [(2, 2), (2, 3), (3, 2), (3, 3)], "4x4 block",  1e5),
+        (6, 6, [(3, 3), (3, 4), (4, 3), (4, 4)], "6x6 block",  1e5),
+        (8, 8, [(i, j) for i in 3:6, j in 3:6], "8x8 4x4blk", 1e5),
     ]
-    println("="^85)
-    println("T-Junction Benchmark (adaptive LP): Sheaf IPM vs Mosek vs Mosek-D")
-    println("="^85)
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
+    println("="^95)
+    println("T-Junction Benchmark (adaptive LP): Sheaf IPM vs $solver_name")
+    println("="^95)
     if dual_optimizer !== nothing
-        @printf("%-12s %5s %5s %5s %9s %9s %9s %7s %7s\n",
-                "Config", "DOF", "|V|", "H1", "IPM(ms)", "Mosek", "Mosek-D", "P/IPM", "D/IPM")
+        @printf("%-12s %6s %5s %5s %5s %9s %9s %9s %7s %7s\n",
+                "Config", "raug", "DOF", "|V|", "H1", "IPM(ms)", sname, sname_d, "P/IPM", "D/IPM")
     else
-        @printf("%-12s %5s %5s %5s %9s %9s %8s\n",
-                "Config", "DOF", "|V|", "H1", "IPM(ms)", "Mosek", "speedup")
+        @printf("%-12s %6s %5s %5s %5s %9s %9s %8s\n",
+                "Config", "raug", "DOF", "|V|", "H1", "IPM(ms)", sname, "speedup")
     end
-    println("-"^85)
-    for (Mx, My, refine_list, label) in cases
+    println("-"^95)
+    for (Mx, My, refine_list, label, raug) in cases
         inst = generate_tjunction_instance(; Mx, My, refine = refine_list, N = 100 * Mx * My)
         prob, info = build_tjunction_problem(inst)
-        for _ in 1:nwarmup; solve(prob, tensor_settings()); end
-        t_ipm = minimum([@elapsed solve(prob, tensor_settings()) for _ in 1:nruns])
+        settings = IPMSettings{Float64}(
+            kkt = UzawaSettings{Float64}(raug = raug),
+            feas_tol = 1e-8, gap_tol = 1e-8, itmax = 200)
+        for _ in 1:nwarmup; solve(prob, settings); end
+        t_ipm = minimum([@elapsed solve(prob, settings) for _ in 1:nruns])
         for _ in 1:nwarmup
             m, _ = build_jump_tjunction(inst, optimizer); optimize!(m)
         end
@@ -391,13 +396,13 @@ function run_tjunction_benchmark(; optimizer = nothing, dual_optimizer = nothing
             t_dual = minimum([@elapsed begin
                 m, _ = build_jump_tjunction(inst, dual_optimizer); optimize!(m)
             end for _ in 1:nruns])
-            @printf("%-12s %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
-                    label, info.ncols, info.nvtx, info.h1,
+            @printf("%-12s %6.0e %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    label, raug, info.ncols, info.nvtx, info.h1,
                     t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
                     t_mosek / t_ipm, t_dual / t_ipm)
         else
-            @printf("%-12s %5d %5d %5d %9.1f %9.1f %7.2fx\n",
-                    label, info.ncols, info.nvtx, info.h1,
+            @printf("%-12s %6.0e %5d %5d %5d %9.1f %9.1f %7.2fx\n",
+                    label, raug, info.ncols, info.nvtx, info.h1,
                     t_ipm * 1000, t_mosek * 1000, t_mosek / t_ipm)
         end
     end
@@ -411,15 +416,16 @@ if abspath(PROGRAM_FILE) == @__FILE__
         using MosekTools
         optimizer = Mosek.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        println("Solver: Mosek + Mosek-D")
+        solver_name = "Mosek"
     else
         using OSQP
         optimizer = OSQP.Optimizer
         dual_optimizer = Dualization.dual_optimizer(OSQP.Optimizer)
-        println("Solver: OSQP + OSQP-D (open-source)")
+        solver_name = "OSQP"
     end
+    println("Solver: $solver_name")
     println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
 
-    run_tjunction_benchmark(; optimizer, dual_optimizer,
+    run_tjunction_benchmark(; optimizer, dual_optimizer, solver_name,
                             nwarmup = opts.nwarmup, nruns = opts.nruns)
 end

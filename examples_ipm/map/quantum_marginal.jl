@@ -274,7 +274,7 @@ tensor_settings_qm(; raug = 1e5) =
 # ---- benchmark -----------------------------------------------------------
 
 function run_qm_benchmark(; optimizer = nothing, dual_optimizer = nothing,
-                          nwarmup::Int = 2, nruns::Int = 5)
+                          solver_name::String = "Mosek", nwarmup::Int = 2, nruns::Int = 5)
     optimizer === nothing && error("Pass optimizer, e.g. run_qm_benchmark(optimizer=Mosek.Optimizer)")
     # (N, ℓ, ring, label, raug) — raug tuned per case
     cases = [
@@ -286,17 +286,19 @@ function run_qm_benchmark(; optimizer = nothing, dual_optimizer = nothing,
         (12, 3, true,  "N12 ℓ3 ring", 1e5),
         (12, 4, true,  "N12 ℓ4 ring", 1e4),
     ]
-    println("="^85)
-    println("Quantum Marginal Benchmark (SDP): Sheaf IPM vs Mosek vs Mosek-D")
-    println("="^85)
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
+    println("="^95)
+    println("Quantum Marginal Benchmark (SDP): Sheaf IPM vs $solver_name")
+    println("="^95)
     if dual_optimizer !== nothing
-        @printf("%-14s %5s %5s %5s %9s %9s %9s %7s %7s\n",
-                "Config", "DOF", "|V|", "H1", "IPM(ms)", "Mosek", "Mosek-D", "P/IPM", "D/IPM")
+        @printf("%-14s %6s %5s %5s %5s %9s %9s %9s %7s %7s\n",
+                "Config", "raug", "DOF", "|V|", "H1", "IPM(ms)", sname, sname_d, "P/IPM", "D/IPM")
     else
-        @printf("%-14s %5s %5s %5s %9s %9s %8s\n",
-                "Config", "DOF", "|V|", "H1", "IPM(ms)", "Mosek", "speedup")
+        @printf("%-14s %6s %5s %5s %5s %9s %9s %8s\n",
+                "Config", "raug", "DOF", "|V|", "H1", "IPM(ms)", sname, "speedup")
     end
-    println("-"^85)
+    println("-"^95)
     for (N, ℓ, ring, label, raug) in cases
         inst = generate_qm_instance(; N, ℓ, ring)
         prob, info = build_qm_problem(inst)
@@ -317,13 +319,13 @@ function run_qm_benchmark(; optimizer = nothing, dual_optimizer = nothing,
             t_dual = minimum([@elapsed begin
                 m, _ = build_jump_qm(inst, dual_optimizer); optimize!(m)
             end for _ in 1:nruns])
-            @printf("%-14s %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
-                    label, size(prob.B, 2), info.ncl, info.h1,
+            @printf("%-14s %6.0e %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    label, raug, size(prob.B, 2), info.ncl, info.h1,
                     t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
                     t_mosek / t_ipm, t_dual / t_ipm)
         else
-            @printf("%-14s %5d %5d %5d %9.1f %9.1f %7.2fx\n",
-                    label, size(prob.B, 2), info.ncl, info.h1,
+            @printf("%-14s %6.0e %5d %5d %5d %9.1f %9.1f %7.2fx\n",
+                    label, raug, size(prob.B, 2), info.ncl, info.h1,
                     t_ipm * 1000, t_mosek * 1000, t_mosek / t_ipm)
         end
     end
@@ -364,15 +366,16 @@ if abspath(PROGRAM_FILE) == @__FILE__
         using MosekTools
         optimizer = Mosek.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        println("Solver: Mosek + Mosek-D")
+        solver_name = "Mosek"
     else
         using Clarabel
         optimizer = Clarabel.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        println("Solver: Clarabel + Clarabel-D (open-source)")
+        solver_name = "Clarabel"
     end
+    println("Solver: $solver_name")
     println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
 
-    run_qm_benchmark(; optimizer, dual_optimizer,
+    run_qm_benchmark(; optimizer, dual_optimizer, solver_name,
                      nwarmup = opts.nwarmup, nruns = opts.nruns)
 end

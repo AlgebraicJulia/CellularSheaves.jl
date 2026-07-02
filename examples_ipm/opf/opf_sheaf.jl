@@ -497,7 +497,8 @@ end
 
 """Benchmark IPM vs Mosek on OPF problems (rung 1 SOCP only)."""
 function run_opf_benchmark(; optimizer = nothing, dual_optimizer = nothing,
-                           nwarmup::Int = 2, nruns::Int = 5)
+                           nwarmup::Int = 2, nruns::Int = 5,
+                           solver_name::String = "Mosek")
     cases = [
         # (topology, cost, label, raug)
         (:triangle, (0.0, 1.0), "tri linear", 1e5),
@@ -508,8 +509,10 @@ function run_opf_benchmark(; optimizer = nothing, dual_optimizer = nothing,
         (:radial, (2.0, 1.0), "radial quad", 1e5),
     ]
 
-    println("Config           DOF   |V|   IPM(ms)     Mosek   Mosek-D   P/IPM   D/IPM")
-    println("-" ^ 70)
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
+    @printf("Config           raug   DOF   |V|   IPM(ms)   %s %s  P/IPM   D/IPM\n", sname, sname_d)
+    println("-" ^ 80)
 
     for (topo, cost, label, raug) in cases
         inst = opf_instance(; topology = topo, cost = cost)
@@ -553,8 +556,8 @@ function run_opf_benchmark(; optimizer = nothing, dual_optimizer = nothing,
 
         rat_p = t_mosek < Inf ? t_mosek / t_ipm : NaN
         rat_d = t_mosek_d < Inf ? t_mosek_d / t_ipm : NaN
-        @printf("%-16s %4d  %4d  %8.1f  %8.1f  %8.1f  %5.2fx  %5.2fx\n",
-                label, dof, info.nv, t_ipm, t_mosek, t_mosek_d, rat_p, rat_d)
+        @printf("%-16s %6.0e %4d  %4d  %8.1f  %8.1f  %8.1f  %5.2fx  %5.2fx\n",
+                label, raug, dof, info.nv, t_ipm, t_mosek, t_mosek_d, rat_p, rat_d)
     end
 end
 
@@ -761,7 +764,8 @@ end
 
 """Extended benchmark: rung 1, rung 2, SE, bowtie."""
 function run_opf_extended_benchmark(; optimizer = nothing, dual_optimizer = nothing,
-                                     nwarmup::Int = 2, nruns::Int = 5)
+                                     nwarmup::Int = 2, nruns::Int = 5,
+                                     solver_name::String = "Mosek")
     println("=" ^ 75)
     println("OPF EXTENDED BENCHMARK: Rung 1, Rung 2, SE, Bowtie")
     println("=" ^ 75)
@@ -811,12 +815,14 @@ function run_opf_extended_benchmark(; optimizer = nothing, dual_optimizer = noth
 
         rat_p = t_mosek < Inf ? t_mosek / t_ipm : NaN
         rat_d = t_mosek_d < Inf ? t_mosek_d / t_ipm : NaN
-        @printf("%-20s %4d  %7.2f  %7.2f  %7.2f  %6.2fx  %6.2fx\n",
-                label, dof, t_ipm, t_mosek, t_mosek_d, rat_p, rat_d)
+        @printf("%-20s %6.0e %4d  %7.2f  %7.2f  %7.2f  %6.2fx  %6.2fx\n",
+                label, raug, dof, t_ipm, t_mosek, t_mosek_d, rat_p, rat_d)
     end
 
-    println("\nConfig                DOF   IPM(ms)  Mosek-P  Mosek-D   P/IPM   D/IPM")
-    println("-" ^ 75)
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
+    @printf("\nConfig                raug   DOF   IPM(ms)  %s %s  P/IPM   D/IPM\n", sname, sname_d)
+    println("-" ^ 85)
 
     # --- Rung 1 cases ---
     println("--- Rung 1 (SOCP) ---")
@@ -1385,15 +1391,17 @@ if abspath(PROGRAM_FILE) == @__FILE__
         using MosekTools
         optimizer = Mosek.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
+        solver_name = "Mosek"
     else
         using Clarabel
         optimizer = Clarabel.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
+        solver_name = "Clarabel"
     end
 
     println("=== Basic OPF Benchmark ===")
-    run_opf_benchmark(; optimizer, dual_optimizer, nwarmup = opts.nwarmup, nruns = opts.nruns)
+    run_opf_benchmark(; optimizer, dual_optimizer, nwarmup = opts.nwarmup, nruns = opts.nruns, solver_name)
 
     println("\n=== Extended OPF Benchmark ===")
-    run_opf_extended_benchmark(; optimizer, dual_optimizer, nwarmup = opts.nwarmup, nruns = opts.nruns)
+    run_opf_extended_benchmark(; optimizer, dual_optimizer, nwarmup = opts.nwarmup, nruns = opts.nruns, solver_name)
 end

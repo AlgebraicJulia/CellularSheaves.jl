@@ -439,17 +439,17 @@ function run_tensor_benchmark(; optimizer = nothing, dual_optimizer = nothing,
     ]
     sname = rpad(solver_name, 9)
     sname_d = rpad(solver_name * "-D", 9)
-    println("="^90)
+    println("="^100)
     println("Tensor-Spline Benchmark (2D grid, lossy variants): Sheaf IPM vs $solver_name")
-    println("="^90)
+    println("="^100)
     if dual_optimizer !== nothing
-        @printf("%-10s %-11s %6s %5s %5s %5s %9s %9s %9s %7s %7s\n",
-                "Mode", "Shape", "grid", "|V|", "H1", "n", "IPM(ms)", sname, sname_d, "P/IPM", "D/IPM")
+        @printf("%-10s %-11s %6s %6s %5s %5s %5s %9s %9s %9s %7s %7s\n",
+                "Mode", "Shape", "raug", "grid", "|V|", "H1", "n", "IPM(ms)", sname, sname_d, "P/IPM", "D/IPM")
     else
-        @printf("%-10s %-11s %6s %5s %5s %5s %9s %9s %8s\n",
-                "Mode", "Shape", "grid", "|V|", "H1", "n", "IPM(ms)", sname, "speedup")
+        @printf("%-10s %-11s %6s %6s %5s %5s %5s %9s %9s %8s\n",
+                "Mode", "Shape", "raug", "grid", "|V|", "H1", "n", "IPM(ms)", sname, "speedup")
     end
-    println("-"^90)
+    println("-"^100)
     for (mode, shape, Mx, My, holes, faults, raug) in cases
         inst = generate_tensor_instance(; mode, shape, Mx, My, holes, faults, N = 50 * Mx * My)
         prob, info = build_tensor_problem(inst)
@@ -472,13 +472,13 @@ function run_tensor_benchmark(; optimizer = nothing, dual_optimizer = nothing,
             t_dual = minimum([@elapsed begin
                 m, _ = build_jump_tensor(inst, dual_optimizer); optimize!(m)
             end for _ in 1:nruns])
-            @printf("%-10s %-11s %3dx%-3d %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
-                    string(mode), string(shape), Mx, My, info.nvtx, info.h1, inst.n,
+            @printf("%-10s %-11s %6.0e %3dx%-3d %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    string(mode), string(shape), raug, Mx, My, info.nvtx, info.h1, inst.n,
                     t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
                     t_mosek / t_ipm, t_dual / t_ipm)
         else
-            @printf("%-10s %-11s %3dx%-3d %5d %5d %5d %9.1f %9.1f %7.2fx\n",
-                    string(mode), string(shape), Mx, My, info.nvtx, info.h1, inst.n,
+            @printf("%-10s %-11s %6.0e %3dx%-3d %5d %5d %5d %9.1f %9.1f %7.2fx\n",
+                    string(mode), string(shape), raug, Mx, My, info.nvtx, info.h1, inst.n,
                     t_ipm * 1000, t_mosek * 1000, t_mosek / t_ipm)
         end
     end

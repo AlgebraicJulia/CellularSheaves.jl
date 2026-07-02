@@ -352,7 +352,7 @@ end
 
 # ---- benchmark -----------------------------------------------------------
 
-function run_tjsdp_benchmark(; optimizer = nothing, dual_optimizer = nothing, nwarmup::Int = 2, nruns::Int = 5)
+function run_tjsdp_benchmark(; optimizer = nothing, dual_optimizer = nothing, solver_name::String = "Mosek", nwarmup::Int = 2, nruns::Int = 5)
     optimizer === nothing && error("Pass optimizer, e.g. run_tjsdp_benchmark(optimizer=Mosek.Optimizer)")
     # (shape, Mx, My, refine_list, label, raug) — raug tuned per case
     cases = [
@@ -363,17 +363,19 @@ function run_tjsdp_benchmark(; optimizer = nothing, dual_optimizer = nothing, nw
         (:convex_sdp, 3, 3, [(2, 2)], "CVX 3x3 ctr", 1e3),
         (:convex_sdp, 4, 4, [(2, 2), (3, 3)], "CVX 4x4 diag", 1e4),
     ]
-    println("="^85)
-    println("T-Junction SDP Benchmark: Sheaf IPM vs Mosek vs Mosek-D")
-    println("="^85)
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
+    println("="^95)
+    println("T-Junction SDP Benchmark: Sheaf IPM vs $solver_name")
+    println("="^95)
     if dual_optimizer !== nothing
-        @printf("%-14s %5s %5s %5s %9s %9s %9s %7s %7s\n",
-                "Config", "DOF", "|V|", "H1", "IPM(ms)", "Mosek", "Mosek-D", "P/IPM", "D/IPM")
+        @printf("%-14s %6s %5s %5s %5s %9s %9s %9s %7s %7s\n",
+                "Config", "raug", "DOF", "|V|", "H1", "IPM(ms)", sname, sname_d, "P/IPM", "D/IPM")
     else
-        @printf("%-14s %5s %5s %5s %9s %9s %8s\n",
-                "Config", "DOF", "|V|", "H1", "IPM(ms)", "Mosek", "speedup")
+        @printf("%-14s %6s %5s %5s %5s %9s %9s %8s\n",
+                "Config", "raug", "DOF", "|V|", "H1", "IPM(ms)", sname, "speedup")
     end
-    println("-"^85)
+    println("-"^95)
     for (shape, Mx, My, refine_list, label, raug) in cases
         inst = generate_tjsdp_instance(; Mx, My, shape, refine = refine_list, N = 100 * Mx * My)
         prob, info = build_tjsdp_problem(inst)
@@ -396,13 +398,13 @@ function run_tjsdp_benchmark(; optimizer = nothing, dual_optimizer = nothing, nw
             t_dual = minimum([@elapsed begin
                 m, _ = build_jump_tjsdp(inst, dual_optimizer); optimize!(m)
             end for _ in 1:nruns])
-            @printf("%-14s %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
-                    label, info.ncols, info.nvtx, info.h1,
+            @printf("%-14s %6.0e %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    label, raug, info.ncols, info.nvtx, info.h1,
                     t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
                     t_mosek / t_ipm, t_dual / t_ipm)
         else
-            @printf("%-14s %5d %5d %5d %9.1f %9.1f %7.2fx\n",
-                    label, info.ncols, info.nvtx, info.h1,
+            @printf("%-14s %6.0e %5d %5d %5d %9.1f %9.1f %7.2fx\n",
+                    label, raug, info.ncols, info.nvtx, info.h1,
                     t_ipm * 1000, t_mosek * 1000, t_mosek / t_ipm)
         end
     end
@@ -447,15 +449,16 @@ if abspath(PROGRAM_FILE) == @__FILE__
         using MosekTools
         optimizer = Mosek.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        println("Solver: Mosek + Mosek-D")
+        solver_name = "Mosek"
     else
         using Clarabel
         optimizer = Clarabel.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        println("Solver: Clarabel + Clarabel-D (open-source)")
+        solver_name = "Clarabel"
     end
+    println("Solver: $solver_name")
     println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
 
-    run_tjsdp_benchmark(; optimizer, dual_optimizer,
+    run_tjsdp_benchmark(; optimizer, dual_optimizer, solver_name,
                         nwarmup = opts.nwarmup, nruns = opts.nruns)
 end

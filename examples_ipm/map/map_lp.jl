@@ -509,36 +509,40 @@ end
 
 # ---- Benchmark -------------------------------------------------------
 
-function run_benchmark(; optimizer = nothing, dual_optimizer = nothing, rho::Float64 = 1.0, nwarmup::Int = 2, nruns::Int = 5)
+function run_benchmark(; optimizer = nothing, dual_optimizer = nothing, solver_name::String = "Mosek", rho::Float64 = 1.0, nwarmup::Int = 2, nruns::Int = 5)
     optimizer === nothing && error("Pass optimizer, e.g. run_benchmark(optimizer=Mosek.Optimizer)")
 
     cases = [
-        ("grid 50×50",       grid_mrf(50)),
-        ("cycle",            cycle_mrf(4000)),
-        ("complete",         complete_mrf(95)),
-        ("ladder",           ladder_mrf(1200)),
-        ("triangular 40×40", triangular_mrf(40)),
+        ("grid 50×50",       grid_mrf(50),       1e6),
+        ("cycle",            cycle_mrf(4000),    1e6),
+        ("complete",         complete_mrf(95),   1e6),
+        ("ladder",           ladder_mrf(1200),   1e6),
+        ("triangular 40×40", triangular_mrf(40), 1e6),
     ]
 
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
     println("="^80)
-    println("SparseMAP Benchmark: Sheaf IPM vs Mosek vs Mosek-D  (ρ = $rho)")
+    println("SparseMAP Benchmark: Sheaf IPM vs $solver_name  (rho = $rho)")
     println("="^80)
     println()
     if dual_optimizer !== nothing
-        @printf("%-18s %7s %7s %9s %9s %9s %7s %7s\n",
-                "Graph", "|V|", "|E|", "IPM(ms)", "Mosek", "Mosek-D", "P/IPM", "D/IPM")
+        @printf("%-18s %6s %7s %7s %9s %9s %9s %7s %7s\n",
+                "Graph", "raug", "|V|", "|E|", "IPM(ms)", sname, sname_d, "P/IPM", "D/IPM")
     else
-        @printf("%-18s %7s %7s %9s %9s %8s\n",
-                "Graph", "|V|", "|E|", "IPM(ms)", "Mosek", "speedup")
+        @printf("%-18s %6s %7s %7s %9s %9s %8s\n",
+                "Graph", "raug", "|V|", "|E|", "IPM(ms)", sname, "speedup")
     end
     println("-"^80)
 
-    for (name, inst) in cases
+    for (name, inst, raug) in cases
         spec, _ = mrf_spec(inst)
         prob, info = build_ipm_problem(spec; rho = rho)
         nV, nE = inst.V, length(inst.edges)
 
-        settings = IPMSettings{Float64}(feas_tol = 1e-8, gap_tol = 1e-8, itmax = 200)
+        settings = IPMSettings{Float64}(
+            kkt = UzawaSettings{Float64}(raug = raug),
+            feas_tol = 1e-8, gap_tol = 1e-8, itmax = 200)
         for _ in 1:nwarmup; solve(prob, settings); end
         t_ipm = minimum([@elapsed solve(prob, settings) for _ in 1:nruns])
 
@@ -561,12 +565,12 @@ function run_benchmark(; optimizer = nothing, dual_optimizer = nothing, rho::Flo
                 optimize!(m)
             end for _ in 1:nruns])
 
-            @printf("%-18s %7d %7d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
-                    name, nV, nE, t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
+            @printf("%-18s %6.0e %7d %7d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    name, raug, nV, nE, t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
                     t_mosek / t_ipm, t_dual / t_ipm)
         else
-            @printf("%-18s %7d %7d %9.1f %9.1f %7.2fx\n",
-                    name, nV, nE, t_ipm * 1000, t_mosek * 1000,
+            @printf("%-18s %6.0e %7d %7d %9.1f %9.1f %7.2fx\n",
+                    name, raug, nV, nE, t_ipm * 1000, t_mosek * 1000,
                     t_mosek / t_ipm)
         end
     end
@@ -647,34 +651,38 @@ function triangular_dense(n::Int; nstates::Int = 8, seed::Int = 0)
     return dense_channel_spec(edges, V; nstates, seed)
 end
 
-function run_benchmark_dense(; optimizer = nothing, dual_optimizer = nothing, rho::Float64 = 1.0, nwarmup::Int = 2, nruns::Int = 5)
+function run_benchmark_dense(; optimizer = nothing, dual_optimizer = nothing, solver_name::String = "Mosek", rho::Float64 = 1.0, nwarmup::Int = 2, nruns::Int = 5)
     optimizer === nothing && error("Pass optimizer, e.g. run_benchmark_dense(optimizer=Mosek.Optimizer)")
 
     cases = [
-        ("grid 20×20",       grid_dense(20),       20*20, 2*20*(20-1)),
-        ("cycle",            cycle_dense(400),     400,   400),
-        ("complete",         complete_dense(40),   40,    40*39÷2),
-        ("ladder",           ladder_dense(200),    400,   3*200-2),
-        ("triangular 15×15", triangular_dense(15), 15*15, 3*15*(15-1)),
+        ("grid 20×20",       grid_dense(20),       20*20, 2*20*(20-1), 1e6),
+        ("cycle",            cycle_dense(400),     400,   400,         1e6),
+        ("complete",         complete_dense(40),   40,    40*39÷2,     1e6),
+        ("ladder",           ladder_dense(200),    400,   3*200-2,     1e6),
+        ("triangular 15×15", triangular_dense(15), 15*15, 3*15*(15-1), 1e6),
     ]
 
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
     println("="^80)
-    println("Dense Stochastic Channels: Sheaf IPM vs Mosek vs Mosek-D  (ρ = $rho)")
+    println("Dense Stochastic Channels: Sheaf IPM vs $solver_name  (rho = $rho)")
     println("="^80)
     println()
     if dual_optimizer !== nothing
-        @printf("%-18s %7s %7s %9s %9s %9s %7s %7s\n",
-                "Graph", "|V|", "|E|", "IPM(ms)", "Mosek", "Mosek-D", "P/IPM", "D/IPM")
+        @printf("%-18s %6s %7s %7s %9s %9s %9s %7s %7s\n",
+                "Graph", "raug", "|V|", "|E|", "IPM(ms)", sname, sname_d, "P/IPM", "D/IPM")
     else
-        @printf("%-18s %7s %7s %9s %9s %8s\n",
-                "Graph", "|V|", "|E|", "IPM(ms)", "Mosek", "speedup")
+        @printf("%-18s %6s %7s %7s %9s %9s %8s\n",
+                "Graph", "raug", "|V|", "|E|", "IPM(ms)", sname, "speedup")
     end
     println("-"^80)
 
-    for (name, spec, nV, nE) in cases
+    for (name, spec, nV, nE, raug) in cases
         prob, info = build_ipm_problem(spec; rho = rho)
 
-        settings = IPMSettings{Float64}(feas_tol = 1e-8, gap_tol = 1e-8, itmax = 200)
+        settings = IPMSettings{Float64}(
+            kkt = UzawaSettings{Float64}(raug = raug),
+            feas_tol = 1e-8, gap_tol = 1e-8, itmax = 200)
         for _ in 1:nwarmup; solve(prob, settings); end
         t_ipm = minimum([@elapsed solve(prob, settings) for _ in 1:nruns])
 
@@ -697,12 +705,12 @@ function run_benchmark_dense(; optimizer = nothing, dual_optimizer = nothing, rh
                 optimize!(m)
             end for _ in 1:nruns])
 
-            @printf("%-18s %7d %7d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
-                    name, nV, nE, t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
+            @printf("%-18s %6.0e %7d %7d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    name, raug, nV, nE, t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
                     t_mosek / t_ipm, t_dual / t_ipm)
         else
-            @printf("%-18s %7d %7d %9.1f %9.1f %7.2fx\n",
-                    name, nV, nE, t_ipm * 1000, t_mosek * 1000,
+            @printf("%-18s %6.0e %7d %7d %9.1f %9.1f %7.2fx\n",
+                    name, raug, nV, nE, t_ipm * 1000, t_mosek * 1000,
                     t_mosek / t_ipm)
         end
     end
@@ -716,18 +724,19 @@ if abspath(PROGRAM_FILE) == @__FILE__
         using MosekTools
         optimizer = Mosek.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        println("Solver: Mosek + Mosek-D")
+        solver_name = "Mosek"
     else
-        using Clarabel
-        optimizer = Clarabel.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        println("Solver: Clarabel + Clarabel-D (open-source)")
+        using OSQP
+        optimizer = OSQP.Optimizer
+        dual_optimizer = Dualization.dual_optimizer(OSQP.Optimizer)
+        solver_name = "OSQP"
     end
+    println("Solver: $solver_name")
     println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
 
-    run_benchmark(; optimizer, dual_optimizer,
+    run_benchmark(; optimizer, dual_optimizer, solver_name,
                   nwarmup = opts.nwarmup, nruns = opts.nruns)
     println()
-    run_benchmark_dense(; optimizer, dual_optimizer,
+    run_benchmark_dense(; optimizer, dual_optimizer, solver_name,
                         nwarmup = opts.nwarmup, nruns = opts.nruns)
 end

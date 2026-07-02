@@ -254,41 +254,46 @@ end
 # Benchmark: Sheaf IPM vs Mosek
 # =====================================================================
 
-function run_exact_benchmark(; optimizer = nothing, dual_optimizer = nothing, nwarmup::Int = 2, nruns::Int = 5)
+function run_exact_benchmark(; optimizer = nothing, dual_optimizer = nothing, solver_name::String = "Mosek", nwarmup::Int = 2, nruns::Int = 5)
     optimizer === nothing && error("Pass optimizer, e.g. run_exact_benchmark(optimizer=Mosek.Optimizer)")
 
     cases = [
-        (:nonneg,   50, 6),   # M=50 pieces, degree 6 -> nd=6, block=4 (SDP)
-        (:nonneg,   100, 6),
-        (:monotone, 50, 6),   # nd=5, block=3 (SDP)
-        (:monotone, 100, 6),
-        (:convex,   50, 6),   # nd=4, block=3 (SDP)
-        (:convex,   100, 6),
+        (:nonneg,   50, 6,  1e5),   # M=50 pieces, degree 6 -> nd=6, block=4 (SDP)
+        (:nonneg,   100, 6, 1e5),
+        (:monotone, 50, 6,  1e5),   # nd=5, block=3 (SDP)
+        (:monotone, 100, 6, 1e5),
+        (:convex,   50, 6,  1e5),   # nd=4, block=3 (SDP)
+        (:convex,   100, 6, 1e5),
     ]
 
-    println("="^80)
-    println("Shape-Spline Exact (SDP) Benchmark: Sheaf IPM vs Mosek vs Mosek-D")
-    println("="^80)
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
+    println("="^90)
+    println("Shape-Spline Exact (SDP) Benchmark: Sheaf IPM vs $solver_name")
+    println("="^90)
     println()
     if dual_optimizer !== nothing
-        @printf("%-12s %7s %6s %5s %5s %9s %9s %9s %7s %7s\n",
-                "Shape", "splines", "degree", "|V|", "|E|", "IPM(ms)", "Mosek", "Mosek-D", "P/IPM", "D/IPM")
+        @printf("%-12s %6s %7s %6s %5s %5s %9s %9s %9s %7s %7s\n",
+                "Shape", "raug", "splines", "degree", "|V|", "|E|", "IPM(ms)", sname, sname_d, "P/IPM", "D/IPM")
     else
-        @printf("%-12s %7s %6s %5s %5s %9s %9s %8s\n",
-                "Shape", "splines", "degree", "|V|", "|E|", "IPM(ms)", "Mosek", "speedup")
+        @printf("%-12s %6s %7s %6s %5s %5s %9s %9s %8s\n",
+                "Shape", "raug", "splines", "degree", "|V|", "|E|", "IPM(ms)", sname, "speedup")
     end
-    println("-"^80)
+    println("-"^90)
 
-    for (shape, M, n) in cases
+    for (shape, M, n, raug) in cases
         inst = generate_shape_instance(; shape, M, n, N = 20 * M)
         prob, info = build_shape_exact_problem(inst)
         nV = info.nvtx
         # |E|: certificate edges (M) + continuity edges (M-1)
         nE = M + (M - 1)
 
+        settings = IPMSettings{Float64}(
+            kkt = UzawaSettings{Float64}(raug = raug),
+            feas_tol = 1e-8, gap_tol = 1e-8, itmax = 100)
         # warmup
-        for _ in 1:nwarmup; solve(prob, lp_settings()); end
-        t_ipm = minimum([@elapsed solve(prob, lp_settings()) for _ in 1:nruns])
+        for _ in 1:nwarmup; solve(prob, settings); end
+        t_ipm = minimum([@elapsed solve(prob, settings) for _ in 1:nruns])
 
         for _ in 1:nwarmup
             m, _ = build_jump_exact(inst, optimizer)
@@ -309,12 +314,12 @@ function run_exact_benchmark(; optimizer = nothing, dual_optimizer = nothing, nw
                 optimize!(m)
             end for _ in 1:nruns])
 
-            @printf("%-12s %7d %6d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
-                    string(shape), M, n, nV, nE, t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
+            @printf("%-12s %6.0e %7d %6d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    string(shape), raug, M, n, nV, nE, t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
                     t_mosek / t_ipm, t_dual / t_ipm)
         else
-            @printf("%-12s %7d %6d %5d %5d %9.1f %9.1f %7.2fx\n",
-                    string(shape), M, n, nV, nE, t_ipm * 1000, t_mosek * 1000,
+            @printf("%-12s %6.0e %7d %6d %5d %5d %9.1f %9.1f %7.2fx\n",
+                    string(shape), raug, M, n, nV, nE, t_ipm * 1000, t_mosek * 1000,
                     t_mosek / t_ipm)
         end
     end
@@ -328,15 +333,16 @@ if abspath(PROGRAM_FILE) == @__FILE__
         using MosekTools
         optimizer = Mosek.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        println("Solver: Mosek + Mosek-D")
+        solver_name = "Mosek"
     else
         using Clarabel
         optimizer = Clarabel.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        println("Solver: Clarabel + Clarabel-D (open-source)")
+        solver_name = "Clarabel"
     end
+    println("Solver: $solver_name")
     println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
 
-    run_exact_benchmark(; optimizer, dual_optimizer,
+    run_exact_benchmark(; optimizer, dual_optimizer, solver_name,
                         nwarmup = opts.nwarmup, nruns = opts.nruns)
 end

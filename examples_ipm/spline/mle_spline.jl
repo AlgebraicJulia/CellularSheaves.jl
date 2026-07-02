@@ -294,7 +294,7 @@ end
 # Benchmark: Sheaf IPM vs Mosek (exp-cone path)
 # =====================================================================
 
-function run_mle_benchmark(; optimizer = nothing, dual_optimizer = nothing, nwarmup::Int = 2, nruns::Int = 5)
+function run_mle_benchmark(; optimizer = nothing, dual_optimizer = nothing, solver_name::String = "Mosek", nwarmup::Int = 2, nruns::Int = 5)
     optimizer === nothing && error("Pass optimizer, e.g. run_mle_benchmark(optimizer=Mosek.Optimizer)")
     # (mode, M, n, N, nbins, raug, tol) — tuned per case from sweep
     # intensity uses tol=1e-6 (dual stalls at ~1e-6 anyway)
@@ -306,17 +306,19 @@ function run_mle_benchmark(; optimizer = nothing, dual_optimizer = nothing, nwar
         (:intensity, 16, 4, 1000, 0,  1e4, 1e-6),
         (:intensity, 16, 4, 1000, 64, 1e1, 1e-6),
     ]
-    println("="^85)
-    println("MLE-Spline Benchmark (exp-cone leaves): Sheaf IPM vs Mosek vs Mosek-D")
-    println("="^85)
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
+    println("="^95)
+    println("MLE-Spline Benchmark (exp-cone leaves): Sheaf IPM vs $solver_name")
+    println("="^95)
     if dual_optimizer !== nothing
-        @printf("%-11s %4s %3s %6s %6s %6s %9s %9s %9s %7s %7s\n",
-                "Mode", "M", "n", "N", "leaves", "|V|", "IPM(ms)", "Mosek", "Mosek-D", "P/IPM", "D/IPM")
+        @printf("%-11s %6s %4s %3s %6s %6s %6s %9s %9s %9s %7s %7s\n",
+                "Mode", "raug", "M", "n", "N", "leaves", "|V|", "IPM(ms)", sname, sname_d, "P/IPM", "D/IPM")
     else
-        @printf("%-11s %4s %3s %6s %6s %6s %9s %9s %8s\n",
-                "Mode", "M", "n", "N", "leaves", "|V|", "IPM(ms)", "Mosek", "speedup")
+        @printf("%-11s %6s %4s %3s %6s %6s %6s %9s %9s %8s\n",
+                "Mode", "raug", "M", "n", "N", "leaves", "|V|", "IPM(ms)", sname, "speedup")
     end
-    println("-"^85)
+    println("-"^95)
     for (mode, M, n, N, nbins, raug, tol) in cases
         inst = generate_mle_instance(; mode, M, n, N)
         nbins > 0 && (inst = binned(inst; nbins))
@@ -340,13 +342,13 @@ function run_mle_benchmark(; optimizer = nothing, dual_optimizer = nothing, nwar
             t_dual = minimum([@elapsed begin
                 m, _, _ = build_jump_mle(inst, dual_optimizer); optimize!(m)
             end for _ in 1:nruns])
-            @printf("%-11s %4d %3d %6d %6d %6d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
-                    string(mode), M, n, N, length(inst.obs), info.nvtx,
+            @printf("%-11s %6.0e %4d %3d %6d %6d %6d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    string(mode), raug, M, n, N, length(inst.obs), info.nvtx,
                     t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
                     t_mosek / t_ipm, t_dual / t_ipm)
         else
-            @printf("%-11s %4d %3d %6d %6d %6d %9.1f %9.1f %7.2fx\n",
-                    string(mode), M, n, N, length(inst.obs), info.nvtx,
+            @printf("%-11s %6.0e %4d %3d %6d %6d %6d %9.1f %9.1f %7.2fx\n",
+                    string(mode), raug, M, n, N, length(inst.obs), info.nvtx,
                     t_ipm * 1000, t_mosek * 1000, t_mosek / t_ipm)
         end
     end
@@ -360,15 +362,16 @@ if abspath(PROGRAM_FILE) == @__FILE__
         using MosekTools
         optimizer = Mosek.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        println("Solver: Mosek + Mosek-D")
+        solver_name = "Mosek"
     else
         using Clarabel
         optimizer = Clarabel.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        println("Solver: Clarabel + Clarabel-D (open-source)")
+        dual_optimizer = nothing  # skip dualization (ExponentialCone not supported)
+        solver_name = "Clarabel"
     end
+    println("Solver: $solver_name")
     println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
 
-    run_mle_benchmark(; optimizer, dual_optimizer,
+    run_mle_benchmark(; optimizer, dual_optimizer, solver_name,
                       nwarmup = opts.nwarmup, nruns = opts.nruns)
 end

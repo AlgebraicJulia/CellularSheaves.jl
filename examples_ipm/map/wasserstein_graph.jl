@@ -215,6 +215,256 @@ function wg_smooth_barycenter(νs, xs, λs; λsmooth::Float64 = 0.02, ε = 1e-9)
                Dict(1 => λsmooth .* wg_path_laplacian(length(xs))))
 end
 
+# ---- LIFTED Laplacian formulation ----------------------------------------
+# Instead of one cell with dense ns*nt × ns*nt Gram, we lift:
+#   • ns*nt vertex cells (one per coupling entry π_ij)
+#   • edge cells for source/target Laplacian differences
+# Q becomes diagonal on edge cells. Dense Kronecker → sparse lifted.
+
+"""Extract edges from a similarity-based Laplacian (threshold small weights)."""
+function laplacian_edges(S::Matrix{Float64}; thresh::Float64 = 1e-6)
+    n = size(S, 1)
+    edges = Tuple{Int, Int, Float64}[]
+    for i in 1:n, j in (i + 1):n
+        S[i, j] > thresh && push!(edges, (i, j, S[i, j]))
+    end
+    return edges
+end
+
+"""LIFTED Laplacian-regularized OT: each coupling entry is a vertex cell,
+edge cells capture (π_ij - π_kj) for source edges (i,k) and (π_ij - π_il)
+for target edges (j,l). Q is DIAGONAL on edge cells.
+
+Variables:
+  • v_{ij} = π_ij  for i=1..ns, j=1..nt  (vertex cells, PositiveCone)
+  • y^s_{(ik)j} for each source edge (i,k) and target j  (edge cells, CofreeCone)
+  • y^t_{i(jl)} for each target edge (j,l) and source i  (edge cells, CofreeCone)
+
+Agreements:
+  • y^s_{(ik)j} = π_ij - π_kj  (source edge × target)
+  • y^t_{i(jl)} = π_ij - π_il  (source × target edge)
+  • marginal constraints: Σ_j π_ij = μ_i, Σ_i π_ij = ν_j
+
+Objective:
+  • Σ_{ij} M_ij π_ij  (linear cost)
+  • + α·η · Σ_{(ik),j} ||Xt_j||² (y^s_{(ik)j})²  (source smoothness)
+  • + (1-α)·η · Σ_{i,(jl)} ||Xs_i||² (y^t_{i(jl)})²  (target smoothness)
+"""
+function build_lifted_laplace_problem(; ns::Int = 20, nt::Int = 20, seed::Int = 7,
+                                      α::Float64 = 0.5, η::Float64 = 0.4, σ::Float64 = 0.8,
+                                      edge_thresh::Float64 = 0.1, ε::Float64 = 1e-9)
+    rng = MersenneTwister(seed)
+    Xs = randn(rng, ns, 2)
+    Xt = randn(rng, nt, 2) .+ [1.5 0.5]
+    M = [sum(abs2, Xs[i, :] .- Xt[j, :]) for i in 1:ns, j in 1:nt]
+
+    # Similarity matrices and edges
+    Ss = wg_gauss_sim(Xs, σ)
+    St = wg_gauss_sim(Xt, σ)
+    Es = laplacian_edges(Ss; thresh = edge_thresh)
+    Et = laplacian_edges(St; thresh = edge_thresh)
+
+    # Feature norms squared
+    Xs_norm2 = [sum(abs2, Xs[i, :]) for i in 1:ns]
+    Xt_norm2 = [sum(abs2, Xt[j, :]) for j in 1:nt]
+
+    # Indexing: v_{ij} at cell (i-1)*nt + j for i=1..ns, j=1..nt
+    # Then source edge cells, then target edge cells
+    nv_coupling = ns * nt
+    nv_source_edges = length(Es) * nt
+    nv_target_edges = length(Et) * ns
+    nv = nv_coupling + nv_source_edges + nv_target_edges
+
+    vdims = ones(Int, nv)  # all 1D cells
+
+    # Build agreement matrix B and RHS g
+    row_ids = Int[]; col_ids = Int[]; blks = Matrix{Float64}[]
+    place!(e, v, m) = (push!(row_ids, e); push!(col_ids, v); push!(blks, reshape([m], 1, 1)))
+    gval = Dict{Int, Vector{Float64}}()
+    ec = Ref(0)
+
+    # Source edge agreements: y^s_{(ik)j} = π_ij - π_kj
+    for (t, (i, k, _)) in enumerate(Es)
+        for j in 1:nt
+            v_coup_ij = (i - 1) * nt + j
+            v_coup_kj = (k - 1) * nt + j
+            v_edge = nv_coupling + (t - 1) * nt + j
+            id = (ec[] += 1)
+            place!(id, v_coup_ij, 1.0)
+            place!(id, v_coup_kj, -1.0)
+            place!(id, v_edge, -1.0)
+            gval[id] = [0.0]
+        end
+    end
+
+    # Target edge agreements: y^t_{i(jl)} = π_ij - π_il
+    for (t, (j, l, _)) in enumerate(Et)
+        for i in 1:ns
+            v_coup_ij = (i - 1) * nt + j
+            v_coup_il = (i - 1) * nt + l
+            v_edge = nv_coupling + nv_source_edges + (t - 1) * ns + i
+            id = (ec[] += 1)
+            place!(id, v_coup_ij, 1.0)
+            place!(id, v_coup_il, -1.0)
+            place!(id, v_edge, -1.0)
+            gval[id] = [0.0]
+        end
+    end
+
+    # Row marginal: Σ_j π_ij = 1/ns
+    for i in 1:ns
+        id = (ec[] += 1)
+        for j in 1:nt
+            place!(id, (i - 1) * nt + j, 1.0)
+        end
+        gval[id] = [1.0 / ns]
+    end
+
+    # Column marginal: Σ_i π_ij = 1/nt
+    for j in 1:nt
+        id = (ec[] += 1)
+        for i in 1:ns
+            place!(id, (i - 1) * nt + j, 1.0)
+        end
+        gval[id] = [1.0 / nt]
+    end
+
+    B = blocksparse(row_ids, col_ids, blks)
+    g = zeros(size(B, 1))
+    for (e, v) in gval
+        g[rowrange(B, e)] .= v
+    end
+
+    # Build Q (diagonal on edge cells) and c (linear cost)
+    Q = IPM.allocblockdiag(B); fill!(Q, 0)
+    c = zeros(size(B, 2))
+
+    # Linear cost on coupling cells
+    for i in 1:ns, j in 1:nt
+        v = (i - 1) * nt + j
+        c[colrange(B, v)] .= M[i, j]
+        block(Q, v, v, v) .= reshape([ε], 1, 1)  # tiny regularization
+    end
+
+    # Source edge Q: 2 * α * η * ||Xt_j||² * w_{ik}
+    for (t, (i, k, w_ik)) in enumerate(Es)
+        for j in 1:nt
+            v_edge = nv_coupling + (t - 1) * nt + j
+            qval = 2.0 * α * η * Xt_norm2[j] * w_ik
+            block(Q, v_edge, v_edge, v_edge) .= reshape([qval + ε], 1, 1)
+        end
+    end
+
+    # Target edge Q: 2 * (1-α) * η * ||Xs_i||² * w_{jl}
+    for (t, (j, l, w_jl)) in enumerate(Et)
+        for i in 1:ns
+            v_edge = nv_coupling + nv_source_edges + (t - 1) * ns + i
+            qval = 2.0 * (1.0 - α) * η * Xs_norm2[i] * w_jl
+            block(Q, v_edge, v_edge, v_edge) .= reshape([qval + ε], 1, 1)
+        end
+    end
+
+    # Cones: coupling cells are PositiveCone, edge cells are CofreeCone
+    cones = AbstractCone[]
+    for v in 1:nv_coupling
+        push!(cones, PositiveCone())
+    end
+    for v in 1:(nv_source_edges + nv_target_edges)
+        push!(cones, CofreeCone())
+    end
+
+    prob = IPMProblem(Q, B, c, g, cones)
+    info = (ns = ns, nt = nt, nv = nv, nv_coupling = nv_coupling,
+            n_source_edges = length(Es), n_target_edges = length(Et),
+            cupcols = [colrange(B, v) for v in 1:nv_coupling])
+    return prob, info
+end
+
+"""Lifted Laplacian demo: compare dense vs lifted formulations."""
+function wg_lifted_laplace_demo(; ns::Int = 20, nt::Int = 20, kwargs...)
+    # Dense version
+    inst_dense = wg_laplace_instance(; ns, nt, kwargs...)
+    prob_dense, info_dense = build_wg_problem(inst_dense)
+    settings = wg_settings()
+    res_dense = solve(prob_dense, settings)
+    t_dense = @elapsed solve(prob_dense, settings)
+
+    # Lifted version
+    prob_lifted, info_lifted = build_lifted_laplace_problem(; ns, nt, kwargs...)
+    res_lifted = solve(prob_lifted, settings)
+    t_lifted = @elapsed solve(prob_lifted, settings)
+
+    @printf("Laplacian-OT %dx%d:\n", ns, nt)
+    @printf("  Dense:  |V|=%d  DOF=%d  obj=%.6f  %.1fms  it=%d %s\n",
+            1, size(prob_dense.B, 2), prob_dense.c' * res_dense.p,
+            t_dense * 1000, res_dense.niter, res_dense.status)
+    @printf("  Lifted: |V|=%d  DOF=%d  obj=%.6f  %.1fms  it=%d %s\n",
+            info_lifted.nv, size(prob_lifted.B, 2), prob_lifted.c' * res_lifted.p,
+            t_lifted * 1000, res_lifted.niter, res_lifted.status)
+    @printf("  Source edges: %d, Target edges: %d\n",
+            info_lifted.n_source_edges, info_lifted.n_target_edges)
+    return (dense = (prob_dense, res_dense), lifted = (prob_lifted, res_lifted))
+end
+
+# ---- LIFTED quadreg: split diagonal Q into scalar cells ----------------------
+
+"""LIFTED quadratic-regularized OT: each π_ij is its own 1D cell with Q=η.
+Transforms diagonal Q in one big cell → scalar Q in ns*nt cells."""
+function build_lifted_quadreg_problem(; n::Int = 25, η::Float64 = 0.5, seed::Int = 7, ε::Float64 = 1e-9)
+    rng = MersenneTwister(seed)
+    xs = collect(range(0, 1, length = n))
+    ν1 = abs.(randn(rng, n)) .+ 0.05; ν1 ./= sum(ν1)
+    ν2 = abs.(randn(rng, n)) .+ 0.05; ν2 ./= sum(ν2)
+    M = quad_cost(xs, xs)
+
+    # Each coupling entry is a 1D cell
+    nv = n * n
+    vdims = ones(Int, nv)
+
+    row_ids = Int[]; col_ids = Int[]; blks = Matrix{Float64}[]
+    place!(e, v, m) = (push!(row_ids, e); push!(col_ids, v); push!(blks, reshape([m], 1, 1)))
+    gval = Dict{Int, Vector{Float64}}()
+    ec = Ref(0)
+
+    # Row marginals: Σ_j π_ij = ν1_i
+    for i in 1:n
+        id = (ec[] += 1)
+        for j in 1:n
+            place!(id, (i - 1) * n + j, 1.0)
+        end
+        gval[id] = [ν1[i]]
+    end
+
+    # Column marginals: Σ_i π_ij = ν2_j
+    for j in 1:n
+        id = (ec[] += 1)
+        for i in 1:n
+            place!(id, (i - 1) * n + j, 1.0)
+        end
+        gval[id] = [ν2[j]]
+    end
+
+    B = blocksparse(row_ids, col_ids, blks)
+    g = zeros(size(B, 1))
+    for (e, v) in gval
+        g[rowrange(B, e)] .= v
+    end
+
+    # Q = η on each cell (diagonal!)
+    Q = IPM.allocblockdiag(B); fill!(Q, 0)
+    c = zeros(size(B, 2))
+    for i in 1:n, j in 1:n
+        v = (i - 1) * n + j
+        c[colrange(B, v)] .= M[i, j]
+        block(Q, v, v, v) .= reshape([η + ε], 1, 1)
+    end
+
+    cones = AbstractCone[PositiveCone() for _ in 1:nv]
+    prob = IPMProblem(Q, B, c, g, cones)
+    info = (n = n, nv = nv, h1 = 1)
+    return prob, info
+end
+
 # ---- H¹ law (measured; see header) --------------------------------------
 
 function wg_h1_predict(inst::WGInstance)
@@ -517,36 +767,105 @@ function build_jump_wg(inst::WGInstance, optimizer)
     return model, π, μ
 end
 
+"""JuMP model for lifted Laplacian OT (diagonal Q on auxiliary edge variables)."""
+function build_jump_lifted_laplace(; ns::Int = 20, nt::Int = 20, seed::Int = 7,
+                                   α::Float64 = 0.5, η::Float64 = 0.4, σ::Float64 = 0.8,
+                                   edge_thresh::Float64 = 0.1, ε::Float64 = 1e-9, optimizer = nothing)
+    rng = MersenneTwister(seed)
+    Xs = randn(rng, ns, 2)
+    Xt = randn(rng, nt, 2) .+ [1.5 0.5]
+    M = [sum(abs2, Xs[i, :] .- Xt[j, :]) for i in 1:ns, j in 1:nt]
+    Ss = wg_gauss_sim(Xs, σ)
+    St = wg_gauss_sim(Xt, σ)
+    Es = laplacian_edges(Ss; thresh = edge_thresh)
+    Et = laplacian_edges(St; thresh = edge_thresh)
+    Xs_norm2 = [sum(abs2, Xs[i, :]) for i in 1:ns]
+    Xt_norm2 = [sum(abs2, Xt[j, :]) for j in 1:nt]
+
+    model = Model(optimizer); set_silent(model)
+    @variable(model, π[1:ns, 1:nt] >= 0)
+    # Source edge variables: y^s_{(ik),j} = π_ij - π_kj
+    @variable(model, ys[1:length(Es), 1:nt])
+    # Target edge variables: y^t_{(jl),i} = π_ij - π_il
+    @variable(model, yt[1:length(Et), 1:ns])
+
+    # Edge definitions
+    for (t, (i, k, _)) in enumerate(Es)
+        for j in 1:nt
+            @constraint(model, ys[t, j] == π[i, j] - π[k, j])
+        end
+    end
+    for (t, (j, l, _)) in enumerate(Et)
+        for i in 1:ns
+            @constraint(model, yt[t, i] == π[i, j] - π[i, l])
+        end
+    end
+
+    # Marginals: uniform
+    @constraint(model, [i in 1:ns], sum(π[i, :]) == 1.0 / ns)
+    @constraint(model, [j in 1:nt], sum(π[:, j]) == 1.0 / nt)
+
+    # Objective: linear cost + diagonal quadratics on edge variables
+    @objective(model, Min,
+        sum(M[i, j] * π[i, j] + 0.5 * ε * π[i, j]^2 for i in 1:ns, j in 1:nt) +
+        sum(0.5 * (2.0 * α * η * Xt_norm2[j] * Es[t][3] + ε) * ys[t, j]^2 for t in 1:length(Es), j in 1:nt) +
+        sum(0.5 * (2.0 * (1.0 - α) * η * Xs_norm2[i] * Et[t][3] + ε) * yt[t, i]^2 for t in 1:length(Et), i in 1:ns))
+
+    info = (ns = ns, nt = nt)
+    return model, info
+end
+
+"""JuMP model for lifted quadreg OT (diagonal Q = η on each coupling entry)."""
+function build_jump_lifted_quadreg(; n::Int = 25, η::Float64 = 0.5, seed::Int = 7,
+                                   ε::Float64 = 1e-9, optimizer = nothing)
+    rng = MersenneTwister(seed)
+    xs = collect(range(0, 1, length = n))
+    ν1 = abs.(randn(rng, n)) .+ 0.05; ν1 ./= sum(ν1)
+    ν2 = abs.(randn(rng, n)) .+ 0.05; ν2 ./= sum(ν2)
+    M = quad_cost(xs, xs)
+
+    model = Model(optimizer); set_silent(model)
+    @variable(model, π[1:n, 1:n] >= 0)
+
+    @constraint(model, [i in 1:n], sum(π[i, :]) == ν1[i])
+    @constraint(model, [j in 1:n], sum(π[:, j]) == ν2[j])
+
+    @objective(model, Min, sum(M[i, j] * π[i, j] + 0.5 * (η + ε) * π[i, j]^2 for i in 1:n, j in 1:n))
+
+    info = (n = n,)
+    return model, info
+end
+
 # ---- benchmark -----------------------------------------------------------
 
 function run_wg_benchmark(; optimizer = nothing, dual_optimizer = nothing,
-                          nwarmup::Int = 2, nruns::Int = 5)
+                          nwarmup::Int = 2, nruns::Int = 5, solver_name::String = "Ref")
     optimizer === nothing && error("Pass optimizer, e.g. run_wg_benchmark(optimizer=Mosek.Optimizer)")
-    # (inst_fn, label, raug) — real Q cases, raug tuned
+    # Standard cases (inst_fn, label, raug) — only truly pairwise problems
     cases = [
         (() -> wg_binary_triangle(), "tri LP", 1e5),
         (() -> wg_cycle_instance(; K = 4, n = 15), "4-cyc LP", 1e4),
-        (() -> wg_laplace_instance(; ns = 20, nt = 20), "laplace 20", 1e0),
-        (() -> wg_laplace_instance(; ns = 30, nt = 30), "laplace 30", 1e2),
-        (() -> wg_instance([range(0,1,25)|>collect, range(0,1,25)|>collect], [(1,2)],
-                           [quad_cost(range(0,1,25), range(0,1,25))],
-                           Dict(1 => fill(1/25,25), 2 => fill(1/25,25)); η = 0.5),
-         "quadreg 25", 1e3),
         (() -> wg_smooth_barycenter([fill(1/20,20), fill(1/20,20), fill(1/20,20)],
                                     collect(range(0,1,20)), [0.33,0.33,0.34]; λsmooth = 0.1),
          "smooth bary", 1e5),
     ]
-    println("="^85)
-    println("Wasserstein Graph Benchmark (real Q): Sheaf IPM vs Mosek vs Mosek-D")
-    println("="^85)
+    # Lifted cases: diagonal Q decomposed into scalar cells
+    lifted_cases = [
+        (() -> build_lifted_quadreg_problem(; n = 25, η = 0.5), "quadreg 25 (lifted)", 1e3),
+        (() -> build_lifted_laplace_problem(; ns = 15, nt = 15, edge_thresh = 0.3), "laplace 15 (lifted)", 1e2),
+        (() -> build_lifted_laplace_problem(; ns = 20, nt = 20, edge_thresh = 0.4), "laplace 20 (lifted)", 1e2),
+    ]
+    println("="^95)
+    @printf("Wasserstein Graph Benchmark: Sheaf IPM vs %s\n", solver_name)
+    println("="^95)
     if dual_optimizer !== nothing
-        @printf("%-12s %5s %5s %5s %9s %9s %9s %7s %7s\n",
-                "Config", "DOF", "|V|", "H1", "IPM(ms)", "Mosek", "Mosek-D", "P/IPM", "D/IPM")
+        @printf("%-20s %6s %5s %5s %5s %9s %9s %9s %7s %7s\n",
+                "Config", "raug", "DOF", "|V|", "H1", "IPM(ms)", solver_name, solver_name * "-D", "P/IPM", "D/IPM")
     else
-        @printf("%-12s %5s %5s %5s %9s %9s %8s\n",
-                "Config", "DOF", "|V|", "H1", "IPM(ms)", "Mosek", "speedup")
+        @printf("%-20s %6s %5s %5s %5s %9s %9s %8s\n",
+                "Config", "raug", "DOF", "|V|", "H1", "IPM(ms)", solver_name, "speedup")
     end
-    println("-"^85)
+    println("-"^95)
     for (inst_fn, label, raug) in cases
         inst = inst_fn()
         prob, info = build_wg_problem(inst)
@@ -568,13 +887,73 @@ function run_wg_benchmark(; optimizer = nothing, dual_optimizer = nothing,
             t_dual = minimum([@elapsed begin
                 m, _, _ = build_jump_wg(inst, dual_optimizer); optimize!(m)
             end for _ in 1:nruns])
-            @printf("%-12s %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
-                    label, size(prob.B, 2), info.nv, info.h1,
+            @printf("%-20s %6.0e %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    label, raug, size(prob.B, 2), info.nv, info.h1,
                     t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
                     t_mosek / t_ipm, t_dual / t_ipm)
         else
-            @printf("%-12s %5d %5d %5d %9.1f %9.1f %7.2fx\n",
-                    label, size(prob.B, 2), info.nv, info.h1,
+            @printf("%-20s %6.0e %5d %5d %5d %9.1f %9.1f %7.2fx\n",
+                    label, raug, size(prob.B, 2), info.nv, info.h1,
+                    t_ipm * 1000, t_mosek * 1000, t_mosek / t_ipm)
+        end
+    end
+
+    # Lifted cases: IPM and Mosek both on lifted formulation
+    for (build_fn, label, raug) in lifted_cases
+        prob, info = build_fn()
+        nv = info.nv
+        h1 = haskey(info, :h1) ? info.h1 : 1
+        settings = wg_settings(; raug)
+        for _ in 1:nwarmup; solve(prob, settings); end
+        t_ipm = minimum([@elapsed solve(prob, settings) for _ in 1:nruns])
+
+        # Build lifted JuMP model (same structure)
+        if haskey(info, :ns)  # laplace case
+            ns, nt = info.ns, info.nt
+            for _ in 1:nwarmup
+                m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer); optimize!(m)
+            end
+            t_mosek = minimum([@elapsed begin
+                m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer); optimize!(m)
+            end for _ in 1:nruns])
+            if dual_optimizer !== nothing
+                for _ in 1:nwarmup
+                    m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer = dual_optimizer); optimize!(m)
+                end
+                t_dual = minimum([@elapsed begin
+                    m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer = dual_optimizer); optimize!(m)
+                end for _ in 1:nruns])
+            else
+                t_dual = Inf
+            end
+        else  # quadreg case
+            n = info.n
+            for _ in 1:nwarmup
+                m, _ = build_jump_lifted_quadreg(; n, optimizer); optimize!(m)
+            end
+            t_mosek = minimum([@elapsed begin
+                m, _ = build_jump_lifted_quadreg(; n, optimizer); optimize!(m)
+            end for _ in 1:nruns])
+            if dual_optimizer !== nothing
+                for _ in 1:nwarmup
+                    m, _ = build_jump_lifted_quadreg(; n, optimizer = dual_optimizer); optimize!(m)
+                end
+                t_dual = minimum([@elapsed begin
+                    m, _ = build_jump_lifted_quadreg(; n, optimizer = dual_optimizer); optimize!(m)
+                end for _ in 1:nruns])
+            else
+                t_dual = Inf
+            end
+        end
+
+        if dual_optimizer !== nothing && t_dual < Inf
+            @printf("%-20s %6.0e %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
+                    label, raug, size(prob.B, 2), nv, h1,
+                    t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
+                    t_mosek / t_ipm, t_dual / t_ipm)
+        else
+            @printf("%-20s %6.0e %5d %5d %5d %9.1f %9.1f %7.2fx\n",
+                    label, raug, size(prob.B, 2), nv, h1,
                     t_ipm * 1000, t_mosek * 1000, t_mosek / t_ipm)
         end
     end
@@ -588,15 +967,17 @@ if abspath(PROGRAM_FILE) == @__FILE__
         using MosekTools
         optimizer = Mosek.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
+        solver_name = "Mosek"
         println("Solver: Mosek + Mosek-D")
     else
-        using Clarabel
-        optimizer = Clarabel.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        println("Solver: Clarabel + Clarabel-D (open-source)")
+        using OSQP
+        optimizer = OSQP.Optimizer
+        dual_optimizer = Dualization.dual_optimizer(OSQP.Optimizer)
+        solver_name = "OSQP"
+        println("Solver: OSQP + OSQP-D (open-source)")
     end
     println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
 
-    run_wg_benchmark(; optimizer, dual_optimizer,
+    run_wg_benchmark(; optimizer, dual_optimizer, solver_name,
                      nwarmup = opts.nwarmup, nruns = opts.nruns)
 end

@@ -74,6 +74,26 @@ AC-OPF relaxations as a ladder of covers. Tests SOC, SDP, and mixed cones with n
 
 See [opf/README.md](opf/README.md) for details.
 
+### 4. Obstacle / American Options (`obstacle/`)
+
+Obstacle problems where Q **is** the problem (PDE energy), not regularization. Features macroscopic active sets and Schwarz domain decomposition.
+
+| File | Cones | Description |
+|------|-------|-------------|
+| `obstacle_option.jl` | LP | Perpetual/American puts, game options |
+
+See [obstacle/README.md](obstacle/README.md) for details.
+
+### 5. Network Utility Maximization (`num/`)
+
+Kelly's NUM framework as a sheaf — the fairness ladder maps to cones, and **the dual is TCP congestion control**.
+
+| File | Cones | Description |
+|------|-------|-------------|
+| `num_sheaf.jl` | LP/Exp/SOC | Four fairness modes, Kelly's identity |
+
+See [num/README.md](num/README.md) for details.
+
 ## What We Measure
 
 Each benchmark reports:

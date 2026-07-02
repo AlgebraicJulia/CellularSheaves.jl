@@ -425,7 +425,7 @@ end
 """Benchmark IPM vs Mosek on Gaussian Wasserstein problems.
 Dense Q (Higham weights) → IPM wins 5-40x; diagonal Q → Mosek wins."""
 function run_gw_benchmark(; optimizer = nothing, dual_optimizer = nothing,
-                          nwarmup::Int = 2, nruns::Int = 5)
+                          solver_name::String = "Mosek", nwarmup::Int = 2, nruns::Int = 5)
     cases = [
         # (builder, label, raug)
         # Transport (Q = εI, diagonal) — small d favors IPM
@@ -478,8 +478,10 @@ function run_gw_benchmark(; optimizer = nothing, dual_optimizer = nothing,
          end, "Higham grid 6x6", 1e1),
     ]
 
-    println("Config           DOF   |V|   IPM(ms)     Mosek   Mosek-D   P/IPM   D/IPM")
-    println("-" ^ 75)
+    sname = rpad(solver_name, 9)
+    sname_d = rpad(solver_name * "-D", 9)
+    @printf("Config           raug   DOF   |V|   IPM(ms)   %s %s  P/IPM   D/IPM\n", sname, sname_d)
+    println("-" ^ 85)
 
     for (builder, label, raug) in cases
         inst = builder()
@@ -523,8 +525,8 @@ function run_gw_benchmark(; optimizer = nothing, dual_optimizer = nothing,
 
         rat_p = t_mosek < Inf ? t_mosek / t_ipm : NaN
         rat_d = t_mosek_d < Inf ? t_mosek_d / t_ipm : NaN
-        @printf("%-16s %4d  %4d  %8.1f  %8.1f  %8.1f  %5.2fx  %5.2fx\n",
-                label, dof, info.nv, t_ipm, t_mosek, t_mosek_d, rat_p, rat_d)
+        @printf("%-16s %6.0e %4d  %4d  %8.1f  %8.1f  %8.1f  %5.2fx  %5.2fx\n",
+                label, raug, dof, info.nv, t_ipm, t_mosek, t_mosek_d, rat_p, rat_d)
     end
 end
 
@@ -537,19 +539,20 @@ if abspath(PROGRAM_FILE) == @__FILE__
     using Dualization
 
     opts = parse_benchmark_args(ARGS)
-    println("Gaussian Wasserstein benchmark")
-    println("Solver: $(opts.mosek ? "Mosek" : "Clarabel (open-source)")")
-    println()
-
     if opts.mosek
         using MosekTools
         optimizer = Mosek.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
+        solver_name = "Mosek"
     else
         using Clarabel
         optimizer = Clarabel.Optimizer
         dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
+        solver_name = "Clarabel"
     end
+    println("Gaussian Wasserstein benchmark")
+    println("Solver: $solver_name")
+    println()
 
-    run_gw_benchmark(; optimizer, dual_optimizer, nwarmup = opts.nwarmup, nruns = opts.nruns)
+    run_gw_benchmark(; optimizer, dual_optimizer, solver_name, nwarmup = opts.nwarmup, nruns = opts.nruns)
 end
