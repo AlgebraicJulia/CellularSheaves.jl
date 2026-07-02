@@ -176,13 +176,15 @@ function sdpscale!(
     #
     #   P = LP LPᵀ
     #
-    cholesky!(Symmetric(LP, :L))
+    FP = cholesky!(Symmetric(LP, :L); check=false)
+    issuccess(FP) || return false
     #
     # factorize D:
     #
     #   D = LD LDᵀ
     #
-    cholesky!(Symmetric(LD, :L))
+    FD = cholesky!(Symmetric(LD, :L); check=false)
+    issuccess(FD) || return false
     #
     # factorize the product LPᵀ LD
     #
@@ -208,7 +210,7 @@ function sdpscale!(
     #
     skron!(H, W)
 
-    return
+    return true
 end
 
 # Compute the corrector term

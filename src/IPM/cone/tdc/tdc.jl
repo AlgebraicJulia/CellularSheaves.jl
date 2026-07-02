@@ -151,7 +151,7 @@ function tdscale!(
     #
     #   d = -f'(p*)
     #
-    seed_new = tddualgrad!(sp, seed, d, cache)
+    next = tddualgrad!(sp, seed, d, cache)
     #
     # compute the centrality parameters
     #
@@ -233,7 +233,7 @@ function tdscale!(
         end
     end
 
-    return seed_new
+    return true, next
 end
 
 # Compute the Mehrotra corrector term
@@ -334,8 +334,9 @@ function cachesize(::AbstractTDCone, n::Integer)
 end
 
 function scale!(H::AbstractMatrix{T}, p::AbstractVector{T}, d::AbstractVector{T}, cache::AbstractTDConeCache{C, T}, wrk::ConeWorkspace{T}) where {C, T}
-    cache.seed[] = tdscale!(H, cache.L, cache.sd, cache.seed[], p, d, cache, wrk)
-    return H
+    flag, seed = tdscale!(H, cache.L, cache.sd, cache.seed[], p, d, cache, wrk)
+    cache.seed[] = seed
+    return flag
 end
 
 function corr!(r::AbstractVector{T}, p::AbstractVector{T}, d::AbstractVector{T}, Δp::AbstractVector{T}, Δd::AbstractVector{T}, σμ::Real, cache::AbstractTDConeCache{C, T}, wrk::ConeWorkspace{T}) where {C, T}

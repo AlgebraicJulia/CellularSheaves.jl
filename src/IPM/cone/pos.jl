@@ -39,7 +39,7 @@ function posscale!(H::AbstractMatrix, p::AbstractVector, d::AbstractVector)
         H[i, i] = d[i] / p[i]
     end
 
-    return H
+    return true
 end
 
 # Compute the corrector term

@@ -77,9 +77,9 @@ function scale!(
     r = colrange(B, v)
     Hv = block(H, v, v, v)
     cv = cache(caches, v, cone)
-    scale!(Hv, view(p, r), view(d, r), cv, conewrk)
+    ok = scale!(Hv, view(p, r), view(d, r), cv, conewrk)
     axpy!(true, block(Q, v, v, v), Hv)
-    return
+    return ok
 end
 
 function newton!(
@@ -441,11 +441,22 @@ function step!(s::IPMSolver{T}) where {T}
         # where f is the barrier function and
         # w is the scaling point.
         #
+        flag = true
         for v in vtxs(s.B)
-            scale!(s.K[v], v, s.H, s.caches, s.p, s.d, s.B, s.Q, s.conewrk)
+            flag = flag && scale!(s.K[v], v, s.H, s.caches, s.p, s.d, s.B, s.Q, s.conewrk)
         end
 
-        if !initkkt!(s)
+        if !flag
+            if s.settings.verbose
+                @warn "Cone scaling failed (iterate left interior)."
+            end
+
+            if isnearoptimal(s)
+                status = NEAR_OPTIMAL
+            else
+                status = NUMERICAL_FAILURE
+            end
+        elseif !initkkt!(s)
             if s.settings.verbose
                 @warn "Failed to initialize KKT solver."
             end

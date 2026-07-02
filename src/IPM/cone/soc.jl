@@ -164,6 +164,14 @@ function socscale!(
     #
     pdet = socdet(p)
     ddet = socdet(d)
+    #
+    # ensure that p and d are strictly interior:
+    #
+    #   p ∈ ri K
+    #   d ∈ ri K
+    #
+    (pdet > 0 && p[1] > 0) || return false, zero(T)
+    (ddet > 0 && d[1] > 0) || return false, zero(T)
 
     pdot = cdot(p, d)
 
@@ -199,7 +207,7 @@ function socscale!(
         end
     end
 
-    return β
+    return true, β
 end
 
 function soccorr!(
@@ -350,8 +358,9 @@ function identity!(x::AbstractVector, ::SecondOrderCone)
 end
 
 function scale!(H::AbstractMatrix, p::AbstractVector, d::AbstractVector, cache::SecondOrderConeCache, ::ConeWorkspace)
-    cache.β[] = socscale!(H, cache.w, p, d)
-    return H
+    flag, β = socscale!(H, cache.w, p, d)
+    cache.β[] = β
+    return flag
 end
 
 function corr!(

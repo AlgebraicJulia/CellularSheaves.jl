@@ -37,7 +37,7 @@ end
 
 function scale!(H::AbstractMatrix{T}, ::AbstractVector{T}, ::AbstractVector{T}, ::CofreeConeCache, ::ConeWorkspace) where {T}
     fill!(H, zero(T))
-    return H
+    return true
 end
 
 function corr!(
