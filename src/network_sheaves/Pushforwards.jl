@@ -71,7 +71,7 @@ function fiber_section_basis(F, verts::Vector{Int}, fedges::Vector{Tuple{Int,Int
                         get_restriction_map(F, a, b),
                         get_restriction_map(F, b, a))
     end
-    d_fib = sparse(coboundary_map(Fib))
+    d_fib = coboundary_map(Fib)
     return nullspace_ldlt(d_fib' * d_fib)
 end
 

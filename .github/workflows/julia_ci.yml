@@ -41,6 +41,7 @@ jobs:
     uses: AlgebraicJulia/.github/.github/workflows/julia_ci.yml@main
     with:
       docs: false  # Documentation is built and deployed by docs.yml with caching
+      test_versions: "['1']"  # Overrides the default ['1.10', '1']
     secrets: inherit
   CompatHelper:
     if: github.event_name == 'schedule'

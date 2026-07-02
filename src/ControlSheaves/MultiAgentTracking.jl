@@ -16,7 +16,7 @@ using ArgCheck
 using CliqueTrees.Multifrontal
 
 using ...NetworkSheaves: EuclideanSheaf, add_sheaf_edge!, harmonic_extension,
-                          sheaf_laplacian_matrix_direct,
+                          sheaf_laplacian_matrix,
                           ldlt_pseudoinverse_and_null, ldlt_pinv_solve
 
 export TrackingEdge, TrackingProblem, BobbingTarget, ScenarioResult
@@ -68,7 +68,7 @@ using .QuadraticCosts: build_control_cost_matrix, solve_quadratic_on_basis
 Build the sheaf from `prob`, run `harmonic_extension`, compute the Laplacian
 energy `sqrt(z' * L * z)`, and return a `ScenarioResult`.
 
-`sheaf_laplacian_matrix_direct` is used for the energy (rather than
+`sheaf_laplacian_matrix` is used for the energy (rather than
 `coboundary_map`) because the coboundary matrix only spans vertices appearing
 in at least one edge; isolated target vertices (when
 `include_target_dynamics = false`) would cause a dimension mismatch.
@@ -92,7 +92,7 @@ function run_scenario(
     # -------------------------------------------------------------------
     sheaf = build_time_expanded_tracking_sheaf(prob)
     z_harmonic, null_basis = harmonic_extension(sheaf, boundary)
-    L  = sheaf_laplacian_matrix_direct(sheaf)
+    L  = sheaf_laplacian_matrix(sheaf)
     z_harmonic_array = Array(z_harmonic)
     nd = size(null_basis, 2)
 
@@ -292,7 +292,7 @@ projection to produce a dense operator `M` so each MPC step is `M * x_B`.
 function tracking_extension_operator(window_prob::TrackingProblem; cost::Union{Number,Function}=1.0)
     W      = window_prob.k
     sheaf  = build_time_expanded_tracking_sheaf(window_prob; state_only_initial=true)
-    L      = sheaf_laplacian_matrix_direct(sheaf)
+    L      = sparse(sheaf_laplacian_matrix(sheaf))
     stalks = sheaf.vertex_stalks
 
     boundary = _window_boundary_dofs(window_prob, stalks)
@@ -439,7 +439,7 @@ function run_mpc_scenario(
                 z_arr = solve_quadratic_on_basis(z_arr, N, build_control_cost_matrix(local_prob, sheaf.vertex_stalks, cost))
             end
             t == 0 && (nd = size(N, 2))
-            x_now, residual = _finish_step(local_prob, z_arr, sheaf_laplacian_matrix_direct(sheaf), sheaf.vertex_stalks)
+            x_now, residual = _finish_step(local_prob, z_arr, sheaf_laplacian_matrix(sheaf), sheaf.vertex_stalks)
         end
 
         for i in 1:prob.n_agents; agent_trajs[i][t+2, :] = x_now[i]; end

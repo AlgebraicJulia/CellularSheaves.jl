@@ -4,6 +4,10 @@ using Test
   include("aqua.jl")
 end
 
+@testset "Block Sparse Arrays" begin
+  include("block_sparse_arrays.jl")
+end
+
 @testset "Network Sheaves" begin
   include("network_sheaves/Asynch.jl")
   include("network_sheaves/ADT.jl")

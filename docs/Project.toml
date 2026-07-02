@@ -13,3 +13,6 @@ Literate = "98b081ad-f1c9-55d3-8b20-4c87d4299306"
 PackageCompiler = "9b87118b-4619-50d2-8e1e-99f35a4d4d9d"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+
+[sources]
+CellularSheaves = {path = ".."}

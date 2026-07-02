@@ -45,12 +45,10 @@ end
 SUITE["laplacian"] = BenchmarkGroup()
 for (name, _) in FACTORIES
     SUITE["laplacian"][name] = BenchmarkGroup()
-    #SUITE["laplacian"][name]["matrix"] = BenchmarkGroup()
-    SUITE["laplacian"][name]["matrix_direct"] = BenchmarkGroup()
+    SUITE["laplacian"][name]["matrix"] = BenchmarkGroup()
     for n in SIZES
         s = SHEAVES[(name, n)]
-        #SUITE["laplacian"][name]["matrix"][n] = @benchmarkable sheaf_laplacian_matrix($s)
-        SUITE["laplacian"][name]["matrix_direct"]["n$n"] = @benchmarkable sheaf_laplacian_matrix_direct($s)
+        SUITE["laplacian"][name]["matrix"]["n$n"] = @benchmarkable sparse(sheaf_laplacian_matrix($s))
     end
 end
 

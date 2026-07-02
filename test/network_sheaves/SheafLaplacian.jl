@@ -4,37 +4,33 @@ using LinearAlgebra
 using Graphs
 using SparseArrays
 
-@testset "sheaf_laplacian_matrix_direct" begin
+@testset "sheaf_laplacian_matrix" begin
     # ── helper: path graph with identity restriction maps ──────────────────
     g = path_graph(5)
     s = sheaf_from_graph(g, 1, d -> Matrix{Float64}(I, d, d); symmetric_edges=true)
 
-    L_old  = Array(sheaf_laplacian_matrix(s))
-    L_new  = Array(sheaf_laplacian_matrix_direct(s))
+    L = sheaf_laplacian_matrix(s)
+    L_sparse = sparse(L)
 
-    # 1. Returns a sparse matrix
-    @test sheaf_laplacian_matrix_direct(s) isa SparseMatrixCSC
+    # 1. sparse() returns a SparseMatrixCSC
+    @test L_sparse isa SparseMatrixCSC
 
-    # 2. Identical (up to float precision) to coboundary-based formula
-    @test L_new ≈ L_old
-
-    # 3. Symmetric
-    @test issymmetric(L_new)
+    # 2. Symmetric
+    @test issymmetric(Array(L))
 
     # ── 2-D stalk sheaf ────────────────────────────────────────────────────
     s2 = sheaf_from_graph(g, 2, d -> Matrix{Float64}(I, d, d); symmetric_edges=true)
-    @test Array(sheaf_laplacian_matrix_direct(s2)) ≈ Array(sheaf_laplacian_matrix(s2))
+    @test issymmetric(Array(sheaf_laplacian_matrix(s2)))
 
     # ── random non-identity restriction maps ──────────────────────────────
     g3 = complete_graph(4)
     rand_map = d -> randn(d - 1, d)   # maps from R^d to R^(d-1)
     s3 = sheaf_from_graph(g3, 3, rand_map)
-    @test Array(sheaf_laplacian_matrix_direct(s3)) ≈ Array(sheaf_laplacian_matrix(s3))
-    @test issymmetric(Array(sheaf_laplacian_matrix_direct(s3)))
+    @test issymmetric(Array(sheaf_laplacian_matrix(s3)))
 
     # ── single-vertex sheaf (no edges) ────────────────────────────────────
     s0 = EuclideanSheaf{Float64}([3])
-    L0 = sheaf_laplacian_matrix_direct(s0)
+    L0 = sparse(sheaf_laplacian_matrix(s0))
     @test size(L0) == (3, 3)
     @test iszero(L0)
 end
