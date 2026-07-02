@@ -17,6 +17,7 @@
 ######################################################################
 
 using Dualization
+using JuMP: optimizer_with_attributes
 using Printf
 using Statistics: median
 
@@ -32,18 +33,21 @@ Returns a NamedTuple with:
 - `mosek::Bool` - use Mosek (overrides open)
 - `nruns::Int` - number of benchmark runs (default: 5)
 - `nwarmup::Int` - number of warmup runs (default: 2)
+- `tol::Float64` - solver tolerance for all solvers (default: 1e-8)
 
 Examples:
     julia bench.jl                    # open=true (Clarabel/OSQP)
     julia bench.jl --open             # same as above
     julia bench.jl --mosek            # use Mosek
     julia bench.jl --nruns=10         # 10 benchmark runs
+    julia bench.jl --tol=1e-5         # looser tolerance for speed comparison
 """
 function parse_benchmark_args(args = ARGS)
     open = true
     mosek = false
     nruns = 5
     nwarmup = 2
+    tol = 1e-8
 
     for arg in args
         if arg == "--open" || arg == "--open=true"
@@ -57,17 +61,19 @@ function parse_benchmark_args(args = ARGS)
             nruns = parse(Int, split(arg, "=")[2])
         elseif startswith(arg, "--nwarmup=")
             nwarmup = parse(Int, split(arg, "=")[2])
+        elseif startswith(arg, "--tol=")
+            tol = parse(Float64, split(arg, "=")[2])
         end
     end
 
-    return (open = open && !mosek, mosek = mosek, nruns = nruns, nwarmup = nwarmup)
+    return (open = open && !mosek, mosek = mosek, nruns = nruns, nwarmup = nwarmup, tol = tol)
 end
 
 """Print benchmark configuration."""
 function print_benchmark_config(opts; lp_only::Bool = false)
-    solver_name = opts.mosek ? "Mosek" : (lp_only ? "OSQP" : "Clarabel")
+    solver_name = opts.mosek ? "Mosek" : "Clarabel"
     println("Solver: $solver_name + Dualized")
-    println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)")
+    println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup), Tolerance: $(opts.tol)")
     println()
 end
 
@@ -107,29 +113,37 @@ is_lp_compatible(cones) = !cones.soc && !cones.sdp && !cones.exp
 """
     get_optimizers(opts; lp_only::Bool = false)
 
-Returns (primal_optimizer, dual_optimizer) pair based on parsed options.
+Returns (primal_optimizer, dual_optimizer) pair based on parsed options,
+with termination tolerances pinned to `opts.tol` so all solvers chase
+the same accuracy.
 
 - `opts.mosek=true`: Mosek + Dualization.dual_optimizer(Mosek)
-- `opts.opensource=true`:
-  - `lp_only=true`: OSQP + Dualization.dual_optimizer(OSQP)
-  - `lp_only=false`: Clarabel + Dualization.dual_optimizer(Clarabel)
+- `opts.open=true`: Clarabel + Dualization.dual_optimizer(Clarabel)
+
+The `lp_only` parameter is kept for API compatibility but ignored —
+Clarabel handles both LP/QP and conic problems efficiently.
 
 Requires the appropriate solver package to be loaded in the calling file:
   - MosekTools for Mosek
-  - Clarabel for conic problems
-  - OSQP for LP/QP problems
+  - Clarabel for all open-source problems
 """
 function get_optimizers(opts; lp_only::Bool = false)
+    tol = opts.tol
     if opts.mosek
-        primal = Mosek.Optimizer
-        dual = Dualization.dual_optimizer(Mosek.Optimizer)
-    elseif lp_only
-        primal = OSQP.Optimizer
-        dual = Dualization.dual_optimizer(OSQP.Optimizer)
+        primal = optimizer_with_attributes(Mosek.Optimizer,
+            "MSK_DPAR_INTPNT_TOL_PFEAS"      => tol,   # LP/QP path
+            "MSK_DPAR_INTPNT_TOL_DFEAS"      => tol,
+            "MSK_DPAR_INTPNT_TOL_REL_GAP"    => tol,
+            "MSK_DPAR_INTPNT_CO_TOL_PFEAS"   => tol,   # conic path
+            "MSK_DPAR_INTPNT_CO_TOL_DFEAS"   => tol,
+            "MSK_DPAR_INTPNT_CO_TOL_REL_GAP" => tol)
     else
-        primal = Clarabel.Optimizer
-        dual = Dualization.dual_optimizer(Clarabel.Optimizer)
+        primal = optimizer_with_attributes(Clarabel.Optimizer,
+            "tol_feas"    => tol,
+            "tol_gap_abs" => tol,
+            "tol_gap_rel" => tol)
     end
+    dual = Dualization.dual_optimizer(primal)
     return primal, dual
 end
 

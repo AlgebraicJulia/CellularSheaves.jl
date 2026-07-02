@@ -396,16 +396,18 @@ function run_obstacle_benchmark(; optimizer = nothing, dual_optimizer = nothing,
         for _ in 1:nwarmup
             m, _ = build_jump_obstacle(inst, optimizer); optimize!(m)
         end
-        t_mosek = minimum([@elapsed begin
-            m, _ = build_jump_obstacle(inst, optimizer); optimize!(m)
+        t_mosek = minimum([begin
+            m, _ = build_jump_obstacle(inst, optimizer)
+            @elapsed optimize!(m)
         end for _ in 1:nruns])
 
         if dual_optimizer !== nothing
             for _ in 1:nwarmup
                 m, _ = build_jump_obstacle(inst, dual_optimizer); optimize!(m)
             end
-            t_dual = minimum([@elapsed begin
-                m, _ = build_jump_obstacle(inst, dual_optimizer); optimize!(m)
+            t_dual = minimum([begin
+                m, _ = build_jump_obstacle(inst, dual_optimizer)
+                @elapsed optimize!(m)
             end for _ in 1:nruns])
             @printf("%-18s %6.0e %5d %4d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
                     label, raug, dof, info.nv, h1, t_ipm * 1000, t_mosek * 1000, t_dual * 1000,
@@ -465,20 +467,14 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     opts = parse_benchmark_args(ARGS)
     println("Obstacle/American-Option benchmark")
-    println("Solver: $(opts.mosek ? "Mosek" : "OSQP (open-source)")")
-    println()
-
     if opts.mosek
         using MosekTools
-        optimizer = Mosek.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        solver_name = "Mosek"
     else
-        using OSQP
-        optimizer = OSQP.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(OSQP.Optimizer)
-        solver_name = "OSQP"
+        using Clarabel
     end
+    optimizer, dual_optimizer = get_optimizers(opts)
+    solver_name = opts.mosek ? "Mosek" : "Clarabel"
+    print_benchmark_config(opts; lp_only = true)
 
     run_obstacle_benchmark(; optimizer, dual_optimizer, solver_name,
                            nwarmup = opts.nwarmup, nruns = opts.nruns)

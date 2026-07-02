@@ -308,16 +308,18 @@ function run_qm_benchmark(; optimizer = nothing, dual_optimizer = nothing,
         for _ in 1:nwarmup
             m, _ = build_jump_qm(inst, optimizer); optimize!(m)
         end
-        t_mosek = minimum([@elapsed begin
-            m, _ = build_jump_qm(inst, optimizer); optimize!(m)
+        t_mosek = minimum([begin
+            m, _ = build_jump_qm(inst, optimizer)
+            @elapsed optimize!(m)
         end for _ in 1:nruns])
 
         if dual_optimizer !== nothing
             for _ in 1:nwarmup
                 m, _ = build_jump_qm(inst, dual_optimizer); optimize!(m)
             end
-            t_dual = minimum([@elapsed begin
-                m, _ = build_jump_qm(inst, dual_optimizer); optimize!(m)
+            t_dual = minimum([begin
+                m, _ = build_jump_qm(inst, dual_optimizer)
+                @elapsed optimize!(m)
             end for _ in 1:nruns])
             @printf("%-14s %6.0e %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
                     label, raug, size(prob.B, 2), info.ncl, info.h1,
@@ -364,17 +366,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     if opts.mosek
         using MosekTools
-        optimizer = Mosek.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        solver_name = "Mosek"
     else
         using Clarabel
-        optimizer = Clarabel.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        solver_name = "Clarabel"
     end
-    println("Solver: $solver_name")
-    println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
+    optimizer, dual_optimizer = get_optimizers(opts; lp_only = false)
+    solver_name = opts.mosek ? "Mosek" : "Clarabel"
+    print_benchmark_config(opts; lp_only = false)
 
     run_qm_benchmark(; optimizer, dual_optimizer, solver_name,
                      nwarmup = opts.nwarmup, nruns = opts.nruns)

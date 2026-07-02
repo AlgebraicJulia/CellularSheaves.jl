@@ -741,9 +741,9 @@ function run_sdp_benchmark(; optimizer = nothing, dual_optimizer = nothing, solv
             m, _ = build_jump_sdp(spec, optimizer; rho = rho)
             optimize!(m)
         end
-        t_mosek = minimum([@elapsed begin
+        t_mosek = minimum([begin
             m, _ = build_jump_sdp(spec, optimizer; rho = rho)
-            optimize!(m)
+            @elapsed optimize!(m)
         end for _ in 1:nruns])
 
         if dual_optimizer !== nothing
@@ -751,9 +751,9 @@ function run_sdp_benchmark(; optimizer = nothing, dual_optimizer = nothing, solv
                 m, _ = build_jump_sdp(spec, dual_optimizer; rho = rho)
                 optimize!(m)
             end
-            t_dual = minimum([@elapsed begin
+            t_dual = minimum([begin
                 m, _ = build_jump_sdp(spec, dual_optimizer; rho = rho)
-                optimize!(m)
+                @elapsed optimize!(m)
             end for _ in 1:nruns])
 
             @printf("%-18s %6.0e %7d %7d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
@@ -806,9 +806,9 @@ function run_unital_benchmark(; optimizer = nothing, dual_optimizer = nothing, s
             m, _ = build_jump_unital_sdp(spec, optimizer; rho = rho)
             optimize!(m)
         end
-        t_mosek = minimum([@elapsed begin
+        t_mosek = minimum([begin
             m, _ = build_jump_unital_sdp(spec, optimizer; rho = rho)
-            optimize!(m)
+            @elapsed optimize!(m)
         end for _ in 1:nruns])
 
         if dual_optimizer !== nothing
@@ -816,9 +816,9 @@ function run_unital_benchmark(; optimizer = nothing, dual_optimizer = nothing, s
                 m, _ = build_jump_unital_sdp(spec, dual_optimizer; rho = rho)
                 optimize!(m)
             end
-            t_dual = minimum([@elapsed begin
+            t_dual = minimum([begin
                 m, _ = build_jump_unital_sdp(spec, dual_optimizer; rho = rho)
-                optimize!(m)
+                @elapsed optimize!(m)
             end for _ in 1:nruns])
 
             @printf("%-18s %6.0e %7d %7d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
@@ -838,17 +838,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     if opts.mosek
         using MosekTools
-        optimizer = Mosek.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        solver_name = "Mosek"
     else
         using Clarabel
-        optimizer = Clarabel.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        solver_name = "Clarabel"
     end
-    println("Solver: $solver_name")
-    println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
+    optimizer, dual_optimizer = get_optimizers(opts; lp_only = false)
+    solver_name = opts.mosek ? "Mosek" : "Clarabel"
+    print_benchmark_config(opts; lp_only = false)
 
     run_sdp_benchmark(; optimizer, dual_optimizer, solver_name,
                       nwarmup = opts.nwarmup, nruns = opts.nruns)

@@ -1384,20 +1384,14 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     opts = parse_benchmark_args(ARGS)
     println("AC-OPF benchmark (rung 1 SOCP + rung 2 cycle cells)")
-    println("Solver: $(opts.mosek ? "Mosek" : "Clarabel (open-source)")")
-    println()
-
     if opts.mosek
         using MosekTools
-        optimizer = Mosek.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        solver_name = "Mosek"
     else
         using Clarabel
-        optimizer = Clarabel.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        solver_name = "Clarabel"
     end
+    optimizer, dual_optimizer = get_optimizers(opts; lp_only = false)
+    solver_name = opts.mosek ? "Mosek" : "Clarabel"
+    print_benchmark_config(opts; lp_only = false)
 
     println("=== Basic OPF Benchmark ===")
     run_opf_benchmark(; optimizer, dual_optimizer, nwarmup = opts.nwarmup, nruns = opts.nruns, solver_name)

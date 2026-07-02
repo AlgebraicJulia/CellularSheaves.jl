@@ -541,18 +541,13 @@ if abspath(PROGRAM_FILE) == @__FILE__
     opts = parse_benchmark_args(ARGS)
     if opts.mosek
         using MosekTools
-        optimizer = Mosek.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        solver_name = "Mosek"
     else
         using Clarabel
-        optimizer = Clarabel.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Clarabel.Optimizer)
-        solver_name = "Clarabel"
     end
+    optimizer, dual_optimizer = get_optimizers(opts; lp_only = false)
+    solver_name = opts.mosek ? "Mosek" : "Clarabel"
     println("Gaussian Wasserstein benchmark")
-    println("Solver: $solver_name")
-    println()
+    print_benchmark_config(opts; lp_only = false)
 
     run_gw_benchmark(; optimizer, dual_optimizer, solver_name, nwarmup = opts.nwarmup, nruns = opts.nruns)
 end

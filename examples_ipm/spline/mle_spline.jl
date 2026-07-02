@@ -331,16 +331,18 @@ function run_mle_benchmark(; optimizer = nothing, dual_optimizer = nothing, solv
         for _ in 1:nwarmup
             m, _, _ = build_jump_mle(inst, optimizer); optimize!(m)
         end
-        t_mosek = minimum([@elapsed begin
-            m, _, _ = build_jump_mle(inst, optimizer); optimize!(m)
+        t_mosek = minimum([begin
+            m, _, _ = build_jump_mle(inst, optimizer)
+            @elapsed optimize!(m)
         end for _ in 1:nruns])
 
         if dual_optimizer !== nothing
             for _ in 1:nwarmup
                 m, _, _ = build_jump_mle(inst, dual_optimizer); optimize!(m)
             end
-            t_dual = minimum([@elapsed begin
-                m, _, _ = build_jump_mle(inst, dual_optimizer); optimize!(m)
+            t_dual = minimum([begin
+                m, _, _ = build_jump_mle(inst, dual_optimizer)
+                @elapsed optimize!(m)
             end for _ in 1:nruns])
             @printf("%-11s %6.0e %4d %3d %6d %6d %6d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
                     string(mode), raug, M, n, N, length(inst.obs), info.nvtx,
@@ -360,17 +362,15 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     if opts.mosek
         using MosekTools
-        optimizer = Mosek.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        solver_name = "Mosek"
     else
         using Clarabel
-        optimizer = Clarabel.Optimizer
-        dual_optimizer = nothing  # skip dualization (ExponentialCone not supported)
-        solver_name = "Clarabel"
     end
-    println("Solver: $solver_name")
-    println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
+    optimizer, dual_optimizer = get_optimizers(opts; lp_only = false)
+    if !opts.mosek
+        dual_optimizer = nothing  # skip dualization (ExponentialCone not supported)
+    end
+    solver_name = opts.mosek ? "Mosek" : "Clarabel"
+    print_benchmark_config(opts; lp_only = false)
 
     run_mle_benchmark(; optimizer, dual_optimizer, solver_name,
                       nwarmup = opts.nwarmup, nruns = opts.nruns)

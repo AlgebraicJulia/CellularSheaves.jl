@@ -876,16 +876,18 @@ function run_wg_benchmark(; optimizer = nothing, dual_optimizer = nothing,
         for _ in 1:nwarmup
             m, _, _ = build_jump_wg(inst, optimizer); optimize!(m)
         end
-        t_mosek = minimum([@elapsed begin
-            m, _, _ = build_jump_wg(inst, optimizer); optimize!(m)
+        t_mosek = minimum([begin
+            m, _, _ = build_jump_wg(inst, optimizer)
+            @elapsed optimize!(m)
         end for _ in 1:nruns])
 
         if dual_optimizer !== nothing
             for _ in 1:nwarmup
                 m, _, _ = build_jump_wg(inst, dual_optimizer); optimize!(m)
             end
-            t_dual = minimum([@elapsed begin
-                m, _, _ = build_jump_wg(inst, dual_optimizer); optimize!(m)
+            t_dual = minimum([begin
+                m, _, _ = build_jump_wg(inst, dual_optimizer)
+                @elapsed optimize!(m)
             end for _ in 1:nruns])
             @printf("%-20s %6.0e %5d %5d %5d %9.1f %9.1f %9.1f %6.2fx %6.2fx\n",
                     label, raug, size(prob.B, 2), info.nv, info.h1,
@@ -913,15 +915,17 @@ function run_wg_benchmark(; optimizer = nothing, dual_optimizer = nothing,
             for _ in 1:nwarmup
                 m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer); optimize!(m)
             end
-            t_mosek = minimum([@elapsed begin
-                m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer); optimize!(m)
+            t_mosek = minimum([begin
+                m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer)
+                @elapsed optimize!(m)
             end for _ in 1:nruns])
             if dual_optimizer !== nothing
                 for _ in 1:nwarmup
                     m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer = dual_optimizer); optimize!(m)
                 end
-                t_dual = minimum([@elapsed begin
-                    m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer = dual_optimizer); optimize!(m)
+                t_dual = minimum([begin
+                    m, _ = build_jump_lifted_laplace(; ns, nt, edge_thresh = 0.3, optimizer = dual_optimizer)
+                    @elapsed optimize!(m)
                 end for _ in 1:nruns])
             else
                 t_dual = Inf
@@ -931,15 +935,17 @@ function run_wg_benchmark(; optimizer = nothing, dual_optimizer = nothing,
             for _ in 1:nwarmup
                 m, _ = build_jump_lifted_quadreg(; n, optimizer); optimize!(m)
             end
-            t_mosek = minimum([@elapsed begin
-                m, _ = build_jump_lifted_quadreg(; n, optimizer); optimize!(m)
+            t_mosek = minimum([begin
+                m, _ = build_jump_lifted_quadreg(; n, optimizer)
+                @elapsed optimize!(m)
             end for _ in 1:nruns])
             if dual_optimizer !== nothing
                 for _ in 1:nwarmup
                     m, _ = build_jump_lifted_quadreg(; n, optimizer = dual_optimizer); optimize!(m)
                 end
-                t_dual = minimum([@elapsed begin
-                    m, _ = build_jump_lifted_quadreg(; n, optimizer = dual_optimizer); optimize!(m)
+                t_dual = minimum([begin
+                    m, _ = build_jump_lifted_quadreg(; n, optimizer = dual_optimizer)
+                    @elapsed optimize!(m)
                 end for _ in 1:nruns])
             else
                 t_dual = Inf
@@ -965,18 +971,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
 
     if opts.mosek
         using MosekTools
-        optimizer = Mosek.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(Mosek.Optimizer)
-        solver_name = "Mosek"
-        println("Solver: Mosek + Mosek-D")
     else
-        using OSQP
-        optimizer = OSQP.Optimizer
-        dual_optimizer = Dualization.dual_optimizer(OSQP.Optimizer)
-        solver_name = "OSQP"
-        println("Solver: OSQP + OSQP-D (open-source)")
+        using Clarabel
     end
-    println("Runs: $(opts.nruns), Warmup: $(opts.nwarmup)\n")
+    optimizer, dual_optimizer = get_optimizers(opts)
+    solver_name = opts.mosek ? "Mosek" : "Clarabel"
+    print_benchmark_config(opts; lp_only = true)
 
     run_wg_benchmark(; optimizer, dual_optimizer, solver_name,
                      nwarmup = opts.nwarmup, nruns = opts.nruns)
