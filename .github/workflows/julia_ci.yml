@@ -17,9 +17,15 @@ on:
         options:
           - test
           - release
+          - hpc-test
       version:
         description: "Tag and release version:"
         required: false
+
+env:
+  HPC_SYSIMAGE_DIR: "/blue/fairbanksj/gha/sysimages/cellularsheaves"
+  HPC_SHARED_WORK: "/blue/fairbanksj/gha/work/cellularsheaves"
+  HPC_SCRIPT_DIR: ".github/scripts"
 
 permissions:
   actions: read
@@ -43,6 +49,99 @@ jobs:
       docs: false  # Documentation is built and deployed by docs.yml with caching
       test_versions: "['1']"  # Overrides the default ['1.10', '1']
     secrets: inherit
+  CI-HPC:
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'hpc-test'
+    runs-on: [self-hosted, hpc-gpu]
+    steps:
+      - name: "🗂️ Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "🔄 Resolve Dynamic Library Manifest"
+        run: |
+          source /etc/profile.d/modules.sh
+          module load julia
+          julia --project=. -e 'using Pkg; Pkg.resolve()'
+
+      - name: "🔑 Compute Cache Keys and Paths"
+        id: cache-setup
+        run: |
+          set -x
+          MANIFEST_HASH=$(sha256sum Manifest.toml | awk '{print $1}')
+          SYSIMAGE_PATH="$HPC_SYSIMAGE_DIR/sysimage-${MANIFEST_HASH}.so"
+          DEPOT_PATH="$HPC_SYSIMAGE_DIR/depots/$MANIFEST_HASH"
+          echo "SYSIMAGE_PATH=$SYSIMAGE_PATH" >> $GITHUB_ENV
+          echo "DEPOT_PATH=$DEPOT_PATH" >> $GITHUB_ENV
+
+      - name: "🛠️ System Image Cache Validation"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+          WORK_SHARED="$HPC_SHARED_WORK/$GITHUB_RUN_ID"
+          mkdir -p "$WORK_SHARED"
+          rsync -a --delete "$GITHUB_WORKSPACE/" "$WORK_SHARED/"
+
+          if [ ! -f "$SYSIMAGE_PATH" ] || [ ! -d "$DEPOT_PATH" ]; then
+            echo "❌ Cache Miss: System image or depot missing. Launching pre-compilation routine"
+            TEMP_DEPOT="$HPC_SYSIMAGE_DIR/depots/tmp_$GITHUB_RUN_ID"
+            TEMP_SYSIMAGE="$HPC_SYSIMAGE_DIR/tmp_sysimage_$GITHUB_RUN_ID.so"
+            mkdir -p "$HPC_SYSIMAGE_DIR/depots"
+
+            srun --partition=hpg-dev \
+            --time=01:00:00 \
+                 --cpus-per-task=8 \
+                 --job-name="gha-sysimg-compile" \
+                 bash -c "
+                     source /etc/profile.d/modules.sh
+                     module load julia
+                     export JULIA_DEPOT_PATH=$TEMP_DEPOT
+                     mkdir -p $TEMP_DEPOT
+                     cd $WORK_SHARED
+                     julia -e 'using Pkg; Pkg.add(\"PackageCompiler\")'
+                     julia --project=. $HPC_SCRIPT_DIR/compile_sysimage.jl '$TEMP_SYSIMAGE'
+                 "
+
+            echo "Promoting build to shared cache..."
+            if [[ -n "$DEPOT_PATH" && "$DEPOT_PATH" =~ ^/blue/fairbanksj/gha/sysimages/cellularsheaves/depots/[a-f0-9]{64}$ ]]; then
+              rm -rf "$DEPOT_PATH"
+            else
+              echo "❌ SAFETY ERROR: Path '$DEPOT_PATH' does not match the strict depot pattern. Aborting to protect /blue/fairbanksj/" && exit 1
+            fi
+            mv "$TEMP_DEPOT" "$DEPOT_PATH"
+            mv "$TEMP_SYSIMAGE" "$SYSIMAGE_PATH"
+          else
+            echo "✅ Cache Hit: Both optimized binary blob and artifact depot found"
+          fi
+
+      - name: "🚀 Execute Test Suite via Slurm"
+        continue-on-error: true
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+          WORK_SHARED="$HPC_SHARED_WORK/$GITHUB_RUN_ID"
+          echo "Launching parallelized validation payload..."
+
+          srun --partition=hpg-dev \
+               --cpus-per-task=8 \
+               --job-name="gha-cluster-test" \
+               bash -c "
+                  source /etc/profile.d/modules.sh
+                  module load julia
+                  export JULIA_DEPOT_PATH=$DEPOT_PATH:\$SLURM_TMPDIR/.julia
+                  mkdir -p \$SLURM_TMPDIR/.julia
+                  cd $WORK_SHARED
+                  julia -J '$SYSIMAGE_PATH' --project=. -e 'using Pkg; Pkg.test()'
+               "
+
+      - name: "🧹 Clean Up Staged Workspace"
+        if: always()
+        run: |
+          TARGET_CLEAN="$HPC_SHARED_WORK/$GITHUB_RUN_ID"
+          if [[ -n "$TARGET_CLEAN" && "$TARGET_CLEAN" =~ ^/blue/fairbanksj/gha/work/cellularsheaves/[0-9]+$ ]]; then
+            rm -rf "$TARGET_CLEAN"
+          else
+            echo "❌ SAFETY ERROR: Path '$TARGET_CLEAN' does not match the strict workspace pattern. Aborting to protect /blue/fairbanksj/" && exit 1
+          fi
+
   CompatHelper:
     if: github.event_name == 'schedule'
     uses: AlgebraicJulia/.github/.github/workflows/julia_compat.yml@main
