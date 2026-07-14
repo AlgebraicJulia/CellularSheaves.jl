@@ -34,11 +34,27 @@ if !no_literate
   end
 end
 
-let src = joinpath(@__DIR__, "figures", "asynch"),
-    dst = joinpath(@__DIR__, "src", "assets", "figures", "asynch")
+for group in ("asynch", "control")
+  src = joinpath(@__DIR__, "figures", group)
+  dst = joinpath(@__DIR__, "src", "assets", "figures", group)
+  isdir(src) || continue
   mkpath(dirname(dst))
   cp(src, dst; force=true)
 end
+
+# examples/RL/refresh_viz.sh rewrites result numbers between `<!--r:KEY-->` and `<!--/r-->`
+# sentinels. Documenter escapes those into the page rather than treating them as HTML comments,
+# so strip them for the build and restore the sources afterwards.
+const sentinel_dir = joinpath(@__DIR__, "src", "control", "sheaf_rl")
+const sentinel_srcs = isdir(sentinel_dir) ?
+  Dict(f => read(f, String) for f in readdir(sentinel_dir; join=true) if endswith(f, ".md")) :
+  Dict{String,String}()
+for (f, src) in sentinel_srcs
+  stripped = replace(src, r"<!--r:[A-Za-z0-9_]+-->" => "", "<!--/r-->" => "")
+  stripped == src || write(f, stripped)
+end
+
+try
 
 @info "Building Documenter.jl docs"
 makedocs(
@@ -80,6 +96,15 @@ makedocs(
       "features/core_sheaf_workflows.md",
       "features/morphisms_and_pushforwards.md",
       "features/trajectory_and_control.md",
+      "Sheaf-Coordinated Learned Control"=>Any[
+        "control/sheaf_rl/index.md",
+        "control/sheaf_rl/pipeline.md",
+        "control/sheaf_rl/replicating.md",
+        "control/sheaf_rl/rl_wins.md",
+        "control/sheaf_rl/generalization.md",
+        "control/sheaf_rl/constrained.md",
+        "control/sheaf_rl/cbf.md",
+      ],
     ],
     "API Reference"=>Any[
       "api/index.md",
@@ -110,3 +135,9 @@ deploydocs(
   devbranch="main",
   push_preview=true
 )
+
+finally
+  for (f, src) in sentinel_srcs
+    write(f, src)
+  end
+end
