@@ -34,6 +34,78 @@ function intriangle(i, j, ::Val{UL}) where {UL}
     return intriangle(i, j, UL)
 end
 
+function symnorminf(A::AbstractMatrix{T}, uplo::Symbol) where {T}
+    n = size(A, 1); out = zero(real(T))
+
+    if uplo === :L
+        @inbounds for j in 1:n
+            for i in j:n
+                out = max(out, abs(A[i, j]))
+            end
+        end
+    else
+        @inbounds for j in 1:n
+            for i in 1:j
+                out = max(out, abs(A[i, j]))
+            end
+        end
+    end
+
+    return out
+end
+
+function symnorm1(A::AbstractMatrix{T}, uplo::Symbol) where {T}
+    n = size(A, 1); out = zero(real(T))
+
+    @inbounds for j in 1:n
+        out += abs(A[j, j])
+
+        if uplo === :L
+            Aj = view(A, j + 1:n, j)
+        else
+            Aj = view(A, 1:j - 1, j)
+        end
+
+        out += 2sum(abs, Aj)
+    end
+
+    return out
+end
+
+function symsqnorm2(A::AbstractMatrix{T}, uplo::Symbol, imax::T) where {T}
+    n = size(A, 1); out = zero(real(T))
+
+    @inbounds for j in 1:n
+        out += (A[j, j] * imax)^2
+
+        if uplo === :L
+            Aj = view(A, j + 1:n, j)
+        else
+            Aj = view(A, 1:j - 1, j)
+        end
+
+        Δ = zero(real(T))
+
+        for x in Aj
+            Δ += (x * imax)^2
+        end
+
+        out += 2Δ
+    end
+
+    return out
+end
+
+function sqnorm2(A::AbstractMatrix{T}, imax::T) where {T}
+    out = zero(real(T))
+
+    @inbounds for x in A
+        out += (x * imax)^2
+    end
+
+    return out
+end
+
 function unwrapadj(A::Transpose)
     return parent(A), Val(:T)
 end
