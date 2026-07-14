@@ -21,8 +21,13 @@ using CellularSheaves
 import CellularSheaves.NetworkSheaves.EuclideanSheaves: harmonic_extension
 using Flux, Random, Statistics, LinearAlgebra, Printf, JLD2
 
+# Layer-1 coordination via Richard's sheaf interior-point method (the conic harmonic extension).
+# Provides build_ipm_harmonic / ipm_harmonic_problem / update_boundary! / extract_qstar.
+include(joinpath(@__DIR__, "ipm_harmonic.jl"))
+
 export Config, SheafEnv, reset!, step!, observation, base_control, drift_field, project_ball,
        push_history!, train_td3, evaluate_policy, train_and_save, save_model,
+       build_reference_bank, reference_episode, load_reference_bank, sample_cone_config,
        N_AGENTS, N_TARGETS, STALK_DIM, AGENT_EDGES, PINNING, build_sheaf, make_targets,
        obs_dim, pinned_target, edge_angle
 
@@ -63,10 +68,30 @@ Base.@kwdef struct Config
     horizon::Int            = 300                       # steps per episode K
     rotate_consensus::Bool  = false                     # heterogeneous: per-edge rotation maps on consensus edges
     planar_agents::Set{Int} = Set{Int}()               # heterogeneous: agents that pin to the x-y projection only
+    coordination::Symbol    = :analytic                 # Layer 1: :analytic (linear harmonic ext) | :conic (IPM)
+    coord_cones::Any        = nothing                   # per-vertex cones for :conic (nothing ⇒ free ⇒ = analytic)
+    coord_ball::Any         = nothing                   # Dict{Int,Float64} vertex→r: SOC reachability cap ‖q*_v‖≤r
+    base_law::Symbol        = :laplacian                # Layer 2 base: :laplacian (sheaf flow, equilibrates at the
+                                                        #   UNCONSTRAINED q*) | :reference (track the Layer-1 q*,
+                                                        #   consistent with a conic reference — no steady-state offset)
+    ref_bank::Int           = 0                         # >0: precompute this many reference episodes in parallel
+                                                        #   (threads) and sample them in training — takes the IPM
+                                                        #   out of the hot loop (q* depends only on targets + cone)
+    drift_rand::Bool        = false                     # TRAINING only (via step!): sample a fresh per-episode
+                                                        #   drift amplitude in [0, drift_amp] (w/ drift_zero_prob
+                                                        #   chance of exactly 0) instead of always using drift_amp.
+                                                        #   evaluate_policy/quick_eval always use the fixed drift_amp.
+    drift_zero_prob::Float64 = 0.2                      # P(a no-drift episode) when drift_rand — teaches the
+                                                        #   residual when NOT to act (fixes the no-drift regression)
+    phase_feature::Bool     = false                     # append [sin(ωt), cos(ωt)] (known freq, NOT amplitude) to
+                                                        #   the observation — a deterministic clock signal so the
+                                                        #   residual can infer drift phase instead of blind-guessing
+                                                        #   from a short history window.
 end
 
-"Observation dimension: own state, reference error, and the (x,u) history window."
-obs_dim(c::Config) = 2*STALK_DIM + 2*STALK_DIM*c.history
+"Observation dimension: own state, reference error, the (x,u) history window, and (if enabled) the
+2-D phase-clock feature."
+obs_dim(c::Config) = 2*STALK_DIM + 2*STALK_DIM*c.history + (c.phase_feature ? 2 : 0)
 
 # ----------------------------------------------------------------------------------------------
 # Restriction maps and the cellular sheaf.
@@ -123,11 +148,13 @@ function make_targets(cfg::Config, rng)
     Tg
 end
 
-"The unknown, time-varying swirl drift f(q,t) = a·[-sin(q_y+ωt), sin(q_x+ωt), 0] (horizontal only)."
-function drift_field(cfg::Config, q, t)
-    cfg.drift_amp == 0.0 && return zero(q)
+"The unknown, time-varying swirl drift f(q,t) = amp·[-sin(q_y+ωt), sin(q_x+ωt), 0] (horizontal only).
+`amp` defaults to `cfg.drift_amp` (unchanged behavior for eval/viz call sites); training's `step!`
+passes the env's per-episode-randomized amplitude explicitly when `cfg.drift_rand`."
+function drift_field(cfg::Config, q, t, amp::Float64 = cfg.drift_amp)
+    amp == 0.0 && return zero(q)
     phase = cfg.drift_freq * t * cfg.dt
-    cfg.drift_amp .* [-sin(q[2] + phase), sin(q[1] + phase), 0.0]
+    amp .* [-sin(q[2] + phase), sin(q[1] + phase), 0.0]
 end
 
 "Closed-form projection onto the actuator ball ‖u‖ ≤ ū (the only place the SOC constraint enters)."
@@ -147,42 +174,131 @@ mutable struct SheafEnv
     hist_x::Array{Float64,3}      # STALK_DIM × H × N_AGENTS
     hist_u::Array{Float64,3}
     t::Int
+    bank::Any                     # precomputed (targets, reference) episodes to sample, or nothing
+    drift_amp_ep::Float64         # this episode's drift amplitude (= cfg.drift_amp unless cfg.drift_rand)
 end
 
 "Create an environment for `cfg` (builds the fixed sheaf once)."
 function SheafEnv(cfg::Config)
     s, tv = build_sheaf(cfg)
     SheafEnv(cfg, s, tv, coboundary_map(s),
-             zeros(0,0,0), zeros(0,0,0), Vector{Float64}[], zeros(0,0,0), zeros(0,0,0), 1)
+             zeros(0,0,0), zeros(0,0,0), Vector{Float64}[], zeros(0,0,0), zeros(0,0,0), 1, nothing,
+             cfg.drift_amp)
 end
 
-"Layer 1: the harmonic extension q* = H⁻¹Bp for the current targets, at every step of the episode."
+"Layer 1: the harmonic extension q* = H⁻¹Bp for the current targets, at every step of the episode.
+`cfg.coordination = :analytic` uses the linear solve; `:conic` solves the same coordination as a
+sheaf conic QP through the IPM (identical q* with free cones; feasibility-constrained q* with cones)."
 function compute_reference!(env::SheafEnv)
     K = env.cfg.horizon
     env.reference = Array{Float64}(undef, STALK_DIM, K, N_AGENTS)
-    for t in 1:K
-        boundary = Dict(env.target_vertices[k] => env.targets[:, t, k] for k in 1:N_TARGETS)
-        q = Vector(harmonic_extension(env.sheaf, boundary)[1])
-        for i in 1:N_AGENTS
-            env.reference[:, t, i] = q[(i-1)*STALK_DIM+1 : i*STALK_DIM]
+    bd(t) = Dict(env.target_vertices[k] => env.targets[:, t, k] for k in 1:N_TARGETS)
+    if env.cfg.coordination === :conic
+        # assemble the sheaf conic QP once (structure fixed); only the boundary g changes per step
+        prob, info = ipm_harmonic_problem(env.sheaf, bd(1); vertex_cones = env.cfg.coord_cones, ball = env.cfg.coord_ball)
+        for t in 1:K
+            update_boundary!(prob, info, bd(t))
+            q = extract_qstar(solve(prob, default_ipm_settings()), info)
+            for i in 1:N_AGENTS; env.reference[:, t, i] = q[(i-1)*STALK_DIM+1 : i*STALK_DIM]; end
+        end
+    else
+        for t in 1:K
+            q = Vector(harmonic_extension(env.sheaf, bd(t))[1])
+            for i in 1:N_AGENTS; env.reference[:, t, i] = q[(i-1)*STALK_DIM+1 : i*STALK_DIM]; end
         end
     end
 end
 
-"Reset to a fresh episode: new targets, recomputed reference, agents started near q*(t=1)."
+"""
+Sample one cone from a diverse multi-family set: SOC reachability (varying radius on all agents),
+SOC on a random subset, positive-orthant on a random subset, or free. Returns a NamedTuple of the
+cone-relevant `Config` fields (splat into `Config`). This is the constraint diversity that trains a
+cone-GENERAL residual policy: the policy never sees the cone, only the reference it induces, so
+covering the induced-reference distribution is exactly what generalization needs.
+"""
+function sample_cone_config(rng)
+    fam = rand(rng, (:ball, :ball_subset, :orthant, :free))
+    if fam === :free
+        (coordination = :conic, coord_ball = nothing, coord_cones = nothing, cone_label = "free")
+    elseif fam === :ball
+        r = 2.0 + 1.5 * rand(rng)
+        (coordination = :conic, coord_ball = Dict(i => r for i in 1:N_AGENTS), coord_cones = nothing,
+         cone_label = "ball_r$(round(r, digits=2))")
+    elseif fam === :ball_subset
+        r = 2.0 + rand(rng)
+        sub = [i for i in 1:N_AGENTS if rand(rng) < 0.5]; isempty(sub) && push!(sub, rand(rng, 1:N_AGENTS))
+        (coordination = :conic, coord_ball = Dict(i => r for i in sub), coord_cones = nothing,
+         cone_label = "ballsub_r$(round(r, digits=2))_n$(length(sub))")
+    else
+        NV = N_AGENTS + N_TARGETS
+        cones = AbstractCone[CofreeCone() for _ in 1:NV]; capped = 0
+        for i in 1:N_AGENTS; rand(rng) < 0.4 && (cones[i] = PositiveCone(); capped += 1); end
+        capped == 0 && (cones[rand(rng, 1:N_AGENTS)] = PositiveCone())
+        (coordination = :conic, coord_ball = nothing, coord_cones = cones, cone_label = "orthant")
+    end
+end
+
+"""
+One reference episode `(targets, reference)` under `cfg`'s cone — a single, self-contained call with
+no threads. This is the unit of the sharded datagen: run it in independent PROCESSES (a SLURM array),
+not threads, because the IPM allocates heavily and 16 threads serialize on Julia's stop-the-world GC
+(the threaded `build_reference_bank` measured ~3× SLOWER per solve than serial). Separate processes =
+separate heaps = near-linear scaling. `cfg`'s cone (`coord_ball` / `coord_cones`) may vary per call,
+so a multi-cone bank is just a stream of episodes each built under a sampled cone.
+"""
+function reference_episode(cfg::Config, rng)
+    env = SheafEnv(cfg)
+    env.targets = make_targets(cfg, rng)
+    compute_reference!(env)
+    (env.targets, env.reference)
+end
+
+"Load and concatenate reference-bank shard files (each a jld2 holding key \"bank\")."
+function load_reference_bank(paths)
+    bank = NTuple{2, Array{Float64,3}}[]
+    for p in paths; append!(bank, JLD2.load(p, "bank")); end
+    bank
+end
+
+"Convenience threaded bank build (single node). Prefer the process-sharded datagen for large banks."
+function build_reference_bank(cfg::Config, n::Int; seed=0)
+    bank = Vector{NTuple{2, Array{Float64,3}}}(undef, n)
+    nblas = BLAS.get_num_threads(); BLAS.set_num_threads(1)
+    try
+        Threads.@threads for b in 1:n
+            bank[b] = reference_episode(cfg, MersenneTwister(seed + b))
+        end
+    finally
+        BLAS.set_num_threads(nblas)
+    end
+    bank
+end
+
+"Reset to a fresh episode: new targets + reference (sampled from the bank when one is attached,
+recomputed otherwise), agents started near q*(t=1)."
 function reset!(env::SheafEnv, rng)
     c = env.cfg
-    env.targets = make_targets(c, rng)
-    compute_reference!(env)
+    if env.bank !== nothing
+        env.targets, env.reference = env.bank[rand(rng, 1:length(env.bank))]
+    else
+        env.targets = make_targets(c, rng)
+        compute_reference!(env)
+    end
     env.x = [env.reference[:, 1, i] .+ 0.4 .* randn(rng, STALK_DIM) for i in 1:N_AGENTS]
     env.hist_x = zeros(STALK_DIM, c.history, N_AGENTS)
     env.hist_u = zeros(STALK_DIM, c.history, N_AGENTS)
     env.t = 1
+    env.drift_amp_ep = !c.drift_rand ? c.drift_amp :
+        rand(rng) < c.drift_zero_prob ? 0.0 : c.drift_amp * rand(rng)
     env
 end
 
-"Layer 2 base law: the sheaf feedback -k (L_F z)_i (= -k η_i), per agent."
+"Layer 2 base law. `:laplacian` is the sheaf feedback -k (L_F z)_i, whose equilibrium is the
+UNCONSTRAINED harmonic extension; `:reference` tracks the Layer-1 q* directly, -k (x_i − q*_i),
+so the base is consistent with a conic (cone-projected) reference — no steady-state offset."
 function base_control(env::SheafEnv)
+    env.cfg.base_law === :reference &&
+        return [-env.cfg.gain .* (env.x[i] .- env.reference[:, env.t, i]) for i in 1:N_AGENTS]
     z = zeros(STALK_DIM * (N_AGENTS + N_TARGETS))
     for i in 1:N_AGENTS;  z[(i-1)*STALK_DIM+1 : i*STALK_DIM] = env.x[i];               end
     for k in 1:N_TARGETS; z[(N_AGENTS+k-1)*STALK_DIM+1 : (N_AGENTS+k)*STALK_DIM] = env.targets[:, env.t, k]; end
@@ -190,10 +306,18 @@ function base_control(env::SheafEnv)
     [-env.cfg.gain .* Lz[(i-1)*STALK_DIM+1 : i*STALK_DIM] for i in 1:N_AGENTS]
 end
 
-"Per-agent observation o_i = [x_i; q*_i − x_i; history]."
-observation(env::SheafEnv, i) =
-    Float32.(vcat(env.x[i], env.reference[:, env.t, i] .- env.x[i],
-                  vec(env.hist_x[:, :, i]), vec(env.hist_u[:, :, i])))
+"Per-agent observation o_i = [x_i; q*_i − x_i; history; (phase clock if enabled)].
+The phase clock is [sin(ωt), cos(ωt)] using the KNOWN frequency `cfg.drift_freq` — a deterministic
+timing signal (any real controller has a clock), not the unknown drift amplitude or value itself."
+function observation(env::SheafEnv, i)
+    base = vcat(env.x[i], env.reference[:, env.t, i] .- env.x[i],
+               vec(env.hist_x[:, :, i]), vec(env.hist_u[:, :, i]))
+    if env.cfg.phase_feature
+        phase = env.cfg.drift_freq * env.t * env.cfg.dt
+        base = vcat(base, sin(phase), cos(phase))
+    end
+    Float32.(base)
+end
 
 push_history!(env::SheafEnv, i, u) = begin
     env.cfg.history == 0 && return
@@ -210,7 +334,7 @@ function step!(env::SheafEnv, residual::Matrix{Float64})
         u = project_ball(c, base[i] .+ c.residual_scale .* residual[:, i])
         reward[i] = Float32(-norm(env.x[i] .- env.reference[:, env.t, i]))
         push_history!(env, i, u)
-        env.x[i] = env.x[i] .+ c.dt .* (u .+ drift_field(c, env.x[i], env.t))
+        env.x[i] = env.x[i] .+ c.dt .* (u .+ drift_field(c, env.x[i], env.t, env.drift_amp_ep))
     end
     env.t += 1
     reward, env.t > c.horizon
@@ -243,15 +367,43 @@ function sample(rb::Replay, batch)
     rb.s[:, idx], rb.a[:, idx], rb.r[idx], rb.s2[:, idx], rb.done[idx]
 end
 
+"Mean tracking error ‖x−q*‖ of the *deterministic* `:rl` policy over `n` fixed eval episodes — a
+cheap, deterministic score for checkpoint selection (same `rng` ⇒ same episodes ⇒ comparable)."
+function quick_eval(actor, cfg::Config, evalenv::SheafEnv, rng; n=5)
+    total = 0.0; cnt = 0
+    for _ in 1:n
+        reset!(evalenv, rng)
+        for _ in 1:cfg.horizon
+            base = base_control(evalenv)
+            for i in 1:N_AGENTS
+                u = project_ball(cfg, base[i] .+ cfg.residual_scale .* Float64.(vec(actor(observation(evalenv, i)))))
+                total += norm(evalenv.x[i] .- evalenv.reference[:, evalenv.t, i]); cnt += 1
+                push_history!(evalenv, i, u)
+                evalenv.x[i] = evalenv.x[i] .+ cfg.dt .* (u .+ drift_field(cfg, evalenv.x[i], evalenv.t))
+            end
+            evalenv.t += 1
+        end
+    end
+    total / cnt
+end
+
 """
 Train a residual TD3 policy on `cfg`. Many environments roll in parallel; each agent is an
 independent sample of the same weight-shared policy (so the controller is decentralized and
-size-agnostic). Returns the trained actor.
+size-agnostic). TD3 wanders, so we eval a deterministic score every `eval_every` steps and return
+the BEST-scoring actor, not the last one (final ≠ best; the last policy is often past its peak).
 """
 function train_td3(cfg::Config; total_steps, n_envs=32, seed=1,
                    γ=0.99f0, τ=0.005f0, actor_lr=3f-4, critic_lr=1f-3, batch=256,
                    explore=0.15f0, target_noise=0.2f0, target_clip=0.5f0,
-                   policy_delay=2, warmup=2000, anchor=0.05f0, replay_capacity=300_000)
+                   policy_delay=2, warmup=2000, replay_capacity=300_000,
+                   anchor_hi=0.1f0, anchor_lo=0.02f0, anchor_anneal_frac=0.5f0,
+                   eval_every=25_000, eval_scenarios=5)
+    # anchor anneal: start conservative (stability near the base law), relax over the first
+    # `anchor_anneal_frac` of training so late updates get more room to exploit (measured: anchor
+    # 0.1→0.633, 0.05→0.482, 0.02→0.439 final score — lower anchor = closer to the oracle, but early
+    # instability needs the higher value; annealing gets both).
+    anchor_at(step) = anchor_hi + (anchor_lo - anchor_hi) * min(1f0, Float32(step) / (anchor_anneal_frac * total_steps))
     rng = MersenneTwister(seed)
     actor = make_actor(cfg); critic1 = make_critic(cfg); critic2 = make_critic(cfg)
     actor_t = deepcopy(actor); critic1_t = deepcopy(critic1); critic2_t = deepcopy(critic2)
@@ -260,8 +412,31 @@ function train_td3(cfg::Config; total_steps, n_envs=32, seed=1,
     replay = Replay(replay_capacity, obs_dim(cfg), STALK_DIM)
     polyak!(dst, src) = for (p, q) in zip(Flux.params(dst), Flux.params(src)); p .= (1-τ).*p .+ τ.*q; end
 
-    envs = [reset!(SheafEnv(cfg), rng) for _ in 1:n_envs]
+    bank = nothing
+    if cfg.ref_bank > 0
+        bankdir  = get(ENV, "RLJ_BANKDIR", "")     # a directory of datagen shards (multi-cone bank)
+        bankfile = get(ENV, "RLJ_BANKFILE", "")    # a single cached bank file
+        if !isempty(bankdir) && isdir(bankdir)
+            shards = sort(filter(f -> endswith(f, ".jld2"), readdir(bankdir; join=true)))
+            bank = load_reference_bank(shards)
+            @printf("  reference bank: %d episodes from %d shards in %s\n", length(bank), length(shards), bankdir)
+        elseif !isempty(bankfile) && isfile(bankfile)
+            bank = JLD2.load(bankfile, "bank")
+            @printf("  reference bank: %d episodes loaded from %s\n", length(bank), bankfile)
+        else
+            tb = time()
+            bank = build_reference_bank(cfg, cfg.ref_bank; seed = seed + 31)
+            @printf("  reference bank: %d episodes on %d threads in %.0fs\n", cfg.ref_bank, Threads.nthreads(), time()-tb)
+            isempty(bankfile) || (jldsave(bankfile; bank); @printf("  reference bank: cached to %s\n", bankfile))
+        end
+    end
+    envs = map(1:n_envs) do _
+        e = SheafEnv(cfg); e.bank = bank; reset!(e, rng)
+    end
     all_obs() = reduce(hcat, [reduce(hcat, [observation(e, i) for i in 1:N_AGENTS]) for e in envs])
+
+    evalenv = SheafEnv(cfg); evalenv.bank = bank      # deterministic checkpoint-selection env
+    best_actor = deepcopy(actor); best_score = Inf; last_eval = 0
 
     obs = all_obs(); steps = 0; last_loss = NaN32; t0 = time()
     while steps < total_steps
@@ -285,6 +460,7 @@ function train_td3(cfg::Config; total_steps, n_envs=32, seed=1,
             l, g2 = Flux.withgradient(m -> mean((vec(m(vcat(s, a))) .- y).^2), critic2); Flux.update!(opt_c2, critic2, g2[1])
             last_loss = Float32(l)
             if (steps ÷ size(act, 2)) % policy_delay == 0
+                anchor = anchor_at(steps)
                 _, ga = Flux.withgradient(actor) do m
                     aa = m(s); -mean(critic1(vcat(s, aa))) + anchor * mean(aa.^2)   # maximise Q, stay near the base controller
                 end
@@ -293,11 +469,21 @@ function train_td3(cfg::Config; total_steps, n_envs=32, seed=1,
             end
         end
         if steps % (n_envs*N_AGENTS*50) < n_envs*N_AGENTS
-            @printf("  steps %7d  buffer %7d  critic_loss %.4f  %.0fs\n", steps, n_stored(replay), last_loss, time()-t0)
+            @printf("  steps %7d  buffer %7d  critic_loss %.4f  anchor %.3f  %.0fs\n",
+                    steps, n_stored(replay), last_loss, anchor_at(steps), time()-t0)
+            flush(stdout)
+        end
+        if n_stored(replay) >= max(batch, warmup) && steps - last_eval >= eval_every
+            last_eval = steps
+            score = quick_eval(actor, cfg, evalenv, MersenneTwister(seed + 999); n = eval_scenarios)
+            score < best_score && (best_score = score; best_actor = deepcopy(actor))
+            @printf("  eval @ %7d  rl=%.4f  best=%.4f  %s\n", steps, score, best_score,
+                    score ≈ best_score ? "← kept" : "")
             flush(stdout)
         end
     end
-    actor
+    @printf("  best eval score over training: %.4f\n", best_score)
+    best_actor
 end
 
 # ----------------------------------------------------------------------------------------------
@@ -342,13 +528,20 @@ function save_model(path, actor, cfg::Config, result)
         DRIFT = cfg.drift_amp, DRIFTW = cfg.drift_freq, HIST = cfg.history, KGAIN = cfg.gain,
         DT = cfg.dt, K = cfg.horizon, RESS = cfg.residual_scale, OBS = obs_dim(cfg), UCAP = cfg.actuator_cap,
         rotate_consensus = cfg.rotate_consensus, planar_agents = collect(cfg.planar_agents),
+        COORD = String(cfg.coordination),                                    # Layer-1 solver: analytic | conic
+        BASELAW = String(cfg.base_law),                                      # Layer-2 base: laplacian | reference
+        PHASEFEAT = cfg.phase_feature,                # obs includes [sin(ωt),cos(ωt)] — MUST match to reconstruct obs_dim
+        DRIFTRAND = cfg.drift_rand, DRIFTZEROP = cfg.drift_zero_prob,        # training-time drift randomization (eval is fixed)
+        BALLV = cfg.coord_ball === nothing ? Int[]     : collect(keys(cfg.coord_ball)),   # capped vertices …
+        BALLR = cfg.coord_ball === nothing ? Float64[] : collect(values(cfg.coord_ball)), # … and their radii
         eval = Dict("analytic"=>result.analytic, "oracle"=>result.oracle, "rl"=>result.rl))
 end
 
-"Train on `cfg`, evaluate, save to `out`, and print the result. The standard demo entry point."
-function train_and_save(cfg::Config; total_steps, out, seed=1, n_envs=32, n_scenarios=30, label="")
+"Train on `cfg`, evaluate, save to `out`, and print the result. The standard demo entry point.
+Extra kwargs (`anchor`, `eval_every`, `explore`, …) are forwarded to `train_td3`."
+function train_and_save(cfg::Config; total_steps, out, seed=1, n_envs=32, n_scenarios=30, label="", train_kw...)
     @info "sheaf-track RL$(isempty(label) ? "" : " — "*label)" drift=cfg.drift_amp cap=cfg.actuator_cap history=cfg.history rotate=cfg.rotate_consensus planar=collect(cfg.planar_agents) total_steps
-    actor = train_td3(cfg; total_steps, n_envs, seed)
+    actor = train_td3(cfg; total_steps, n_envs, seed, train_kw...)
     result = evaluate_policy(actor, cfg; rng = MersenneTwister(seed + 777), n_scenarios)
     @printf("\n=== mean ‖x−q*‖ over %d scenarios (cap ū=%.3g, drift a=%.3g) ===\n", n_scenarios, cfg.actuator_cap, cfg.drift_amp)
     @printf("  analytic = %.4f\n  drift-oracle = %.4f\n  sheaf+RL = %.4f\n", result.analytic, result.oracle, result.rl)
