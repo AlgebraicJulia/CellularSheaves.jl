@@ -1,3 +1,9 @@
+# Render GR/Plots figures offscreen during the build so executing the examples
+# never pops an on-screen gksqt window that has to be closed by hand. Must be
+# set before anything loads Plots/GR (including the CellularSheavesPlots
+# extension). "100" = offscreen file rendering; respects an explicit override.
+get!(ENV, "GKSwstype", "100")
+
 using Documenter
 using Literate
 
@@ -40,11 +46,19 @@ let src = joinpath(@__DIR__, "figures", "asynch"),
   cp(src, dst; force=true)
 end
 
+let src = joinpath(@__DIR__, "figures", "distributed_solve"),
+    dst = joinpath(@__DIR__, "src", "assets", "figures", "distributed_solve")
+  if isdir(src)
+    mkpath(dirname(dst))
+    cp(src, dst; force=true)
+  end
+end
+
 @info "Building Documenter.jl docs"
 makedocs(
   modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
   draft=false,
-  format=Documenter.HTML(),
+  format=Documenter.HTML(assets=["assets/benchtables.css"]),
   sitename="CellularSheaves.jl",
   doctest=false,
   checkdocs=:none,
@@ -66,7 +80,8 @@ makedocs(
         "generated/control/controlled_mass_spring_damper_chain.md",
         "control/single_integrator_target_tracking.md",
         "generated/control/multi_quadrotor_target_tracking.md",
-        "generated/control/mpc_target_tracking.md"
+        "generated/control/mpc_target_tracking.md",
+        "generated/control/distributed_harmonic_tracking.md"
 
         ],
       "Asynchronous Diffusion"=>Any[
@@ -80,12 +95,22 @@ makedocs(
       "features/core_sheaf_workflows.md",
       "features/morphisms_and_pushforwards.md",
       "features/trajectory_and_control.md",
+      "Distributed Sheaf Solve"=>Any[
+        "features/distributed_sheaf_solve/index.md",
+        "features/distributed_sheaf_solve/theory_coordination.md",
+        "features/distributed_sheaf_solve/theory_multifrontal.md",
+        "features/distributed_sheaf_solve/theory_distributed.md",
+        "features/distributed_sheaf_solve/comparison.md",
+        "features/distributed_sheaf_solve/benchmarks.md",
+        "features/distributed_sheaf_solve/api.md",
+      ],
     ],
     "API Reference"=>Any[
       "api/index.md",
       "api/network_sheaves.md",
       "api/sheaf_interface.md",
       "api/euclidean_sheaves.md",
+      "api/distributed_solve.md",
       "api/graph_homomorphisms.md",
       "api/sheaf_morphisms.md",
       "api/pushforwards.md",
