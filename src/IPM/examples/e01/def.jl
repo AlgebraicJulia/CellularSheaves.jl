@@ -364,7 +364,7 @@ function run_chain_ipm!(prob, ctx, settings; picard_tol = 1e-8, picard_max = 6)
         vbar .= max.(u .- ctx.ψi, 0.0)
         local vres
         for _ in 1:picard_max
-            cglob = ctx.h0 .+ ctx.Rop * vbar .- b̃
+            cglob = b̃ .- ctx.h0 .- ctx.Rop * vbar  # negated for min ½p'Qp - c'p
             scatter_c!(prob.c, ctx, cglob)
             res = solve(prob, settings)
             res.status in (OPTIMAL, NEAR_OPTIMAL) || error("IPM status $(res.status) in chain")
@@ -543,9 +543,9 @@ end
 # Sweep
 # -----------------------------------------------------------------------------
 
-sizes() = OPTS.tiny ? [(nx = 15, olap = 4)] :
-    OPTS.quick ? [(nx = 15, olap = 4), (nx = 21, olap = 5), (nx = 31, olap = 8)] :
-    [(nx = 15, olap = 4), (nx = 21, olap = 5), (nx = 31, olap = 8),
+sizes() = OPTS.tiny ? [(nx = 11, olap = 3)] :
+    OPTS.quick ? [(nx = 11, olap = 3), (nx = 15, olap = 4), (nx = 21, olap = 5)] :
+    [(nx = 11, olap = 3), (nx = 15, olap = 4), (nx = 21, olap = 5), (nx = 31, olap = 8),
      (nx = 41, olap = 10), (nx = 55, olap = 14), (nx = 71, olap = 17)]
 
 const NSTEPS_BENCH = 10
@@ -556,14 +556,18 @@ function run()
         "(implicit-Euler chain × $NSTEPS_BENCH steps; dial: nx)")
     println("=" ^ 78)
 
-    settings = IPMSettings{Float64}(
+    ipm_settings = IPMSettings{Float64}(
+        kkt = UzawaSettings{Float64}(raug = 1e5),
+        feas_tol = TOL, gap_tol = TOL, itmax = 200)
+
+    hsd_settings = HSDSettings{Float64}(
         kkt = UzawaSettings{Float64}(raug = 1e5),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
     println("\n  Gate tests:")
     test_kernel_and_split()
     v_mc = test_european_vs_mc()
-    test_american_chain(settings, v_mc)
+    test_american_chain(ipm_settings, v_mc)
     println()
 
     cla_opt = clarabel_opt(; tol = TOL)
@@ -579,9 +583,14 @@ function run()
             cfg.nx, stats.N0, stats.N1, stats.med_block)
 
         t_ipm = try
-            timed_min(() -> run_chain_ipm!(prob, ctx, settings); nruns = NRUNS)
+            timed_min(() -> run_chain_ipm!(prob, ctx, ipm_settings); nruns = NRUNS)
         catch; NaN end
         m_ipm = (t = t_ipm, status = isfinite(t_ipm) ? "OPTIMAL" : "ERROR", obj = NaN)
+
+        t_hsd = try
+            timed_min(() -> run_chain_ipm!(prob, ctx, hsd_settings); nruns = NRUNS)
+        catch; NaN end
+        m_hsd = (t = t_hsd, status = isfinite(t_hsd) ? "OPTIMAL" : "ERROR", obj = NaN)
 
         t_cla = try
             model, xv = build_jump_chain_model(prob, cla_opt)
@@ -599,18 +608,19 @@ function run()
             (t = NaN, status = "", obj = NaN)
         end
 
-        ratio(b) = isfinite(b.t) && isfinite(m_ipm.t) ? b.t / m_ipm.t : NaN
-        fmt_ratio(b) = isnan(ratio(b)) ? "—" : @sprintf("%.2fx", ratio(b))
+        ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
+        fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))
 
-        println("IPM ", fmt_time(m_ipm), "  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla),
-            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk), ")")
+        println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd), " (", fmt_ratio(m_hsd, m_ipm),
+            ")  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla, m_ipm),
+            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk, m_ipm), ")")
 
-        push!(rows, (size = cfg.nx, dof = stats.N0, ipm = m_ipm, cla = m_cla, msk = m_msk))
+        push!(rows, (size = cfg.nx, dof = stats.N0, ipm = m_ipm, hsd = m_hsd, cla = m_cla, msk = m_msk))
     end
 
     dofs = [r.dof for r in rows]
     println("\nFitted log-log slopes (chain time vs DOF):")
-    for (name, get_t) in [("IPM", r -> r.ipm.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
+    for (name, get_t) in [("IPM", r -> r.ipm.t), ("HSD", r -> r.hsd.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
         sl = loglog_slope(dofs, [get_t(r) for r in rows])
         print("  $name: ", isnan(sl) ? "n/a" : @sprintf("DOF^%.2f", sl))
     end

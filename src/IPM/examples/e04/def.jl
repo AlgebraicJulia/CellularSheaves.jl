@@ -265,7 +265,7 @@ function build_sos_spline(inst::SOSSplineInstance)
     for v in 1:P
         block(Q, v, v, v) .= Symmetric(0.5 .* (Qblocks[v] .+ Qblocks[v]'))
     end
-    c = vcat(cvecs...)
+    c = .-vcat(cvecs...)
     g = zeros(size(B, 1))
     K = [SemidefiniteCone() for _ in 1:P]
     prob = IPMProblem(Q, B, c, g, K)
@@ -292,7 +292,7 @@ end
 
 "Full-scale objective from a solution vector (undoes normalization)."
 function full_objective(prob, ctx, p::AbstractVector)
-    return ctx.scale * (0.5 * dot(p, prob.Q * p) + dot(prob.c, p)) + ctx.constterm
+    return ctx.scale * (0.5 * dot(p, prob.Q * p) - dot(prob.c, p)) + ctx.constterm
 end
 
 # -----------------------------------------------------------------------------
@@ -308,7 +308,7 @@ function build_jump_sos(prob, ctx, optimizer)
             for c in 1:Msz for r in c:Msz] for v in 1:ctx.P]
     x = reduce(vcat, svs)
     Qs = sparse(prob.Q); Bs = sparse(prob.B)
-    @objective(model, Min, 0.5 * x' * Qs * x + prob.c' * x)
+    @objective(model, Min, 0.5 * x' * Qs * x - prob.c' * x)
     @constraint(model, Bs * x .== prob.g)
     return model, x
 end
@@ -446,13 +446,16 @@ function run()
     println("  E04: SOS-certified shape-constrained regression (dial: intervals P; n = 13)")
     println("=" ^ 78)
 
-    settings = IPMSettings{Float64}(
+    ipm_settings = IPMSettings{Float64}(
+        kkt = UzawaSettings{Float64}(raug = 1e2),
+        feas_tol = TOL, gap_tol = TOL, itmax = 200)
+    hsd_settings = HSDSettings{Float64}(
         kkt = UzawaSettings{Float64}(raug = 1e2),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
     println("\n  Gate tests:")
     test_representation()
-    prob13, ctx13, res13 = test_constraint_live_and_certified(settings)
+    prob13, ctx13, res13 = test_constraint_live_and_certified(ipm_settings)
     o_ipm = test_ipm_vs_clarabel(prob13, ctx13, res13)
     test_sandwich(o_ipm)
     println()
@@ -469,24 +472,26 @@ function run()
         @printf("  P=%-3d dof=%-6d n1=%-4d blk=%-4.0f  ",
             P, stats.N0, stats.N1, stats.med_block)
 
-        m_ipm = measure_ipm(prob, settings; nruns = NRUNS)
+        m_ipm = measure_ipm(prob, ipm_settings; nruns = NRUNS)
+        m_hsd = measure_ipm(prob, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_sos(prob, ctx, cla_opt)); nruns = NRUNS)
         m_msk = msk_opt !== nothing ?
             measure_jump(() -> first(build_jump_sos(prob, ctx, msk_opt)); nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
 
-        ratio(b) = isfinite(b.t) && isfinite(m_ipm.t) ? b.t / m_ipm.t : NaN
-        fmt_ratio(b) = isnan(ratio(b)) ? "—" : @sprintf("%.2fx", ratio(b))
+        ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
+        fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))
 
-        println("IPM ", fmt_time(m_ipm), "  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla),
-            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk), ")")
+        println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd), " (", fmt_ratio(m_hsd, m_ipm),
+            ")  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla, m_ipm),
+            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk, m_ipm), ")")
 
-        push!(rows, (size = P, dof = stats.N0, ipm = m_ipm, cla = m_cla, msk = m_msk))
+        push!(rows, (size = P, dof = stats.N0, ipm = m_ipm, hsd = m_hsd, cla = m_cla, msk = m_msk))
     end
 
     dofs = [r.dof for r in rows]
     println("\nFitted log-log slopes (time vs DOF):")
-    for (name, get_t) in [("IPM", r -> r.ipm.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
+    for (name, get_t) in [("IPM", r -> r.ipm.t), ("HSD", r -> r.hsd.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
         sl = loglog_slope(dofs, [get_t(r) for r in rows])
         print("  $name: ", isnan(sl) ? "n/a" : @sprintf("DOF^%.2f", sl))
     end

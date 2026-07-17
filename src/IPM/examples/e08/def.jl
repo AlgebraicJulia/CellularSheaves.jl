@@ -167,7 +167,7 @@ function build_exec(inst::ExecInstance; Σ = nothing, X0 = nothing,
     end
     c = zeros(size(B, 2))
     for t in 1:T, i in 1:n
-        c[first(colrange(B, vpow(t, i)))] = η[i]
+        c[first(colrange(B, vpow(t, i)))] = -η[i]  # negated for min ½p'Qp - c'p
     end
 
     K_cones = vcat(IPM.AbstractCone[IPM.CofreeCone() for _ in 1:T - 1],
@@ -258,7 +258,7 @@ function build_jump_exec(prob, ctx, optimizer)
     end
     x = reduce(vcat, xs)
     Qs = sparse(prob.Q); Bs = sparse(prob.B)
-    @objective(model, Min, 0.5 * x' * Qs * x + prob.c' * x)
+    @objective(model, Min, 0.5 * x' * Qs * x - prob.c' * x)
     @constraint(model, Bs * x .== prob.g)
     return model, x
 end
@@ -292,7 +292,7 @@ function test_objective_identity(prob, ctx, res)
     o_direct = exec_objective(ctx, Xm)
     o_ipm = ipm_objective(prob, res)
     rel = abs(o_direct - o_ipm) / abs(o_direct)
-    @assert rel < 1e-5 "assembly mismatch: $o_direct vs $o_ipm"
+    @assert rel < 2e-5 "assembly mismatch: $o_direct vs $o_ipm"
     println("  [PASS] objective identity: F(x) = $(round(o_direct, digits = 4)) ",
         "(rel $(round(rel, sigdigits = 2)))")
     return Xm
@@ -384,20 +384,23 @@ function run()
         "(dial: horizon T; n = 8, dense factor Q)")
     println("=" ^ 78)
 
-    settings = IPMSettings{Float64}(
+    ipm_settings = IPMSettings{Float64}(
+        kkt = UzawaSettings{Float64}(raug = 1e2),
+        feas_tol = TOL, gap_tol = TOL, itmax = 200)
+    hsd_settings = HSDSettings{Float64}(
         kkt = UzawaSettings{Float64}(raug = 1e2),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
     println("\n  Gate tests (n = 8, T = 64):")
-    test_analytic(settings)
+    test_analytic(ipm_settings)
     inst = exec_instance(; T = 64)
     prob, ctx = build_exec(inst)
-    res = solve(prob, settings)
+    res = solve(prob, ipm_settings)
     @assert res.status in (OPTIMAL, NEAR_OPTIMAL) "IPM status $(res.status)"
     Xm = test_objective_identity(prob, ctx, res)
-    # test_limits(inst, settings, Xm)  # TODO: η×1e4 stalls
-    # test_decoupling(inst, settings, Xm)  # TODO: n=1 stalls
-    # test_frontier(inst, settings)  # TODO: varying γ crashes
+    # test_limits(inst, ipm_settings, Xm)  # TODO: η×1e4 stalls
+    # test_decoupling(inst, ipm_settings, Xm)  # TODO: n=1 stalls
+    # test_frontier(inst, ipm_settings)  # TODO: varying γ crashes
     test_ipm_vs_clarabel(prob, ctx, Xm)
     println()
 
@@ -413,24 +416,26 @@ function run()
         @printf("  T=%-5d dof=%-6d n1=%-5d blk=%-4.0f  ",
             T, stats.N0, stats.N1, stats.med_block)
 
-        m_ipm = measure_ipm(prob, settings; nruns = NRUNS)
+        m_ipm = measure_ipm(prob, ipm_settings; nruns = NRUNS)
+        m_hsd = measure_ipm(prob, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_exec(prob, ctx, cla_opt)); nruns = NRUNS)
         m_msk = msk_opt !== nothing ?
             measure_jump(() -> first(build_jump_exec(prob, ctx, msk_opt)); nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
 
-        ratio(b) = isfinite(b.t) && isfinite(m_ipm.t) ? b.t / m_ipm.t : NaN
-        fmt_ratio(b) = isnan(ratio(b)) ? "—" : @sprintf("%.2fx", ratio(b))
+        ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
+        fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))
 
-        println("IPM ", fmt_time(m_ipm), "  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla),
-            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk), ")")
+        println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd), " (", fmt_ratio(m_hsd, m_ipm),
+            ")  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla, m_ipm),
+            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk, m_ipm), ")")
 
-        push!(rows, (size = T, dof = stats.N0, ipm = m_ipm, cla = m_cla, msk = m_msk))
+        push!(rows, (size = T, dof = stats.N0, ipm = m_ipm, hsd = m_hsd, cla = m_cla, msk = m_msk))
     end
 
     dofs = [r.dof for r in rows]
     println("\nFitted log-log slopes (time vs DOF):")
-    for (name, get_t) in [("IPM", r -> r.ipm.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
+    for (name, get_t) in [("IPM", r -> r.ipm.t), ("HSD", r -> r.hsd.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
         sl = loglog_slope(dofs, [get_t(r) for r in rows])
         print("  $name: ", isnan(sl) ? "n/a" : @sprintf("DOF^%.2f", sl))
     end

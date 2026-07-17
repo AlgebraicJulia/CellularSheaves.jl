@@ -3,28 +3,30 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run (--quick --mosek, M3 Max, raug = 1e2):
+# Sample run: 2026-07-16 (--quick)
+# -----------------------------------------------------------------------------
+# K dial (d = 4 fixed):
+# K=4   dof=1312   IPM   46.6ms  HSD   50.0ms (1.07x)  Cla   92.6ms (1.99x)  Msk —
+# K=6   dof=2952   IPM  146.8ms  HSD  175.0ms (1.19x)  Cla  336.1ms (2.29x)  Msk —
+# K=8   dof=5248   IPM  322.4ms  HSD  395.2ms (1.23x)  Cla  759.3ms (2.35x)  Msk —
 #
-#   K dial (d = 4 fixed):
-#     K=4   dof=1312  n1=672   blk=36  IPM  55ms  Cla  93ms (1.67x)  Msk  52ms (0.94x)
-#     K=6   dof=2952  n1=1512  blk=36  IPM 175ms  Cla 327ms (1.87x)  Msk 148ms (0.84x)
-#     K=8   dof=5248  n1=2688  blk=36  IPM 385ms  Cla 739ms (1.92x)  Msk 297ms (0.77x)
-#   Slopes: IPM DOF^1.40, Clarabel DOF^1.50, Mosek DOF^1.26.
+# d dial (K = 4 fixed):
+# d=4   dof=1312   IPM   47.2ms  HSD   50.9ms (1.08x)  Cla   93.3ms (1.98x)  Msk —
+# d=6   dof=2832   IPM  246.1ms  HSD  296.9ms (1.21x)  Cla  593.2ms (2.41x)  Msk —
+# d=8   dof=4928   IPM  721.4ms  HSD  941.0ms (1.30x)  Cla 2538.2ms (3.52x)  Msk —
+# =============================================================================
 #
-#   d dial (K = 4 fixed) — baselines pay per nonzero (~d²), IPM per block:
-#     d=4   dof=1312  n1=672   blk=36   IPM  55ms  Cla   93ms (1.70x)  Msk  53ms (0.97x)
-#     d=6   dof=2832  n1=1488  blk=78   IPM 280ms  Cla  567ms (2.03x)  Msk 255ms (0.91x)
-#     d=8   dof=4928  n1=2624  blk=136  IPM 800ms  Cla 2464ms (3.08x)  Msk 677ms (0.85x)
+# =============================================================================
+# Sample run: 2026-07-14 (--quick --mosek)
+# -----------------------------------------------------------------------------
+# K dial (d = 4 fixed):
+# K=4   dof=1312   IPM   53.9ms  HSD   52.6ms (0.98x)  Cla   93.0ms (1.73x)  Msk   51.1ms (0.95x)
+# K=6   dof=2952   IPM  166.0ms  HSD  180.5ms (1.09x)  Cla  340.1ms (2.05x)  Msk  152.5ms (0.92x)
+# K=8   dof=5248   IPM  369.5ms  HSD  402.9ms (1.09x)  Cla  776.8ms (2.10x)  Msk  306.1ms (0.83x)
+# Slopes: IPM DOF^1.39, HSD DOF^1.47, Clarabel DOF^1.54, Mosek DOF^1.30
 #
-#   READING: Both predictions confirmed.
-#   (1) THIN-SIDE: balanced blocks (b_v ≈ b_e) moved the Mosek ratio from
-#       0.36x (fat-primal quantum torus at matched DOF) to 0.77-0.97x — a
-#       ~2.5x swing attributable to block geometry alone — and Clarabel
-#       moved from DNF to functioning at ~2x slower (coker = 0: nothing
-#       to choke on).
-#   (2) d DIAL: Mosek pulls further ahead as d grows (0.97 → 0.91 → 0.85),
-#       contrary to the d² nonzero-cost prediction — something in the IPM
-#       scales worse than expected with block size. Clarabel ratio does
-#       improve (1.70 → 2.03 → 3.08x), so the d lever works against the
-#       first-order solver, just not against Mosek.
+# d dial (K = 4 fixed):
+# d=4   dof=1312   IPM   53.5ms  HSD   52.6ms (0.98x)  Cla   94.0ms (1.76x)  Msk   52.6ms (0.98x)
+# d=6   dof=2832   IPM  274.0ms  HSD  305.2ms (1.11x)  Cla  589.2ms (2.15x)  Msk  252.2ms (0.92x)
+# d=8   dof=4928   IPM  792.4ms  HSD  956.6ms (1.21x)  Cla 2513.0ms (3.17x)  Msk  667.3ms (0.84x)
 # =============================================================================

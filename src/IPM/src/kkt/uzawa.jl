@@ -1,8 +1,6 @@
 @kwdef struct UzawaSettings{T, E <: EliminationAlgorithm} <: KKTSettings{T}
     aaug::T = zero(T)
     raug::T = 1e6
-    atol::T = √eps(T)
-    rtol::T = √eps(T)
     itmax::Int = 1000
     elim::E = DEFAULT_ELIMINATION_ALGORITHM
 end
@@ -14,7 +12,6 @@ end
 function showsettings(io::IO, set::UzawaSettings; indent::Integer=0)
     pad = " "^indent
     @printf(io, "%saaug:  %8.2e  raug:  %8.2e\n", pad, set.aaug, set.raug)
-    @printf(io, "%satol:  %8.2e  rtol:  %8.2e\n", pad, set.atol, set.rtol)
     @printf(io, "%sitmax: %8d\n", pad, set.itmax)
     return
 end
@@ -32,7 +29,6 @@ struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     itrwrk::CraigWorkspace{T, T, Vector{T}}
     r::Vector{T}
     α::Scalar{T}
-    nrm::T
 end
 
 function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I}) where {UPLO, T, I <: Integer}
@@ -42,8 +38,7 @@ function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMat
     itrwrk = CraigWorkspace(m, n, Vector{T})
     r = zeros(T, m)
     α = ones(T)
-    nrm = norm(B)^2
-    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, nrm)
+    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α)
 end
 
 function make_kkt(settings::UzawaSettings{T}, B::BlockSparseMatrix{T, I}) where {T, I}
@@ -61,8 +56,8 @@ function make_kkt(settings::UzawaSettings{T}, B::BlockSparseMatrix{T, I}) where 
     return R, P, B, wrk
 end
 
-function initkkt!(wrk::UzawaWorkspace{UPLO, T}, set::UzawaSettings{T}, A::BlockSparseMatrix, rgmin::T, rgmax::T) where {UPLO, T}
-    wrk.α[] = α = set.aaug + set.raug * norm(Symmetric(A, :L)) / wrk.nrm
+function initkkt!(wrk::UzawaWorkspace{UPLO, T}, set::UzawaSettings{T}, A::BlockSparseMatrix, nH::T, nB::T, rgmin::T, rgmax::T) where {UPLO, T}
+    wrk.α[] = α = set.aaug + set.raug * nH / nB^2
     return init_uzw!(wrk.facwrk, wrk.F, wrk.L, A, α, rgmin, rgmax)
 end
 
@@ -111,10 +106,9 @@ function solve_kkt!(
     f::AbstractVector{T},
     g::AbstractVector{T},
     y0 = nothing;
-    rtol::T = set.rtol,
+    atol::T,
 ) where {UPLO, T}
-    rtol = max(set.rtol, rtol)
-    return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, B, f, g, wrk.α[], set.atol, rtol, set.itmax, y0)
+    return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, B, f, g, wrk.α[], atol, set.itmax, y0)
 end
 
 #
@@ -135,7 +129,6 @@ function solve_uzw!(
         g::AbstractVector{T},
         α::T,
         atol::T,
-        rtol::T,
         itmax::Int,
         y0 = nothing
     ) where {UPLO, T}
@@ -188,7 +181,7 @@ function solve_uzw!(
     end
 
     N = LinearOperator(T, n, n, true, true, prec!)
-    craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol, rtol, itmax)
+    craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol, itmax)
     #
     # update x and y:
     #

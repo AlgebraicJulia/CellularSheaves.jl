@@ -3,16 +3,19 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run (julia --project e9.jl --quick --mosek):
+# Sample run: 2026-07-16 (--quick)
+# -----------------------------------------------------------------------------
+# T=64    dof=2040   IPM   28.7ms  HSD   45.5ms (1.58x)  Cla   30.5ms (1.06x)  Msk —
+# T=128   dof=4088   IPM   61.0ms  HSD   90.7ms (1.49x)  Cla   82.0ms (1.34x)  Msk —
+# T=256   dof=8184   IPM  133.5ms  HSD  186.7ms (1.40x)  Cla  276.3ms (2.07x)  Msk —
+# =============================================================================
 #
-#   Gate tests (n = 8, T = 64):
-#     [PASS] analytic (Almgren power-law ODE, E = 0.00448774): sup|x_dt − x(t)| = 0.00037 at N = 64
-#     [PASS] objective identity: F(x) = 233.9868 (rel 5.0e-8)
-#     [PASS] IPM vs Clarabel (same conic program): ‖Δx‖∞ = 5.3e-5
-#
-#   T=64    dof=2040   n1=1024  blk=3     IPM  108.3ms  Cla   30.7ms (0.28x)  Msk   43.1ms (0.40x)
-#   T=128   dof=4088   n1=2048  blk=3     IPM  150.2ms  Cla   83.7ms (0.56x)  Msk  123.2ms (0.82x)
-#   T=256   dof=8184   n1=4096  blk=3     IPM  498.0ms  Cla  283.9ms (0.57x)  Msk  630.4ms (1.27x)
-#
-#   Fitted slopes: IPM DOF^1.10, Clarabel DOF^1.60, Mosek DOF^1.93
+# =============================================================================
+# Sample run: 2026-07-14 (--quick --mosek)
+# -----------------------------------------------------------------------------
+# T=64    dof=2040   IPM   59.4ms*  HSD   92.3ms* (1.55x)  Cla   30.2ms (0.51x)  Msk   42.1ms (0.71x)
+# T=128   dof=4088   IPM  118.2ms*  HSD  174.5ms* (1.48x)  Cla   81.6ms (0.69x)  Msk  120.8ms (1.02x)
+# T=256   dof=8184   IPM  235.0ms*  HSD  364.4ms* (1.55x)  Cla  274.1ms (1.17x)  Msk  604.0ms* (2.57x)
+# Slopes: IPM DOF^0.99, HSD DOF^0.99, Clarabel DOF^1.59, Mosek DOF^1.92
+# * = NEAR_OPTIMAL
 # =============================================================================

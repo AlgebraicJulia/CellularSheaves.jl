@@ -146,7 +146,7 @@ function build_qm_problem(inst::QMInstance)
     c = zeros(size(B, 2))
     for (k, start) in enumerate(cl)
         block(Q, k, k, k) .= inst.ε .* Matrix{Float64}(I, sd, sd)
-        c[colrange(B, k)] .= qm_svec(qm_cluster_H(inst, start))
+        c[colrange(B, k)] .= -qm_svec(qm_cluster_H(inst, start))  # negated for min ½p'Qp - c'p
     end
     IPMProblem(Q, B, c, g, AbstractCone[SemidefiniteCone() for _ in 1:ncl]), (ncl=ncl, D=D)
 end
@@ -190,7 +190,7 @@ function test_ed_oracle()
     res = solve(prob, settings)
 
     if res.status in (OPTIMAL, NEAR_OPTIMAL)
-        E_sdp = 0.5 * dot(res.p, prob.Q * res.p) + dot(prob.c, res.p)
+        E_sdp = 0.5 * dot(res.p, prob.Q * res.p) - dot(prob.c, res.p)
         gap = E_ed - E_sdp
         if gap >= -1e-6
             println("  [PASS] Lower bound: E_sdp=$(round(E_sdp, sigdigits=5)) ≤ E_ed=$(round(E_ed, sigdigits=5)) (gap=$(round(gap, sigdigits=3)))")
@@ -217,7 +217,11 @@ function run()
     test_ed_oracle()
     println()
 
-    settings = IPMSettings{Float64}(
+    ipm_settings = IPMSettings{Float64}(
+        kkt = UzawaSettings{Float64}(raug = 1e2),
+        feas_tol = TOL, gap_tol = TOL, itmax = 200)
+
+    hsd_settings = HSDSettings{Float64}(
         kkt = UzawaSettings{Float64}(raug = 1e2),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
@@ -233,23 +237,26 @@ function run()
         @printf("  N=%-4d dof=%-6d n1=%-5d blk=%-4.0f  ",
             N, stats.N0, stats.N1, stats.med_block)
 
-        m_ipm = measure_ipm(prob, settings; nruns = NRUNS)
+        m_ipm = measure_ipm(prob, ipm_settings; nruns = NRUNS)
+        m_hsd = measure_ipm(prob, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_qm(inst, cla_opt)); nruns = NRUNS)
         m_msk = msk_opt !== nothing ?
             measure_jump(() -> first(build_jump_qm(inst, msk_opt)); nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
 
-        ratio(b) = isfinite(b.t) && isfinite(m_ipm.t) ? b.t / m_ipm.t : NaN
-        fmt_ratio(b) = isnan(ratio(b)) ? "—" : @sprintf("%.2fx", ratio(b))
+        ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
+        fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))
 
-        println("IPM ", fmt_time(m_ipm), "  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla), ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk), ")")
+        println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd), " (", fmt_ratio(m_hsd, m_ipm),
+            ")  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla, m_ipm),
+            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk, m_ipm), ")")
 
-        push!(rows, (size = N, dof = stats.N0, ipm = m_ipm, cla = m_cla, msk = m_msk))
+        push!(rows, (size = N, dof = stats.N0, ipm = m_ipm, hsd = m_hsd, cla = m_cla, msk = m_msk))
     end
 
     dofs = [r.dof for r in rows]
     println("\nFitted log-log slopes (time vs DOF):")
-    for (name, get_t) in [("IPM", r -> r.ipm.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
+    for (name, get_t) in [("IPM", r -> r.ipm.t), ("HSD", r -> r.hsd.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
         sl = loglog_slope(dofs, [get_t(r) for r in rows])
         print("  $name: ", isnan(sl) ? "n/a" : @sprintf("DOF^%.2f", sl))
     end

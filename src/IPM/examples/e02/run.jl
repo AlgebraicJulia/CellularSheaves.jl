@@ -3,15 +3,19 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run: 2026-07-14 (--quick --mosek, M3 Max)
+# Sample run: 2026-07-16 (--quick)
 # -----------------------------------------------------------------------------
-#   Gate tests:
-#     [PASS] ED oracle N=6: E₀=-2.8028 (true ring energy; fixed 2026-07-14)
-#     [PASS] Lower bound: E_sdp=-3.0 ≤ E_ed=-2.8028 (gap=0.197)
+# N=8    dof=1088   IPM  21.2ms  HSD  28.7ms (1.36x)  Cla  147.1ms (6.95x)  Msk —
+# N=10   dof=1360   IPM  31.5ms  HSD  38.7ms (1.23x)  Cla  184.8ms (5.86x)  Msk —
+# N=12   dof=1632   IPM  37.9ms  HSD  46.6ms (1.23x)  Cla  240.0ms (6.34x)  Msk —
+# Slopes: IPM DOF^1.45, HSD DOF^1.20, Clarabel DOF^1.20, Mosek n/a
+# =============================================================================
 #
-#   N=8    dof=1088   IPM  27ms  Cla  145ms (5.37x)  Msk  56ms (2.09x)
-#   N=10   dof=1360   IPM  32ms  Cla  187ms (5.84x)  Msk  61ms (1.91x)
-#   N=12   dof=1632   IPM  40ms  Cla  246ms (6.22x)  Msk  80ms (2.02x)
-#
-#   Slopes: IPM DOF^0.94, Clarabel DOF^1.30, Mosek DOF^0.85
+# =============================================================================
+# Sample run: 2026-07-14 (--quick --mosek)
+# -----------------------------------------------------------------------------
+# N=8    dof=1088   IPM  27.3ms  HSD  32.4ms (1.18x)  Cla  149.5ms (5.47x)  Msk  55.6ms (2.03x)
+# N=10   dof=1360   IPM  31.6ms  HSD  42.6ms (1.35x)  Cla  197.2ms (6.23x)  Msk  59.7ms (1.89x)
+# N=12   dof=1632   IPM  39.3ms  HSD  52.0ms (1.32x)  Cla  244.3ms (6.22x)  Msk  78.0ms (1.99x)
+# Slopes: IPM DOF^0.88, HSD DOF^1.17, Clarabel DOF^1.21, Mosek DOF^0.82
 # =============================================================================

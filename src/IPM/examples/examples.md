@@ -27,6 +27,7 @@ julia --project e01/run.jl --quick      # quick (smaller) sweep
 | **E09** | Robust Kalman smoothing, burst-corrupted sensors | dense-Q + SOC chain | horizon T |
 | **E10** | Compositional Lyapunov on a K×K torus | dense-Q dense-SDP, sum-decomposition edges | torus size K |
 | **E11** | Multichannel FIR equalizer bank (MINT) | dense-Q + SOC, Cholesky ties | channels M |
+| **E13** | Distributed sound-zone control, cooperative rendering | dense-Q + SOC, bounded degree | zones Z |
 
 ## E01: Two-asset American basket put under Merton jump-diffusion
 
@@ -387,6 +388,98 @@ Dials: channel count M (DOF = M(2Lf+2)+1) and block size Lf (--ldial).
 
 Files: `e11/`, `tools/mint_equalizer_oracle.py`.
 
+
+## E13: Distributed sound zones — cooperative multizone rendering (`e13/`)
+
+Z zones on a path, each with a 4-speaker array and 3 control points;
+reverberant FIR acoustics (Lh = 96) with inter-zone gain γ^{|Δz|}. Every
+array within radius ρ = 1 of a program cooperates in rendering it
+(pressure matching, Betlehem et al. IEEE SPM 2015), giving stalks f_{z',p}
+(dim 64) with dense radiated-power Grams (sinc radiation coupling ×
+heterogeneous AR(2) program spectra, Morse–Ingard) and one reproduction
+ball per (zone, program): reference-field bright targets, dark leakage
+caps, signal-scale radii at the global-LS floors. Per-array acoustic-output
+budgets (SPL caps, same Gram family) connect the programs at each array.
+Every ball gets E11's exact whitening + slice split LOCALLY: slice SOCs of
+dim 65, hub SOCs of dim ≤ 5 — bounded arity, coupling mass O(Z). E13 is
+E11 tiled, built to answer E11's M-dial reading (DOF^2.29 under O(M²)
+global coupling).
+
+Three structural observations recorded during design (oracle-measured):
+(i) one-array-per-program renders the gluing exactly block-diagonal
+(tri-density 1/(2ρ+1) = 0.338) — cooperative rendering restores 1.000;
+(ii) without the budgets the problem decomposes exactly by program (Z
+components, machine-checked) — and the cure is connectivity, not reach:
+the physics is screening (hop ratio 0.21 at γ 0.25 vs 0.31 at 0.4,
+the E09-DARE species); (iii) a signal-power budget (I_S ⊗ Toeplitz)
+would be block-diagonal across speakers, tri-density 1/S — avoided by
+capping acoustic rather than electrical power.
+
+Oracle (`tools/soundzone_oracle.py`, 10 checks, fully executed): endpoint
+η^0.98; assembly == native 1.8e-7 / 7.3e-11; TRS (Z = 1 reduction) with
+Moré–Sorensen residuals ~1e-17; γ = 0 separates per array to 1.2e-9;
+truncation reach γ^1.79 / γ^2.80 (increment 1.01 — one power of
+γ per zone; the base exceeds naive γ^1 because the dark balls
+shadow farther leakage); response-domain contrast +2.3..+4.3 dB per zone
+(mean +3.3) over non-cooperative at budget utilization 0.83–0.94;
+cross-solver 4.2e-8.
+
+Benchmark (Z-dial 4 → 32, med blk 65). PRE-REGISTERED slope ~1.1–1.3
+against E11's 2.29: measured IPM DOF^1.17 (HSD 1.19), Clarabel 1.07,
+Mosek 1.55. IPM wins 2.14× vs Clarabel and 5.62× vs Mosek at Z = 32.
+Honest caveat: Clarabel's slope is 0.10 SHALLOWER than ours — the win
+over Clarabel on this dial is constant-factor, not exponent (extrapolated
+crossover ~1e7+ DOF, far outside the regime; stated, not hidden). Mosek
+mirrors E11 exactly: it loses the count dial (2.21× → 2.83× → 5.62×) as
+decisively as it won E11's size dial.
+
+Ablations: --joint (per-ball monolithic SOCs, dim ~194 vs 65): slope
+nearly unchanged (1.22) but the win compresses 2.14× → 1.33× — the
+balanced-blocks lesson operating at the constant. --nobudget
+(decomposability control): IPM indifferent (1.16); only Mosek's presolve
+shows decomposition-awareness (1.55 → 1.29); Clarabel does not (1.10).
+--ldial (Lf 16 → 48 at Z = 8): all superlinear as predicted, but ratios
+NOT stable — Clarabel steepest (2.77, IPM win grows to 4.02×), Mosek
+shallowest (1.90); see the count-vs-size regime rule below.
+
+Files: `e13/`, `tools/soundzone_oracle.py`.
+
+---
+
+## Suite-level lessons
+
+**Coupling mass sets the slope only under bounded topology.** E11 + E13
+now demonstrate this as a three-point ladder within one problem family:
+O(M²) global coupling → DOF^2.29 (E11 flagship); O(M) coupling through
+an arity-M star hub → DOF^1.97 and a 6× LOSS to Clarabel (E11 --budget:
+the hub SOC has dim M+2, a single (M+2)³ vertex cost, slope → 3
+asymptotically); O(M) coupling through a binary hypot tree → DOF^0.99
+and a 1.77× win (E11 --tree); O(Z) bounded-degree tiling → DOF^1.17
+(E13). The habitat condition is therefore: dense-after-scaling blocks AND
+bounded vertex arity AND bounded max block dimension — med_blk alone is
+not sufficient (the star keeps med_blk at 65 while the max block grows
+unboundedly; E10's imbalance lesson in topological form).
+
+**The hypot tree is a reusable formulation species.** Any arity-k hub
+s = ‖(s_1, .., s_k)‖ splits exactly into a depth-log(k) binary tree of
+dim-3 combiners s_parent = ‖(s_left, s_right)‖ (nested norms; zero
+conservatism). Cost: O(k) extra 3-dim SOCs. Use it whenever a budget or
+ball aggregates more than O(1) channels.
+
+**Count-dial vs size-dial regime rule (three independent sightings).**
+Mosek is the strong opponent on BLOCK-SIZE growth (E11 M-dial 1.72; E13
+--ldial 1.90, shallowest) and the weak one on BLOCK-COUNT growth (E13
+Z-dial 1.55, steepest). Clarabel is the reverse (Z-dial 1.07, best;
+--ldial 2.77, worst). The sheaf IPM's advantage is maximal on count dials
+with bounded blocks (wins the exponent vs Mosek, the constant vs
+Clarabel) and on size dials vs Clarabel; its exposed flank is size dials
+vs Mosek (E11 flagship crossover at M ~ 16).
+
+**Practical recommendation for E11-type problems now flips with scale:**
+the flagship exact-slice split (zero conservatism) up to M ~ 16; the
+--tree budget split (conservatism 1.04 measured) beyond — slope 0.99,
+36.5 ms at M = 32 vs the flagship's 244.9 ms.
+
 ---
 
 ## Files
@@ -403,6 +496,7 @@ Files: `e11/`, `tools/mint_equalizer_oracle.py`.
 - `e09/` — Robust Kalman smoothing, burst corruption (dense-Q + SOC chain)
 - `e10/` — Compositional Lyapunov on a K×K torus (dense-Q dense-SDP)
 - `e11/` — Multichannel FIR equalizer bank (dense-Q + SOC, Cholesky ties)
+- `e13/` — Distributed sound-zone control (dense-Q + SOC, bounded degree)
 
 ## Reference documentation
 

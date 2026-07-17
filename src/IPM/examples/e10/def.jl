@@ -269,7 +269,7 @@ function build_torus(sys, K::Int; γ = sys.γ)
         block(Q, pstalk(v), pstalk(v), pstalk(v)) .= Qp
         block(Q, hstalk(v), hstalk(v), hstalk(v)) .= Isr
         block(Q, vstalk(v), vstalk(v), vstalk(v)) .= Isr
-        c[colrange(B, pstalk(v))] .= ci
+        c[colrange(B, pstalk(v))] .= .-ci
     end
     cones = vcat(IPM.AbstractCone[SemidefiniteCone() for _ in 1:W],
                  IPM.AbstractCone[SemidefiniteCone() for _ in 1:(2 * W)])
@@ -300,7 +300,7 @@ function build_cell(sys; γ = sys.γ)
     block(Q, 2, 2, 2) .= RIDGE .* Matrix{Float64}(I, ss, ss)
     block(Q, 3, 3, 3) .= RIDGE .* Matrix{Float64}(I, ss, ss)
     c = zeros(size(B, 2))
-    c[colrange(B, 1)] .= tosvec(Matrix{Float64}(I, d, d))
+    c[colrange(B, 1)] .= .-tosvec(Matrix{Float64}(I, d, d))
     prob = IPMProblem(Q, B, c, g,
                       IPM.AbstractCone[SemidefiniteCone() for _ in 1:3])
     prob
@@ -494,7 +494,10 @@ function run()
         "(dials: K; d fattens both sides)")
     println("=" ^ 78)
 
-    settings = IPMSettings{Float64}(
+    ipm_settings = IPMSettings{Float64}(
+        kkt = UzawaSettings{Float64}(raug = 1e2),
+        feas_tol = TOL, gap_tol = TOL, itmax = 200)
+    hsd_settings = HSDSettings{Float64}(
         kkt = UzawaSettings{Float64}(raug = 1e2),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
@@ -505,9 +508,9 @@ function run()
     test_maps(sys)
     test_coker(sys)
     test_stability(sys)
-    prob3, ctx3, res3, Ps3 = test_symmetry(sys, settings)
+    prob3, ctx3, res3, Ps3 = test_symmetry(sys, ipm_settings)
     test_dynamical(sys, Ps3)
-    test_deformation(sys, settings)
+    test_deformation(sys, ipm_settings)
     test_objective_identity(prob3, ctx3, res3)
     test_ipm_vs_clarabel(sys, ctx3, Ps3)
     println()
@@ -523,23 +526,25 @@ function run()
         stats = problem_stats(prob)
         @printf("  K=%-3d dof=%-6d n1=%-6d blk=%-4.0f  ",
             K, stats.N0, stats.N1, stats.med_block)
-        m_ipm = measure_ipm(prob, settings; nruns = NRUNS)
+        m_ipm = measure_ipm(prob, ipm_settings; nruns = NRUNS)
+        m_hsd = measure_ipm(prob, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_torus(sys, K, cla_opt));
                              nruns = NRUNS)
         m_msk = msk_opt !== nothing ?
             measure_jump(() -> first(build_jump_torus(sys, K, msk_opt));
                          nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
-        ratio(b) = isfinite(b.t) && isfinite(m_ipm.t) ? b.t / m_ipm.t : NaN
-        fmt_ratio(b) = isnan(ratio(b)) ? "—" : @sprintf("%.2fx", ratio(b))
-        println("IPM ", fmt_time(m_ipm), "  Cla ", fmt_time(m_cla),
-            " (", fmt_ratio(m_cla), ")  Msk ", fmt_time(m_msk),
-            " (", fmt_ratio(m_msk), ")")
-        push!(rows, (dof = stats.N0, ipm = m_ipm, cla = m_cla, msk = m_msk))
+        ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
+        fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))
+        println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd),
+            " (", fmt_ratio(m_hsd, m_ipm), ")  Cla ", fmt_time(m_cla),
+            " (", fmt_ratio(m_cla, m_ipm), ")  Msk ", fmt_time(m_msk),
+            " (", fmt_ratio(m_msk, m_ipm), ")")
+        push!(rows, (dof = stats.N0, ipm = m_ipm, hsd = m_hsd, cla = m_cla, msk = m_msk))
     end
     dofs = [r.dof for r in rows]
     println("\nFitted log-log slopes (time vs DOF):")
-    for (name, get_t) in [("IPM", r -> r.ipm.t), ("Clarabel", r -> r.cla.t),
+    for (name, get_t) in [("IPM", r -> r.ipm.t), ("HSD", r -> r.hsd.t), ("Clarabel", r -> r.cla.t),
                           ("Mosek", r -> r.msk.t)]
         sl = loglog_slope(dofs, [get_t(r) for r in rows])
         print("  $name: ", isnan(sl) ? "n/a" : @sprintf("DOF^%.2f", sl))
@@ -558,18 +563,20 @@ function run()
         statsd = problem_stats(probd)
         @printf("  d=%-3d dof=%-6d n1=%-6d blk=%-4.0f  ",
             dd, statsd.N0, statsd.N1, statsd.med_block)
-        m_ipm = measure_ipm(probd, settings; nruns = NRUNS)
+        m_ipm = measure_ipm(probd, ipm_settings; nruns = NRUNS)
+        m_hsd = measure_ipm(probd, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_torus(sysd, Kd, cla_opt));
                              nruns = NRUNS)
         m_msk = msk_opt !== nothing ?
             measure_jump(() -> first(build_jump_torus(sysd, Kd, msk_opt));
                          nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
-        ratio(b) = isfinite(b.t) && isfinite(m_ipm.t) ? b.t / m_ipm.t : NaN
-        fmt_ratio(b) = isnan(ratio(b)) ? "—" : @sprintf("%.2fx", ratio(b))
-        println("IPM ", fmt_time(m_ipm), "  Cla ", fmt_time(m_cla),
-            " (", fmt_ratio(m_cla), ")  Msk ", fmt_time(m_msk),
-            " (", fmt_ratio(m_msk), ")")
+        ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
+        fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))
+        println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd),
+            " (", fmt_ratio(m_hsd, m_ipm), ")  Cla ", fmt_time(m_cla),
+            " (", fmt_ratio(m_cla, m_ipm), ")  Msk ", fmt_time(m_msk),
+            " (", fmt_ratio(m_msk, m_ipm), ")")
     end
 end
 

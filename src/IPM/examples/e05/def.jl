@@ -224,10 +224,10 @@ function build_galerkin(inst::GalerkinNLTVInstance)
         G = Emats[t]' * Emats[t]
         ridge = 1e-10 * tr(G) / m
         block(Q, t, t, t) .= Symmetric(G .+ ridge .* Matrix(I, m, m))
-        c[colrange(B, t)] .= -(Emats[t]' * y[tiles[t][1]:tiles[t][2]])
+        c[colrange(B, t)] .= Emats[t]' * y[tiles[t][1]:tiles[t][2]]
     end
     for i in 1:N
-        c[first(colrange(B, P + i))] = λ
+        c[first(colrange(B, P + i))] = -λ
     end
     g = zeros(size(B, 1))
     K_cones = vcat(IPM.AbstractCone[IPM.CofreeCone() for _ in 1:P],
@@ -276,7 +276,7 @@ function build_jump_galerkin(prob, ctx, optimizer)
     end
     x = reduce(vcat, xs)
     Qs = sparse(prob.Q); Bs = sparse(prob.B)
-    @objective(model, Min, 0.5 * x' * Qs * x + prob.c' * x)
+    @objective(model, Min, 0.5 * x' * Qs * x - prob.c' * x)
     @constraint(model, Bs * x .== prob.g)
     return model, x
 end
@@ -392,19 +392,22 @@ function run()
     println("  E05: Galerkin-compressed nonlocal TV (dial: N; Tsz = 128, m = 32, K = 12)")
     println("=" ^ 78)
 
-    settings = IPMSettings{Float64}(
+    ipm_settings = IPMSettings{Float64}(
         kkt = UzawaSettings{Float64}(raug = 1e3),   # retune if slow
+        feas_tol = TOL, gap_tol = TOL, itmax = 200)
+    hsd_settings = HSDSettings{Float64}(
+        kkt = UzawaSettings{Float64}(raug = 1e3),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
     println("\n  Gate tests (N = 512):")
     inst = galerkin_instance(; N = 512)
     prob, ctx = build_galerkin(inst)
     test_graph(ctx)
-    res = solve(prob, settings)
+    res = solve(prob, ipm_settings)
     @assert res.status in (OPTIMAL, NEAR_OPTIMAL) "IPM status $(res.status)"
     u_ipm = test_objective_identity(prob, ctx, res)
     test_model_value(ctx, u_ipm)
-    test_completeness(settings)
+    test_completeness(ipm_settings)
     test_ipm_vs_clarabel(prob, ctx, u_ipm)
     println()
 
@@ -420,24 +423,26 @@ function run()
         @printf("  N=%-5d dof=%-6d n1=%-5d blk=%-4.0f  ",
             N, stats.N0, stats.N1, stats.med_block)
 
-        m_ipm = measure_ipm(prob, settings; nruns = NRUNS)
+        m_ipm = measure_ipm(prob, ipm_settings; nruns = NRUNS)
+        m_hsd = measure_ipm(prob, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_galerkin(prob, ctx, cla_opt)); nruns = NRUNS)
         m_msk = msk_opt !== nothing ?
             measure_jump(() -> first(build_jump_galerkin(prob, ctx, msk_opt)); nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
 
-        ratio(b) = isfinite(b.t) && isfinite(m_ipm.t) ? b.t / m_ipm.t : NaN
-        fmt_ratio(b) = isnan(ratio(b)) ? "—" : @sprintf("%.2fx", ratio(b))
+        ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
+        fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))
 
-        println("IPM ", fmt_time(m_ipm), "  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla),
-            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk), ")")
+        println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd), " (", fmt_ratio(m_hsd, m_ipm),
+            ")  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla, m_ipm),
+            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk, m_ipm), ")")
 
-        push!(rows, (size = N, dof = stats.N0, ipm = m_ipm, cla = m_cla, msk = m_msk))
+        push!(rows, (size = N, dof = stats.N0, ipm = m_ipm, hsd = m_hsd, cla = m_cla, msk = m_msk))
     end
 
     dofs = [r.dof for r in rows]
     println("\nFitted log-log slopes (time vs DOF):")
-    for (name, get_t) in [("IPM", r -> r.ipm.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
+    for (name, get_t) in [("IPM", r -> r.ipm.t), ("HSD", r -> r.hsd.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
         sl = loglog_slope(dofs, [get_t(r) for r in rows])
         print("  $name: ", isnan(sl) ? "n/a" : @sprintf("DOF^%.2f", sl))
     end

@@ -11,7 +11,7 @@ using Dualization
 import MathOptInterface as MOI
 
 using CellularSheaves.IPM
-using CellularSheaves.IPM: OPTIMAL, NEAR_OPTIMAL, PositiveCone, SemidefiniteCone
+using CellularSheaves.IPM: OPTIMAL, NEAR_OPTIMAL, PositiveCone, SemidefiniteCone, IPMSettings, HSDSettings, UzawaSettings
 using CellularSheaves.BlockSparseArrays: block, nvtxs, blocksparse, colrange
 
 # -----------------------------------------------------------------------------
@@ -89,7 +89,7 @@ end
 # -----------------------------------------------------------------------------
 
 function ipm_objective(prob, res)
-    0.5 * dot(res.p, prob.Q * res.p) + dot(prob.c, res.p)
+    0.5 * dot(res.p, prob.Q * res.p) - dot(prob.c, res.p)
 end
 
 function measure_ipm(prob, settings; nruns = 5, nwarmup = 2)

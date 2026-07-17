@@ -7,7 +7,8 @@
 #   julia --project e11/run.jl              # Clarabel baseline (exact form)
 #   julia --project e11/run.jl --mosek      # + Mosek
 #   julia --project e11/run.jl --quick      # quick (smaller) sweep
-#   julia --project e11/run.jl --budget     # budget-split variant (O(M) coupling)
+#   julia --project e11/run.jl --budget     # budget-split variant (O(M) coupling, star)
+#   julia --project e11/run.jl --tree       # budget-tree variant (O(M) coupling, tree)
 #   julia --project e11/run.jl --white      # diagonal-Q ablation (pre-registered)
 #   julia --project e11/run.jl --ldial      # block-size dial Lf at fixed M
 #
@@ -78,6 +79,22 @@
 # uses only 0.33 of the whitened ball vs the exact form's 1.000. The
 # certified budget buys O(M) coupling mass; the benchmark measures both
 # sides of the tradeoff.
+#
+# MEASURED EPILOGUE (post-first-run; the star-vs-tree lesson). The
+# --budget split as originally designed aggregates the M per-filter slack
+# scalars in ONE arity-M hub SOC of dim M+2. Coupling mass is O(M), but
+# the hub is a star: a single vertex of unbounded dimension, (M+2)³
+# per-iteration cost, measured slope DOF^1.97 and a 6× LOSS to Clarabel
+# at M = 32 (whose presolve sees a nearly separable program plus one
+# coupling row: slope 1.04). --tree replaces the star by a binary hypot
+# tree of dim-3 combiners s_parent = ‖(s_left, s_right)‖ — exact by
+# nested norms, O(M) extra tiny SOCs, bounded degree — and the slope
+# drops to DOF^0.99: 36.5 ms at M = 32 (was 585 ms), 1.77× WIN vs
+# Clarabel. Diagnosis confirmed: the bottleneck was hub TOPOLOGY, not the
+# budget formulation. Habitat rule refined accordingly: bounded coupling
+# mass is necessary but not sufficient — vertex arity and max block
+# dimension must be bounded too. Recommendation flips with scale:
+# flagship (zero conservatism) for M ≤ 16; --tree beyond.
 #
 # WHY D = 1 (the polyphase exclusion). For a decimated filter bank (D > 1)
 # the per-filter constraint Gram is EXACTLY polyphase-block-diagonal:
@@ -151,6 +168,7 @@ const OPTS = parse_args(ARGS)
 const TOL = OPTS.tol
 const NRUNS = 5
 const BUDGET = "--budget" in ARGS
+const TREE = "--tree" in ARGS
 const WHITE = "--white" in ARGS
 const LDIAL = "--ldial" in ARGS
 
@@ -246,7 +264,7 @@ end
 # (σ_m = ε_LS/M), one budget row (Σ_m s_m = ε).
 
 function build_equalizer(sys, inst::EqualizerInstance;
-                         form = BUDGET ? :budget : :exact, white = WHITE)
+                         form = TREE ? :budget_tree : (BUDGET ? :budget : :exact), white = WHITE)
     M, Lf = sys.M, sys.Lf
     vfil(m) = m
     vsoc(m) = M + m
@@ -309,6 +327,87 @@ function build_equalizer(sys, inst::EqualizerInstance;
         K_cones = vcat(IPM.AbstractCone[CofreeCone() for _ in 1:M],
                        IPM.AbstractCone[SecondOrderCone() for _ in 1:M])
         stalks = vcat([(Lf, :free) for _ in 1:M], [(dsoc, :soc) for _ in 1:M])
+    elseif form == :budget_tree
+        dsoc = Lf + 2
+        for m in 1:M                          # ---- ties w_m − L_m'f_m = −b_m
+            e += 1
+            Aw = zeros(Lf, dsoc); Aw[:, 2:Lf + 1] .= ILf
+            push!(row_ids, e); push!(col_ids, vsoc(m)); push!(blocks, Aw)
+            push!(row_ids, e); push!(col_ids, vfil(m)); push!(blocks, -sys.LTms[m])
+            rhs_val[e] = -sys.bms[m]
+        end
+        for m in 1:M                          # ---- pins σ_m = ε_LS/M
+            e += 1
+            Ap = zeros(1, dsoc); Ap[1, dsoc] = 1.0
+            push!(row_ids, e); push!(col_ids, vsoc(m)); push!(blocks, Ap)
+            rhs_val[e] = [sys.eLS / M]
+        end
+        ncomb = M - 1
+        vcomb(k) = 2M + k
+        nodes = collect(1:M)
+        node_is_leaf = trues(M)
+        combiner_idx = 0
+        combiner_children = Vector{Tuple{Int,Bool,Int,Bool}}()
+        while length(nodes) > 1
+            new_nodes = Int[]
+            new_is_leaf = Bool[]
+            i = 1
+            while i <= length(nodes)
+                if i + 1 <= length(nodes)
+                    combiner_idx += 1
+                    push!(combiner_children, (nodes[i], node_is_leaf[i],
+                                              nodes[i+1], node_is_leaf[i+1]))
+                    push!(new_nodes, combiner_idx)
+                    push!(new_is_leaf, false)
+                    i += 2
+                else
+                    push!(new_nodes, nodes[i])
+                    push!(new_is_leaf, node_is_leaf[i])
+                    i += 1
+                end
+            end
+            nodes = new_nodes
+            node_is_leaf = new_is_leaf
+        end
+        root_is_leaf = node_is_leaf[1]
+        root_idx = nodes[1]
+        for (k, (left, left_leaf, right, right_leaf)) in enumerate(combiner_children)
+            e += 1
+            Al = zeros(1, 3); Al[1, 2] = 1.0
+            push!(row_ids, e); push!(col_ids, vcomb(k)); push!(blocks, Al)
+            if left_leaf
+                As = zeros(1, dsoc); As[1, 1] = -1.0
+                push!(row_ids, e); push!(col_ids, vsoc(left)); push!(blocks, As)
+            else
+                Ac = zeros(1, 3); Ac[1, 1] = -1.0
+                push!(row_ids, e); push!(col_ids, vcomb(left)); push!(blocks, Ac)
+            end
+            e += 1
+            Ar = zeros(1, 3); Ar[1, 3] = 1.0
+            push!(row_ids, e); push!(col_ids, vcomb(k)); push!(blocks, Ar)
+            if right_leaf
+                As = zeros(1, dsoc); As[1, 1] = -1.0
+                push!(row_ids, e); push!(col_ids, vsoc(right)); push!(blocks, As)
+            else
+                Ac = zeros(1, 3); Ac[1, 1] = -1.0
+                push!(row_ids, e); push!(col_ids, vcomb(right)); push!(blocks, Ac)
+            end
+        end
+        e += 1
+        if root_is_leaf
+            Ap = zeros(1, dsoc); Ap[1, 1] = 1.0
+            push!(row_ids, e); push!(col_ids, vsoc(root_idx)); push!(blocks, Ap)
+        else
+            Ap = zeros(1, 3); Ap[1, 1] = 1.0
+            push!(row_ids, e); push!(col_ids, vcomb(root_idx)); push!(blocks, Ap)
+        end
+        rhs_val[e] = [sys.eps]
+        K_cones = vcat(IPM.AbstractCone[CofreeCone() for _ in 1:M],
+                       IPM.AbstractCone[SecondOrderCone() for _ in 1:M],
+                       IPM.AbstractCone[SecondOrderCone() for _ in 1:ncomb])
+        stalks = vcat([(Lf, :free) for _ in 1:M],
+                      [(dsoc, :soc) for _ in 1:M],
+                      [(3, :soc) for _ in 1:ncomb])
     else
         error("unknown form $form")
     end
@@ -408,7 +507,7 @@ function build_jump_equalizer(prob, ctx, optimizer)
     end
     x = reduce(vcat, xs)
     Qs = sparse(prob.Q); Bs = sparse(prob.B)
-    @objective(model, Min, 0.5 * x' * Qs * x + prob.c' * x)
+    @objective(model, Min, 0.5 * x' * Qs * x - prob.c' * x)
     @constraint(model, Bs * x .== prob.g)
     return model, x
 end
@@ -580,14 +679,17 @@ msizes() = OPTS.tiny ? [4] : OPTS.quick ? [4, 8, 16] : [4, 8, 16, 32]
 lsizes() = OPTS.tiny ? [32] : OPTS.quick ? [32, 64, 128] : [32, 64, 128, 256]
 
 function run()
-    form = BUDGET ? :budget : :exact
+    form = TREE ? :budget_tree : (BUDGET ? :budget : :exact)
     println("\n", "=" ^ 78)
     println("  E11: multichannel equalizer bank, regularized MINT ",
         LDIAL ? "(dial: block size Lf; M = 8)" : "(dial: channels M; Lf = 64)",
         " [$(form) form$(WHITE ? ", WHITE ablation" : "")]")
     println("=" ^ 78)
 
-    settings = IPMSettings{Float64}(
+    ipm_settings = IPMSettings{Float64}(
+        kkt = UzawaSettings{Float64}(raug = 1e4, elim = CliqueTrees.METIS()),
+        feas_tol = TOL, gap_tol = TOL, itmax = 200)
+    hsd_settings = HSDSettings{Float64}(
         kkt = UzawaSettings{Float64}(raug = 1e4, elim = CliqueTrees.METIS()),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
@@ -601,13 +703,13 @@ function run()
     test_mint_threshold()
     test_whitening_identity(sys)
     prob, ctx = build_equalizer(sys, inst; form = :exact, white = false)
-    res = solve(prob, settings)
+    res = solve(prob, ipm_settings)
     @assert res.status in (OPTIMAL, NEAR_OPTIMAL) "IPM status $(res.status)"
     F = test_objective_identity(prob, ctx, res)
     test_trs(sys, inst, F, ipm_objective(prob, res))
     test_certificate_and_ball(ctx, F)
-    test_conservatism(sys, inst, settings)
-    test_noise_shaping(sys, inst, settings, F)
+    test_conservatism(sys, inst, ipm_settings)
+    test_noise_shaping(sys, inst, ipm_settings, F)
     test_ipm_vs_clarabel(prob, ctx, F)
     println()
 
@@ -625,24 +727,26 @@ function run()
         @printf("  %s=%-4d dof=%-6d n1=%-6d blk=%-4.0f  ",
             LDIAL ? "Lf" : "M", sz, stats.N0, stats.N1, stats.med_block)
 
-        m_ipm = measure_ipm(probk, settings; nruns = NRUNS)
+        m_ipm = measure_ipm(probk, ipm_settings; nruns = NRUNS)
+        m_hsd = measure_ipm(probk, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_equalizer(probk, ctxk, cla_opt)); nruns = NRUNS)
         m_msk = msk_opt !== nothing ?
             measure_jump(() -> first(build_jump_equalizer(probk, ctxk, msk_opt)); nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
 
-        ratio(b) = isfinite(b.t) && isfinite(m_ipm.t) ? b.t / m_ipm.t : NaN
-        fmt_ratio(b) = isnan(ratio(b)) ? "—" : @sprintf("%.2fx", ratio(b))
+        ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
+        fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))
 
-        println("IPM ", fmt_time(m_ipm), "  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla),
-            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk), ")")
+        println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd), " (", fmt_ratio(m_hsd, m_ipm),
+            ")  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla, m_ipm),
+            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk, m_ipm), ")")
 
-        push!(rows, (size = sz, dof = stats.N0, ipm = m_ipm, cla = m_cla, msk = m_msk))
+        push!(rows, (size = sz, dof = stats.N0, ipm = m_ipm, hsd = m_hsd, cla = m_cla, msk = m_msk))
     end
 
     dofs = [r.dof for r in rows]
     println("\nFitted log-log slopes (time vs DOF):")
-    for (name, get_t) in [("IPM", r -> r.ipm.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
+    for (name, get_t) in [("IPM", r -> r.ipm.t), ("HSD", r -> r.hsd.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
         sl = loglog_slope(dofs, [get_t(r) for r in rows])
         print("  $name: ", isnan(sl) ? "n/a" : @sprintf("DOF^%.2f", sl))
     end

@@ -1101,14 +1101,8 @@ function symnorm_impl(tA::Val{TA}, uplo::Symbol, A::BlockSparseMatrix{T}, p::Rea
                 AE = block(A, u, v, e)
 
                 if u == v
-                    if TA === :N
-                        SE = Symmetric(AE, uplo)
-                    else
-                        SE = Hermitian(AE, uplo)
-                    end
-
-                    nxt = norm(SE, p)
-                    out = norm((out, nxt), p)
+                    nxt = norm(wrapsym(AE, tA, uplo), p)
+                    out = norm((out, nxt),            p)
                 else
                     nxt = norm(AE, p)
                     out = norm((out, nxt, nxt), p)
@@ -1191,6 +1185,63 @@ function symnorm_impl_2(tA::Val{TA}, uplo::Symbol, A::BlockSparseMatrix{T}) wher
         end
 
         out = maxabs * sqrt(out)
+    end
+
+    return out
+end
+
+function LinearAlgebra.dot(x::AbstractVector, A::BlockSparseMatrix, y::AbstractVector)
+    out = zero(real(promote_eltype(x, A, y)))
+
+    @inbounds for v in vtxs(A)
+        yv = view(y, colrange(A, v))
+
+        for e in srcrange(A, v)
+            u  = A.tgt[e]
+            Ae = block(A, u, v, e)
+            xu = view(x, rowrange(A, u))
+            out += dot(xu, Ae, yv)
+        end
+    end
+
+    return out
+end 
+
+function LinearAlgebra.dot(x::AbstractVector, A::HermOrSymBlockSparseMatrix, y::AbstractVector)
+    uA, tA = unwrapsym(A)
+
+    if A.uplo == 'L'
+        uplo = :L
+    else
+        uplo = :U
+    end
+
+    return symdot_impl(tA, uplo, x, uA, y)
+end
+
+function symdot_impl(tA::Val{TA}, uplo::Symbol, x::AbstractVector, A::BlockSparseMatrix, y::AbstractVector) where {TA}
+    out = zero(real(promote_eltype(x, A, y)))
+
+    @inbounds for v in vtxs(A)
+        xv = view(x, rowrange(A, v))
+        yv = view(y, colrange(A, v))
+
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+
+            if intriangle(u, v, uplo)
+                Ae = block(A, u, v, e)
+
+                if u == v
+                    out += dot(xv, wrapsym(Ae, tA, uplo), yv)
+                else
+                    xu = view(x, rowrange(A, u))
+                    yu = view(y, colrange(A, u))
+                    out += dot(xu, Ae, yv)
+                    out += dot(xv, wrapadj(Ae, tA), yu)
+                end
+            end
+        end
     end
 
     return out
@@ -1401,3 +1452,4 @@ function show_matrix_dense(io::IO, A::BlockSparseMatrix)
     print_matrix(io, A)
     return
 end
+

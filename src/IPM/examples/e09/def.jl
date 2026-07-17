@@ -291,9 +291,9 @@ function build_smoother(sys, inst::SmootherInstance, y;
         block(Q, t, t, t) .= Qt
     end
     c = zeros(size(B, 2))
-    c[colrange(B, 1)[1:n]] .= -(sys.Ω0 * sys.μ0)
+    c[colrange(B, 1)[1:n]] .= (sys.Ω0 * sys.μ0)
     for τ in 0:T
-        c[first(colrange(B, vsoc(τ)))] = weight
+        c[first(colrange(B, vsoc(τ)))] = -weight
     end
 
     K_cones = vcat(IPM.AbstractCone[CofreeCone() for _ in 1:T],
@@ -352,7 +352,7 @@ function build_jump_smoother(prob, ctx, optimizer)
     end
     x = reduce(vcat, xs)
     Qs = sparse(prob.Q); Bs = sparse(prob.B)
-    @objective(model, Min, 0.5 * x' * Qs * x + prob.c' * x)
+    @objective(model, Min, 0.5 * x' * Qs * x - prob.c' * x)
     @constraint(model, Bs * x .== prob.g)
     return model, x
 end
@@ -465,7 +465,10 @@ function run()
         "(dial: horizon T; n = 12, m = 4)")
     println("=" ^ 78)
 
-    settings = IPMSettings{Float64}(
+    ipm_settings = IPMSettings{Float64}(
+        kkt = UzawaSettings{Float64}(raug = 1e4),
+        feas_tol = TOL, gap_tol = TOL, itmax = 200)
+    hsd_settings = HSDSettings{Float64}(
         kkt = UzawaSettings{Float64}(raug = 1e4),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
@@ -477,11 +480,11 @@ function run()
     test_references(sys, inst)
     x_true, y, corrupted = simulate(sys, inst, 100)
     prob, ctx = build_smoother(sys, inst, y)
-    res = solve(prob, settings)
+    res = solve(prob, ipm_settings)
     @assert res.status in (OPTIMAL, NEAR_OPTIMAL) "IPM status $(res.status)"
     X = test_objective_identity(prob, ctx, res)
-    test_deformation(sys, inst, settings)
-    test_robustness(sys, inst, settings)
+    test_deformation(sys, inst, ipm_settings)
+    test_robustness(sys, inst, ipm_settings)
     test_support_recovery(ctx, X, corrupted)
     test_ipm_vs_clarabel(prob, ctx, X)
     println()
@@ -498,24 +501,26 @@ function run()
         @printf("  T=%-5d dof=%-6d n1=%-5d blk=%-4.0f  ",
             T, stats.N0, stats.N1, stats.med_block)
 
-        m_ipm = measure_ipm(prob, settings; nruns = NRUNS)
+        m_ipm = measure_ipm(prob, ipm_settings; nruns = NRUNS)
+        m_hsd = measure_ipm(prob, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_smoother(prob, ctx, cla_opt)); nruns = NRUNS)
         m_msk = msk_opt !== nothing ?
             measure_jump(() -> first(build_jump_smoother(prob, ctx, msk_opt)); nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
 
-        ratio(b) = isfinite(b.t) && isfinite(m_ipm.t) ? b.t / m_ipm.t : NaN
-        fmt_ratio(b) = isnan(ratio(b)) ? "—" : @sprintf("%.2fx", ratio(b))
+        ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
+        fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))
 
-        println("IPM ", fmt_time(m_ipm), "  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla),
-            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk), ")")
+        println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd), " (", fmt_ratio(m_hsd, m_ipm),
+            ")  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla, m_ipm),
+            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk, m_ipm), ")")
 
-        push!(rows, (size = T, dof = stats.N0, ipm = m_ipm, cla = m_cla, msk = m_msk))
+        push!(rows, (size = T, dof = stats.N0, ipm = m_ipm, hsd = m_hsd, cla = m_cla, msk = m_msk))
     end
 
     dofs = [r.dof for r in rows]
     println("\nFitted log-log slopes (time vs DOF):")
-    for (name, get_t) in [("IPM", r -> r.ipm.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
+    for (name, get_t) in [("IPM", r -> r.ipm.t), ("HSD", r -> r.hsd.t), ("Clarabel", r -> r.cla.t), ("Mosek", r -> r.msk.t)]
         sl = loglog_slope(dofs, [get_t(r) for r in rows])
         print("  $name: ", isnan(sl) ? "n/a" : @sprintf("DOF^%.2f", sl))
     end
