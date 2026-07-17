@@ -1,0 +1,27 @@
+/* Green winner-cell highlight for the benchmark tables in the Distributed
+   Sheaf Solve feature guide. The tables are emitted as raw <table> elements so
+   they inherit Documenter's ordinary table styling; this only paints the
+   winning cell. rgba keeps it legible on both the light and dark themes. */
+
+/* right-align the numeric columns, left-align the leading label column, to
+   match the alignment of the markdown tables elsewhere in the docs */
+.content table.bench th,
+.content table.bench td {
+  text-align: right;
+}
+.content table.bench th:first-child,
+.content table.bench td:first-child {
+  text-align: left;
+}
+
+.content table td.win {
+  font-weight: 700;
+  color: #1c6b32;
+  background: rgba(46, 158, 68, 0.17);
+}
+
+html.theme--documenter-dark .content table td.win,
+:root[data-theme="dark"] .content table td.win {
+  color: #83e0a0;
+  background: rgba(111, 220, 140, 0.18);
+}
