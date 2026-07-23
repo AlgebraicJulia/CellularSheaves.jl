@@ -50,7 +50,7 @@ jobs:
       test_versions: "['1']"  # Overrides the default ['1.10', '1']
     secrets: inherit
   CI-HPC:
-    if: github.event_name == 'workflow_dispatch' && inputs.action == 'hpc-test'
+    if: (github.event_name == 'push') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'workflow_dispatch' && inputs.action == 'hpc-test')
     runs-on: [self-hosted, hpc-gpu]
     steps:
       - name: "🗂️ Checkout Repository"
