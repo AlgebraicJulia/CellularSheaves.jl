@@ -6,7 +6,7 @@ using Random: Xoshiro
 using Printf: @sprintf, @printf
 using LinearAlgebra.BLAS: @blasfunc, libblastrampoline
 using LinearAlgebra.LAPACK: chklapackerror
-using Base: require_one_based_indexing, ReshapedArray, @propagate_inbounds, promote_eltype
+using Base: require_one_based_indexing, ReshapedArray, @propagate_inbounds, promote_eltype, oneto
 using FixedSizeArrays: FixedSizeArrayDefault
 using SparseArrays
 using TimerOutputs
@@ -34,7 +34,7 @@ import CommonSolve
 include("src/utils.jl")
 include("src/cone/cone.jl")
 include("src/kkt/kkt.jl")
-include("src/scaling.jl")
+include("src/scaling/scaling.jl")
 include("src/ipm/ipm.jl")
 
 export IPMProblem, IPMSettings, IPMSolver, IPMResult, IPMHistory, IPMHistoryRow, IPMStatus

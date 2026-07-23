@@ -27,11 +27,6 @@ struct IPMWorkspace{T} <: AbstractWorkspace{T}
     sy::FVector{T}
     dp::FVector{T}
     dy::FVector{T}
-    #
-    # steplength workspace
-    #
-    g::FVector{T}  # Q·Δp
-    h::FVector{T}  # Bᵀ·Δy
 end
 
 function IPMWorkspace{T}(m::Integer, n::Integer) where {T}
@@ -49,7 +44,5 @@ function IPMWorkspace{T}(m::Integer, n::Integer) where {T}
         FVector{T}(undef, m),  # sy
         FVector{T}(undef, n),  # dp
         FVector{T}(undef, m),  # dy
-        FVector{T}(undef, n),  # g
-        FVector{T}(undef, n),  # h
     )
 end

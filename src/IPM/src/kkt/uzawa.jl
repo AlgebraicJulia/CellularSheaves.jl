@@ -72,23 +72,32 @@ function init_uzw!(
     ) where {UPLO, T}
     @assert size(F, 1) == size(L, 1) == size(A, 1)
 
+    β = inv(α)
     ρ = rgmin
-
-    copyto!(F, A)
-    axpy!(α, L, F)
+    #
+    # assemble and factor the augmented matrix
+    #
+    #   F = β A + Bᵀ B
+    #
+    copyto!(F, L)
+    axpy!(β, A, F)
     info = cholesky!(facwrk, F; check=false)
-
+    #
+    # on failure, add a diagonal shift ρ I and retry:
+    #
+    #   F ← β A + Bᵀ B + ρ I
+    #
     if !iszero(info)
-        copyto!(F, A)
-        axpy!(α, L, F)
+        copyto!(F, L)
+        axpy!(β, A, F)
         axpy!(ρ, I, F)
         info = cholesky!(facwrk, F; check=false)
     end
 
     while !iszero(info) && 8ρ ≤ rgmax
         ρ *= 8
-        copyto!(F, A)
-        axpy!(α, L, F)
+        copyto!(F, L)
+        axpy!(β, A, F)
         axpy!(ρ, I, F)
         info = cholesky!(facwrk, F; check=false)
     end
@@ -108,7 +117,8 @@ function solve_kkt!(
     y0 = nothing;
     atol::T,
 ) where {UPLO, T}
-    return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, B, f, g, wrk.α[], atol, set.itmax, y0)
+    return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, A, B,
+                      f, g, wrk.α[], atol, set.itmax, y0)
 end
 
 #
@@ -124,13 +134,14 @@ function solve_uzw!(
         y::AbstractVector{T},
         r::AbstractVector{T},
         F::ChordalTriangular{:N, UPLO, T},
+        A::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         f::AbstractVector{T},
         g::AbstractVector{T},
         α::T,
         atol::T,
         itmax::Int,
-        y0 = nothing
+        y0 = nothing,
     ) where {UPLO, T}
     m, n = size(B)
 
@@ -140,20 +151,21 @@ function solve_uzw!(
     @assert length(f) == n
     @assert length(g) == m
     @assert size(F, 1) == n
+    @assert size(A, 1) == n
+    niter = 1; β = inv(α)
     #
     # solve for x:
     #
-    #   (A + α Bᵀ B) x = f + Bᵀ (α g + y₀)
+    #   (β A + Bᵀ B) x =  β f + Bᵀ (g + β y₀)
     #
     copyto!(r, g)
-    lmul!(α, r)
 
     if !isnothing(y0)
-        axpy!(one(T), y0, r)
+        axpy!(β, y0, r)
     end
 
     copyto!(x, f)
-    mul!(x, B', r, one(T), one(T))
+    mul!(x, B', r, one(T), β)
     ldiv!(divwrk, F,  x)
     ldiv!(divwrk, F', x)
     #
@@ -166,14 +178,14 @@ function solve_uzw!(
     #
     # solve for δx and δy:
     #
-    #   [ A + α Bᵀ B -Bᵀ ] [ δx ] = [ 0 ]
-    #   [ B           0  ] [ δy ]   [ r ]
+    #   [ β A + Bᵀ B  -Bᵀ ] [ δx ] = [ 0 ]
+    #   [ B            0  ] [ δy ]   [ r ]
     #
     function prec!(u, v)
         #
         # solve for u:
         #
-        #   (A + α Bᵀ B) u = v
+        #   (β A + Bᵀ B) u = v
         #
         copyto!(u, v)
         ldiv!(divwrk, F,  u)
@@ -182,26 +194,27 @@ function solve_uzw!(
 
     N = LinearOperator(T, n, n, true, true, prec!)
     craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol, itmax)
+    niter += itrwrk.stats.niter
     #
-    # update x and y:
+    # update x:
     #
-    #   x = x  + δx
-    #   y = y₀ + δy
+    #   x = x + δx
     #
     axpy!(one(T), itrwrk.x, x)
+    #
+    # recover y:
+    #
+    #   y = y₀ + 1/β (δy + (g - B x))
+    #
+    copyto!(r, g)
+    mul!(r, B, x, -one(T), one(T))
     copyto!(y, itrwrk.y)
+    axpy!(one(T), r, y)
+    lmul!(α, y)
 
     if !isnothing(y0)
         axpy!(one(T), y0, y)
     end
-    #
-    # update y:
-    #
-    #   y = y + α (g - B x)
-    #
-    copyto!(r, g)
-    mul!(r, B, x, -one(T), one(T))
-    axpy!(α, r, y)
 
-    return itrwrk.stats.niter + 1
+    return niter
 end

@@ -8,7 +8,7 @@
     stall_tol::T = 1e-6
     forcing_frac::T = 0.1
     forcing_ceil::T = 0.3
-    refine_itmax::Int = 3
+    refine_itmax::Int = 10   # final_spec.md C1: raised from 3 — un-gated refinement needs the budget
     refine_stall::T = 0.5
     floor_patience::Int = 3
     scale_itmax::Int = 10

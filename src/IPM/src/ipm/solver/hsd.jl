@@ -9,7 +9,7 @@ struct HSDSolver{T, I, W, C} <: AbstractSolver{T}
     d::FVector{T}
     y::FVector{T}
     K::FVector{C}
-    scaling::Scaling{T}
+    scaling::HSDScaling{T}
     P::FPermutation{I}
     wrk::HSDWorkspace{T}
     caches::Caches{T, I}
@@ -33,12 +33,11 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
     d = Vector{T}(undef, length(s.d))
     y = Vector{T}(undef, length(s.y))
 
-    τ = s.τ[]
-    κ = s.κ[]
-
     ldiv!(p, s.P, s.p)
     ldiv!(d, s.P, s.d)
     copyto!(y, s.y)
+
+    τ, κ = unscale!(p, d, y, s.τ[], s.κ[], s.scaling)   # interior unscale + user-frame (τ, κ)
 
     if status in (OPTIMAL, NEAR_OPTIMAL, STALLED, ITERATION_LIMIT, NUMERICAL_FAILURE)
         ldiv!(τ, p)
@@ -52,8 +51,6 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
         ldiv!(np, d)
     end
 
-    unscale!(p, d, y, s.scaling)
-
     niter = 0
     npred = 0
     ncorr = 0
@@ -63,8 +60,33 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
         npred += row.npred
         ncorr += row.ncorr
     end
+    #
+    # C5 (addendum): the answer at the returned point, in user frame. pres/dres are recomputed
+    # from a fresh residual pass (the last step's w.rp/w.rd describe the pre-update iterate), then
+    # the residual VECTOR is un-scaled per-element (÷rscl for rows, ÷cscl for cols) BEFORE norming
+    # — the E/D equilibration reweighting destroys the mass distribution, so un-scaling the stored
+    # embedding norm would be wrong. Objectives are bilinear (equilibration-invariant); mu is
+    # evaluated directly (the τκ / ν+1→ν wedges are full-size at off-path floors).
+    #
+    w = s.wrk; scl = s.scaling
+    if status == PRIMAL_INFEASIBLE
+        mu = pres = dres = dobj = T(NaN); pobj = dot(s.g, s.y)   # certificate gᵀy
+    elseif status == DUAL_INFEASIBLE
+        mu = pres = dres = pobj = T(NaN); dobj = dot(s.c, s.p)   # certificate cᵀp
+    elseif status == ILL_POSED || isempty(s.hist)
+        mu = pres = dres = pobj = dobj = T(NaN)
+    else
+        residuals!(s)   # refresh w.rp (m), w.rd (n), w.Qp = Q·p at the terminal iterate
+        pres = norm(w.rp ./ scl.rscl) / τ / (1 + norm(s.g ./ scl.rscl))
+        dres = norm(w.rd ./ scl.cscl) / τ / (1 + norm(s.c ./ scl.cscl))
+        mu   = dot(s.p, s.d) / (s.ν * τ^2)
+        pQp  = dot(s.p, w.Qp) / τ^2
+        pobj = pQp / 2 - dot(s.c, s.p) / τ
+        dobj = dot(s.g, s.y) / τ - pQp / 2
+    end
 
-    return HSDResult{T}(p, d, y, status, niter, npred, ncorr, τ, κ, s.hist, s.timers)
+    return HSDResult{T}(p, d, y, status, niter, npred, ncorr, τ, κ, s.hist, s.timers,
+                        mu, pres, dres, pobj, dobj)
 end
 
 ############################################################################################
@@ -160,7 +182,7 @@ function residuals!(
     #
     # correct rτ:
     #
-    #   rτmκ ← pᵀQp/τ - rτ
+    #   gap ← pᵀQp/τ - rτ
     #
     return dot(p, Qp) / τ - rτ
 end
@@ -181,8 +203,45 @@ end
 #   [ B   0  ] [ Δy2 ] = [ g ]
 #
 function woodbury!(s::HSDSolver{T}; force_tol::T, floor_tol::T, y0 = nothing) where {T}
+    return woodbury!(
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.c, s.g, s.nc[], s.ng[];
+        force_tol, floor_tol, y0,
+    )
+end
+
+function woodbury!(
+        w::HSDWorkspace{T},
+        kkt::KKTWorkspace{T},
+        set::HSDSettings{T},
+        H::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        c::AbstractVector{T},
+        g::AbstractVector{T},
+        nc::T,
+        ng::T;
+        force_tol::T,
+        floor_tol::T,
+        y0 = nothing,
+    ) where {T}
     atol = max(force_tol, floor_tol)
-    return solve_kkt!(s.kkt, s.settings.kkt, s.wrk.Δp2, s.wrk.Δy2, s.H, s.B, s.c, s.g, y0; atol)
+    #
+    # solve for the Woodbury auxiliary directions
+    #
+    #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
+    #   [ B   0  ] [ Δy2 ] = [ g ]
+    #
+    niter = solve_kkt!(kkt, set.kkt, w.Δp2, w.Δy2, H, B, c, g, y0; atol)
+    #
+    # use iterative refinement to improve tha
+    # accuracy of the solutions Δp2, Δy2
+    #
+    nrefn, rwood = refinekkt!(
+        w.Δp2, w.Δy2, kkt, set.kkt, H, B,
+        c, g, w.sy, w.sp, w.dp, w.dy, nc, ng;
+        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
+    )
+
+    return niter + nrefn, rwood
 end
 
 function capacitance!(
@@ -233,17 +292,15 @@ function refinehsd!(
     Δp::AbstractVector{T},
     Δy::AbstractVector{T},
     Δτ::T,
-    Δd::AbstractVector{T},
     wrk::KKTWorkspace{T},
     set::KKTSettings{T},
     H::BlockSparseMatrix{T},
     B::BlockSparseMatrix{T},
-    Q::BlockSparseMatrix{T},
     c::AbstractVector{T},
     g::AbstractVector{T},
     Qp::AbstractVector{T},
     p::AbstractVector{T},
-    rd::AbstractVector{T},
+    aτ::AbstractVector{T}, # border row: c - 2Qp/τ
     τ::T,
     κ::T,
     rp::AbstractVector{T},  # RHS for row P
@@ -262,17 +319,16 @@ function refinehsd!(
     force_tol::T,
     floor_tol::T,
     stall::T,
-    nH::T,
-    nB::T,
 ) where {T}
     niter = 0
-    status = REACHED_FORCE
+    status = REFINE_ITMAX
     prv = typemax(T)
-
-    nf = norm(f)
-    nrp = norm(rp)
-    nQp = norm(Qp)
-    S0 = dot(p, Qp) / τ^2 + κ / τ
+    #
+    # compute the sum
+    #
+    #   1/τ pᵀQp + κ
+    #
+    pQpτκ = dot(p, Qp) / τ + κ
 
     for i in 1:itmax
         #
@@ -290,7 +346,7 @@ function refinehsd!(
         #
         #   sτ ← sτ + 2pᵀQΔp/τ - (pᵀQp/τ² + κ/τ) Δτ
         #
-        sτ += (2dot(Qp, Δp) - Δτ * (dot(p, Qp) / τ + κ)) / τ
+        sτ += (2dot(Qp, Δp) - Δτ * pQpτκ) / τ
 
         pres = norm(sp, Inf) / (1 + ng)
         dres = norm(sd, Inf) / (1 + nc)
@@ -302,27 +358,8 @@ function refinehsd!(
             status = REACHED_FORCE
             break
         end
-        #
-        # compute backward-error threshold:
-        #
-        #   100ε max(σd/(1+‖c‖), σp/(1+‖g‖), στ/(1+‖c‖+‖g‖))
-        #
-        # where
-        #
-        #   σd = ‖H‖ ‖Δp‖  + ‖B‖‖Δy‖  + ‖c‖ |Δτ| + ‖f‖
-        #   σp = ‖B‖ ‖Δp‖             + ‖g‖ |Δτ| + ‖rp‖
-        #   στ = ‖aτ ‖‖Δp‖ + ‖g‖ ‖Δy‖ + S₀  |Δτ| + |fτ|
-        #
-        np, ny, aΔτ = norm(Δp), norm(Δy), abs(Δτ)
-        naτ = nc + 2nQp / τ
 
-        σd =  nH * np + nB * ny + nc * aΔτ + nf
-        σp =  nB * np           + ng * aΔτ + nrp
-        στ = naτ * np + ng * ny + S0 * aΔτ + abs(fτ)
-
-        dynam_tol = 100eps(T) * max(σd / (1 + nc), σp / (1 + ng), στ / (1 + nc + ng))
-
-        if res ≤ max(dynam_tol, floor_tol)
+        if res ≤ floor_tol
             status = REACHED_FLOOR
             break
         end
@@ -339,13 +376,13 @@ function refinehsd!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        niter += solve_kkt!(wrk, set, dp, dy, H, B, sd, sp; atol=max(force_tol, dynam_tol, floor_tol))
+        niter += solve_kkt!(wrk, set, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
         #
-        # apply the Schur lift (aτ = c - 2Qp/τ)
+        # apply the Schur lift (aτ = c - 2Qp/τ):
         #
         #   dτ = (sτ - aτᵀdp - gᵀdy) / S
         #
-        dτ = (sτ - dot(c, dp) + 2dot(Qp, dp) / τ - dot(g, dy)) / S
+        dτ = (sτ - dot(aτ, dp) - dot(g, dy)) / S
         #
         # apply border correction:
         #
@@ -365,15 +402,6 @@ function refinehsd!(
         axpy!(one(T), dy, Δy)
         Δτ += dτ
     end
-    #
-    # re-compute Δd:
-    #
-    #   Δd ← QΔp - cΔτ - BᵀΔy - rd
-    #
-    mul!(Δd, Symmetric(Q, :L), Δp)
-    axpy!(-Δτ, c, Δd)
-    mul!(Δd, B', Δy, -one(T), one(T))
-    axpy!(-one(T), rd, Δd)
 
     return niter, status, Δτ
 end
@@ -381,28 +409,20 @@ end
 #
 # solve for the directions Δp, Δy, and Δτ
 #
-#   [  H          -Bᵀ   -c  ] [ Δp ]   [ f  ]
-#   [  B           0    -g  ] [ Δy ] = [ rp ]
-#   [ cᵀ - 2pᵀQ/τ  gᵀ    S₀ ] [ Δτ ]   [ fτ ]
-#
-# where S₀ = pᵀQp/τ² + κ/τ
+#   [  H          -Bᵀ             -c ] [ Δp ]   [ f  ]
+#   [  B           0              -g ] [ Δy ] = [ rp ]
+#   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ fτ ]
 #
 function newton!(
         Δp::AbstractVector{T},
         Δy::AbstractVector{T},
-        Δd::AbstractVector{T},
-        τ::T,
-        κ::T,
         wrk::KKTWorkspace{T},
         set::KKTSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
-        Q::BlockSparseMatrix{T},
-        c::AbstractVector{T},
         g::AbstractVector{T},
         f::AbstractVector{T},
         rp::AbstractVector{T},
-        rd::AbstractVector{T},
         fτ::T,
         Δp2::AbstractVector{T},
         Δy2::AbstractVector{T},
@@ -432,16 +452,6 @@ function newton!(
     #
     axpy!(Δτ, Δp2, Δp)
     axpy!(Δτ, Δy2, Δy)
-    #
-    # recover Δd:
-    #
-    #   Δd ← Q Δp - Bᵀ Δy - c Δτ - rd
-    #
-    mul!(Δd, Symmetric(Q, :L), Δp)
-    axpy!(-Δτ, c, Δd)
-
-    mul!(Δd,           B',     Δy, -1, 1)
-    axpy!(-1, rd, Δd)
 
     return niter, Δτ
 end
@@ -453,65 +463,138 @@ end
 #
 # solve for the Mehrotra predictor direction
 #
-#   [  H          -Bᵀ   -c  ] [ Δpa ]   [ rd - d ]
-#   [  B           0    -g  ] [ Δya ] = [ rp     ]
-#   [ cᵀ - 2pᵀQ/τ  gᵀ    S₀ ] [ Δτa ]   [ rτ - κ ]
+#   [  H          -Bᵀ             -c ] [ Δpa ]   [ rd - d ]
+#   [  B           0              -g ] [ Δya ] = [ rp     ]
+#   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
 #
-# where S₀ = pᵀQp/τ² + κ/τ, and recover
+# and recover
 #
 #   Δκa = -κ (1 + Δτa/τ)
 #
-function solvepredictor!(s::HSDSolver{T}, rτmκ::T, aτ::AbstractVector{T}, S::T; force_tol::T, floor_tol::T) where {T}
-    w = s.wrk
-    τ = s.τ[]
-    κ = s.κ[]
+function solvepredictor!(s::HSDSolver{T}, gap::T, aτ::AbstractVector{T}, S::T; force_tol::T, floor_tol::T) where {T}
+    return solvepredictor!(
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.p, s.d,
+        s.τ[], s.κ[], s.nc[], s.ng[], gap, aτ, S;
+        force_tol, floor_tol,
+    )
+end
+
+function solvepredictor!(
+        w::HSDWorkspace{T},
+        kkt::KKTWorkspace{T},
+        set::HSDSettings{T},
+        H::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        Q::BlockSparseMatrix{T},
+        c::AbstractVector{T},
+        g::AbstractVector{T},
+        p::AbstractVector{T},
+        d::AbstractVector{T},
+        τ::T,
+        κ::T,
+        nc::T,
+        ng::T,
+        gap::T,
+        aτ::AbstractVector{T},
+        S::T;
+        force_tol::T,
+        floor_tol::T,
+    ) where {T}
     atol = max(force_tol, floor_tol)
 
-    axpby!(-1,  s.d, 0, w.f)
+    axpby!(-1,  d, 0, w.f)
     axpby!( 1, w.rd, 1, w.f)
     #
     # solve for the directions Δpa, Δya, and Δτa
     #
-    #   [  H          -Bᵀ   -c  ] [ Δpa ]   [ rd - d ]
-    #   [  B           0    -g  ] [ Δya ] = [ rp     ]
-    #   [ cᵀ - 2pᵀQ/τ  gᵀ    S₀ ] [ Δτa ]   [ rτ - κ ]
+    #   [  H          -Bᵀ             -c ] [ Δpa ]   [ rd - d ]
+    #   [  B           0              -g ] [ Δya ] = [ rp     ]
+    #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
     npred, Δτa = newton!(
-        w.Δpa, w.Δya, w.Δda, τ, κ,
-        s.kkt, s.settings.kkt, s.H, s.B, s.Q, s.c, s.g,
-        w.f, w.rp, w.rd, rτmκ, w.Δp2, w.Δy2, aτ, S;
+        w.Δpa, w.Δya,
+        kkt, set.kkt, H, B, g,
+        w.f, w.rp, gap, w.Δp2, w.Δy2, aτ, S;
         atol
     )
+    #
+    # use iterative refinement to improve
+    # the solutions Δpa, Δya, and Δτa
+    #
+    niter, rpred, Δτa = refinehsd!(
+        w.Δpa, w.Δya, Δτa,
+        kkt, set.kkt, H, B, c, g, w.Qp, p, aτ,
+        τ, κ, w.rp, w.f, gap, w.Δp2, w.Δy2, S,
+        w.sy, w.sp, w.dp, w.dy, nc, ng;
+        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall
+    )
+    npred += niter
+    #
+    # recover Δda:
+    #
+    #   Δda ← Q Δpa - Δτa c - Bᵀ Δya - rd
+    #
+    mul!(w.Δda, Symmetric(Q, :L), w.Δpa)
+    axpy!(-Δτa, c, w.Δda)
+    mul!(w.Δda, B', w.Δya, -one(T), one(T))
+    axpy!(-one(T), w.rd, w.Δda)
     #
     # recover Δκa:
     #
     #   Δκa = -κ (1 + 1/τ Δτa)
     #
     Δκa = -κ * (τ + Δτa) / τ
-    return npred, Δτa, Δκa
+    return npred, Δτa, Δκa, rpred
 end
 
 #
 # solve for the Mehrotra combined direction
 #
-#   [  H          -Bᵀ   -c  ] [ Δp ]   [ rd*                         ]
-#   [  B           0    -g  ] [ Δy ] = [ rp                          ]
-#   [ cᵀ - 2pᵀQ/τ  gᵀ    S₀ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
+#   [ H           -Bᵀ               -c ] [ Δp ]   [ rd*                         ]
+#   [ B            0                -g ] [ Δy ] = [ rp                          ]
+#   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
 #
-# where S₀ = pᵀQp/τ² + κ/τ
-#
-# where rd* is the corrected dual residual, S is the Woodbury capacitance scalar
-#
-#   S = Δp2ᵀ W Δp2 + (Δp2 - p/τ)ᵀ Q (Δp2 - p/τ) + κ/τ
-#
-# and
+# where rd* is the corrected dual residual, and recover
 #
 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
 #
-function solvecorrector!(s::HSDSolver{T}, μ::T, rτmκ::T, Δτa::T, Δκa::T, aτ::AbstractVector{T}, S::T; force_tol::T, floor_tol::T, nH::T, nB::T) where {T}
-    w = s.wrk
-    τ = s.τ[]
-    κ = s.κ[]
+function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T, aτ::AbstractVector{T}, S::T; force_tol::T, floor_tol::T) where {T}
+    return solvecorrector!(
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.K, s.p, s.d,
+        s.caches, s.conewrk, s.ν, s.τ[], s.κ[], s.nc[], s.ng[],
+        μ, gap, Δτa, Δκa, aτ, S;
+        force_tol, floor_tol,
+    )
+end
+
+function solvecorrector!(
+        w::HSDWorkspace{T},
+        kkt::KKTWorkspace{T},
+        set::HSDSettings{T},
+        H::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        Q::BlockSparseMatrix{T},
+        c::AbstractVector{T},
+        g::AbstractVector{T},
+        K::AbstractVector,
+        p::AbstractVector{T},
+        d::AbstractVector{T},
+        caches::Caches{T},
+        conewrk::ConeWorkspace{T},
+        ν::Integer,
+        τ::T,
+        κ::T,
+        nc::T,
+        ng::T,
+        μ::T,
+        gap::T,
+        Δτa::T,
+        Δκa::T,
+        aτ::AbstractVector{T},
+        S::T;
+        force_tol::T,
+        floor_tol::T,
+    ) where {T}
     atol = max(force_tol, floor_tol)
     #
     # compute the largest step length αa ∈ (0, 1]
@@ -527,8 +610,8 @@ function solvecorrector!(s::HSDSolver{T}, μ::T, rτmκ::T, Δτa::T, Δκa::T, 
     #
     αa = one(T)
 
-    for v in vtxs(s.B)
-        τpv, τdv = maxsteps(s, v, w.Δpa, w.Δda)
+    for v in vtxs(B)
+        τpv, τdv = maxsteps(K[v], v, p, d, w.Δpa, w.Δda, caches, B, conewrk)
         αa = min(αa, τpv, τdv)
     end
 
@@ -539,36 +622,25 @@ function solvecorrector!(s::HSDSolver{T}, μ::T, rτmκ::T, Δτa::T, Δκa::T, 
     if Δκa < 0
         αa = min(αa, -κ / Δκa)
     end
+
+    #
+    # compute the affine-step complementarity
+    #
+    #   μa = (⟨p + αa Δpa, d + αa Δda⟩ + (τ + αa Δτa)(κ + αa Δκa)) / (ν + 1)
+    #
+    μa = (τ + αa * Δτa) * (κ + αa * Δκa)
+
+    for j in cols(B)
+        μa += (p[j] + αa * w.Δpa[j]) * (d[j] + αa * w.Δda[j])
+    end
+
+    μa /= (ν + 1)
     #
     # compute the centering parameter
     #
     #   σμ ← clamp(μa (μa / μ)², 0, μ)
     #
-    # where
-    #
-    #   μa = (⟨p + αa Δpa, d + αa Δda⟩ + (τ + αa Δτa)(κ + αa Δκa)) / (ν + 1)
-    #
-    σμ = zero(T)
-
-    for j in cols(s.B)
-        σμ += (s.p[j] + αa * w.Δpa[j]) * (s.d[j] + αa * w.Δda[j])
-    end
-
-    σμ += (τ + αa * Δτa) * (κ + αa * Δκa)
-    σμ /= (s.ν + 1)
-    σμ = clamp(σμ * (σμ / μ)^2, zero(T), μ)
-    #
-    # set f to the Mehrotra corrector term:
-    #
-    #   f ← -d + (σμ e - Δpa ∘ Δda) / p
-    #
-    # where e is the Jordan identity element e ∈ K.
-    #
-    for v in vtxs(s.B)
-        initcorrector!(s.K[v], v, w.f, s.caches, s.p, s.d, w.Δpa, w.Δda, σμ, s.B, s.conewrk)
-    end
-
-    axpy!(1, w.rd, w.f)
+    σμ = clamp(μa * (μa / μ)^2, zero(T), μ)
     #
     # compute fκ and fτ:
     #
@@ -576,42 +648,62 @@ function solvecorrector!(s::HSDSolver{T}, μ::T, rτmκ::T, Δτa::T, Δκa::T, 
     #   fτ = rτ -  κ + (σμ - Δτa Δκa) / τ
     #
     fκ = σμ - τ * κ - Δτa * Δκa
-    fτ = rτmκ + (σμ - Δτa * Δκa) / τ
+    fτ = gap + (σμ - Δτa * Δκa) / τ
+    #
+    # set f to the Mehrotra corrector term:
+    #
+    #   f ← -d + (σμ e - Δpa ∘ Δda) / p
+    #
+    # where e is the Jordan identity element e ∈ K.
+    #
+    for v in vtxs(B)
+        initcorrector!(K[v], v, w.f, caches, p, d, w.Δpa, w.Δda, σμ, B, conewrk)
+    end
+
+    axpy!(1, w.rd, w.f)
 
     axpy!(-Δτa, w.Δy2, w.Δya)
     #
     # solve for the directions Δp, Δy, and Δτ
     #
-    #   [  H          -Bᵀ   -c  ] [ Δp ]   [ rd*                       ]
-    #   [  B           0    -g  ] [ Δy ] = [ rp                        ]
-    #   [ cᵀ - 2pᵀQ/τ  gᵀ    S₀ ] [ Δτ ]   [ rτmκ + (σμ - Δτa·Δκa) / τ ]
+    #   [ H           -Bᵀ               -c ] [ Δp ]   [ rd*                         ]
+    #   [ B            0                -g ] [ Δy ] = [ rp                          ]
+    #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
     ncorr, Δτ = newton!(
-        w.Δp, w.Δy, w.Δd, τ, κ,
-        s.kkt, s.settings.kkt, s.H, s.B, s.Q, s.c, s.g,
-        w.f, w.rp, w.rd, fτ, w.Δp2, w.Δy2, aτ, S, w.Δya;
+        w.Δp, w.Δy,
+        kkt, set.kkt, H, B, g,
+        w.f, w.rp, fτ, w.Δp2, w.Δy2, aτ, S, w.Δya;
         atol
     )
     #
     # use iterative refinement to improve
-    # the solutions Δp, Δy, and Δτ 
+    # the solutions Δp, Δy, and Δτ
     #
-    nrefine, refstat, Δτ = refinehsd!(
-        w.Δp, w.Δy, Δτ, w.Δd,
-        s.kkt, s.settings.kkt, s.H, s.B, s.Q, s.c, s.g, w.Qp, s.p, w.rd,
+    nrefine, rcorr, Δτ = refinehsd!(
+        w.Δp, w.Δy, Δτ,
+        kkt, set.kkt, H, B, c, g, w.Qp, p, aτ,
         τ, κ, w.rp, w.f, fτ, w.Δp2, w.Δy2, S,
-        w.sy, w.sp, w.dp, w.dy, s.nc[], s.ng[];
-        itmax=s.settings.refine_itmax, force_tol, floor_tol, stall=s.settings.refine_stall,
-        nH, nB
+        w.sy, w.sp, w.dp, w.dy, nc, ng;
+        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall
     )
     ncorr += nrefine
+    #
+    # recover Δd:
+    #
+    #   Δd ← Q Δp - Δτ c - Bᵀ Δy - rd
+    #
+    mul!(w.Δd, Symmetric(Q, :L), w.Δp)
+    axpy!(-Δτ, c, w.Δd)
+    mul!(w.Δd, B', w.Δy, -one(T), one(T))
+    axpy!(-one(T), w.rd, w.Δd)
     #
     # recover Δκ:
     #
     #   Δκ ← (fκ - κ Δτ) / τ
     #
     Δκ = (fκ - κ * Δτ) / τ
-    return ncorr, Δτ, Δκ, refstat
+    return ncorr, Δτ, Δκ, rcorr
 end
 
 ############################################################################################
@@ -646,7 +738,7 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::HSDSettings{T}) wher
     m = size(prob.B, 1)
     ν = conedegree(prob.K, prob.B)
 
-    scaling = Scaling{T}(n, m)
+    scaling = HSDScaling{T}(n, m)
 
     if settings.scale_itmax > 0
         B = copy(prob.B)
@@ -655,6 +747,7 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::HSDSettings{T}) wher
         g = copy(prob.g)
 
         equilibrate!(scaling, B, Q, c, g; itmax=settings.scale_itmax)
+        update!(scaling, c, g)   # Stage 2: equilibrate the c/g embedding border → τ ≈ 1
     else
         B = prob.B
         Q = prob.Q
@@ -723,7 +816,7 @@ function isoptimal(s::HSDSolver{T}, μ::T, pres::T, dres::T) where {T}
     w = s.wrk
 
     pQp = dot(s.p, w.Qp) / τ^2
-    pobj = dot(s.c, s.p) / τ + pQp / 2
+    pobj = pQp / 2 - dot(s.c, s.p) / τ
     dobj = dot(s.g, s.y) / τ - pQp / 2
 
     max(pres, dres) < s.settings.feas_tol && (μ < s.settings.gap_tol * τ^2 || pobj - dobj < s.settings.gap_tol * (1 + abs(pobj) + abs(dobj)))
@@ -763,7 +856,7 @@ function isdualinfeasible(s::HSDSolver)
     if flag
         cp = dot(s.c, s.p)
         np = norm(s.p)
-        flag = cp < -s.settings.infeas_abs * np * (1 + s.nc[])
+        flag = cp > s.settings.infeas_abs * np * (1 + s.nc[])
 
         if flag
             mul!(w.sy, s.B, s.p)
@@ -788,9 +881,9 @@ function step!(s::HSDSolver{T}) where {T}
     npred = 0
     ncorr = 0
     nwood = 0
-    refstat = REACHED_FORCE
+    rpred = rcorr = rwood = REACHED_FORCE
 
-    α = zero(T)
+    step = zero(T)
 
     w = s.wrk
     τ = s.τ[]
@@ -798,11 +891,11 @@ function step!(s::HSDSolver{T}) where {T}
     #
     # compute negated residuals
     #
-    #   [ rd ]   [ d ]   [  Q          -Bᵀ         c ] [ p ]
-    #   [ rp ] = [ 0 ] - [  B           0         -g ] [ y ]
-    #   [ rτ ]   [ κ ]   [ -cᵀ - 2pᵀQτ  gᵀ   pᵀQp/τ² ] [ τ ]
+    #   [ rd ]   [ d ]   [ Q   -Bᵀ  -c       ] [ p ]
+    #   [ rp ] = [ 0 ] - [ B    0   -g       ] [ y ]
+    #   [ rτ ]   [ κ ]   [ cᵀ   gᵀ  -pᵀQp/τ² ] [ τ ]
     #
-    rτmκ = residuals!(s)
+    gap = residuals!(s)
     #
     # compute the centrality parameter
     #
@@ -872,10 +965,16 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 # compute tolerances for predictor and corrector solves
                 #
-                #   force: min(θμ, ceil)
+                #   force: min(θ μ/μ₁, ceil)
                 #   floor: 100ϵ (1 + max(‖rp‖, ‖rd‖))
                 #
-                force_tol = min(s.settings.forcing_frac * μ, s.settings.forcing_ceil)
+                if isempty(s.hist.μ)
+                    μ1 = μ
+                else
+                    μ1 = first(s.hist.μ)
+                end
+
+                force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
                 floor_tol = 100eps(T) * (1 + max(norm(w.rp, Inf), norm(w.rd, Inf)))
                 #
                 # solve for the Woodbury auxiliary directions
@@ -883,7 +982,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
                 #   [ B   0  ] [ Δy2 ] = [ g ]
                 #
-                nwood = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
+                nwood, rwood = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
                 copyto!(s.Δy0, w.Δy2)
                 #
                 # compute the Woodbury capacitance scalar
@@ -902,7 +1001,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκa = (-τκ - κ Δτa) / τ
                 #
-                npred, Δτa, Δκa = @timeit s.timers "predictor" solvepredictor!(s, rτmκ, w.aτ, S; force_tol, floor_tol)
+                npred, Δτa, Δκa, rpred = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
                 #
                 # solve for the Mehrotra combined direction
                 #
@@ -914,47 +1013,47 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
                 #
-                ncorr, Δτ, Δκ, refstat = @timeit s.timers "corrector" solvecorrector!(s, μ, rτmκ, Δτa, Δκa, w.aτ, S; force_tol, floor_tol, nH, nB=s.nB[])
+                ncorr, Δτ, Δκ, rcorr = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
 
-                if s.settings.verbose > 1 && refstat != REACHED_FORCE
-                    @info "KKT solve above target tolerance" refstat
+                if s.settings.verbose > 1 && (rpred != REACHED_FORCE || rcorr != REACHED_FORCE || rwood != REACHED_FORCE)
+                    @info "KKT solve above target tolerance" rpred rcorr rwood
                 end
                 #
-                # find the largest step size α ∈ (0, 1] such that
+                # find the largest step ∈ (0, 1] such that
                 #
-                #   p + α Δp ∈ K
-                #   d + α Δd ∈ K*
+                #   p + step Δp ∈ K
+                #   d + step Δd ∈ K*
                 #
-                #   τ + α Δτ ≥ 0
-                #   κ + α Δκ ≥ 0
+                #   τ + step Δτ ≥ 0
+                #   κ + step Δκ ≥ 0
                 #
                 @timeit s.timers "maxsteps" begin
                     τp, τd = maxsteps(s, w.Δp, w.Δd; step_frac=s.settings.step_frac)
-                    α = min(τp, τd)
+                    step = min(τp, τd)
                 end
 
                 if Δτ < 0
-                    α = min(α, s.settings.step_frac * (-τ / Δτ))
+                    step = min(step, s.settings.step_frac * (-τ / Δτ))
                 end
 
                 if Δκ < 0
-                    α = min(α, s.settings.step_frac * (-κ / Δκ))
+                    step = min(step, s.settings.step_frac * (-κ / Δκ))
                 end
                 #
                 # compute the updated iterates
                 #
-                #   p ← p + α Δp ∈ K
-                #   d ← d + α Δd ∈ K*
+                #   p ← p + step Δp ∈ K
+                #   d ← d + step Δd ∈ K*
                 #
-                #   τ ← α Δτ ≥ 0
-                #   κ ← α Δκ ≥ 0
+                #   τ ← step Δτ ≥ 0
+                #   κ ← step Δκ ≥ 0
                 #
-                axpy!(α, w.Δp, s.p)
-                axpy!(α, w.Δd, s.d)
-                axpy!(α, w.Δy, s.y)
+                axpy!(step, w.Δp, s.p)
+                axpy!(step, w.Δd, s.d)
+                axpy!(step, w.Δy, s.y)
 
-                s.τ[] = τ + α * Δτ
-                s.κ[] = κ + α * Δκ
+                s.τ[] = τ + step * Δτ
+                s.κ[] = κ + step * Δκ
 
                 if isstalled(s)
                     if s.settings.verbose > 1
@@ -981,7 +1080,7 @@ function step!(s::HSDSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step=α, pres, dres, npred, ncorr, nwood, τ=s.τ[], κ=s.κ[], refstat))
+    push!(s.hist, (; μ, step, pres, dres, gap, npred, ncorr, nwood, τ=s.τ[], κ=s.κ[], rpred, rcorr, rwood))
 
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
@@ -1014,6 +1113,8 @@ function reinit!(solver::HSDSolver{T}, prob::IPMProblem{T}; frac::Real=0.1, rgfr
     for i in rows(solver.B)
         g[i] *= solver.scaling.rscl[i]
     end
+
+    update!(solver.scaling, c, g)   # Stage 2: refresh the border scale for the new c, g
 
     mul!(solver.c, solver.P, c)
     copyto!(solver.g, g)

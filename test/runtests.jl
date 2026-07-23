@@ -8,6 +8,10 @@ end
   include("block_sparse_arrays.jl")
 end
 
+@testset "IPM Solver" begin
+  include("ipm_solver.jl")
+end
+
 @testset "Network Sheaves" begin
   include("network_sheaves/Asynch.jl")
   include("network_sheaves/ADT.jl")

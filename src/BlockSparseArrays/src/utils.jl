@@ -2,14 +2,6 @@ const BRAILLE_BLOCKS = (0x2801, 0x2802, 0x2804, 0x2840, 0x2808, 0x2810, 0x2820, 
 
 const AbstractScalar{T} = AbstractArray{T, 0}
 
-function axpy(a, x, y)
-    return muladd(a, x, y)
-end
-
-function axpy(a::Real, x::Real, y::Real)
-    return fma(a, x, y)
-end
-
 function ispositive(i::I) where {I}
     return i > zero(I)
 end
@@ -20,6 +12,22 @@ end
 
 function two(::I) where {I}
     return two(I)
+end
+
+function three(::Type{I}) where {I}
+    return two(I) + one(I)
+end
+
+function three(::I) where {I}
+    return three(I)
+end
+
+function four(::Type{I}) where {I}
+    return two(I) + two(I)
+end
+
+function four(::I) where {I}
+    return four(I)
 end
 
 function intriangle(i, j, uplo::Symbol)

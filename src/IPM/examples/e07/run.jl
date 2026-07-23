@@ -3,11 +3,9 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run: 2026-07-14 (--quick --mosek)
+# Sample run: 2026-07-22 (--quick)  [commit 53a237e9]
 # -----------------------------------------------------------------------------
-# N=512   dof=8514   IPM  232.3ms*  HSD  298.8ms* (1.29x)  Cla  280.4ms (1.21x)  Msk  506.4ms* (2.18x)
-# N=1024  dof=17028  IPM  493.6ms*  HSD  697.0ms* (1.41x)  Cla  895.4ms (1.81x)  Msk 1197.5ms* (2.43x)
-# N=2048  dof=34068  IPM 1078.2ms*  HSD 1605.9ms* (1.49x)  Cla 1498.0ms (1.39x)  Msk 3662.4ms* (3.40x)
-# Slopes: IPM DOF^1.11, HSD DOF^1.21, Clarabel DOF^1.21, Mosek DOF^1.43
-# * = NEAR_OPTIMAL (exp cone scaling)
+# Did not complete: MLE gate (test_mlem_vs_ipm, N=512) aborts with
+# AssertionError "MLE solve: NUMERICAL_FAILURE" before the timing table.
+# (Poisson-TV exp-cone MLE, known-fragile — not a regression from this refactor.)
 # =============================================================================

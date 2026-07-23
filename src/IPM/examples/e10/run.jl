@@ -3,30 +3,13 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run: 2026-07-16 (--quick)
+# Sample run: 2026-07-22 (--quick)  [commit 53a237e9]
 # -----------------------------------------------------------------------------
-# K dial (d = 4 fixed):
-# K=4   dof=1312   IPM   46.6ms  HSD   50.0ms (1.07x)  Cla   92.6ms (1.99x)  Msk —
-# K=6   dof=2952   IPM  146.8ms  HSD  175.0ms (1.19x)  Cla  336.1ms (2.29x)  Msk —
-# K=8   dof=5248   IPM  322.4ms  HSD  395.2ms (1.23x)  Cla  759.3ms (2.35x)  Msk —
-#
-# d dial (K = 4 fixed):
-# d=4   dof=1312   IPM   47.2ms  HSD   50.9ms (1.08x)  Cla   93.3ms (1.98x)  Msk —
-# d=6   dof=2832   IPM  246.1ms  HSD  296.9ms (1.21x)  Cla  593.2ms (2.41x)  Msk —
-# d=8   dof=4928   IPM  721.4ms  HSD  941.0ms (1.30x)  Cla 2538.2ms (3.52x)  Msk —
-# =============================================================================
-#
-# =============================================================================
-# Sample run: 2026-07-14 (--quick --mosek)
-# -----------------------------------------------------------------------------
-# K dial (d = 4 fixed):
-# K=4   dof=1312   IPM   53.9ms  HSD   52.6ms (0.98x)  Cla   93.0ms (1.73x)  Msk   51.1ms (0.95x)
-# K=6   dof=2952   IPM  166.0ms  HSD  180.5ms (1.09x)  Cla  340.1ms (2.05x)  Msk  152.5ms (0.92x)
-# K=8   dof=5248   IPM  369.5ms  HSD  402.9ms (1.09x)  Cla  776.8ms (2.10x)  Msk  306.1ms (0.83x)
-# Slopes: IPM DOF^1.39, HSD DOF^1.47, Clarabel DOF^1.54, Mosek DOF^1.30
-#
-# d dial (K = 4 fixed):
-# d=4   dof=1312   IPM   53.5ms  HSD   52.6ms (0.98x)  Cla   94.0ms (1.76x)  Msk   52.6ms (0.98x)
-# d=6   dof=2832   IPM  274.0ms  HSD  305.2ms (1.11x)  Cla  589.2ms (2.15x)  Msk  252.2ms (0.92x)
-# d=8   dof=4928   IPM  792.4ms  HSD  956.6ms (1.21x)  Cla 2513.0ms (3.17x)  Msk  667.3ms (0.84x)
+# K=4   dof=1312   n1=672    blk=36    IPM   39.9ms  HSD   48.9ms (1.22x)  Cla   93.8ms (2.35x)  Msk —        (—)
+# K=6   dof=2952   n1=1512   blk=36    IPM  128.9ms  HSD  157.1ms (1.22x)  Cla  330.6ms (2.56x)  Msk —        (—)
+# K=8   dof=5248   n1=2688   blk=36    IPM  289.1ms  HSD  346.1ms (1.20x)  Cla  759.1ms (2.63x)  Msk —        (—)
+# IPM: DOF^1.43  HSD: DOF^1.41  Clarabel: DOF^1.51  Mosek: n/a  (K-dial)
+# d=4   dof=1312   n1=672    blk=36    IPM   40.8ms  HSD   48.4ms (1.19x)  Cla   93.3ms (2.29x)  Msk —        (—)
+# d=6   dof=2832   n1=1488   blk=78    IPM  237.2ms  HSD  284.4ms (1.20x)  Cla  591.1ms (2.49x)  Msk —        (—)
+# d=8   dof=4928   n1=2624   blk=136   IPM  758.5ms  HSD  913.4ms (1.20x)  Cla 2337.8ms (3.08x)  Msk —        (—)
 # =============================================================================

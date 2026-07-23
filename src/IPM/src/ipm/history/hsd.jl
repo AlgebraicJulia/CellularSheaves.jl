@@ -1,20 +1,23 @@
-const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, npred::Int, ncorr::Int, nwood::Int, τ::T, κ::T, refstat::RefStatus}
+const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, gap::T, npred::Int, ncorr::Int, nwood::Int, τ::T, κ::T, rpred::RefStatus, rcorr::RefStatus, rwood::RefStatus}
 
 struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     μ::Vector{T}
     step::Vector{T}
     pres::Vector{T}
     dres::Vector{T}
+    gap::Vector{T}
     npred::Vector{Int}
     ncorr::Vector{Int}
     nwood::Vector{Int}
     τ::Vector{T}
     κ::Vector{T}
-    refstat::Vector{RefStatus}
+    rpred::Vector{RefStatus}
+    rcorr::Vector{RefStatus}
+    rwood::Vector{RefStatus}
 end
 
 function HSDHistory{T}() where {T}
-    return HSDHistory{T}(T[], T[], T[], T[], Int[], Int[], Int[], T[], T[], RefStatus[])
+    return HSDHistory{T}(T[], T[], T[], T[], T[], Int[], Int[], Int[], T[], T[], RefStatus[], RefStatus[], RefStatus[])
 end
 
 function Base.getindex(hist::HSDHistory, i::Int)
@@ -22,13 +25,16 @@ function Base.getindex(hist::HSDHistory, i::Int)
     step    = hist.step[i]
     pres    = hist.pres[i]
     dres    = hist.dres[i]
+    gap     = hist.gap[i]
     npred   = hist.npred[i]
     ncorr   = hist.ncorr[i]
     nwood   = hist.nwood[i]
     τ       = hist.τ[i]
     κ       = hist.κ[i]
-    refstat = hist.refstat[i]
-    return (; μ, step, pres, dres, npred, ncorr, nwood, τ, κ, refstat)
+    rpred   = hist.rpred[i]
+    rcorr   = hist.rcorr[i]
+    rwood   = hist.rwood[i]
+    return (; μ, step, pres, dres, gap, npred, ncorr, nwood, τ, κ, rpred, rcorr, rwood)
 end
 
 function Base.push!(hist::HSDHistory, row::NamedTuple)
@@ -36,12 +42,15 @@ function Base.push!(hist::HSDHistory, row::NamedTuple)
     push!(hist.step,    row.step)
     push!(hist.pres,    row.pres)
     push!(hist.dres,    row.dres)
+    push!(hist.gap,     row.gap)
     push!(hist.npred,   row.npred)
     push!(hist.ncorr,   row.ncorr)
     push!(hist.nwood,   row.nwood)
     push!(hist.τ,       row.τ)
     push!(hist.κ,       row.κ)
-    push!(hist.refstat, row.refstat)
+    push!(hist.rpred,   row.rpred)
+    push!(hist.rcorr,   row.rcorr)
+    push!(hist.rwood,   row.rwood)
     return hist
 end
 
@@ -50,12 +59,15 @@ function Base.empty!(hist::HSDHistory)
     empty!(hist.step)
     empty!(hist.pres)
     empty!(hist.dres)
+    empty!(hist.gap)
     empty!(hist.npred)
     empty!(hist.ncorr)
     empty!(hist.nwood)
     empty!(hist.τ)
     empty!(hist.κ)
-    empty!(hist.refstat)
+    empty!(hist.rpred)
+    empty!(hist.rcorr)
+    empty!(hist.rwood)
     return hist
 end
 

@@ -3,21 +3,10 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run: 2026-07-16 (--quick)
+# Sample run: 2026-07-22 (--quick)  [commit 53a237e9]
 # -----------------------------------------------------------------------------
-# P=8   dof=840    IPM  15.1ms  HSD  21.1ms (1.40x)  Cla   6.9ms (0.46x)*  Msk —
-# P=16  dof=1680   IPM  30.3ms  HSD  44.3ms (1.46x)  Cla 153.5ms (5.07x)   Msk —
-# P=32  dof=3360   IPM  62.7ms  HSD 102.6ms (1.64x)  Cla 426.1ms (6.80x)   Msk —
-# Slopes: IPM DOF^1.05, HSD DOF^1.13, Clarabel DOF^2.92
-# * = non-OPTIMAL status
-# =============================================================================
-#
-# =============================================================================
-# Sample run: 2026-07-14 (--quick --mosek)
-# -----------------------------------------------------------------------------
-# P=8   dof=840    IPM  15.6ms  HSD  24.6ms (1.58x)  Cla   7.3ms (0.47x)*  Msk  29.3ms (1.87x)
-# P=16  dof=1680   IPM  33.0ms  HSD  53.5ms (1.62x)  Cla 152.3ms (4.61x)   Msk  63.5ms (1.92x)
-# P=32  dof=3360   IPM  70.4ms  HSD 130.9ms (1.86x)  Cla 423.7ms (6.02x)   Msk 117.9ms (1.68x)
-# Slopes: IPM DOF^1.08, HSD DOF^1.20, Clarabel DOF^2.93, Mosek DOF^1.01
-# * = non-OPTIMAL status
+# P=8   dof=840    n1=21   blk=105   IPM   14.6ms  HSD   20.9ms (1.43x)  Cla    7.1ms (0.49x)  Msk —        (—)
+# P=16  dof=1680   n1=45   blk=105   IPM   29.8ms  HSD   55.5ms (1.87x)  Cla  147.1ms (4.94x)  Msk —        (—)
+# P=32  dof=3360   n1=93   blk=105   IPM   61.9ms  HSD  116.2ms (1.88x)  Cla  399.4ms (6.45x)  Msk —        (—)
+# IPM: DOF^1.04  HSD: DOF^1.24  Clarabel: DOF^2.90  Mosek: n/a
 # =============================================================================

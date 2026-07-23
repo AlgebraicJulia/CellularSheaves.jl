@@ -40,19 +40,10 @@
 # scaling acts on it as Q̂ = D Q D with D constant on each block.
 #
 
-struct Scaling{T}
-    cscl::Vector{T}   # length n: per-column scaling (constant on each cone block)
-    rscl::Vector{T}   # length m: per-row scaling
-end
+abstract type AbstractScaling{T} end
 
-"""
-    Scaling{T}(n, m)
-
-Construct an identity (trivial) scaling with all entries equal to 1.
-"""
-function Scaling{T}(n::Int, m::Int) where {T}
-    return Scaling{T}(ones(T, n), ones(T, m))
-end
+include("ipm.jl")
+include("hsd.jl")
 
 #
 # Compute row and vertex-block ∞-norms in a single pass.
@@ -124,7 +115,7 @@ Keyword arguments:
 - `tol`   : stop when every row/block ∞-norm is within `tol` of 1.
 """
 function equilibrate!(
-        scaling::Scaling{T},
+        scaling::AbstractScaling{T},
         B::BlockSparseMatrix{T},
         Q::BlockSparseMatrix{T},
         c::AbstractVector{T},
@@ -194,7 +185,7 @@ Apply forward scaling to vectors in place:
 
     p ← D⁻¹ p,   d ← D d,   y ← E⁻¹ y
 """
-function scale!(p::AbstractVector, d::AbstractVector, y::AbstractVector, scaling::Scaling)
+function scale!(p::AbstractVector, d::AbstractVector, y::AbstractVector, scaling::AbstractScaling)
     p ./= scaling.cscl
     d .*= scaling.cscl
     y ./= scaling.rscl
@@ -208,7 +199,7 @@ Apply inverse scaling to vectors in place:
 
     p ← D p,   d ← D⁻¹ d,   y ← E y
 """
-function unscale!(p::AbstractVector, d::AbstractVector, y::AbstractVector, scaling::Scaling)
+function unscale!(p::AbstractVector, d::AbstractVector, y::AbstractVector, scaling::AbstractScaling)
     p .*= scaling.cscl
     d ./= scaling.cscl
     y .*= scaling.rscl

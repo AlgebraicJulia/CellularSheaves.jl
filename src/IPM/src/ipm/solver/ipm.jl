@@ -8,7 +8,7 @@ struct IPMSolver{T, I, W, C} <: AbstractSolver{T}
     d::FVector{T}
     y::FVector{T}
     K::FVector{C}
-    scaling::Scaling{T}
+    scaling::IPMScaling{T}
     P::FPermutation{I}
     wrk::IPMWorkspace{T}
     caches::Caches{T, I}
@@ -104,15 +104,12 @@ end
 function refinekkt!(
     Δp::AbstractVector{T},
     Δy::AbstractVector{T},
-    Δd::AbstractVector{T},
     wrk::KKTWorkspace{T},
     set::KKTSettings{T},
     H::BlockSparseMatrix{T},
     B::BlockSparseMatrix{T},
-    Q::BlockSparseMatrix{T},
     f::AbstractVector{T},
     rp::AbstractVector{T},
-    rd::AbstractVector{T},
     sp::AbstractVector{T},  # scratch for primal residual
     sd::AbstractVector{T},  # scratch for dual residual
     dp::AbstractVector{T},
@@ -123,15 +120,10 @@ function refinekkt!(
     force_tol::T,
     floor_tol::T,
     stall::T,
-    nH::T,
-    nB::T,
 ) where {T}
     niter = 0
-    status = REACHED_FORCE
+    status = REFINE_ITMAX
     prv = typemax(T)
-
-    nf = norm(f)
-    nrp = norm(rp)
 
     for i in 1:itmax
         #
@@ -152,24 +144,8 @@ function refinekkt!(
             status = REACHED_FORCE
             break
         end
-        #
-        # compute backward-error threshold:
-        #
-        #   100ε max(σd/(1+‖c‖), σp/(1+‖g‖))
-        #
-        # where
-        #
-        #   σd = ‖H‖ ‖Δp‖ + ‖B‖ ‖Δy‖ + ‖f‖
-        #   σp = ‖B‖ ‖Δp‖            + ‖rp‖
-        #
-        np, ny = norm(Δp), norm(Δy)
 
-        σd = nH * np + nB * ny + nf
-        σp = nB * np           + nrp
-
-        dynam_tol = 100eps(T) * max(σd / (1 + nc), σp / (1 + ng))
-
-        if res ≤ max(dynam_tol, floor_tol)
+        if res ≤ floor_tol
             status = REACHED_FLOOR
             break
         end
@@ -183,10 +159,10 @@ function refinekkt!(
         #
         # solve for dp and dy:
         #
-        #   [ H -Bᵀ ] [ dp ] = [ sp ]
-        #   [ B  0  ] [ dy ]   [ sd ]
+        #   [ H -Bᵀ ] [ dp ] = [ sd ]
+        #   [ B  0  ] [ dy ]   [ sp ]
         #
-        niter += solve_kkt!(wrk, set, dp, dy, H, B, sd, sp; atol=max(force_tol, dynam_tol, floor_tol))
+        niter += solve_kkt!(wrk, set, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
         #
         # update Δp and Δy:
         #
@@ -196,140 +172,8 @@ function refinekkt!(
         axpy!(one(T), dp, Δp)
         axpy!(one(T), dy, Δy)
     end
-    #
-    # re-compute Δd:
-    #
-    #   Δd = Q Δp - Bᵀ Δy - rd 
-    #
-    copyto!(Δd, rd)
-    mul!(Δd,           B',     Δy, one(T),  one(T))
-    mul!(Δd, Symmetric(Q, :L), Δp, one(T), -one(T))
 
     return niter, status
-end
-
-############################################################################################
-# newton!
-############################################################################################
-
-#
-# solve for the directions Δp and Δy
-#
-#   [ H -Bᵀ ] [ Δp ] = [ f  ]
-#   [ B  0  ] [ Δy ]   [ rp ]
-#
-function newton!(
-        Δp::AbstractVector{T},
-        Δy::AbstractVector{T},
-        Δd::AbstractVector{T},
-        wrk::KKTWorkspace{T},
-        set::KKTSettings{T},
-        H::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        f::AbstractVector{T},
-        rp::AbstractVector{T},
-        rd::AbstractVector{T},
-        Q::BlockSparseMatrix{T},
-        y0 = nothing;
-        atol::T = T(0.1),
-    ) where {T}
-    #
-    # solve for Δp and Δy:
-    #
-    #   [ H -Bᵀ ] [ Δp ] = [ f  ]
-    #   [ B  0  ] [ Δy ]   [ rp ]
-    #
-    niter = solve_kkt!(wrk, set, Δp, Δy, H, B, f, rp, y0; atol)
-    #
-    # recover Δd:
-    #
-    #   Δd ← Q Δp - Bᵀ Δy - rd
-    #
-    copyto!(Δd, rd)
-    mul!(Δd, B', Δy, -1, -1)
-    mul!(Δd, Symmetric(Q, :L), Δp, 1, 1)
-
-    return niter
-end
-
-############################################################################################
-# steplengths
-############################################################################################
-
-function steplengths(
-        pmax::T,
-        dmax::T,
-        rd::AbstractVector{T},
-        Δp::AbstractVector{T},
-        Δy::AbstractVector{T},
-        Δd::AbstractVector{T},
-        Q::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        g::AbstractVector{T},
-        h::AbstractVector{T}
-    ) where {T}
-    mul!(g, Symmetric(Q, :L), Δp)
-    mul!(h,           B',     Δy)
-
-    cgg = dot( g,  g)
-    chh = dot( h,  h)
-    cuu = dot(Δd, Δd)
-
-    cgh = dot( g,  h)
-    cgu = dot( g, Δd)
-    chu = dot( h, Δd)
-
-    crg = -dot(rd,  g)
-    crh = -dot(rd,  h)
-    cru = -dot(rd, Δd)
-
-    aA = cuu - chu^2 / chh
-    aB = cgg - cgh^2 / chh
-
-    bA = -2(cru + pmax * cgu - chu * (crh + pmax * cgh) / chh)
-    bB =  2(crg - dmax * cgu - cgh * (crh - dmax * chu) / chh)
-
-    tol = sqrt(eps(T))
-
-    flagA = aA > tol * cuu
-
-    if !flagA
-        dA = dmax
-    else
-        dA = clamp(-bA / 2aA, zero(T), dmax)
-    end
-
-    flagB = aB > tol * cgg
-
-    if !flagB
-        pB = pmax
-    else
-        pB = clamp(-bB / 2aB, zero(T), pmax)
-    end
-
-    yA = (crh + pmax * cgh - dA   * chu) / chh
-    yB = (crh + pB *   cgh - dmax * chu) / chh
-
-    fA = cgg * pmax^2 + chh * yA^2 + cuu * dA^2 +
-         2(crg * pmax - crh * yA - cru * dA - cgh * pmax * yA - cgu * pmax * dA + chu * yA * dA)
-    fB = cgg * pB^2 + chh * yB^2 + cuu * dmax^2 +
-         2(crg * pB - crh * yB - cru * dmax - cgh * pB * yB - cgu * pB * dmax + chu * yB * dmax)
-
-    if !flagB || fA <= fB
-        pstep, dstep = pmax, dA
-    else
-        pstep, dstep = pB, dmax
-    end
-
-    pstep = max(min(pmax, dmax), pstep)
-    ystep = (crh + pstep * cgh - dstep * chu) / chh
-
-    return pstep, ystep, dstep
-end
-
-function steplengths(s::IPMSolver{T}, pmax::T, dmax::T, Δp::AbstractVector{T}, Δy::AbstractVector{T}, Δd::AbstractVector{T}) where {T}
-    w = s.wrk
-    return steplengths(pmax, dmax, w.rd, Δp, Δy, Δd, s.Q, s.B, w.g, w.h)
 end
 
 ############################################################################################
@@ -343,10 +187,28 @@ end
 #   [ B   0  ] [ Δya ] = [ rp     ]
 #
 function solvepredictor!(s::IPMSolver{T}; force_tol::T, floor_tol::T) where {T}
-    w = s.wrk
+    return solvepredictor!(
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.d, s.nc[], s.ng[];
+        force_tol, floor_tol,
+    )
+end
+
+function solvepredictor!(
+        w::IPMWorkspace{T},
+        kkt::KKTWorkspace{T},
+        set::IPMSettings{T},
+        H::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        Q::BlockSparseMatrix{T},
+        d::AbstractVector{T},
+        nc::T,
+        ng::T;
+        force_tol::T,
+        floor_tol::T,
+    ) where {T}
     atol = max(force_tol, floor_tol)
 
-    axpby!(-1, s.d, 0, w.f)
+    axpby!(-1, d, 0, w.f)
     axpby!(1, w.rd, 1, w.f)
     #
     # solve for the directions Δpa and Δya
@@ -354,7 +216,25 @@ function solvepredictor!(s::IPMSolver{T}; force_tol::T, floor_tol::T) where {T}
     #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
-    return newton!(w.Δpa, w.Δya, w.Δda, s.kkt, s.settings.kkt, s.H, s.B, w.f, w.rp, w.rd, s.Q; atol)
+    npred = solve_kkt!(kkt, set.kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
+    #
+    # refine Δpa, Δya to force_tol
+    #
+    nrefn, rpred = refinekkt!(
+        w.Δpa, w.Δya, kkt, set.kkt, H, B,
+        w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
+        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
+    )
+    #
+    # recover Δda:
+    #
+    #   Δda ← Q Δpa - Bᵀ Δya - rd
+    #
+    copyto!(w.Δda, w.rd)
+    mul!(w.Δda, B', w.Δya, -1, -1)
+    mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
+
+    return npred + nrefn, rpred
 end
 
 #
@@ -365,25 +245,48 @@ end
 #
 # where rd* is the corrected dual residual
 #
-function solvecorrector!(s::IPMSolver{T}, μ::T; force_tol::T, floor_tol::T, nH::T, nB::T) where {T}
-    w = s.wrk
+function solvecorrector!(s::IPMSolver{T}, μ::T; force_tol::T, floor_tol::T) where {T}
+    return solvecorrector!(
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.K, s.p, s.d,
+        s.caches, s.conewrk, s.ν, s.nc[], s.ng[], μ;
+        force_tol, floor_tol,
+    )
+end
+
+function solvecorrector!(
+        w::IPMWorkspace{T},
+        kkt::KKTWorkspace{T},
+        set::IPMSettings{T},
+        H::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        Q::BlockSparseMatrix{T},
+        K::AbstractVector,
+        p::AbstractVector{T},
+        d::AbstractVector{T},
+        caches::Caches{T},
+        conewrk::ConeWorkspace{T},
+        ν::Integer,
+        nc::T,
+        ng::T,
+        μ::T;
+        force_tol::T,
+        floor_tol::T,
+    ) where {T}
     atol = max(force_tol, floor_tol)
     #
-    # compute the largest step lengths τpa, τda ∈ (0, 1]
+    # compute the largest step length τa ∈ (0, 1]
     # such that the perturbed iterates
     #
-    #   p + τpa Δpa ∈ K
-    #   d + τda Δda ∈ K*
+    #   p + τa Δpa ∈ K
+    #   d + τa Δda ∈ K*
     #
     # lie within their respective cones
     #
-    τpa = one(T)
-    τda = one(T)
+    τa = one(T)
 
-    for v in vtxs(s.B)
-        τpv, τdv = maxsteps(s, v, w.Δpa, w.Δda)
-        τpa = min(τpa, τpv)
-        τda = min(τda, τdv)
+    for v in vtxs(B)
+        τpv, τdv = maxsteps(K[v], v, p, d, w.Δpa, w.Δda, caches, B, conewrk)
+        τa = min(τa, τpv, τdv)
     end
     #
     # compute the centering parameter
@@ -392,15 +295,15 @@ function solvecorrector!(s::IPMSolver{T}, μ::T; force_tol::T, floor_tol::T, nH:
     #
     # where
     #
-    #   μa  = ⟨p + τpa Δpa, d + τda Δda⟩ / ν
+    #   μa  = ⟨p + τa Δpa, d + τa Δda⟩ / ν
     #
     σμ = zero(T)
 
-    for j in cols(s.B)
-        σμ += (s.p[j] + τpa * w.Δpa[j]) * (s.d[j] + τda * w.Δda[j])
+    for j in cols(B)
+        σμ += (p[j] + τa * w.Δpa[j]) * (d[j] + τa * w.Δda[j])
     end
 
-    σμ /= s.ν
+    σμ /= ν
     σμ = clamp(σμ * (σμ / μ)^2, zero(T), μ)
     #
     # set f to the Mehrota corrector term:
@@ -409,8 +312,8 @@ function solvecorrector!(s::IPMSolver{T}, μ::T; force_tol::T, floor_tol::T, nH:
     #
     # where e is the Jordan identity element e ∈ K.
     #
-    for v in vtxs(s.B)
-        initcorrector!(s.K[v], v, w.f, s.caches, s.p, s.d, w.Δpa, w.Δda, σμ, s.B, s.conewrk)
+    for v in vtxs(B)
+        initcorrector!(K[v], v, w.f, caches, p, d, w.Δpa, w.Δda, σμ, B, conewrk)
     end
 
     axpy!(1, w.rd, w.f)
@@ -420,19 +323,26 @@ function solvecorrector!(s::IPMSolver{T}, μ::T; force_tol::T, floor_tol::T, nH:
     #   [ H  -Bᵀ ] [ Δp ]   [ rd* ]
     #   [ B   0  ] [ Δy ] = [ rp  ]
     #
-    ncorr = newton!(w.Δp, w.Δy, w.Δd, s.kkt, s.settings.kkt, s.H, s.B, w.f, w.rp, w.rd, s.Q, w.Δya; atol)
+    ncorr = solve_kkt!(kkt, set.kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
     #
     # use iterative refinement to improve
-    # the solutions Δp and Δy 
+    # the solutions Δp and Δy
     #
     nrefn, refstat = refinekkt!(
-        w.Δp, w.Δy, w.Δd, s.kkt, s.settings.kkt, s.H, s.B, s.Q,
-        w.f, w.rp, w.rd, w.sy, w.sp, w.dp, w.dy, s.nc[], s.ng[];
-        itmax=s.settings.refine_itmax, force_tol, floor_tol, stall=s.settings.refine_stall,
-        nH, nB
+        w.Δp, w.Δy, kkt, set.kkt, H, B,
+        w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
+        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
 
     ncorr += nrefn
+    #
+    # recover Δd:
+    #
+    #   Δd ← Q Δp - Bᵀ Δy - rd
+    #
+    copyto!(w.Δd, w.rd)
+    mul!(w.Δd, B', w.Δy, -1, -1)
+    mul!(w.Δd, Symmetric(Q, :L), w.Δp, 1, 1)
 
     return ncorr, refstat
 end
@@ -480,7 +390,7 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::IPMSettings{T}) wher
     m = size(prob.B, 1)
     ν = conedegree(prob.K, prob.B)
 
-    scaling = Scaling{T}(n, m)
+    scaling = IPMScaling{T}(n, m)
 
     if settings.scale_itmax > 0
         B = copy(prob.B)
@@ -550,7 +460,7 @@ end
 
 function isoptimal(s::IPMSolver{T}, μ::T, pres::T, dres::T) where {T}
     pQp = dot(s.p, Symmetric(s.Q, :L), s.p)
-    pobj = dot(s.c, s.p) + pQp / 2
+    pobj = pQp / 2 - dot(s.c, s.p)
     dobj = dot(s.g, s.y) - pQp / 2
     return max(pres, dres) < s.settings.feas_tol && (iszero(s.ν) || μ < s.settings.gap_tol || pobj - dobj < s.settings.gap_tol * (1 + abs(pobj) + abs(dobj)))
 end
@@ -564,9 +474,8 @@ function step!(s::IPMSolver{T}) where {T}
 
     npred = 0
     ncorr = 0
-    pstep = zero(T)
-    dstep = zero(T)
-    refstat = REACHED_FORCE
+    step = zero(T)
+    rpred = rcorr = REACHED_FORCE
 
     w = s.wrk
     #
@@ -637,10 +546,16 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # compute tolerances for predictor and corrector solves
                 #
-                #   force: min(θμ, ceil)
+                #   force: min(θ μ/μ₁, ceil)
                 #   floor: 100ϵ (1 + max(‖rp‖, ‖rd‖))
                 #
-                force_tol = min(s.settings.forcing_frac * μ, s.settings.forcing_ceil)
+                if isempty(s.hist.μ)
+                    μ1 = μ
+                else
+                    μ1 = first(s.hist.μ)
+                end
+
+                force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
                 floor_tol = 100eps(T) * (1 + max(norm(w.rp, Inf), norm(w.rd, Inf)))
                 #
                 # solve for the Mehrotra predictor direction
@@ -648,7 +563,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                npred = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+                npred, rpred = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
                 #
                 # solve for the Mehrotra combined direction
                 #
@@ -657,10 +572,10 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                ncorr, refstat = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol, nH, nB=s.nB[])
+                ncorr, rcorr = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
 
-                if s.settings.verbose > 1 && refstat != REACHED_FORCE
-                    @info "KKT solve above target tolerance" refstat
+                if s.settings.verbose > 1 && (rpred != REACHED_FORCE || rcorr != REACHED_FORCE)
+                    @info "KKT solve above target tolerance" rpred rcorr
                 end
                 #
                 # find the largest step sizes such that
@@ -670,18 +585,20 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 @timeit s.timers "maxsteps" pstep, dstep = maxsteps(s, w.Δp, w.Δd; step_frac=s.settings.step_frac)
                 #
-                # adjust αp and αd using Meszaros' heuristic
+                # take a common step in the primal and dual spaces
                 #
-                pstep, ystep, dstep = steplengths(s, pstep, dstep, w.Δp, w.Δy, w.Δd)
+                #   α = min(αp, αd)
+                #
+                step = min(pstep, dstep)
                 #
                 # compute the updated iterates
                 #
                 #   p ← p + α Δp ∈ K
                 #   d ← d + α Δd ∈ K*
                 #
-                axpy!(pstep, w.Δp, s.p)
-                axpy!(dstep, w.Δd, s.d)
-                axpy!(ystep, w.Δy, s.y)
+                axpy!(step, w.Δp, s.p)
+                axpy!(step, w.Δd, s.d)
+                axpy!(step, w.Δy, s.y)
 
                 if isstalled(s)
                     if s.settings.verbose > 1
@@ -708,7 +625,7 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, pstep, dstep, pres, dres, npred, ncorr, refstat))
+    push!(s.hist, (; μ, step, pres, dres, npred, ncorr, rpred, rcorr))
 
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1

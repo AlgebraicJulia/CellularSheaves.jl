@@ -3,20 +3,10 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run: 2026-07-16 (--quick)
+# Sample run: 2026-07-22 (--quick)  [commit 53a237e9]
 # -----------------------------------------------------------------------------
-# P=32    dof=864    IPM   3.1ms  HSD   5.0ms (1.59x)  Cla   3.0ms (0.95x)  Msk —
-# P=64    dof=1728   IPM   8.0ms  HSD  10.9ms (1.36x)  Cla   6.1ms (0.77x)  Msk —
-# P=128   dof=3456   IPM  13.7ms  HSD  18.0ms (1.31x)  Cla  11.9ms (0.87x)  Msk —
-# NOTE: Clarabel wins on this chain structure.
-# =============================================================================
-#
-# =============================================================================
-# Sample run: 2026-07-14 (--quick --mosek)
-# -----------------------------------------------------------------------------
-# P=32    dof=864    IPM   5.1ms  HSD   5.0ms (0.97x)  Cla   3.0ms (0.58x)  Msk   7.0ms (1.36x)
-# P=64    dof=1728   IPM  10.2ms  HSD  11.4ms (1.12x)  Cla   6.2ms (0.61x)  Msk  20.2ms (1.97x)
-# P=128   dof=3456   IPM  17.9ms  HSD  21.2ms (1.18x)  Cla  12.0ms (0.67x)  Msk  41.1ms (2.29x)
-# Slopes: IPM DOF^0.91, HSD DOF^1.05, Clarabel DOF^1.00, Mosek DOF^1.28
-# NOTE: Clarabel wins on this chain structure; we beat Mosek 1.3-2.3x.
+# P=32    dof=864    n1=125   blk=27    IPM    3.1ms  HSD    3.8ms (1.22x)  Cla    3.0ms (0.95x)  Msk —        (—)
+# P=64    dof=1728   n1=253   blk=27    IPM    6.9ms  HSD    7.2ms (1.05x)  Cla    6.1ms (0.89x)  Msk —        (—)
+# P=128   dof=3456   n1=509   blk=27    IPM   12.1ms  HSD   14.2ms (1.17x)  Cla   11.9ms (0.98x)  Msk —        (—)
+# IPM: DOF^0.97  HSD: DOF^0.95  Clarabel: DOF^1.00  Mosek: n/a
 # =============================================================================

@@ -33,7 +33,7 @@ struct HSDWorkspace{T} <: AbstractWorkspace{T}
     Δp2::FVector{T}  # border direction primal
     Δy2::FVector{T}  # border direction dual
     QΔp2::FVector{T} # Q·Δp2 for Schur complement
-    aτ::FVector{T}   # border row: c + 2Q·ξ
+    aτ::FVector{T}   # border row: c - 2Qp/τ
     Qp::FVector{T}   # cached Q*p
 end
 

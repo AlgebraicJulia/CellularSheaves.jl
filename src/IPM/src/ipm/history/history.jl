@@ -8,9 +8,8 @@ function Base.size(hist::AbstractHistory)
 end
 
 function atfloor(hist::AbstractHistory; patience::Int=3)
-    n = length(hist.refstat)
-    n < patience && return false
-    return all(hist.refstat[i] != REACHED_FORCE for i in n-patience+1:n)
+    n = length(hist)
+    return n ≥ patience && all(hist.rcorr[i] != REACHED_FORCE for i in n-patience+1:n)
 end
 
 function isstalled(hist::AbstractHistory{T}; window=6, threshold=0.5) where {T}
