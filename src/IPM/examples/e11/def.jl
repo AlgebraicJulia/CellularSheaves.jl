@@ -687,10 +687,10 @@ function run()
     println("=" ^ 78)
 
     ipm_settings = IPMSettings{Float64}(
-        kkt = UzawaSettings{Float64}(raug = 1e4, elim = CliqueTrees.METIS()),
+        elim = CliqueTrees.METIS(),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
     hsd_settings = HSDSettings{Float64}(
-        kkt = UzawaSettings{Float64}(raug = 1e4, elim = CliqueTrees.METIS()),
+        elim = CliqueTrees.METIS(),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
     inst = equalizer_instance()

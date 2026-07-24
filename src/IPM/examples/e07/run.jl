@@ -3,7 +3,7 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run: 2026-07-22 (--quick)  [commit 53a237e9]
+# Sample run: 2026-07-24 (--quick)  [rhs/rebuild — anchored raug default]
 # -----------------------------------------------------------------------------
 # Did not complete: MLE gate (test_mlem_vs_ipm, N=512) aborts with
 # AssertionError "MLE solve: NUMERICAL_FAILURE" before the timing table.

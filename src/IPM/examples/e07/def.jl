@@ -357,6 +357,9 @@ function build_poisson_tv(inst::PoissonTVInstance; tv::Bool = true,
     end
 
     # ---- objective
+    # The solver minimizes ½pᵀQp − cᵀp, so c holds the NEGATED linear objective
+    # coefficients (objective = min Σμ − Σ y·t + λ·TV; comments below name the
+    # objective term, c carries its negative).
     Q = IPM.allocblockdiag(B); fill!(Q, 0)
     c = zeros(size(B, 2))
     ridge = (nonneg ? 1e-8 : 0.5e-3) * τ           # SPD floor; inflated for
@@ -366,17 +369,17 @@ function build_poisson_tv(inst::PoissonTVInstance; tv::Bool = true,
     for g in 1:N                                   # y=0 bins: linear Σμ
         y[g] == 0.0 || continue
         for (t, A) in psf_eval_blocks(g)
-            c[colrange(B, t)] .+= τ .* vec(A)
+            c[colrange(B, t)] .-= τ .* vec(A)
         end
     end
     for (j, g) in enumerate(posbins)
         cr = colrange(B, vexp(j))
-        c[cr[1]] = 1.0                             # +μ_g
-        c[cr[3]] = -y[g]                           # −y_g t_g
+        c[cr[1]] = -1.0                            # +μ_g
+        c[cr[3]] = y[g]                            # −y_g t_g
     end
     if tv
         for i in 1:N
-            c[first(colrange(B, vsoc(i)))] = λ
+            c[first(colrange(B, vsoc(i)))] = -λ
         end
     end
 
@@ -636,10 +639,8 @@ function run()
     println("=" ^ 78)
 
     ipm_settings = IPMSettings{Float64}(
-        kkt = UzawaSettings{Float64}(raug = 1e3),   # retune for exp cones
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
     hsd_settings = HSDSettings{Float64}(
-        kkt = UzawaSettings{Float64}(raug = 1e3),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
     println("\n  Gate tests (N = 512):")

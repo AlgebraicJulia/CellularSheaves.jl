@@ -185,7 +185,6 @@ function test_ed_oracle()
     inst = generate_qm_instance(; N=6, ℓ=3, Δ=1.0, ring=true)
     prob, _ = build_qm_problem(inst)
     settings = IPMSettings{Float64}(
-        kkt = UzawaSettings{Float64}(raug = 1e2),
         feas_tol = 1e-8, gap_tol = 1e-8, itmax = 200)
     res = solve(prob, settings)
 
@@ -218,11 +217,9 @@ function run()
     println()
 
     ipm_settings = IPMSettings{Float64}(
-        kkt = UzawaSettings{Float64}(raug = 1e2),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
     hsd_settings = HSDSettings{Float64}(
-        kkt = UzawaSettings{Float64}(raug = 1e2),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
     cla_opt = clarabel_opt(; tol = TOL)

@@ -24,7 +24,7 @@ struct HSDSolver{T, I, W, C} <: AbstractSolver{T}
     Δy0::FVector{T}
     nc::FScalar{T}
     ng::FScalar{T}
-    nB::FScalar{T}
+    α::FScalar{T}       # effective augmentation penalty; anchored at construction, owned by updateaug!
     timers::TimerOutput
 end
 
@@ -52,13 +52,11 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
     end
 
     niter = 0
-    npred = 0
-    ncorr = 0
+    nsolve = 0
 
     for row in s.hist
         niter += 1
-        npred += row.npred
-        ncorr += row.ncorr
+        nsolve += row.pbase + row.prefn + row.cbase + row.crefn + row.wbase + row.wrefn
     end
     #
     # C5 (addendum): the answer at the returned point, in user frame. pres/dres are recomputed
@@ -85,7 +83,7 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
         dobj = dot(s.g, s.y) / τ - pQp / 2
     end
 
-    return HSDResult{T}(p, d, y, status, niter, npred, ncorr, τ, κ, s.hist, s.timers,
+    return HSDResult{T}(p, d, y, status, niter, nsolve, τ, κ, s.hist, s.timers,
                         mu, pres, dres, pobj, dobj)
 end
 
@@ -230,18 +228,18 @@ function woodbury!(
     #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
     #   [ B   0  ] [ Δy2 ] = [ g ]
     #
-    niter = solve_kkt!(kkt, set.kkt, w.Δp2, w.Δy2, H, B, c, g, y0; atol)
+    wbase = solve_kkt!(kkt, w.Δp2, w.Δy2, H, B, c, g, y0; atol)
     #
     # use iterative refinement to improve tha
     # accuracy of the solutions Δp2, Δy2
     #
-    nrefn, rwood = refinekkt!(
-        w.Δp2, w.Δy2, kkt, set.kkt, H, B,
+    wpass, wrefn, wstat = refinekkt!(
+        w.Δp2, w.Δy2, kkt, H, B,
         c, g, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
 
-    return niter + nrefn, rwood
+    return wbase, wrefn, wpass, wstat
 end
 
 function capacitance!(
@@ -285,7 +283,7 @@ function capacitance!(s::HSDSolver)
 end
 
 ############################################################################################
-# refinehsd! — R2: Govaerts–Pryce BE+1 refinement on the 3-row bordered system
+# refinehsd! — Govaerts–Pryce BE+1 refinement on the 3-row bordered system
 ############################################################################################
 
 function refinehsd!(
@@ -293,7 +291,6 @@ function refinehsd!(
     Δy::AbstractVector{T},
     Δτ::T,
     wrk::KKTWorkspace{T},
-    set::KKTSettings{T},
     H::BlockSparseMatrix{T},
     B::BlockSparseMatrix{T},
     c::AbstractVector{T},
@@ -321,6 +318,7 @@ function refinehsd!(
     stall::T,
 ) where {T}
     niter = 0
+    npass = 0
     status = REFINE_ITMAX
     prv = typemax(T)
     #
@@ -376,7 +374,8 @@ function refinehsd!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        niter += solve_kkt!(wrk, set, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        niter += solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        npass += 1
         #
         # apply the Schur lift (aτ = c - 2Qp/τ):
         #
@@ -403,7 +402,7 @@ function refinehsd!(
         Δτ += dτ
     end
 
-    return niter, status, Δτ
+    return npass, niter, status, Δτ
 end
 
 #
@@ -417,7 +416,6 @@ function newton!(
         Δp::AbstractVector{T},
         Δy::AbstractVector{T},
         wrk::KKTWorkspace{T},
-        set::KKTSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         g::AbstractVector{T},
@@ -437,7 +435,7 @@ function newton!(
     #   [ H -Bᵀ ] [ Δp ] = [ f  ]
     #   [ B  0  ] [ Δy ]   [ rp ]
     #
-    niter = solve_kkt!(wrk, set, Δp, Δy, H, B, f, rp, y0; atol)
+    niter = solve_kkt!(wrk, Δp, Δy, H, B, f, rp, y0; atol)
     #
     # apply the Schur lift:
     #
@@ -511,9 +509,9 @@ function solvepredictor!(
     #   [  B           0              -g ] [ Δya ] = [ rp     ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
-    npred, Δτa = newton!(
+    pbase, Δτa = newton!(
         w.Δpa, w.Δya,
-        kkt, set.kkt, H, B, g,
+        kkt, H, B, g,
         w.f, w.rp, gap, w.Δp2, w.Δy2, aτ, S;
         atol
     )
@@ -521,14 +519,13 @@ function solvepredictor!(
     # use iterative refinement to improve
     # the solutions Δpa, Δya, and Δτa
     #
-    niter, rpred, Δτa = refinehsd!(
+    ppass, prefn, pstat, Δτa = refinehsd!(
         w.Δpa, w.Δya, Δτa,
-        kkt, set.kkt, H, B, c, g, w.Qp, p, aτ,
+        kkt, H, B, c, g, w.Qp, p, aτ,
         τ, κ, w.rp, w.f, gap, w.Δp2, w.Δy2, S,
         w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall
     )
-    npred += niter
     #
     # recover Δda:
     #
@@ -544,7 +541,7 @@ function solvepredictor!(
     #   Δκa = -κ (1 + 1/τ Δτa)
     #
     Δκa = -κ * (τ + Δτa) / τ
-    return npred, Δτa, Δκa, rpred
+    return pbase, prefn, ppass, pstat, Δτa, Δκa
 end
 
 #
@@ -670,9 +667,9 @@ function solvecorrector!(
     #   [ B            0                -g ] [ Δy ] = [ rp                          ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
-    ncorr, Δτ = newton!(
+    cbase, Δτ = newton!(
         w.Δp, w.Δy,
-        kkt, set.kkt, H, B, g,
+        kkt, H, B, g,
         w.f, w.rp, fτ, w.Δp2, w.Δy2, aτ, S, w.Δya;
         atol
     )
@@ -680,14 +677,13 @@ function solvecorrector!(
     # use iterative refinement to improve
     # the solutions Δp, Δy, and Δτ
     #
-    nrefine, rcorr, Δτ = refinehsd!(
+    cpass, crefn, cstat, Δτ = refinehsd!(
         w.Δp, w.Δy, Δτ,
-        kkt, set.kkt, H, B, c, g, w.Qp, p, aτ,
+        kkt, H, B, c, g, w.Qp, p, aτ,
         τ, κ, w.rp, w.f, fτ, w.Δp2, w.Δy2, S,
         w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall
     )
-    ncorr += nrefine
     #
     # recover Δd:
     #
@@ -703,7 +699,7 @@ function solvecorrector!(
     #   Δκ ← (fκ - κ Δτ) / τ
     #
     Δκ = (fκ - κ * Δτ) / τ
-    return ncorr, Δτ, Δκ, rcorr
+    return cbase, crefn, cpass, cstat, Δτ, Δκ
 end
 
 ############################################################################################
@@ -755,7 +751,7 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::HSDSettings{T}) wher
         g = prob.g
     end
 
-    R, P, B, kkt = make_kkt(settings.kkt, B)
+    R, P, B, kkt = make_kkt(B; elim=settings.elim, rgmin=settings.rgmin, rgmax=settings.rgmax)
 
     c = P * c
     Q = halfselectvtxs(halfselectvtxs(Q, R.perm), R.perm)
@@ -779,20 +775,26 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::HSDSettings{T}) wher
     κ = FScalar{T}(undef)
     nc = FScalar{T}(undef)
     ng = FScalar{T}(undef)
-    nB = FScalar{T}(undef)
+    α = FScalar{T}(undef)
 
     ρ[] = settings.rgmin
     nc[] = norm(c)
     ng[] = norm(g)
-    nB[] = norm(B)
     Δy0 = FVector{T}(undef, m); fill!(Δy0, false)
 
     τ[] = one(T)
     κ[] = one(T)
+    #
+    # anchor the augmentation to initial problem data (see ipm.jl for the ‖H₁‖ = (η/ξ)√n + ‖Q‖ bound).
+    # HSD starts at the pure identity (p = d = e ⇒ η/ξ = ‖d‖/‖p‖ = 1), so ‖H₁‖_approx = √n + ‖Q‖.
+    #
+    nA = (norm(d) / norm(p)) * sqrt(length(p)) + norm(Symmetric(Q, :L))
+    nB = norm(B)
+    α[] = settings.aaug + settings.raug * nA / nB^2
 
     solver = HSDSolver(Q, H, Hc, B, c, g, p, d, y, cones,
         scaling, P, hsdwrk, caches, conewrk, kkt,
-        hist, ν, settings, ρ, τ, κ, Δy0, nc, ng, nB, TimerOutput()
+        hist, ν, settings, ρ, τ, κ, Δy0, nc, ng, α, TimerOutput()
     )
 
     return solver
@@ -878,10 +880,10 @@ end
 function step!(s::HSDSolver{T}) where {T}
     status = CONTINUE
 
-    npred = 0
-    ncorr = 0
-    nwood = 0
-    rpred = rcorr = rwood = REACHED_FORCE
+    pbase = cbase = wbase = 0   # base-solve CRAIG per role (woodbury counted into craig1, archive-wins)
+    prefn = crefn = wrefn = 0   # refinement CRAIG per role
+    ppass = cpass = wpass = 0   # refinement passes per role
+    pstat = cstat = wstat = REACHED_FORCE   # refinement exit status per role
 
     step = zero(T)
 
@@ -949,9 +951,7 @@ function step!(s::HSDSolver{T}) where {T}
                 status = NUMERICAL_FAILURE
             end
         else
-            nH = norm(Symmetric(s.H, :L))
-
-            if !@timeit s.timers "initkkt" initkkt!(s, nH)
+            if !@timeit s.timers "initkkt" initkkt!(s)
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
                 end
@@ -982,7 +982,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
                 #   [ B   0  ] [ Δy2 ] = [ g ]
                 #
-                nwood, rwood = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
+                wbase, wrefn, wpass, wstat = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
                 copyto!(s.Δy0, w.Δy2)
                 #
                 # compute the Woodbury capacitance scalar
@@ -1001,7 +1001,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκa = (-τκ - κ Δτa) / τ
                 #
-                npred, Δτa, Δκa, rpred = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, Δτa, Δκa = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
                 #
                 # solve for the Mehrotra combined direction
                 #
@@ -1013,10 +1013,10 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
                 #
-                ncorr, Δτ, Δκ, rcorr = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, Δτ, Δκ = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
 
-                if s.settings.verbose > 1 && (rpred != REACHED_FORCE || rcorr != REACHED_FORCE || rwood != REACHED_FORCE)
-                    @info "KKT solve above target tolerance" rpred rcorr rwood
+                if s.settings.verbose > 1 && (pstat != REACHED_FORCE || cstat != REACHED_FORCE || wstat != REACHED_FORCE)
+                    @info "KKT solve above target tolerance" pstat cstat wstat
                 end
                 #
                 # find the largest step ∈ (0, 1] such that
@@ -1080,7 +1080,12 @@ function step!(s::HSDSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, gap, npred, ncorr, nwood, τ=s.τ[], κ=s.κ[], rpred, rcorr, rwood))
+    push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], τ=s.τ[], κ=s.κ[],
+        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat))
+    #
+    # update the augmentation parameter
+    #
+    updateaug!(s)
 
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1

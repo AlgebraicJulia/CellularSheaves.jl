@@ -1,25 +1,12 @@
-@kwdef struct UzawaSettings{T, E <: EliminationAlgorithm} <: KKTSettings{T}
-    aaug::T = zero(T)
-    raug::T = 1e6
-    itmax::Int = 1000
-    elim::E = DEFAULT_ELIMINATION_ALGORITHM
-end
-
-function UzawaSettings{T}(; elim::E = DEFAULT_ELIMINATION_ALGORITHM, kwargs...) where {T, E <: EliminationAlgorithm}
-    return UzawaSettings{T, E}(; elim=elim, kwargs...)
-end
-
-function showsettings(io::IO, set::UzawaSettings; indent::Integer=0)
-    pad = " "^indent
-    @printf(io, "%saaug:  %8.2e  raug:  %8.2e\n", pad, set.aaug, set.raug)
-    @printf(io, "%sitmax: %8d\n", pad, set.itmax)
-    return
-end
-
-function Base.show(io::IO, ::MIME"text/plain", set::T) where {T <: UzawaSettings}
-    println(io, T, ":")
-    return showsettings(io, set; indent=2)
-end
+# Augmentation KKT backend (rebuilt — rebuild_spec.md §1). There is no settings object: α is a
+# per-call argument (a trajectory-level parameter owned by the IPM, held as solver state and mutated
+# only by updateaug!), and the ρ-shift ladder bounds are baked into the workspace at construction. The
+# augmented system is F = (1/α)·H + BᵀB. There is no CRAIG iteration budget of our own: CRAIG terminates
+# in exact arithmetic by iteration n+m, and Krylov.jl caps at its dimension-based default when itmax is
+# unset — the hang guard belongs to the library that owns the iteration, at its termination bound.
+#
+# A different KKT backend is a different workspace type behind the same α/atol argument interface —
+# there is no settings-level polymorphism (the KKTWorkspace abstract type is the only extension point).
 
 struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     F::FChordalTriangular{:N, UPLO, T, I}
@@ -29,36 +16,36 @@ struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     itrwrk::CraigWorkspace{T, T, Vector{T}}
     r::Vector{T}
     α::Scalar{T}
+    rgmin::T                    # baked: ρ-shift ladder lower bound
+    rgmax::T                    # baked: ρ-shift ladder upper bound
 end
 
-function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I}) where {UPLO, T, I <: Integer}
+function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I};
+                        rgmin::T, rgmax::T) where {UPLO, T, I <: Integer}
     m, n = size(B)
     facwrk = FactorizationWorkspace(F)
     divwrk = DivisionWorkspace(F, 1)
     itrwrk = CraigWorkspace(m, n, Vector{T})
     r = zeros(T, m)
     α = ones(T)
-    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α)
+    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, rgmin, rgmax)
 end
 
-function make_kkt(settings::UzawaSettings{T}, B::BlockSparseMatrix{T, I}) where {T, I}
+function make_kkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAULT_ELIMINATION_ALGORITHM,
+                  rgmin::T, rgmax::T) where {T, I}
     weights, graph = weightedgraph(B)
-
-    R, P, S = symbolic(weights, graph; alg=settings.elim)
-
+    R, P, S = symbolic(weights, graph; alg=elim)
     B = selectvtxs(B, R.perm)
-
     F = FChordalTriangular{:N, :L, T, I}(S)
     L = B' * B
-
-    wrk = UzawaWorkspace(F, L, B)
-
+    wrk = UzawaWorkspace(F, L, B; rgmin, rgmax)
     return R, P, B, wrk
 end
 
-function initkkt!(wrk::UzawaWorkspace{UPLO, T}, set::UzawaSettings{T}, A::BlockSparseMatrix, nH::T, nB::T, rgmin::T, rgmax::T) where {UPLO, T}
-    wrk.α[] = α = set.aaug + set.raug * nH / nB^2
-    return init_uzw!(wrk.facwrk, wrk.F, wrk.L, A, α, rgmin, rgmax)
+# build & factor F = (1/α)·A + BᵀB (BᵀB precomputed as wrk.L), with the ρ-shift ladder on failure.
+function initkkt!(wrk::UzawaWorkspace{UPLO, T}, A::BlockSparseMatrix; α::T) where {UPLO, T}
+    wrk.α[] = α
+    return init_uzw!(wrk.facwrk, wrk.F, wrk.L, A, α, wrk.rgmin, wrk.rgmax)
 end
 
 function init_uzw!(
@@ -105,9 +92,9 @@ function init_uzw!(
     return iszero(info), ρ
 end
 
+# base KKT solve to `atol`; returns the base CRAIG iteration count (Krylov's dimension-based cap on hang).
 function solve_kkt!(
     wrk::UzawaWorkspace{UPLO, T},
-    set::UzawaSettings{T},
     x::AbstractVector{T},
     y::AbstractVector{T},
     A::BlockSparseMatrix{T},
@@ -118,7 +105,7 @@ function solve_kkt!(
     atol::T,
 ) where {UPLO, T}
     return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, A, B,
-                      f, g, wrk.α[], atol, set.itmax, y0)
+                      f, g, wrk.α[], atol, y0)
 end
 
 #
@@ -140,7 +127,6 @@ function solve_uzw!(
         g::AbstractVector{T},
         α::T,
         atol::T,
-        itmax::Int,
         y0 = nothing,
     ) where {UPLO, T}
     m, n = size(B)
@@ -193,7 +179,7 @@ function solve_uzw!(
     end
 
     N = LinearOperator(T, n, n, true, true, prec!)
-    craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol, itmax)
+    craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol)
     niter += itrwrk.stats.niter
     #
     # update x:

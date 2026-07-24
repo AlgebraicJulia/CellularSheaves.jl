@@ -495,10 +495,8 @@ function run()
     println("=" ^ 78)
 
     ipm_settings = IPMSettings{Float64}(
-        kkt = UzawaSettings{Float64}(raug = 1e2),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
     hsd_settings = HSDSettings{Float64}(
-        kkt = UzawaSettings{Float64}(raug = 1e2),
         feas_tol = TOL, gap_tol = TOL, itmax = 200)
 
     inst = tl_instance()

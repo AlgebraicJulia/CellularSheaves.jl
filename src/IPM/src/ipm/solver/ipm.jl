@@ -20,7 +20,7 @@ struct IPMSolver{T, I, W, C} <: AbstractSolver{T}
     ρ::FScalar{T}
     nc::FScalar{T}
     ng::FScalar{T}
-    nB::FScalar{T}
+    α::FScalar{T}       # effective augmentation penalty; anchored at construction, owned by updateaug!
     timers::TimerOutput
 end
 
@@ -36,16 +36,14 @@ function result(s::IPMSolver{T}, status::IPMStatus) where {T}
     unscale!(p, d, y, s.scaling)
 
     niter = 0
-    npred = 0
-    ncorr = 0
+    nsolve = 0
 
     for row in s.hist
         niter += 1
-        npred += row.npred
-        ncorr += row.ncorr
+        nsolve += row.pbase + row.prefn + row.cbase + row.crefn
     end
 
-    return IPMResult{T}(p, d, y, status, niter, npred, ncorr, s.hist, s.timers)
+    return IPMResult{T}(p, d, y, status, niter, nsolve, s.hist, s.timers)
 end
 
 ############################################################################################
@@ -98,14 +96,13 @@ function residuals!(s::IPMSolver{T}) where {T}
 end
 
 ############################################################################################
-# refinekkt! — A2/A3: solver-owned refinement loop for 2-row system
+# refinekkt! — solver-owned refinement loop for the 2-row system
 ############################################################################################
 
 function refinekkt!(
     Δp::AbstractVector{T},
     Δy::AbstractVector{T},
     wrk::KKTWorkspace{T},
-    set::KKTSettings{T},
     H::BlockSparseMatrix{T},
     B::BlockSparseMatrix{T},
     f::AbstractVector{T},
@@ -122,6 +119,7 @@ function refinekkt!(
     stall::T,
 ) where {T}
     niter = 0
+    npass = 0
     status = REFINE_ITMAX
     prv = typemax(T)
 
@@ -162,7 +160,8 @@ function refinekkt!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        niter += solve_kkt!(wrk, set, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        niter += solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        npass += 1
         #
         # update Δp and Δy:
         #
@@ -173,7 +172,7 @@ function refinekkt!(
         axpy!(one(T), dy, Δy)
     end
 
-    return niter, status
+    return npass, niter, status
 end
 
 ############################################################################################
@@ -216,12 +215,12 @@ function solvepredictor!(
     #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
-    npred = solve_kkt!(kkt, set.kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
+    pbase = solve_kkt!(kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
     #
     # refine Δpa, Δya to force_tol
     #
-    nrefn, rpred = refinekkt!(
-        w.Δpa, w.Δya, kkt, set.kkt, H, B,
+    ppass, prefn, pstat = refinekkt!(
+        w.Δpa, w.Δya, kkt, H, B,
         w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
@@ -234,7 +233,7 @@ function solvepredictor!(
     mul!(w.Δda, B', w.Δya, -1, -1)
     mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
 
-    return npred + nrefn, rpred
+    return pbase, prefn, ppass, pstat
 end
 
 #
@@ -323,18 +322,16 @@ function solvecorrector!(
     #   [ H  -Bᵀ ] [ Δp ]   [ rd* ]
     #   [ B   0  ] [ Δy ] = [ rp  ]
     #
-    ncorr = solve_kkt!(kkt, set.kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
+    cbase = solve_kkt!(kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
     #
     # use iterative refinement to improve
     # the solutions Δp and Δy
     #
-    nrefn, refstat = refinekkt!(
-        w.Δp, w.Δy, kkt, set.kkt, H, B,
+    cpass, crefn, cstat = refinekkt!(
+        w.Δp, w.Δy, kkt, H, B,
         w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
-
-    ncorr += nrefn
     #
     # recover Δd:
     #
@@ -344,7 +341,7 @@ function solvecorrector!(
     mul!(w.Δd, B', w.Δy, -1, -1)
     mul!(w.Δd, Symmetric(Q, :L), w.Δp, 1, 1)
 
-    return ncorr, refstat
+    return cbase, crefn, cpass, cstat
 end
 
 ############################################################################################
@@ -406,7 +403,7 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::IPMSettings{T}) wher
         g = prob.g
     end
 
-    R, P, B, kkt = make_kkt(settings.kkt, B)
+    R, P, B, kkt = make_kkt(B; elim=settings.elim, rgmin=settings.rgmin, rgmax=settings.rgmax)
 
     c = P * c
     Q = halfselectvtxs(halfselectvtxs(Q, R.perm), R.perm)
@@ -427,16 +424,26 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::IPMSettings{T}) wher
     ρ = FScalar{T}(undef)
     nc = FScalar{T}(undef)
     ng = FScalar{T}(undef)
-    nB = FScalar{T}(undef)
+    α = FScalar{T}(undef)
 
     ρ[] = settings.rgmin
     nc[] = norm(c)
     ng[] = norm(g)
-    nB[] = norm(B)
+    #
+    # anchor the augmentation to initial problem data:
+    #
+    #   α = aaug + raug · ‖H₁‖_approx / ‖B‖²,   ‖H₁‖_approx = (η/ξ)·√n + ‖Q‖
+    #
+    # H₁ = (η/ξ)·I + Q at the scaled identity start; the cone Hessian is a scaled identity with
+    # η/ξ = ‖d‖/‖p‖, so the triangle bound (tight when η/ξ ≪ ‖Q‖/√n ⇒ ‖H₁‖ ≈ ‖Q‖) is analytic.
+    #
+    nA = (norm(d) / norm(p)) * sqrt(length(p)) + norm(Symmetric(Q, :L))
+    nB = norm(B)
+    α[] = settings.aaug + settings.raug * nA / nB^2
 
     return IPMSolver(Q, H, B, c, g, p, d, y, cones,
         scaling, P, ipmwrk, caches, conewrk, kkt,
-        hist, ν, settings, ρ, nc, ng, nB, TimerOutput()
+        hist, ν, settings, ρ, nc, ng, α, TimerOutput()
     )
 end
 
@@ -472,10 +479,11 @@ end
 function step!(s::IPMSolver{T}) where {T}
     status = CONTINUE
 
-    npred = 0
-    ncorr = 0
+    pbase = cbase = 0       # base-solve CRAIG per role
+    prefn = crefn = 0       # refinement CRAIG per role
+    ppass = cpass = 0       # refinement passes per role
+    pstat = cstat = REACHED_FORCE   # refinement exit status per role
     step = zero(T)
-    rpred = rcorr = REACHED_FORCE
 
     w = s.wrk
     #
@@ -530,9 +538,7 @@ function step!(s::IPMSolver{T}) where {T}
                 status = NUMERICAL_FAILURE
             end
         else
-            nH = norm(Symmetric(s.H, :L))
-
-            if !@timeit s.timers "initkkt" initkkt!(s, nH)
+            if !@timeit s.timers "initkkt" initkkt!(s)
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
                 end
@@ -563,7 +569,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                npred, rpred = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
                 #
                 # solve for the Mehrotra combined direction
                 #
@@ -572,10 +578,10 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                ncorr, rcorr = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
 
-                if s.settings.verbose > 1 && (rpred != REACHED_FORCE || rcorr != REACHED_FORCE)
-                    @info "KKT solve above target tolerance" rpred rcorr
+                if s.settings.verbose > 1 && (pstat != REACHED_FORCE || cstat != REACHED_FORCE)
+                    @info "KKT solve above target tolerance" pstat cstat
                 end
                 #
                 # find the largest step sizes such that
@@ -625,7 +631,11 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, npred, ncorr, rpred, rcorr))
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat))
+    #
+    # update the augmentation parameter
+    #
+    updateaug!(s)
 
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
@@ -663,7 +673,8 @@ end
         scale_itmax=10,
         rgmin=1e-9,
         rgmax=1e-6,
-        kkt=UzawaSettings(),
+        aaug=0.0,
+        raug=1e7,
     )
 
 Solve an [`IPMProblem`](@ref).

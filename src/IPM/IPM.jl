@@ -42,7 +42,6 @@ export HSDSettings, HSDSolver, HSDResult, HSDHistory, HSDHistoryRow
 export OPTIMAL, NEAR_OPTIMAL, STALLED, NUMERICAL_FAILURE, ITERATION_LIMIT, PRIMAL_INFEASIBLE, DUAL_INFEASIBLE, ILL_POSED
 export solve, solve!, step!, init, reinit!
 export AbstractCone, SemidefiniteCone, PositiveCone, SecondOrderCone, CofreeCone, ExponentialCone
-export UzawaSettings
 export print_timers
 
 end

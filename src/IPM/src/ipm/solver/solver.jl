@@ -33,9 +33,80 @@ function atfloor(s::AbstractSolver)
     return atfloor(s.hist; patience=s.settings.floor_patience)
 end
 
-function initkkt!(s::AbstractSolver{T}, nH::T) where {T}
-    flag, s.ρ[] = initkkt!(s.kkt, s.settings.kkt, s.H, nH, s.nB[], s.ρ[], s.settings.rgmax)
+function initkkt!(s::AbstractSolver{T}) where {T}
+    flag, s.ρ[] = initkkt!(s.kkt, s.H; α=s.α[])
     return flag
+end
+
+############################################################################################
+# updateaug! — the augmentation controller (rebuild_spec.md §3)
+############################################################################################
+#
+# TRANSCRIBED from the measured incumbent (docs/augmentation/). These constants are the incumbent's
+# mechanics, verbatim in behavior; the rebuild does not resize, add to, or "fix" them. Improvements
+# require new measurements first — which is why they are module consts, not settings: changing one is
+# a code edit with a rationale, not a config tweak. There are no α_min/α_max rails: the emergency arms
+# are the working bounds (descent raises base until the jump fires; climb stops at the secant/refine
+# arms), and no measured run ever needed a clamp.
+#
+const AUG_INC          = 4.0   # climb factor per quiet iter; also the floor of the emergency jump
+const AUG_CRAIG_MIN    = 2     # climb gate: don't climb when summed base is already at the absolute floor
+const AUG_CRAIG_HI     = 8     # emergency tripwire; ~2.5× the in-valley summed base (2–4 per iteration)
+const AUG_CRAIG_TARGET = 2     # jump law  α *= (craig1/craig_target)²   (from base ∝ α^{-1/2})
+const AUG_JUMP_MAX     = 1e4   # single-jump cap; a library-capped base solve saturates it too (badlo recoveries)
+const AUG_DESC         = 4.0   # refine-arm cut (the band's ÷4, proven across every race)
+const AUG_REFINE_HI    = 2     # descend trigger: refinement passes ≥ AUG_REFINE_HI
+
+#
+# The controller reads ONE base observable, `nbase` = Σ base CRAIG over this iteration's solves (the
+# archived `craig1_total` / history `ncraig1` column). This is the observable the incumbent's constants
+# were tuned against — the archived tables' "in-valley base ≈ 3" and "13.8 at low raug" were per-iteration
+# sums — so AUG_CRAIG_HI, AUG_CRAIG_MIN, and the jump law's (nbase/target)² all consume it, verbatim.
+# (A prose transcription earlier compressed this to a per-solve max; archive-wins per §3, see README.md.)
+# For HSD the sum includes the warm-started woodbury solve — it was in `d.solves` and the incumbent's
+# constants were earned with it counted; the cold-only exclusion is an unshipped refinement, docs-only.
+# `refine_passes` stays the worst (max) refinement-pass count over the solves — the shipped descend arm's
+# observable, distinct from the base sum.
+#
+# Mutate s.α for the next iteration. Priority order:
+#
+#   1. Emergency-up: if nbase ≥ AUG_CRAIG_HI, the model jump from base ∝ α^{-1/2}:
+#      α *= clamp((nbase/AUG_CRAIG_TARGET)², AUG_INC, AUG_JUMP_MAX). A base solve that runs to Krylov's
+#      dimension cap (a hang / badly-low α) returns a huge nbase that trips this and saturates AUG_JUMP_MAX
+#      — so the old explicit truncation escape is subsumed here, with no CRAIG budget of our own.
+#   2. Descend (the refine arm): if worst refinement passes ≥ AUG_REFINE_HI, α /= AUG_DESC. (Count-
+#      based, no stall-status clause — the status-triggered variant is the refuted stall guard.)
+#   3. Marginal climb (single-strike secant): if all solves quiet (refine == 0) and nbase above the
+#      floor, compare the last two iterations — if α was climbed and nbase did not drop, hold (at the
+#      floor); otherwise α *= AUG_INC. The secant self-re-arms when the summed base later rises.
+#
+function updateaug!(s::AbstractSolver{T}) where {T}
+    n = length(s.hist)
+
+    if n > 0
+        # observables derived from the just-pushed row; nbase/npass dispatch on the history type, so this
+        # stays solver-agnostic (HSD's nbase sums the woodbury solve, IPM's does not).
+        nb = nbase(s.hist, n)
+        np = npass(s.hist, n)
+        α  = s.α[]
+
+        if nb ≥ AUG_CRAIG_HI
+            jump = clamp((nb / AUG_CRAIG_TARGET)^2, AUG_INC, AUG_JUMP_MAX)
+            s.α[] = α * T(jump)
+        elseif np ≥ AUG_REFINE_HI
+            s.α[] = α / T(AUG_DESC)
+        elseif np == 0 && nb > AUG_CRAIG_MIN
+            # single-strike secant from the last two rows: hold only if α climbed and nbase did not drop.
+            climbed = n ≥ 2 && s.hist.α[n] > s.hist.α[n-1]
+            held    = climbed && nb ≥ nbase(s.hist, n-1)
+
+            if !held
+                s.α[] = α * T(AUG_INC)
+            end
+        end
+    end
+
+    return
 end
 
 function scale!(

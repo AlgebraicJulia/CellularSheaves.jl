@@ -1,4 +1,4 @@
-@kwdef struct IPMSettings{T} <: AbstractSettings{T}
+@kwdef struct IPMSettings{T, E <: EliminationAlgorithm} <: AbstractSettings{T}
     verbose::Int = 0
     step_frac::T = 0.99
     feas_tol::T = 1e-8
@@ -14,7 +14,14 @@
     scale_itmax::Int = 10
     rgmin::T = 1e-9
     rgmax::T = 1e-6
-    kkt::KKTSettings{T} = UzawaSettings{T}()
+    aaug::T = zero(T)   # absolute augmentation (raw-α override: set raug=0, aaug=α_raw)
+    raug::T = 1e7       # relative augmentation, in initial-problem units (the anchored knob)
+    elim::E = DEFAULT_ELIMINATION_ALGORITHM   # KKT elimination ordering (construction-time)
+end
+
+# infer E from the elim argument so IPMSettings{T}(...) stays the call form
+function IPMSettings{T}(; elim::E = DEFAULT_ELIMINATION_ALGORITHM, kwargs...) where {T, E <: EliminationAlgorithm}
+    return IPMSettings{T, E}(; elim, kwargs...)
 end
 
 function showsettings(io::IO, set::IPMSettings; indent::Integer=0)
@@ -27,9 +34,7 @@ function showsettings(io::IO, set::IPMSettings; indent::Integer=0)
     @printf(io, "%srefine_itmax: %8d  refine_stall: %8.2e\n", pad, set.refine_itmax, set.refine_stall)
     @printf(io, "%sscale_itmax:  %8d\n", pad, set.scale_itmax)
     @printf(io, "%srgmin:        %8.2e  rgmax:        %8.2e\n", pad, set.rgmin, set.rgmax)
-    println(io)
-    println(io, pad, "kkt: ", typeof(set.kkt))
-    showsettings(io, set.kkt; indent=indent+4)
+    @printf(io, "%saaug:         %8.2e  raug:         %8.2e\n", pad, set.aaug, set.raug)
     return
 end
 

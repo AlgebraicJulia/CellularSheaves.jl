@@ -11,7 +11,7 @@ using Dualization
 import MathOptInterface as MOI
 
 using CellularSheaves.IPM
-using CellularSheaves.IPM: OPTIMAL, NEAR_OPTIMAL, PositiveCone, SemidefiniteCone, IPMSettings, HSDSettings, UzawaSettings
+using CellularSheaves.IPM: OPTIMAL, NEAR_OPTIMAL, PositiveCone, SemidefiniteCone, IPMSettings, HSDSettings
 using CellularSheaves.BlockSparseArrays: block, nvtxs, blocksparse, colrange
 
 # -----------------------------------------------------------------------------

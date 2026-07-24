@@ -4,8 +4,7 @@ struct HSDResult{T} <: AbstractResult{T}
     y::Vector{T}
     status::IPMStatus
     niter::Int
-    npred::Int
-    ncorr::Int
+    nsolve::Int          # total solve (CRAIG) iterations (base + refinement, all solves, all iterations)
     τ::T
     κ::T
     history::HSDHistory{T}
@@ -30,8 +29,7 @@ function showresult(io::IO, result::HSDResult; indent::Integer=0)
     pad = " "^indent
     println(io, pad, "status: ", result.status)
     println(io, pad, "niter: ",  result.niter)
-    println(io, pad, "npred: ",  result.npred)
-    println(io, pad, "ncorr: ",  result.ncorr)
+    println(io, pad, "nsolve: ", result.nsolve)
     println(io, pad, "τ: ",      result.τ)
     println(io, pad, "κ: ",      result.κ)
     # C5 (addendum): the answer at the returned point, in user frame.
