@@ -3,10 +3,10 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run: 2026-07-24 (--quick)  [rhs/rebuild — anchored raug default]
+# Sample run: 2026-07-24 (--quick --mosek)  [rhs/rebuild — anchored raug default]
 # -----------------------------------------------------------------------------
-# N=8    dof=1088   n1=289   blk=136   IPM   18.1ms  HSD   25.8ms (1.42x)  Cla  148.3ms (8.17x)  Msk —        (—)
-# N=10   dof=1360   n1=361   blk=136   IPM   23.5ms  HSD   33.3ms (1.42x)  Cla  195.2ms (8.29x)  Msk —        (—)
-# N=12   dof=1632   n1=433   blk=136   IPM   28.4ms  HSD   41.1ms (1.45x)  Cla  244.7ms (8.62x)  Msk —        (—)
-# IPM: DOF^1.11  HSD: DOF^1.15  Clarabel: DOF^1.24  Mosek: n/a
+# N=8    dof=1088   n1=289   blk=136   IPM   18.8ms  HSD   26.1ms (1.39x)  Cla  149.1ms (7.94x)  Msk   57.3ms (3.05x)
+# N=10   dof=1360   n1=361   blk=136   IPM   23.7ms  HSD   34.1ms (1.43x)  Cla  193.4ms (8.15x)  Msk   58.2ms (2.45x)
+# N=12   dof=1632   n1=433   blk=136   IPM   28.9ms  HSD   41.0ms (1.42x)  Cla  231.5ms (8.02x)  Msk   75.2ms (2.61x)
+# IPM: DOF^1.06  HSD: DOF^1.11  Clarabel: DOF^1.09  Mosek: DOF^0.65
 # =============================================================================
