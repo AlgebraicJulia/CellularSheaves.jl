@@ -43,9 +43,9 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
         ldiv!(τ, p)
         ldiv!(τ, d)
         ldiv!(τ, y)
-    elseif status == PRIMAL_INFEASIBLE
+    elseif status in (PRIMAL_INFEASIBLE, NEAR_PRIMAL_INFEASIBLE)
         ldiv!(norm(y), y)
-    elseif status == DUAL_INFEASIBLE
+    elseif status in (DUAL_INFEASIBLE, NEAR_DUAL_INFEASIBLE)
         np = norm(p)
         ldiv!(np, p)
         ldiv!(np, d)
@@ -67,11 +67,15 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
     # evaluated directly (the τκ / ν+1→ν wedges are full-size at off-path floors).
     #
     w = s.wrk; scl = s.scaling
-    if status == PRIMAL_INFEASIBLE
-        mu = pres = dres = dobj = T(NaN); pobj = dot(s.g, s.y)   # certificate gᵀy
-    elseif status == DUAL_INFEASIBLE
-        mu = pres = dres = pobj = T(NaN); dobj = dot(s.c, s.p)   # certificate cᵀp
-    elseif status == ILL_POSED || isempty(s.hist)
+    if status in (PRIMAL_INFEASIBLE, NEAR_PRIMAL_INFEASIBLE)
+        # Certificate value gᵀy at the returned ‖y‖ = 1, in the user frame. The HSD embedding
+        # scales g (the border) by d₂ = scaling.bscl, so undo it here (as unscale! does for τ).
+        mu = pres = dres = dobj = T(NaN); pobj = dot(s.g, y) / scl.bscl[]
+    elseif status in (DUAL_INFEASIBLE, NEAR_DUAL_INFEASIBLE)
+        # Certificate value cᵀp at the returned ‖p‖ = 1 (symmetric border-scale undo; no
+        # dual-infeasible example exercises this branch yet — see e14 for the primal analogue).
+        mu = pres = dres = pobj = T(NaN); dobj = dot(s.c, p) / scl.bscl[]
+    elseif status == ILL_POSED || status == NEAR_ILL_POSED || isempty(s.hist)
         mu = pres = dres = pobj = dobj = T(NaN)
     else
         residuals!(s)   # refresh w.rp (m), w.rd (n), w.Qp = Q·p at the terminal iterate
@@ -784,13 +788,11 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::HSDSettings{T}) wher
 
     τ[] = one(T)
     κ[] = one(T)
-    #
-    # anchor the augmentation to initial problem data (see ipm.jl for the ‖H₁‖ = (η/ξ)√n + ‖Q‖ bound).
-    # HSD starts at the pure identity (p = d = e ⇒ η/ξ = ‖d‖/‖p‖ = 1), so ‖H₁‖_approx = √n + ‖Q‖.
-    #
-    nA = (norm(d) / norm(p)) * sqrt(length(p)) + norm(Symmetric(Q, :L))
+
+    nH = sqrt(n)
+    nQ = norm(Symmetric(Q, :L))
     nB = norm(B)
-    α[] = settings.aaug + settings.raug * nA / nB^2
+    α[] = settings.aaug + settings.raug * (nH + nQ) / nB^2
 
     solver = HSDSolver(Q, H, Hc, B, c, g, p, d, y, cones,
         scaling, P, hsdwrk, caches, conewrk, kkt,
@@ -824,53 +826,92 @@ function isoptimal(s::HSDSolver{T}, μ::T, pres::T, dres::T) where {T}
     max(pres, dres) < s.settings.feas_tol && (μ < s.settings.gap_tol * τ^2 || pobj - dobj < s.settings.gap_tol * (1 + abs(pobj) + abs(dobj)))
 end
 
-function isprimalinfeasible(s::HSDSolver)
-    w = s.wrk
-    τ = s.τ[]
-    κ = s.κ[]
-
-    flag = τ / κ < s.settings.infeas_rel
+function isprimalinfeasible(w, τ, κ, B, d, g, y, ng, rtol, atol)
+    flag = τ / κ < rtol
 
     if flag
-        gy = dot(s.g, s.y)
-        ny = norm(s.y)
-        flag = gy > s.settings.infeas_abs * ny * (1 + s.ng[])
+        gy = dot(g, y)
+        ny = norm(y)
+        flag = gy > atol * ny * (1 + ng)
 
         if flag
             nQp = norm(w.Qp)
             copyto!(w.f, w.Qp)
-            axpy!(-1, s.d, w.f)
-            mul!(w.f, s.B', s.y, -1, 1)
-            flag = max(nQp, norm(w.f)) < s.settings.infeas_rel * gy * (1 + norm(s.d) / ny)
+            axpy!(-1, d, w.f)
+            mul!(w.f, B', y, -1, 1)
+            flag = max(nQp, norm(w.f)) < rtol * gy * (1 + norm(d) / ny)
         end
     end
 
     return flag
 end
 
-function isdualinfeasible(s::HSDSolver)
-    w = s.wrk
-    τ = s.τ[]
-    κ = s.κ[]
+function isprimalinfeasible(s::HSDSolver, rtol, atol)
+    return isprimalinfeasible(s.wrk, s.τ[], s.κ[], s.B, s.d, s.g, s.y, s.ng[], rtol, atol)
+end
 
-    flag = τ / κ < s.settings.infeas_rel
+function isprimalinfeasible(s::HSDSolver)
+    return isprimalinfeasible(s, s.settings.infeas_rel, s.settings.infeas_abs)
+end
+
+function isnearprimalinfeasible(s::HSDSolver)
+    f = s.settings.near_factor
+    return isprimalinfeasible(s, f * s.settings.infeas_rel, s.settings.infeas_abs)
+end
+
+function isdualinfeasible(w, τ, κ, B, p, c, nc, rtol, atol)
+    flag = τ / κ < rtol
 
     if flag
-        cp = dot(s.c, s.p)
-        np = norm(s.p)
-        flag = cp > s.settings.infeas_abs * np * (1 + s.nc[])
+        cp = dot(c, p)
+        np = norm(p)
+        flag = cp > atol * np * (1 + nc)
 
         if flag
-            mul!(w.sy, s.B, s.p)
-            flag = max(norm(w.sy), norm(w.Qp)) < s.settings.infeas_rel * abs(cp)
+            mul!(w.sy, B, p)
+            flag = max(norm(w.sy), norm(w.Qp)) < rtol * abs(cp)
         end
     end
 
     return flag
+end
+
+function isdualinfeasible(s::HSDSolver, rtol, atol)
+    return isdualinfeasible(s.wrk, s.τ[], s.κ[], s.B, s.p, s.c, s.nc[], rtol, atol)
+end
+
+function isdualinfeasible(s::HSDSolver)
+    return isdualinfeasible(s, s.settings.infeas_rel, s.settings.infeas_abs)
+end
+
+function isneardualinfeasible(s::HSDSolver)
+    f = s.settings.near_factor
+    return isdualinfeasible(s, f * s.settings.infeas_rel, s.settings.infeas_abs)
 end
 
 function isillposed(s::HSDSolver)
     return isillposed(s.hist; tol=s.settings.illposed_tol)
+end
+
+function isnearillposed(s::HSDSolver)
+    tol = s.settings.near_factor * s.settings.illposed_tol
+    return max(s.τ[], s.κ[]) <= tol
+end
+
+function nearstatus(s::HSDSolver, status::IPMStatus)
+    residuals!(s)
+
+    if isnearoptimal(s)
+        status = NEAR_OPTIMAL
+    elseif isnearprimalinfeasible(s)
+        status = NEAR_PRIMAL_INFEASIBLE
+    elseif isneardualinfeasible(s)
+        status = NEAR_DUAL_INFEASIBLE
+    elseif isnearillposed(s)
+        status = NEAR_ILL_POSED
+    end
+
+    return status
 end
 
 ############################################################################################
@@ -945,22 +986,14 @@ function step!(s::HSDSolver{T}) where {T}
                 @warn "Scaling failed."
             end
 
-            if isnearoptimal(s)
-                status = NEAR_OPTIMAL
-            else
-                status = NUMERICAL_FAILURE
-            end
+            status = nearstatus(s, NUMERICAL_FAILURE)
         else
             if !@timeit s.timers "initkkt" initkkt!(s)
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
                 end
 
-                if isnearoptimal(s)
-                    status = NEAR_OPTIMAL
-                else
-                    status = NUMERICAL_FAILURE
-                end
+                status = nearstatus(s, NUMERICAL_FAILURE)
             else
                 #
                 # compute tolerances for predictor and corrector solves
@@ -1060,27 +1093,19 @@ function step!(s::HSDSolver{T}) where {T}
                         @warn "Stalling detected."
                     end
 
-                    if isnearoptimal(s)
-                        status = NEAR_OPTIMAL
-                    else
-                        status = STALLED
-                    end
+                    status = nearstatus(s, STALLED)
                 elseif isnumfail(s)
                     if s.settings.verbose > 1
                         @warn "Step collapse detected."
                     end
 
-                    if isnearoptimal(s)
-                        status = NEAR_OPTIMAL
-                    else
-                        status = NUMERICAL_FAILURE
-                    end
+                    status = nearstatus(s, NUMERICAL_FAILURE)
                 end
             end
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], τ=s.τ[], κ=s.κ[],
+    push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ=s.ρ[], τ=s.τ[], κ=s.κ[],
         pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat))
     #
     # update the augmentation parameter
@@ -1092,11 +1117,7 @@ function step!(s::HSDSolver{T}) where {T}
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"
         end
 
-        if isnearoptimal(s)
-            status = NEAR_OPTIMAL
-        else
-            status = NUMERICAL_FAILURE
-        end
+        status = nearstatus(s, NUMERICAL_FAILURE)
     end
 
     return status

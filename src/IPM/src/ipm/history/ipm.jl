@@ -1,4 +1,4 @@
-const IPMHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, α::T,
+const IPMHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, α::T, ρ::T,
     pbase::Int, prefn::Int, ppass::Int, pstat::RefStatus,
     cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus}
 
@@ -8,6 +8,7 @@ struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     pres::Vector{T}
     dres::Vector{T}
     α::Vector{T}
+    ρ::Vector{T}
     pbase::Vector{Int}
     prefn::Vector{Int}
     ppass::Vector{Int}
@@ -19,7 +20,7 @@ struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
 end
 
 function IPMHistory{T}() where {T}
-    return IPMHistory{T}(T[], T[], T[], T[], T[],
+    return IPMHistory{T}(T[], T[], T[], T[], T[], T[],
         Int[], Int[], Int[], RefStatus[],
         Int[], Int[], Int[], RefStatus[])
 end
@@ -30,6 +31,7 @@ function Base.getindex(hist::IPMHistory, i::Int)
     pres    = hist.pres[i]
     dres    = hist.dres[i]
     α       = hist.α[i]
+    ρ       = hist.ρ[i]
     pbase   = hist.pbase[i]
     prefn   = hist.prefn[i]
     ppass   = hist.ppass[i]
@@ -38,7 +40,7 @@ function Base.getindex(hist::IPMHistory, i::Int)
     crefn   = hist.crefn[i]
     cpass   = hist.cpass[i]
     cstat   = hist.cstat[i]
-    return (; μ, step, pres, dres, α, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat)
+    return (; μ, step, pres, dres, α, ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat)
 end
 
 function Base.push!(hist::IPMHistory, row::NamedTuple)
@@ -47,6 +49,7 @@ function Base.push!(hist::IPMHistory, row::NamedTuple)
     push!(hist.pres,    row.pres)
     push!(hist.dres,    row.dres)
     push!(hist.α,       row.α)
+    push!(hist.ρ,       row.ρ)
     push!(hist.pbase,   row.pbase)
     push!(hist.prefn,   row.prefn)
     push!(hist.ppass,   row.ppass)
@@ -64,6 +67,7 @@ function Base.empty!(hist::IPMHistory)
     empty!(hist.pres)
     empty!(hist.dres)
     empty!(hist.α)
+    empty!(hist.ρ)
     empty!(hist.pbase)
     empty!(hist.prefn)
     empty!(hist.ppass)
@@ -85,32 +89,32 @@ end
 
 function showtop(io::IO, ::IPMHistory; indent::Integer=0)
     pad = " "^indent
-    println(io, pad, "┌──────┬──────────┬──────────┬────────┬───────┬──────────┬──────────┐")
-    println(io, pad, "│ iter │   pres   │   dres   │  step  │ solve │    α     │    μ     │")
+    println(io, pad, "┌──────┬──────────┬──────────┬────────┬───────┬──────────┬──────────┬──────────┐")
+    println(io, pad, "│ iter │   pres   │   dres   │  step  │ solve │    α     │    ρ     │    μ     │")
     return
 end
 
 function showbot(io::IO, ::IPMHistory; indent::Integer=0)
     pad = " "^indent
-    println(io, pad, "└──────┴──────────┴──────────┴────────┴───────┴──────────┴──────────┘")
+    println(io, pad, "└──────┴──────────┴──────────┴────────┴───────┴──────────┴──────────┴──────────┘")
     return
 end
 
 function showmid(io::IO, ::IPMHistory; indent::Integer=0)
     pad = " "^indent
-    println(io, pad, "├──────┼──────────┼──────────┼────────┼───────┼──────────┼──────────┤")
-    println(io, pad, "│    ⋮ │        ⋮ │        ⋮ │      ⋮ │     ⋮ │        ⋮ │        ⋮ │")
+    println(io, pad, "├──────┼──────────┼──────────┼────────┼───────┼──────────┼──────────┼──────────┤")
+    println(io, pad, "│    ⋮ │        ⋮ │        ⋮ │      ⋮ │     ⋮ │        ⋮ │        ⋮ │        ⋮ │")
     return
 end
 
 function showrow(io::IO, i::Integer, row::IPMHistoryRow; indent::Integer=0)
     pad = " "^indent
-    println(io, pad, "├──────┼──────────┼──────────┼────────┼───────┼──────────┼──────────┤")
+    println(io, pad, "├──────┼──────────┼──────────┼────────┼───────┼──────────┼──────────┼──────────┤")
     print(io, pad)
-    # solve = total solve (CRAIG) iterations this step (base + refinement, both solves); α = penalty used.
+    # solve = total solve (CRAIG) iterations this step (base + refinement, both solves); α = penalty, ρ = regularization.
     solve = row.pbase + row.prefn + row.cbase + row.crefn
-    @printf(io, "│ %4d │ %8.2e │ %8.2e │ %6.4f │ %5d │ %8.2e │ %8.2e │\n",
-            i, row.pres, row.dres, row.step, solve, row.α, row.μ)
+    @printf(io, "│ %4d │ %8.2e │ %8.2e │ %6.4f │ %5d │ %8.2e │ %8.2e │ %8.2e │\n",
+            i, row.pres, row.dres, row.step, solve, row.α, row.ρ, row.μ)
     return
 end
 

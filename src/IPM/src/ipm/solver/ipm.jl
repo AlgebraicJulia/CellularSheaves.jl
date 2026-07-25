@@ -302,8 +302,12 @@ function solvecorrector!(
         σμ += (p[j] + τa * w.Δpa[j]) * (d[j] + τa * w.Δda[j])
     end
 
-    σμ /= ν
-    σμ = clamp(σμ * (σμ / μ)^2, zero(T), μ)
+    if iszero(ν)
+        σμ = zero(T)          # no cones ⇒ no centering; the affine step is exact
+    else
+        σμ /= ν
+        σμ = clamp(σμ * (σμ / μ)^2, zero(T), μ)
+    end
     #
     # set f to the Mehrota corrector term:
     #
@@ -348,30 +352,25 @@ end
 # startingpoint
 ############################################################################################
 
-function startingpoint(B::BlockSparseMatrix{T}, g::AbstractVector{T}, c::AbstractVector{T}, cones::AbstractVector) where {T}
-    p, d, y = identitypoint(B, cones)
-
+function startingpoint(B::BlockSparseMatrix{T}, g::AbstractVector{T}, c::AbstractVector{T}, p::AbstractVector{T}) where {T}
     z = B * p
 
     np = norm(p)
     nz = norm(z)
 
     if nz > eps(T) * np
-        ξ = max(one(T), norm(g) / nz)
+        sp = max(one(T), norm(g) / nz)
     else
-        ξ = one(T)
+        sp = one(T)
     end
 
     if np > eps(T)
-        η = max(one(T), norm(c) / np)
+        sd = max(one(T), norm(c) / np)
     else
-        η = one(T)
+        sd = one(T)
     end
 
-    lmul!(ξ, p)
-    lmul!(η, d)
-
-    return p, d, y
+    return sp, sd
 end
 
 ############################################################################################
@@ -409,7 +408,10 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::IPMSettings{T}) wher
     Q = halfselectvtxs(halfselectvtxs(Q, R.perm), R.perm)
     cones = tounion(prob.K, R.perm)
 
-    p, d, y = startingpoint(B, g, c, cones)
+    p, d, y = identitypoint(B, cones)
+    sp, sd = startingpoint(B, g, c, p)
+    lmul!(sp, p)
+    lmul!(sd, d)
 
     caches = Caches(cones, B)
 
@@ -429,17 +431,11 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::IPMSettings{T}) wher
     ρ[] = settings.rgmin
     nc[] = norm(c)
     ng[] = norm(g)
-    #
-    # anchor the augmentation to initial problem data:
-    #
-    #   α = aaug + raug · ‖H₁‖_approx / ‖B‖²,   ‖H₁‖_approx = (η/ξ)·√n + ‖Q‖
-    #
-    # H₁ = (η/ξ)·I + Q at the scaled identity start; the cone Hessian is a scaled identity with
-    # η/ξ = ‖d‖/‖p‖, so the triangle bound (tight when η/ξ ≪ ‖Q‖/√n ⇒ ‖H₁‖ ≈ ‖Q‖) is analytic.
-    #
-    nA = (norm(d) / norm(p)) * sqrt(length(p)) + norm(Symmetric(Q, :L))
+
+    nH = (sd / sp) * sqrt(n)
+    nQ = norm(Symmetric(Q, :L))
     nB = norm(B)
-    α[] = settings.aaug + settings.raug * nA / nB^2
+    α[] = settings.aaug + settings.raug * (nH + nQ) / nB^2
 
     return IPMSolver(Q, H, B, c, g, p, d, y, cones,
         scaling, P, ipmwrk, caches, conewrk, kkt,
@@ -470,6 +466,14 @@ function isoptimal(s::IPMSolver{T}, μ::T, pres::T, dres::T) where {T}
     pobj = pQp / 2 - dot(s.c, s.p)
     dobj = dot(s.g, s.y) - pQp / 2
     return max(pres, dres) < s.settings.feas_tol && (iszero(s.ν) || μ < s.settings.gap_tol || pobj - dobj < s.settings.gap_tol * (1 + abs(pobj) + abs(dobj)))
+end
+
+function nearstatus(s::IPMSolver, status::IPMStatus)
+    if isnearoptimal(s)
+        status = NEAR_OPTIMAL
+    end
+
+    return status
 end
 
 ############################################################################################
@@ -532,22 +536,14 @@ function step!(s::IPMSolver{T}) where {T}
                 @warn "Scaling failed."
             end
 
-            if isnearoptimal(s)
-                status = NEAR_OPTIMAL
-            else
-                status = NUMERICAL_FAILURE
-            end
+            status = nearstatus(s, NUMERICAL_FAILURE)
         else
             if !@timeit s.timers "initkkt" initkkt!(s)
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
                 end
 
-                if isnearoptimal(s)
-                    status = NEAR_OPTIMAL
-                else
-                    status = NUMERICAL_FAILURE
-                end
+                status = nearstatus(s, NUMERICAL_FAILURE)
             else
                 #
                 # compute tolerances for predictor and corrector solves
@@ -611,27 +607,19 @@ function step!(s::IPMSolver{T}) where {T}
                         @warn "Stalling detected."
                     end
 
-                    if isnearoptimal(s)
-                        status = NEAR_OPTIMAL
-                    else
-                        status = STALLED
-                    end
+                    status = nearstatus(s, STALLED)
                 elseif isnumfail(s)
                     if s.settings.verbose > 1
                         @warn "Step collapse detected."
                     end
 
-                    if isnearoptimal(s)
-                        status = NEAR_OPTIMAL
-                    else
-                        status = NUMERICAL_FAILURE
-                    end
+                    status = nearstatus(s, NUMERICAL_FAILURE)
                 end
             end
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, α=s.α[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat))
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat))
     #
     # update the augmentation parameter
     #
@@ -642,11 +630,7 @@ function step!(s::IPMSolver{T}) where {T}
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"
         end
 
-        if isnearoptimal(s)
-            status = NEAR_OPTIMAL
-        else
-            status = NUMERICAL_FAILURE
-        end
+        status = nearstatus(s, NUMERICAL_FAILURE)
     end
 
     return status
@@ -712,7 +696,10 @@ function reinit!(solver::IPMSolver{T}, prob::IPMProblem{T}; frac::Real=0.1, rgfr
     solver.nc[] = norm(solver.c)
     solver.ng[] = norm(solver.g)
 
-    p, d, y = startingpoint(solver.B, solver.g, solver.c, solver.K)
+    p, d, y = identitypoint(solver.B, solver.K)
+    sp, sd = startingpoint(solver.B, solver.g, solver.c, p)
+    lmul!(sp, p)
+    lmul!(sd, d)
     axpby!(frac, p, 1 - frac, solver.p)
     axpby!(frac, d, 1 - frac, solver.d)
     axpby!(frac, y, 1 - frac, solver.y)

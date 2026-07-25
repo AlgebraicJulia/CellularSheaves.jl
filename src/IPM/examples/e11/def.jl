@@ -102,8 +102,8 @@
 # whitening can remove (measured: off-class entries exactly 0.0 at D = 4).
 # Structural 1/D block density is sheaf shape without sheaf density, in B
 # rather than Q: the decimated bank is out of habitat BY STRUCTURE and is
-# pre-registered as a boundary-suite control (predicted bloat ~ D). E14 is
-# the D = 1 member of the filter-bank family, where every Gram — Θ, G_m,
+# pre-registered as a boundary-suite control (predicted bloat ~ D). The
+# D = 1 member of the filter-bank family is where every Gram — Θ, G_m,
 # L_m', joint G — is honestly dense (all measured 1.000 at 1e-8).
 #
 # Habitat claim: dense-Q + SOC (E09's cell) at E01's block sizes — med block

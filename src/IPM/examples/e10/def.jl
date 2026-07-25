@@ -39,9 +39,9 @@
 # model is that the IPM is competitive HERE). Additionally, coker B = 0
 # BY THE PRIVATE-SLOT THEOREM — every row group pins a fresh S_e block,
 # so the sum-split never manufactures redundancy — verified by numerical
-# rank below; this example is the redundancy CONTROL for E12.
+# rank below; this example is a redundancy CONTROL (vs a coboundary-constrained companion).
 #
-# Two new species. Sum-decomposition edges (vs E09/E12's agreements,
+# Two new species. Sum-decomposition edges (vs E09's agreements,
 # E02's partial traces, E03's jets): the Agler split of the banded slack S
 # into clique-supported PSD pieces, which on the torus's non-chordal
 # cyclic band pattern is a strict RESTRICTION — that is what a
@@ -93,13 +93,13 @@
 # dim d (secondary — fattens BOTH sides together, preserving b_v ≈ b_e);
 # γ and ε are physics knobs.
 #
-# STATUS: authored against the E02/E12 build API; the oracle is fully
+# STATUS: authored against the E02 build API; the oracle is fully
 # executed but this file has NOT yet been run against the IPM. First-run
 # checklist: (1) this is the falsifiable test of the thin-side account —
 # dense Q + small balanced blocks on a 2D torus is predicted
 # IPM-competitive; if it loses like the quantum torus did, the model
 # needs revision; (2) B has FULL row rank by design (the redundancy
-# control for E12); (3) confirm raug (1e2); (4) vertex equations touch
+# control for the coboundary case); (3) confirm raug (1e2); (4) vertex equations touch
 # five stalks on one edge id — first five-block rows in the suite;
 # (5) fill the sample-run table.
 # =============================================================================
@@ -392,7 +392,7 @@ function test_coker(sys)
     @assert r == N1 "coker ≠ 0: rank $r of $N1 rows (private-slot theorem!)"
     println("  [PASS] coker B = 0 (private-slot theorem): B is $(N1)×$(N0) ",
         "(aspect $(round(N1 / N0, digits = 3)), wide), FULL row rank — ",
-        "the redundancy control for E12")
+        "a redundancy control")
 end
 
 function test_stability(sys)

@@ -27,7 +27,9 @@ julia --project e01/run.jl --quick      # quick (smaller) sweep
 | **E09** | Robust Kalman smoothing, burst-corrupted sensors | dense-Q + SOC chain | horizon T |
 | **E10** | Compositional Lyapunov on a K×K torus | dense-Q dense-SDP, sum-decomposition edges | torus size K |
 | **E11** | Multichannel FIR equalizer bank (MINT) | dense-Q + SOC, Cholesky ties | channels M |
-| **E13** | Distributed sound-zone control, cooperative rendering | dense-Q + SOC, bounded degree | zones Z |
+| **E12** | Distributed sound-zone control, cooperative rendering | dense-Q + SOC, bounded degree | zones Z |
+| **E12** | Min-fuel planetary soft landing with tracking | dense-Q SOC chain (LCvx) | grid N |
+| **E13** | Gyre-aware robust flow recovery (punctured grid) | full-Hodge dense-map + dense-Q + SOC | grid size K |
 
 ## E01: Two-asset American basket put under Merton jump-diffusion
 
@@ -318,8 +320,9 @@ runs 8.11% (K=3) → 3.36% → 2.90% → 3.10% (K=8), converging to its
 continuum limit — E02's non-chordal argument relocated to the constraint
 side, with a convergence curve attached. And by the private-slot theorem
 (every row group pins a fresh S_e block), **coker B = 0 by design** —
-verified by numerical rank at K = 3, 4 — making E10 the redundancy
-*control* for E12: same 2D plaquette topology, zero redundancy.
+verified by numerical rank at K = 3, 4 — making E10 a redundancy
+*control*: same 2D plaquette topology, zero redundancy by design (the
+clean counterpart to a coboundary-constrained program with nontrivial coker).
 
 Validated by `tools/torus_lyapunov_oracle.py` (self-contained
 numpy + scipy + cvxpy; fully executed; d = 4, ε = 0.15, γ = 0.1):
@@ -349,7 +352,7 @@ the fat-primal torus, hold 0.85× here because the rows are balanced
 
 Dials: torus size K (DOF = 82K²) and subsystem dim d; γ, ε as physics
 knobs. B has full row rank with a wide aspect — the clean structural
-opposite of E12 on the same graph.
+opposite of a coboundary-constrained (rank-deficient) program on the same graph.
 
 Files: `e10/`, `tools/torus_lyapunov_oracle.py`.
 
@@ -389,7 +392,7 @@ Dials: channel count M (DOF = M(2Lf+2)+1) and block size Lf (--ldial).
 Files: `e11/`, `tools/mint_equalizer_oracle.py`.
 
 
-## E13: Distributed sound zones — cooperative multizone rendering (`e13/`)
+## E12: Distributed sound zones — cooperative multizone rendering (`e12/`)
 
 Z zones on a path, each with a 4-speaker array and 3 control points;
 reverberant FIR acoustics (Lh = 96) with inter-zone gain γ^{|Δz|}. Every
@@ -401,7 +404,7 @@ ball per (zone, program): reference-field bright targets, dark leakage
 caps, signal-scale radii at the global-LS floors. Per-array acoustic-output
 budgets (SPL caps, same Gram family) connect the programs at each array.
 Every ball gets E11's exact whitening + slice split LOCALLY: slice SOCs of
-dim 65, hub SOCs of dim ≤ 5 — bounded arity, coupling mass O(Z). E13 is
+dim 65, hub SOCs of dim ≤ 5 — bounded arity, coupling mass O(Z). E12 is
 E11 tiled, built to answer E11's M-dial reading (DOF^2.29 under O(M²)
 global coupling).
 
@@ -442,20 +445,112 @@ shows decomposition-awareness (1.55 → 1.29); Clarabel does not (1.10).
 NOT stable — Clarabel steepest (2.77, IPM win grows to 4.02×), Mosek
 shallowest (1.90); see the count-vs-size regime rule below.
 
-Files: `e13/`, `tools/soundzone_oracle.py`.
+Files: `e12/`, `tools/soundzone_oracle.py`.
+
+---
+
+## E13: Minimum-fuel soft landing with tracking (`e13/`)
+
+3-DoF powered descent, fixed mass, exact-ZOH discretization — the convex
+(SOC) lossless-convexification relaxation of Açıkmeşe–Ploen minimum-fuel
+powered-descent guidance (JGCD 2007; the G-FOLD line) — plus a **dense
+quadratic tracking term** `(γ/2) Σ (x_t − x̄_t)ᵀ W (x_t − x̄_t)`. `W` is the
+inverse Van-Loan dispersion of accelerometer noise through the double
+integrator: a dense 6×6 with real position–velocity cross terms, which forces
+positions and velocities into one stalk — a genuinely dense-Q construction, the
+habitat cell the pure-fuel landing (Q ≡ 0) lacks. Sheaf structure follows
+E09's chain discipline: ℝ⁶ state stalks on the time path with a dense 6×6 Q
+block each, SOC(4) thrust stalks on the ZOH dynamics edges, NOC(2) thrust
+bounds, SOC(3) glideslope stalks.
+
+**The dense-Q ranking inverts.** The quadratic folds cheaply into the sheaf
+solver's block Hessian but is a reformulation tax for the conic solvers, so
+HSD leads and the gap grows with N: at N = 240 → 960, HSD 28 → 117 ms,
+Clarabel 33 → 158 ms (1.2–1.35×), Mosek-dual 54 → 455 ms (1.9 → 3.9×; slopes
+HSD DOF^1.02, Clarabel 1.13, Mosek-dual 1.54). Mosek is benchmarked on its
+dualized form (its best form here — dualizing recovers ~1.4× over the primal
+QP but not the lead). This is the mirror image of the Q ≡ 0 case, where Mosek
+would win — dense-Q is where "the sheaf IPM per block" pays off.
+
+**Gated construction.** With `x̄` := the pure-fuel optimum, `x̄` minimizes both
+terms simultaneously, so `x(γ) ≡ x̄` for all γ — an exact structural invariance
+(matched at oracle accuracy 2.3e-5 m); γ → 0 recovers pure min-fuel at rate
+γ^1.00; the fuel-vs-tracking frontier is monotone; and feasibility is
+objective-independent (the min-landing-time boundary is unmoved by tracking).
+**Caveat (measured, gated):** under tracking the LCvx relaxation is not tight
+(‖u‖ < ρ1 at some nodes), so the benchmark object is honestly the relaxation.
+
+**A near-degenerate face, and an open stall.** The min-fuel optimum is a
+near-degenerate face: the strict-complementarity margin over ρ1-active thrust
+arcs collapses as N⁻²·⁰⁰ (measured cross-solver at 1e-11 tolerance, reproduced
+to the digit); γ lifts it ×8–×29. The plain affine IPM **stalls at N ≥ 240**
+(a limit cycle at that face) while HSD solves every N. The margin law is real
+but does **not** govern the stall — lifting the margin ×29 does not cure it,
+and every formulation-level candidate (degeneracy, corner-smoothing, encoding,
+augmentation) is falsified by direct experiment. A metrology note carries
+through: boundary quantities (active sets, margins) must be measured at tight
+(1e-11) tolerance, not benchmark-tolerance iterates that sit ~1e-4 off the
+boundary. HSD is the solver at scale here.
+
+Files: `e13/`, `tools/soft_landing_oracle.py`.
+
+---
+
+## E14: Gyre-aware robust flow recovery on a punctured grid (`e14/`)
+
+Drifter-style flow measurements `g_e ∈ ℝ^T` on the edges of a K×K planar grid
+with **islands** (removed faces → `dim H¹ = #islands`). Recover the Hodge
+decomposition of the flow — potential `x` (vertices), vorticity `z` (faces), and
+**gyre circulations `h`** (one block per island, the estimand) — while localizing
+burst-corrupted edges:
+
+```
+min  Σ_e ½ u_eᵀ W_e u_e + λ Σ_e t_e + ridge(x,z,h)
+s.t. (δ⁰x)_e·Φᵀ + (δ¹ᵀz)_e·Φᵀ + (ηh)_e·Φᵀ + u_e + v_e = g_e,   ‖v_e‖₂ ≤ t_e
+```
+
+`Φ` is an orthonormal smooth temporal basis, `W_e` are dense per-edge GP
+precisions, and `η` is the orthonormal harmonic basis of the punctured complex.
+This is the suite's **first full-Hodge design**: the constraint operator carries
+`δ⁰`, `δ¹ᵀ`, *and* a harmonic stalk as first-class column blocks, so the normal
+operator contains the complete degree-1 Hodge Laplacian plus harmonic completion
+— structurally consistent for every `g` (no `ker Bᵀ` pathology). The gyre
+coefficients are the **estimand**, not an obstruction, and an island-blind
+ablation measures exactly what mismodeling `H¹` costs. Smooth-basis restriction
+is the identifiability mechanism: white bursts lie outside `span(Φ)` at any
+magnitude, so burst/clean separation is structural (measured margin 14.1×).
+
+**A dense-Q + dense-column win.** Both sheaf solvers beat the conic baselines at
+every K: at K = 8 → 16, IPM 11.5 → 45.8 ms, HSD 9.5 → 46.2 ms, Clarabel 13.1 →
+64.7 ms, Mosek-dual 30.8 → 93.5 ms (slopes IPM DOF^1.04, HSD^1.18, Clarabel^1.20;
+Mosek benchmarked dual-only). The dense GP precisions `W_e` fold into the block
+Hessian for free but tax the conic solvers, and — crucially — the harmonic
+stalk enters as a dense **column** of `B`, which a min-degree ordering eliminates
+last, so `BᵀB` stays sparse. (Its transpose — gyres *prescribed* as constraints
+— would put `ηᵀ` as a dense **row**, giving `BᵀB = L₁ + ηηᵀ` dense and poisoning
+the factorization: dense columns are cheap, dense rows are not.)
+
+**Gated construction.** `‖δ¹δ⁰‖ = 0` exactly; `dim H¹ = #islands`; the three
+column blocks are Hodge-orthogonal (≤ 7e-16); LS gyre recovery sits at the ~2.5σ
+noise floor; the island-blind ablation is a dose-response curve; group-lasso
+localization has a 14.1× screening margin (burst support recovery is
+draw-dependent — the shipped draw finds 5/6 vs the oracle's 6/6 — while the
+structure and objective gates are exact).
+
+Files: `e14/`, `tools/ocean_gyre_oracle.py`.
 
 ---
 
 ## Suite-level lessons
 
-**Coupling mass sets the slope only under bounded topology.** E11 + E13
+**Coupling mass sets the slope only under bounded topology.** E11 + E12
 now demonstrate this as a three-point ladder within one problem family:
 O(M²) global coupling → DOF^2.29 (E11 flagship); O(M) coupling through
 an arity-M star hub → DOF^1.97 and a 6× LOSS to Clarabel (E11 --budget:
 the hub SOC has dim M+2, a single (M+2)³ vertex cost, slope → 3
 asymptotically); O(M) coupling through a binary hypot tree → DOF^0.99
 and a 1.77× win (E11 --tree); O(Z) bounded-degree tiling → DOF^1.17
-(E13). The habitat condition is therefore: dense-after-scaling blocks AND
+(E12). The habitat condition is therefore: dense-after-scaling blocks AND
 bounded vertex arity AND bounded max block dimension — med_blk alone is
 not sufficient (the star keeps med_blk at 65 while the max block grows
 unboundedly; E10's imbalance lesson in topological form).
@@ -467,8 +562,8 @@ conservatism). Cost: O(k) extra 3-dim SOCs. Use it whenever a budget or
 ball aggregates more than O(1) channels.
 
 **Count-dial vs size-dial regime rule (three independent sightings).**
-Mosek is the strong opponent on BLOCK-SIZE growth (E11 M-dial 1.72; E13
---ldial 1.90, shallowest) and the weak one on BLOCK-COUNT growth (E13
+Mosek is the strong opponent on BLOCK-SIZE growth (E11 M-dial 1.72; E12
+--ldial 1.90, shallowest) and the weak one on BLOCK-COUNT growth (E12
 Z-dial 1.55, steepest). Clarabel is the reverse (Z-dial 1.07, best;
 --ldial 2.77, worst). The sheaf IPM's advantage is maximal on count dials
 with bounded blocks (wins the exponent vs Mosek, the constant vs
@@ -496,7 +591,9 @@ the flagship exact-slice split (zero conservatism) up to M ~ 16; the
 - `e09/` — Robust Kalman smoothing, burst corruption (dense-Q + SOC chain)
 - `e10/` — Compositional Lyapunov on a K×K torus (dense-Q dense-SDP)
 - `e11/` — Multichannel FIR equalizer bank (dense-Q + SOC, Cholesky ties)
-- `e13/` — Distributed sound-zone control (dense-Q + SOC, bounded degree)
+- `e12/` — Distributed sound-zone control (dense-Q + SOC, bounded degree)
+- `e13/` — Min-fuel soft landing with tracking (dense-Q SOC chain, LCvx)
+- `e14/` — Gyre-aware robust flow recovery (full-Hodge: dense-map + dense-Q + SOC)
 
 ## Reference documentation
 

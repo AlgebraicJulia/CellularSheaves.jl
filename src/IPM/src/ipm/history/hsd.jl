@@ -1,4 +1,4 @@
-const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, gap::T, α::T, τ::T, κ::T,
+const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, gap::T, α::T, ρ::T, τ::T, κ::T,
     pbase::Int, prefn::Int, ppass::Int, pstat::RefStatus,
     cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus,
     wbase::Int, wrefn::Int, wpass::Int, wstat::RefStatus}
@@ -10,6 +10,7 @@ struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     dres::Vector{T}
     gap::Vector{T}
     α::Vector{T}
+    ρ::Vector{T}
     τ::Vector{T}
     κ::Vector{T}
     pbase::Vector{Int}
@@ -27,7 +28,7 @@ struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
 end
 
 function HSDHistory{T}() where {T}
-    return HSDHistory{T}(T[], T[], T[], T[], T[], T[], T[], T[],
+    return HSDHistory{T}(T[], T[], T[], T[], T[], T[], T[], T[], T[],
         Int[], Int[], Int[], RefStatus[],
         Int[], Int[], Int[], RefStatus[],
         Int[], Int[], Int[], RefStatus[])
@@ -40,12 +41,13 @@ function Base.getindex(hist::HSDHistory, i::Int)
     dres    = hist.dres[i]
     gap     = hist.gap[i]
     α       = hist.α[i]
+    ρ       = hist.ρ[i]
     τ       = hist.τ[i]
     κ       = hist.κ[i]
     pbase   = hist.pbase[i]; prefn = hist.prefn[i]; ppass = hist.ppass[i]; pstat = hist.pstat[i]
     cbase   = hist.cbase[i]; crefn = hist.crefn[i]; cpass = hist.cpass[i]; cstat = hist.cstat[i]
     wbase   = hist.wbase[i]; wrefn = hist.wrefn[i]; wpass = hist.wpass[i]; wstat = hist.wstat[i]
-    return (; μ, step, pres, dres, gap, α, τ, κ,
+    return (; μ, step, pres, dres, gap, α, ρ, τ, κ,
         pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat)
 end
 
@@ -56,6 +58,7 @@ function Base.push!(hist::HSDHistory, row::NamedTuple)
     push!(hist.dres,    row.dres)
     push!(hist.gap,     row.gap)
     push!(hist.α,       row.α)
+    push!(hist.ρ,       row.ρ)
     push!(hist.τ,       row.τ)
     push!(hist.κ,       row.κ)
     push!(hist.pbase,   row.pbase); push!(hist.prefn, row.prefn); push!(hist.ppass, row.ppass); push!(hist.pstat, row.pstat)
@@ -71,6 +74,7 @@ function Base.empty!(hist::HSDHistory)
     empty!(hist.dres)
     empty!(hist.gap)
     empty!(hist.α)
+    empty!(hist.ρ)
     empty!(hist.τ)
     empty!(hist.κ)
     empty!(hist.pbase); empty!(hist.prefn); empty!(hist.ppass); empty!(hist.pstat)
@@ -89,32 +93,32 @@ end
 
 function showtop(io::IO, ::HSDHistory; indent::Integer=0)
     pad = " "^indent
-    println(io, pad, "┌──────┬──────────┬──────────┬────────┬───────┬──────────┬──────────┬──────────┬──────────┐")
-    println(io, pad, "│ iter │   pres   │   dres   │  step  │ solve │    α     │    μ     │    τ     │    κ     │")
+    println(io, pad, "┌──────┬──────────┬──────────┬────────┬───────┬──────────┬──────────┬──────────┬──────────┬──────────┐")
+    println(io, pad, "│ iter │   pres   │   dres   │  step  │ solve │    α     │    ρ     │    μ     │    τ     │    κ     │")
     return
 end
 
 function showbot(io::IO, ::HSDHistory; indent::Integer=0)
     pad = " "^indent
-    println(io, pad, "└──────┴──────────┴──────────┴────────┴───────┴──────────┴──────────┴──────────┴──────────┘")
+    println(io, pad, "└──────┴──────────┴──────────┴────────┴───────┴──────────┴──────────┴──────────┴──────────┴──────────┘")
     return
 end
 
 function showmid(io::IO, ::HSDHistory; indent::Integer=0)
     pad = " "^indent
-    println(io, pad, "├──────┼──────────┼──────────┼────────┼───────┼──────────┼──────────┼──────────┼──────────┤")
-    println(io, pad, "│    ⋮ │        ⋮ │        ⋮ │      ⋮ │     ⋮ │        ⋮ │        ⋮ │        ⋮ │        ⋮ │")
+    println(io, pad, "├──────┼──────────┼──────────┼────────┼───────┼──────────┼──────────┼──────────┼──────────┼──────────┤")
+    println(io, pad, "│    ⋮ │        ⋮ │        ⋮ │      ⋮ │     ⋮ │        ⋮ │        ⋮ │        ⋮ │        ⋮ │        ⋮ │")
     return
 end
 
 function showrow(io::IO, i::Integer, row::HSDHistoryRow; indent::Integer=0)
     pad = " "^indent
-    println(io, pad, "├──────┼──────────┼──────────┼────────┼───────┼──────────┼──────────┼──────────┼──────────┤")
+    println(io, pad, "├──────┼──────────┼──────────┼────────┼───────┼──────────┼──────────┼──────────┼──────────┼──────────┤")
     print(io, pad)
-    # solve = total solve (CRAIG) iterations this step (base + refinement, all three solves); α = penalty.
+    # solve = total solve (CRAIG) iterations this step (base + refinement, all three solves); α = penalty, ρ = regularization.
     solve = row.pbase + row.prefn + row.cbase + row.crefn + row.wbase + row.wrefn
-    @printf(io, "│ %4d │ %8.2e │ %8.2e │ %6.4f │ %5d │ %8.2e │ %8.2e │ %8.2e │ %8.2e │\n",
-            i, row.pres, row.dres, row.step, solve, row.α, row.μ, row.τ, row.κ)
+    @printf(io, "│ %4d │ %8.2e │ %8.2e │ %6.4f │ %5d │ %8.2e │ %8.2e │ %8.2e │ %8.2e │ %8.2e │\n",
+            i, row.pres, row.dres, row.step, solve, row.α, row.ρ, row.μ, row.τ, row.κ)
     return
 end
 

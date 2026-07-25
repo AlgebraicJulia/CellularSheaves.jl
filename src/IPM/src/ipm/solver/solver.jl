@@ -79,6 +79,9 @@ const AUG_REFINE_HI    = 2     # descend trigger: refinement passes ≥ AUG_REFI
 #   3. Marginal climb (single-strike secant): if all solves quiet (refine == 0) and nbase above the
 #      floor, compare the last two iterations — if α was climbed and nbase did not drop, hold (at the
 #      floor); otherwise α *= AUG_INC. The secant self-re-arms when the summed base later rises.
+#      (KNOWN ISSUE — this one-row lookback ratchets α upward on a degenerate endgame; see
+#      examples/e16/AUG_CLIMB_RATCHET.md for the diagnosis and a proposed latched fix, deferred
+#      pending a proper cross-suite test harness.)
 #
 function updateaug!(s::AbstractSolver{T}) where {T}
     n = length(s.hist)

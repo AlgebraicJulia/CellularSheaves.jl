@@ -39,7 +39,7 @@ include("src/ipm/ipm.jl")
 
 export IPMProblem, IPMSettings, IPMSolver, IPMResult, IPMHistory, IPMHistoryRow, IPMStatus
 export HSDSettings, HSDSolver, HSDResult, HSDHistory, HSDHistoryRow
-export OPTIMAL, NEAR_OPTIMAL, STALLED, NUMERICAL_FAILURE, ITERATION_LIMIT, PRIMAL_INFEASIBLE, DUAL_INFEASIBLE, ILL_POSED
+export OPTIMAL, NEAR_OPTIMAL, STALLED, NUMERICAL_FAILURE, ITERATION_LIMIT, PRIMAL_INFEASIBLE, DUAL_INFEASIBLE, ILL_POSED, NEAR_PRIMAL_INFEASIBLE, NEAR_DUAL_INFEASIBLE, NEAR_ILL_POSED
 export solve, solve!, step!, init, reinit!
 export AbstractCone, SemidefiniteCone, PositiveCone, SecondOrderCone, CofreeCone, ExponentialCone
 export print_timers
