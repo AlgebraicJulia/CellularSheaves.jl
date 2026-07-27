@@ -4,7 +4,7 @@
 #
 # Usage:
 #   julia --project e13/run.jl              # Clarabel baseline
-#   julia --project e13/run.jl --mosek      # + Mosek (benchmarked dual-only)
+#   julia --project e13/run.jl --mosek      # + Mosek (benchmarked primal)
 #   julia --project e13/run.jl --quick      # quick (smaller) sweep
 #
 # Problem. 3-DoF powered descent, fixed mass, exact-ZOH discretization — the
@@ -26,7 +26,7 @@
 # WHY THIS EXAMPLE EXISTS. The dense-Q habitat: a per-state dense 6×6 Q block on
 # an SOC chain (cf. E03/E09). The quadratic folds cheaply into the sheaf solver's
 # block Hessian but is a reformulation tax for the conic solvers — so the sheaf
-# method LEADS (HSD < Clarabel < Mosek-dual, gap growing with N; see run.jl),
+# method LEADS (HSD < Clarabel < Mosek, gap growing with N; see run.jl),
 # inverting the Q ≡ 0 ranking where Mosek wins. (The r–v cross terms need
 # positions and velocities in ONE stalk — a genuinely dense-Q construction.)
 #
@@ -297,11 +297,10 @@ end
 const W_BASE = dispersion_W()
 const GAMMA_BASE = 2e-3
 
-# POLICY (2026-07-24): Mosek is benchmarked on its DUALIZED form only —
-# measured as its best form on the dense-Q objective (dual buys ~1.4-1.6x over primal here;
-# primal numbers retired from the sweep). If the problem class changes
-# materially, re-measure the primal once before trusting this choice.
-mosek_dual_opt(; tol = 1e-8) = Dualization.dual_optimizer(mosek_opt(; tol))
+# POLICY (2026-07-25): Mosek is benchmarked in PRIMAL form — measured as its best
+# form here (primal ~2x faster than the dualized problem via Dualization.jl; the
+# earlier dual-only policy was based on an un-remeasured guess and is retired). If the
+# problem class changes materially, re-measure the dual once before trusting this choice.
 
 "Straight-line descent corridor: r linear r0 → 0, v = −r0/t_f constant.
 Deliberately endpoint-inconsistent with the pins (v0 ≠ v̄ ≠ 0)."
@@ -636,8 +635,9 @@ function run()
         m_ipm = measure_ipm(probN, ipm_settings; nruns = NRUNS)
         m_hsd = measure_ipm(probN, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_landing(probN, ctxN, cla_opt)); nruns = NRUNS)
-        m_mskd = msk_opt !== nothing ?
-            measure_jump(() -> first(build_jump_landing(probN, ctxN, mosek_dual_opt(; tol = TOL))); nruns = NRUNS) :
+        # Mosek benchmarked in PRIMAL form: ~2x faster than dualized here.
+        m_msk = msk_opt !== nothing ?
+            measure_jump(() -> first(build_jump_landing(probN, ctxN, mosek_opt(; tol = TOL))); nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
 
         ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
@@ -645,16 +645,16 @@ function run()
 
         println("IPM ", fmt_time(m_ipm), "  HSD ", fmt_time(m_hsd), " (", fmt_ratio(m_hsd, m_ipm),
             ")  Cla ", fmt_time(m_cla), " (", fmt_ratio(m_cla, m_ipm),
-            ")  MskD ", fmt_time(m_mskd), " (", fmt_ratio(m_mskd, m_ipm), ")")
+            ")  Msk ", fmt_time(m_msk), " (", fmt_ratio(m_msk, m_ipm), ")")
 
         push!(rows, (size = N, dof = stats.N0, ipm = m_ipm, hsd = m_hsd, cla = m_cla,
-                     mskd = m_mskd))
+                     msk = m_msk))
     end
 
     dofs = [r.dof for r in rows]
     println("\nFitted log-log slopes (time vs DOF):")
     for (name, get_t) in [("IPM", r -> r.ipm.t), ("HSD", r -> r.hsd.t), ("Clarabel", r -> r.cla.t),
-                          ("Mosek(dual)", r -> r.mskd.t)]
+                          ("Mosek", r -> r.msk.t)]
         sl = loglog_slope(dofs, [get_t(r) for r in rows])
         print("  $name: ", isnan(sl) ? "n/a" : @sprintf("DOF^%.2f", sl))
     end

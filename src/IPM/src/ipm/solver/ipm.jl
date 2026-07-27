@@ -566,6 +566,12 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
                 pbase, prefn, ppass, pstat = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+
+                for v in vtxs(s.B)
+                    if s.K[v] isa CofreeCone
+                        fill!(view(w.Δda, colrange(s.B, v)), zero(T))
+                    end
+                end
                 #
                 # solve for the Mehrotra combined direction
                 #
@@ -575,6 +581,12 @@ function step!(s::IPMSolver{T}) where {T}
                 # where rd* is the corrected dual residual
                 #
                 cbase, crefn, cpass, cstat = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
+
+                for v in vtxs(s.B)
+                    if s.K[v] isa CofreeCone
+                        fill!(view(w.Δd, colrange(s.B, v)), zero(T))
+                    end
+                end
 
                 if s.settings.verbose > 1 && (pstat != REACHED_FORCE || cstat != REACHED_FORCE)
                     @info "KKT solve above target tolerance" pstat cstat

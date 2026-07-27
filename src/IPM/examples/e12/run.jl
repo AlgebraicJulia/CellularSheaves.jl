@@ -3,10 +3,10 @@ include("def.jl")
 run()
 
 # =============================================================================
-# Sample run: 2026-07-24 (--quick --mosek)  [rhs/rebuild — anchored raug default]
+# Sample run: 2026-07-25 (--quick --mosek)  [Mosek benchmarked DUAL — ~1.1x faster than primal]
 # -----------------------------------------------------------------------------
-# Z=4    dof=3040   n1=2364   blk=65    IPM   65.9ms  HSD   72.4ms (1.10x)  Cla  198.3ms (3.01x)  Msk  164.1ms (2.49x)
-# Z=8    dof=7004   n1=5512   blk=65    IPM  166.9ms  HSD  182.2ms (1.09x)  Cla  528.3ms (3.17x)  Msk  486.6ms (2.92x)
-# Z=16   dof=14932  n1=11808  blk=65    IPM  392.2ms  HSD  453.9ms (1.16x)  Cla 1154.9ms (2.94x)  Msk 1444.0ms (3.68x)
-# IPM: DOF^1.12  HSD: DOF^1.15  Clarabel: DOF^1.11  Mosek: DOF^1.37
+# Z=4    dof=3040   n1=2364   blk=65    IPM   65.6ms  HSD   72.6ms (1.11x)  Cla  200.3ms (3.05x)  Msk  188.9ms (2.88x)
+# Z=8    dof=7004   n1=5512   blk=65    IPM  167.5ms  HSD  179.9ms (1.07x)  Cla  528.3ms (3.15x)  Msk  501.6ms (2.99x)
+# Z=16   dof=14932  n1=11808  blk=65    IPM  381.8ms  HSD  444.0ms (1.16x)  Cla 1151.6ms (3.02x)  Msk 1282.6ms (3.36x)
+# IPM: DOF^1.11  HSD: DOF^1.14  Clarabel: DOF^1.10  Mosek: DOF^1.20  (dual shaves ~12% off primal at Z=16; sheaf still leads)
 # =============================================================================

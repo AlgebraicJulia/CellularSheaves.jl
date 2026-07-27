@@ -4,7 +4,7 @@
 #
 # Usage:
 #   julia --project e14/run.jl              # Clarabel baseline
-#   julia --project e14/run.jl --mosek      # + Mosek (dual-only)
+#   julia --project e14/run.jl --mosek      # + Mosek (benchmarked primal)
 #   julia --project e14/run.jl --quick      # quick (smaller) sweep
 #
 # Problem. Drifter-style flow measurements g_e ∈ R^T on the edges of a K×K
@@ -117,7 +117,7 @@
 # CRAIG breakdown-swallowing pathology in kkt/uzawa.jl).
 #
 # STATUS: gates green (2026-07-25, --quick --mosek). Both sheaf solvers (affine
-# IPM and HSD) beat Clarabel at every K and Mosek-dual by a wide margin — the
+# IPM and HSD) beat Clarabel at every K and Mosek by a wide margin — the
 # dense GP precisions W_e fold into the block Hessian for free while taxing the
 # conic solvers, and the harmonic stalk is a dense COLUMN (eliminated last, so
 # BᵀB stays sparse; the first-run worry about the global stalk was unfounded).
@@ -358,10 +358,10 @@ function run(; quick = OPTS.quick, mosek = OPTS.mosek)
     gates()
     Ks = quick ? [8, 12, 16] : [8, 12, 16, 24]
     # IPM = affine primal-dual, HSD = homogeneous self-dual (both the sheaf
-    # solver). Mosek is benchmarked DUAL-ONLY: on this dense-Q objective the
-    # dualized form is its best (primal trails it, and both trail the sheaf).
+    # solver). Mosek benchmarked primal (dual is within noise here — ~6% — and
+    # both forms trail the sheaf by a wide margin on this dense-Q objective).
     println("\n  K      DOF     N1      IPM       HSD       Clarabel",
-            mosek ? "     Mosek" : "")
+            mosek ? "    Mosek" : "")
     dofs = Int[]; t_ipm = Float64[]; t_hsd = Float64[]; t_cla = Float64[]; t_msk = Float64[]
     for K in Ks
         sys = make_system(K)
@@ -374,9 +374,8 @@ function run(; quick = OPTS.quick, mosek = OPTS.mosek)
                         fmt_time(mi), fmt_time(mh), fmt_time(mc))
         tmsk = NaN
         if mosek
-            md = measure_jump(() -> build_jump_hodge(sys,
-                     Dualization.dual_optimizer(mosek_opt(; tol = TOL))); nruns = NRUNS)
-            line *= "  " * fmt_time(md); tmsk = md.t
+            mp = measure_jump(() -> build_jump_hodge(sys, mosek_opt(; tol = TOL)); nruns = NRUNS)
+            line *= "  " * fmt_time(mp); tmsk = mp.t
         end
         println(line)
         push!(dofs, st.N0); push!(t_ipm, mi.t); push!(t_hsd, mh.t)
@@ -385,5 +384,50 @@ function run(; quick = OPTS.quick, mosek = OPTS.mosek)
     @printf("\nslopes:  IPM DOF^%.2f  HSD DOF^%.2f  Clarabel DOF^%.2f",
             loglog_slope(dofs, t_ipm), loglog_slope(dofs, t_hsd), loglog_slope(dofs, t_cla))
     mosek && @printf("  Mosek DOF^%.2f", loglog_slope(dofs, t_msk))
+    println()
+
+    # ---- T-dial (block-fatness experiment; added 2026-07-25). T fattens the
+    # per-edge blocks (u-stalks T-dim, W_e T×T dense, T-row edge groups) at
+    # fixed K and p — the controlled experiment for the fat-block kernel
+    # mechanism. REGISTERED PREDICTION: margins vs BOTH baselines widen with
+    # T (our per-block work is BLAS-3 GEMM at b³; Clarabel's is nodal scalar
+    # ops over the same entries; Mosek's Q = FᵀF rows grow as T per edge).
+    # Falsifier: a baseline handling fat diagonal blocks better than the nodal
+    # model predicts. λ is held at its T = 6 tuning: the timing family is what
+    # is measured, not estimation quality across T.
+    #   OUTCOME (measured, run.jl): prediction confirmed at the fat end — at
+    # T = 48 HSD leads Mosek by 3.14x and Clarabel by 1.25x — but NON-MONOTONE:
+    # both baselines close in at T = 24 (Mosek to 1.26x) before the margin
+    # reopens. That mid-range flat spot makes the log-log slope fit misleading
+    # (it under-reports Mosek's growth); the endpoint RATIOS, not the slope, are
+    # the honest metric here. Mosek benchmarked PRIMAL — measured faster than
+    # the dualized form at every T (T = 48: 1106ms primal vs 1492ms dual).
+    Kt = 12
+    Ts = [6, 12, 24, 48]
+    println("\n  T-dial (K = $Kt fixed):")
+    println("  T      DOF     N1      IPM       HSD       Clarabel",
+            mosek ? "    Mosek" : "")
+    tdofs = Int[]; s_ipm = Float64[]; s_hsd = Float64[]; s_cla = Float64[]; s_msk = Float64[]
+    for T in Ts
+        sys = make_system(Kt; T)
+        prob = build_hodge(sys)
+        st = problem_stats(prob)
+        mi = measure_ipm(prob, IPMSettings{Float64}(); nruns = NRUNS)
+        mh = measure_ipm(prob, HSDSettings{Float64}(); nruns = NRUNS)
+        mc = measure_jump(() -> build_jump_hodge(sys, clarabel_opt(; tol = TOL)); nruns = NRUNS)
+        line = @sprintf("%3d  %7d %6d  %s  %s  %s", T, st.N0, st.N1,
+                        fmt_time(mi), fmt_time(mh), fmt_time(mc))
+        tm = NaN
+        if mosek
+            mp = measure_jump(() -> build_jump_hodge(sys, mosek_opt(; tol = TOL)); nruns = NRUNS)
+            line *= "  " * fmt_time(mp); tm = mp.t
+        end
+        println(line)
+        push!(tdofs, st.N0); push!(s_ipm, mi.t); push!(s_hsd, mh.t)
+        push!(s_cla, mc.t); push!(s_msk, tm)
+    end
+    @printf("\n  T-slopes (vs T):  IPM T^%.2f  HSD T^%.2f  Clarabel T^%.2f",
+            loglog_slope(Ts, s_ipm), loglog_slope(Ts, s_hsd), loglog_slope(Ts, s_cla))
+    mosek && @printf("  Mosek T^%.2f", loglog_slope(Ts, s_msk))
     println()
 end

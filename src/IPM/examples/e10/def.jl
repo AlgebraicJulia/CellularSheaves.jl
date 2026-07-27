@@ -528,8 +528,9 @@ function run()
         m_hsd = measure_ipm(prob, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_torus(sys, K, cla_opt));
                              nruns = NRUNS)
+        # Mosek benchmarked in DUAL form (Dualization.jl): ~1.4x faster than primal here.
         m_msk = msk_opt !== nothing ?
-            measure_jump(() -> first(build_jump_torus(sys, K, msk_opt));
+            measure_jump(() -> first(build_jump_torus(sys, K, Dualization.dual_optimizer(msk_opt)));
                          nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
         ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
@@ -565,8 +566,9 @@ function run()
         m_hsd = measure_ipm(probd, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_torus(sysd, Kd, cla_opt));
                              nruns = NRUNS)
+        # Mosek benchmarked in DUAL form (Dualization.jl): ~1.4x faster than primal here.
         m_msk = msk_opt !== nothing ?
-            measure_jump(() -> first(build_jump_torus(sysd, Kd, msk_opt));
+            measure_jump(() -> first(build_jump_torus(sysd, Kd, Dualization.dual_optimizer(msk_opt)));
                          nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
         ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN

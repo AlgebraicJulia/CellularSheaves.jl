@@ -28,8 +28,9 @@ julia --project e01/run.jl --quick      # quick (smaller) sweep
 | **E10** | Compositional Lyapunov on a K×K torus | dense-Q dense-SDP, sum-decomposition edges | torus size K |
 | **E11** | Multichannel FIR equalizer bank (MINT) | dense-Q + SOC, Cholesky ties | channels M |
 | **E12** | Distributed sound-zone control, cooperative rendering | dense-Q + SOC, bounded degree | zones Z |
-| **E12** | Min-fuel planetary soft landing with tracking | dense-Q SOC chain (LCvx) | grid N |
-| **E13** | Gyre-aware robust flow recovery (punctured grid) | full-Hodge dense-map + dense-Q + SOC | grid size K |
+| **E13** | Min-fuel planetary soft landing with tracking | dense-Q SOC chain (LCvx) | grid N |
+| **E14** | Gyre-aware robust flow recovery (punctured grid) | full-Hodge dense-map + dense-Q + SOC | grid size K |
+| **E15** | Orbital formation-keeping (Clohessy–Wiltshire) | dense-Q SOC chains × formation ring | fleet size V |
 
 ## E01: Two-asset American basket put under Merton jump-diffusion
 
@@ -521,14 +522,28 @@ is the identifiability mechanism: white bursts lie outside `span(Φ)` at any
 magnitude, so burst/clean separation is structural (measured margin 14.1×).
 
 **A dense-Q + dense-column win.** Both sheaf solvers beat the conic baselines at
-every K: at K = 8 → 16, IPM 11.5 → 45.8 ms, HSD 9.5 → 46.2 ms, Clarabel 13.1 →
-64.7 ms, Mosek-dual 30.8 → 93.5 ms (slopes IPM DOF^1.04, HSD^1.18, Clarabel^1.20;
-Mosek benchmarked dual-only). The dense GP precisions `W_e` fold into the block
-Hessian for free but tax the conic solvers, and — crucially — the harmonic
-stalk enters as a dense **column** of `B`, which a min-degree ordering eliminates
-last, so `BᵀB` stays sparse. (Its transpose — gyres *prescribed* as constraints
-— would put `ηᵀ` as a dense **row**, giving `BᵀB = L₁ + ηηᵀ` dense and poisoning
-the factorization: dense columns are cheap, dense rows are not.)
+every K: at K = 8 → 16, IPM 11.7 → 45.9 ms, HSD 9.8 → 46.3 ms, Clarabel 13.1 →
+64.6 ms, Mosek 34.0 → 103.8 ms (slopes IPM DOF^1.03, HSD^1.17, Clarabel^1.20;
+Mosek benchmarked primal — measured faster than its dualized form at every
+point). The dense GP precisions `W_e` fold into the block Hessian for free but
+tax the conic solvers, and — crucially — the harmonic stalk enters as a dense
+**column** of `B`, which a min-degree ordering eliminates last, so `BᵀB` stays
+sparse. (Its transpose — gyres *prescribed* as constraints — would put `ηᵀ` as a
+dense **row**, giving `BᵀB = L₁ + ηηᵀ` dense and poisoning the factorization:
+dense columns are cheap, dense rows are not.)
+
+**The fat-block experiment (T-dial).** A second sweep fattens the per-edge blocks
+directly — `T` scales the u-stalk dimension, the dense `W_e` (T×T), and the edge
+row groups at fixed K = 12. Registered prediction: margins vs *both* baselines
+widen with `T`, since the sheaf per-block work is BLAS-3 GEMM (`b³`) while the
+conic baselines pay nodal scalar ops / growing `Q = FᵀF` rows. Outcome
+(`e14/run.jl`): **confirmed at the fat end** — at T = 48 HSD leads Mosek 3.36× and
+Clarabel 1.32× — but **non-monotone**: both baselines briefly close in at T = 24
+(Mosek to 1.26×) before the margin reopens. That mid-range flat spot distorts the
+log-log slope fit, so the endpoint *ratios*, not the slopes, are the honest
+metric (the T = 24 → 48 segment alone is HSD ×3.1 vs Mosek ×8.3 per 2× T). A
+three-point extrapolation over T ≤ 24 wrongly predicted a Mosek crossover; T = 48
+refuted it, which is why the sweep runs that far.
 
 **Gated construction.** `‖δ¹δ⁰‖ = 0` exactly; `dim H¹ = #islands`; the three
 column blocks are Hodge-orthogonal (≤ 7e-16); LS gyre recovery sits at the ~2.5σ
@@ -538,6 +553,57 @@ draw-dependent — the shipped draw finds 5/6 vs the oracle's 6/6 — while the
 structure and objective gates are exact).
 
 Files: `e14/`, `tools/ocean_gyre_oracle.py`.
+
+---
+
+## E15: Orbital formation-keeping under Clohessy–Wiltshire dynamics (`e15/`)
+
+`V` spacecraft hold a rigid formation (LVLH slots `d_v`) around a circular
+reference orbit with mean motion `ω`. Over horizon `N`:
+
+```
+min  Σ_v Σ_k dt·s_vk                                      (fuel; SOC (s,u))
+   + (γ/2) Σ_{v,t} (x_vt − d_v)ᵀ W (x_vt − d_v)           (slot tracking)
+   + (κ/2) Σ_{(i,j)∈ring,t} (x_it − x_jt − d_ij)ᵀ W (·)   (formation coupling)
+s.t. x_{t+1} = Φ x_t + Γ u_t,  x_{v,0} = d_v + δ_v,  ‖u‖ ≤ u_max
+```
+
+`W` is the Van Loan inverse dispersion of the accel process noise (track in the
+metric of your own navigation dispersion), and the cross-vehicle coupling
+quadratic is the *actual* mission objective of formation flying (PRISMA,
+TanDEM-X): relative geometry is the payload. Cones: `Cofree` state chains and
+ring-relative stalks, `SOC` thrust epigraphs `(s,u)`, and `Positive` bound
+slacks (`s + b = u_max`). The coupling `Q = κW` and linear term `κW d_ij` cannot
+sit in a block-diagonal `Q` — they ride the arity-3 ring edges. Topology:
+dense-Q SOC chains × a formation ring, degree ≤ 4.
+
+**The measured-moat shape, with honest physics.** This is the dense-Q-chains ×
+ring topology that a retired synthetic variant already measured as a win; CW
+dynamics supply defensible physics for the same mathematics. Result (V-dial, the
+headline, N = 60): both sheaf solvers beat the conic baselines, and the gap
+*grows* with V — HSD scales `V^0.97`, IPM `V^1.34`, Clarabel `V^1.67`; at V = 16
+HSD/IPM are **2.2–2.6× faster** than Clarabel and Mosek. This matches/beats the
+registered prior-shape prediction (HSD DOF^1.19 vs Clarabel^1.55). The N-dial
+(horizon, V = 4) also favors IPM/HSD, and the affine long-horizon stall seen on
+the landing chains (E13) did **not** recur here. Mosek is faster in its **primal**
+form on this problem (dual wins only at V = 8).
+
+**Physics anchor (the hover theorem).** Holding a fixed LVLH offset (Δx, Δy, Δz)
+requires thrust `u = (−3ω²Δx, 0, ω²Δz)` exactly: along-track offsets are free,
+radial/cross-track cost `ω²√(9Δx² + Δz²)` per unit time. Both halves are gated
+(an along-track train is free to ~1e-5 m/s; the radial-hover rate matches theory
+to 1.6e-4). Other gates: analytic CW STM vs `expm` (7e-14), objective identity,
+oracle objective (5.9e-7 vs frozen), κ=0 decoupling into V independent programs,
+and a monotone fuel/formation-error frontier.
+
+**Known solver datum (under investigation).** At κ = 1e-4 (weak coupling) HSD
+oversteps and leaves the cone (μ < 0), stalling ~0.6% above the true optimum and
+mislabeling the point `NEAR_OPTIMAL` — the gap check has no guard against μ < 0.
+The affine IPM and Clarabel both hit the oracle value to ~1e-5, so the frontier
+gate is verified with IPM. The mechanism (a suspected step-length / cone-boundary
+issue) is being instrumented.
+
+Files: `e15/`, `tools/cw_oracle.py`.
 
 ---
 
@@ -594,6 +660,7 @@ the flagship exact-slice split (zero conservatism) up to M ~ 16; the
 - `e12/` — Distributed sound-zone control (dense-Q + SOC, bounded degree)
 - `e13/` — Min-fuel soft landing with tracking (dense-Q SOC chain, LCvx)
 - `e14/` — Gyre-aware robust flow recovery (full-Hodge: dense-map + dense-Q + SOC)
+- `e15/` — Orbital formation-keeping (Clohessy–Wiltshire; dense-Q SOC chains × ring)
 
 ## Reference documentation
 

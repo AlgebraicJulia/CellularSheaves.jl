@@ -245,6 +245,7 @@ function run()
         m_msk = msk_opt !== nothing ?
             measure_jump(() -> first(build_jump_tensor(inst, msk_opt)); nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
+        # Mosek benchmarked in PRIMAL form (faster than dualized here).
 
         ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN
         fmt_ratio(b, base) = isnan(ratio(b, base)) ? "—" : @sprintf("%.2fx", ratio(b, base))

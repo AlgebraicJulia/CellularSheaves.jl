@@ -677,8 +677,9 @@ function run()
         m_ipm = measure_ipm(prob, ipm_settings; nruns = NRUNS)
         m_hsd = measure_ipm(prob, hsd_settings; nruns = NRUNS)
         m_cla = measure_jump(() -> first(build_jump_poisson(prob, ctx, cla_opt)); nruns = NRUNS)
+        # Mosek benchmarked in DUAL form (Dualization.jl): ~3.7x faster than primal here.
         m_msk = msk_opt !== nothing ?
-            measure_jump(() -> first(build_jump_poisson(prob, ctx, msk_opt)); nruns = NRUNS) :
+            measure_jump(() -> first(build_jump_poisson(prob, ctx, Dualization.dual_optimizer(msk_opt))); nruns = NRUNS) :
             (t = NaN, status = "", obj = NaN)
 
         ratio(b, base) = isfinite(b.t) && isfinite(base.t) ? b.t / base.t : NaN

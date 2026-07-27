@@ -1035,6 +1035,12 @@ function step!(s::HSDSolver{T}) where {T}
                 #   Δκa = (-τκ - κ Δτa) / τ
                 #
                 pbase, prefn, ppass, pstat, Δτa, Δκa = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
+
+                for v in vtxs(s.B)
+                    if s.K[v] isa CofreeCone
+                        fill!(view(w.Δda, colrange(s.B, v)), zero(T))
+                    end
+                end
                 #
                 # solve for the Mehrotra combined direction
                 #
@@ -1047,6 +1053,12 @@ function step!(s::HSDSolver{T}) where {T}
                 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
                 #
                 cbase, crefn, cpass, cstat, Δτ, Δκ = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
+
+                for v in vtxs(s.B)
+                    if s.K[v] isa CofreeCone
+                        fill!(view(w.Δd, colrange(s.B, v)), zero(T))
+                    end
+                end
 
                 if s.settings.verbose > 1 && (pstat != REACHED_FORCE || cstat != REACHED_FORCE || wstat != REACHED_FORCE)
                     @info "KKT solve above target tolerance" pstat cstat wstat
