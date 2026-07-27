@@ -1,11 +1,11 @@
 # =============================================================================
-# e09/def.jl — Robust fixed-interval smoothing under burst-corrupted measurements
+# e09.jl — Robust fixed-interval smoothing under burst-corrupted measurements
 #          (dense-Q + SOC habitat: the Kalman smoother meets E06's sqrt loss)
 #
 # Usage:
-#   julia --project e09/run.jl              # Clarabel baseline
-#   julia --project e09/run.jl --mosek      # + Mosek
-#   julia --project e09/run.jl --quick      # quick (smaller) sweep
+#   julia --project e09.jl              # Clarabel baseline
+#   julia --project e09.jl --mosek      # + Mosek
+#   julia --project e09.jl --quick      # quick (smaller) sweep
 #
 # Problem. Linear-Gaussian state-space smoothing over a horizon T,
 #
@@ -91,7 +91,7 @@
 using AppleAccelerate
 using LinearAlgebra, SparseArrays, Printf, Random
 
-include("../utils.jl")
+include("utils.jl")
 
 using CellularSheaves.IPM: SecondOrderCone, CofreeCone
 using CellularSheaves.BlockSparseArrays: rowrange
@@ -526,3 +526,16 @@ function run()
     println()
 end
 
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    run()
+end
+
+# =============================================================================
+# Sample run: 2026-07-24 (--quick --mosek)  [rhs/rebuild — anchored raug default]
+# -----------------------------------------------------------------------------
+# T=64    dof=1926   n1=1081  blk=6     IPM   13.3ms  HSD    9.7ms (0.73x)  Cla   14.0ms (1.05x)  Msk   40.4ms (3.04x)
+# T=128   dof=3846   n1=2169  blk=6     IPM   22.9ms  HSD   21.3ms (0.93x)  Cla   28.1ms (1.22x)  Msk   74.6ms (3.25x)
+# T=256   dof=7686   n1=4345  blk=6     IPM   52.8ms  HSD   42.3ms (0.80x)  Cla   61.5ms (1.17x)  Msk  162.2ms (3.07x)
+# IPM: DOF^1.00  HSD: DOF^1.06  Clarabel: DOF^1.07  Mosek: DOF^1.00
+# =============================================================================

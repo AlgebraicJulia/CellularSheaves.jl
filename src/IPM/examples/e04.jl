@@ -1,10 +1,10 @@
 # =============================================================================
-# e04/def.jl — SOS-certified shape-constrained regression (dense-SDP habitat)
+# e04.jl — SOS-certified shape-constrained regression (dense-SDP habitat)
 #
 # Usage:
-#   julia --project e04/run.jl              # Clarabel only
-#   julia --project e04/run.jl --mosek      # + Mosek
-#   julia --project e04/run.jl --quick      # small sweep
+#   julia --project e04.jl              # Clarabel only
+#   julia --project e04.jl --mosek      # + Mosek
+#   julia --project e04.jl --quick      # small sweep
 #
 # Problem. Nonparametric regression with a CERTIFIED-nonnegative estimator:
 # fit noisy samples of f ≥ 0 with a piecewise polynomial of odd degree n on P
@@ -50,7 +50,7 @@
 using AppleAccelerate
 using LinearAlgebra, SparseArrays, Printf, Random
 
-include("../utils.jl")
+include("utils.jl")
 
 const OPTS = parse_args(ARGS)
 const TOL = OPTS.tol
@@ -500,3 +500,16 @@ function run()
     println()
 end
 
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    run()
+end
+
+# =============================================================================
+# Sample run: 2026-07-24 (--quick --mosek)  [rhs/rebuild — anchored raug default]
+# -----------------------------------------------------------------------------
+# P=8   dof=840    n1=21   blk=105   IPM   13.5ms  HSD   25.8ms (1.92x)  Cla    7.0ms (0.52x)  Msk   29.0ms (2.16x)
+# P=16  dof=1680   n1=45   blk=105   IPM   26.3ms  HSD   55.3ms (2.10x)  Cla  152.1ms (5.78x)  Msk   63.4ms (2.41x)
+# P=32  dof=3360   n1=93   blk=105   IPM   54.8ms  HSD  125.2ms (2.29x)  Cla  425.1ms (7.76x)  Msk  117.1ms (2.14x)
+# IPM: DOF^1.01  HSD: DOF^1.14  Clarabel: DOF^2.97  Mosek: DOF^1.01
+# =============================================================================

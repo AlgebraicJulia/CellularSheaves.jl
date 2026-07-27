@@ -1,11 +1,11 @@
 # =============================================================================
-# e08/def.jl — Optimal execution: multi-asset trading with 3/2-power market impact
+# e08.jl — Optimal execution: multi-asset trading with 3/2-power market impact
 #         (power-cone habitat with genuinely dense per-period Q)
 #
 # Usage:
-#   julia --project e08/run.jl              # Clarabel baseline
-#   julia --project e08/run.jl --mosek      # + Mosek
-#   julia --project e08/run.jl --quick      # quick (smaller) sweep
+#   julia --project e08.jl              # Clarabel baseline
+#   julia --project e08.jl --mosek      # + Mosek
+#   julia --project e08.jl --quick      # quick (smaller) sweep
 #
 # Problem. Liquidate a portfolio x_0 = X over T periods (x_T = 0), trading
 # v_t = x_{t-1} - x_t, under quadratic risk and 3/2-power temporary impact:
@@ -73,7 +73,7 @@ using AppleAccelerate
 using LinearAlgebra, SparseArrays, Printf, Random
 using Statistics: median
 
-include("../utils.jl")
+include("utils.jl")
 
 using CellularSheaves.IPM: PowerCone
 using CellularSheaves.BlockSparseArrays: rowrange
@@ -441,3 +441,17 @@ function run()
     println()
 end
 
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    run()
+end
+
+# =============================================================================
+# Sample run: 2026-07-24 (--quick --mosek)  [rhs/rebuild — anchored raug default]
+# -----------------------------------------------------------------------------
+# T=64    dof=2040   n1=1024  blk=3     IPM   56.2ms  HSD   41.9ms (0.75x)  Cla   30.4ms (0.54x)  Msk   42.3ms (0.75x)
+# T=128   dof=4088   n1=2048  blk=3     IPM  107.1ms  HSD   81.7ms (0.76x)  Cla   81.8ms (0.76x)  Msk  121.2ms (1.13x)
+# T=256   dof=8184   n1=4096  blk=3     IPM  225.0ms  HSD  163.5ms (0.73x)  Cla  275.6ms (1.23x)  Msk  604.7ms (2.69x)
+# IPM: DOF^1.00  HSD: DOF^0.98  Clarabel: DOF^1.59  Mosek: DOF^1.92
+# (ALMOST_OPTIMAL at 1e-8 — accuracy-ceiling cell; times finite and on the saved line.)
+# =============================================================================

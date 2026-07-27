@@ -1,16 +1,16 @@
 # =============================================================================
-# e11/def.jl — Short multichannel FIR equalizer-bank design under colored noise
+# e11.jl — Short multichannel FIR equalizer-bank design under colored noise
 #          (regularized MINT: the D = 1 synthesis filter bank; dense-Q + SOC
 #          at E01's block sizes, with the gluing maps a Cholesky factor)
 #
 # Usage:
-#   julia --project e11/run.jl              # Clarabel baseline (exact form)
-#   julia --project e11/run.jl --mosek      # + Mosek
-#   julia --project e11/run.jl --quick      # quick (smaller) sweep
-#   julia --project e11/run.jl --budget     # budget-split variant (O(M) coupling, star)
-#   julia --project e11/run.jl --tree       # budget-tree variant (O(M) coupling, tree)
-#   julia --project e11/run.jl --white      # diagonal-Q ablation (pre-registered)
-#   julia --project e11/run.jl --ldial      # block-size dial Lf at fixed M
+#   julia --project e11.jl              # Clarabel baseline (exact form)
+#   julia --project e11.jl --mosek      # + Mosek
+#   julia --project e11.jl --quick      # quick (smaller) sweep
+#   julia --project e11.jl --budget     # budget-split variant (O(M) coupling, star)
+#   julia --project e11.jl --tree       # budget-tree variant (O(M) coupling, tree)
+#   julia --project e11.jl --white      # diagonal-Q ablation (pre-registered)
+#   julia --project e11.jl --ldial      # block-size dial Lf at fixed M
 #
 # Problem. M sensors observe a source through reverberant FIR channels h_m
 # (length Lh, exponentially decaying, unit norm); design one equalizer f_m
@@ -159,7 +159,7 @@ using AppleAccelerate
 using LinearAlgebra, SparseArrays, Printf, Random
 import Metis, CliqueTrees
 
-include("../utils.jl")
+include("utils.jl")
 
 using CellularSheaves.IPM: SecondOrderCone, CofreeCone
 using CellularSheaves.BlockSparseArrays: rowrange
@@ -754,3 +754,16 @@ function run()
     println()
 end
 
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    run()
+end
+
+# =============================================================================
+# Sample run: 2026-07-24 (--quick --mosek)  [rhs/rebuild — anchored raug default]
+# -----------------------------------------------------------------------------
+# M=4    dof=521    n1=261    blk=64    IPM    9.1ms  HSD   10.8ms (1.18x)  Cla   41.6ms (4.56x)  Msk   38.9ms (4.26x)
+# M=8    dof=1041   n1=521    blk=64    IPM   38.9ms  HSD   48.7ms (1.25x)  Cla  286.6ms (7.37x)  Msk  115.1ms (2.96x)
+# M=16   dof=2081   n1=1041   blk=64    IPM  218.6ms  HSD  244.7ms (1.12x)  Cla 1979.5ms (9.05x)  Msk  419.1ms (1.92x)
+# IPM: DOF^2.29  HSD: DOF^2.26  Clarabel: DOF^2.79  Mosek: DOF^1.72  (elim = METIS)
+# =============================================================================

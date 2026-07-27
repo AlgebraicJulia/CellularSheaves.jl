@@ -1,10 +1,10 @@
 # =============================================================================
-# e05/def.jl — Galerkin-compressed nonlocal TV (dense-restriction-map SOC habitat)
+# e05.jl — Galerkin-compressed nonlocal TV (dense-restriction-map SOC habitat)
 #
 # Usage:
-#   julia --project e05/run.jl              # Clarabel only
-#   julia --project e05/run.jl --mosek      # + Mosek
-#   julia --project e05/run.jl --quick      # small sweep
+#   julia --project e05.jl              # Clarabel only
+#   julia --project e05.jl --mosek      # + Mosek
+#   julia --project e05.jl --quick      # small sweep
 #
 # The same variational problem as E5 (Gilboa–Osher isotropic nonlocal TV),
 # re-discretized: u is a piecewise polynomial — P non-overlapping tiles, m
@@ -53,7 +53,7 @@ using AppleAccelerate
 using LinearAlgebra, SparseArrays, Printf, Random
 using Statistics: median
 
-include("../utils.jl")
+include("utils.jl")
 
 const OPTS = parse_args(ARGS)
 const TOL = OPTS.tol
@@ -448,3 +448,16 @@ function run()
     println()
 end
 
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    run()
+end
+
+# =============================================================================
+# Sample run: 2026-07-24 (--quick --mosek)  [rhs/rebuild — anchored raug default]
+# -----------------------------------------------------------------------------
+# N=512   dof=6784   n1=6153  blk=13    IPM   52.9ms  HSD   73.0ms (1.38x)  Cla  140.1ms (2.65x)  Msk  101.0ms (1.91x)
+# N=1024  dof=13568  n1=12309 blk=13    IPM  125.5ms  HSD  166.3ms (1.32x)  Cla  430.6ms (3.43x)  Msk  199.3ms (1.59x)
+# N=2048  dof=27136  n1=24621 blk=13    IPM  262.0ms  HSD  345.3ms (1.32x)  Cla  615.4ms (2.35x)  Msk  392.3ms (1.50x)
+# IPM: DOF^1.15  HSD: DOF^1.12  Clarabel: DOF^1.07  Mosek: DOF^0.98
+# =============================================================================

@@ -1,15 +1,12 @@
 # IPM Examples
 
-This directory contains benchmark examples demonstrating the sheaf-structured interior-point solver. Each example is a directory with two files:
-
-- `def.jl` — definitions (structs, builders, gate tests, sweep function)
-- `run.jl` — includes def.jl, calls run(), sample results in comments
+This directory contains benchmark examples demonstrating the sheaf-structured interior-point solver. Each example is a single self-contained file `eNN.jl` — definitions (structs, builders, gate tests, sweep function) followed by the sample results in a trailing comment. Running the file directly executes the sweep; `include`-ing it loads the definitions without running, via an `if abspath(PROGRAM_FILE) == @__FILE__` guard at the bottom.
 
 Usage:
 ```bash
-julia --project e01/run.jl              # Clarabel baseline
-julia --project e01/run.jl --mosek      # + Mosek
-julia --project e01/run.jl --quick      # quick (smaller) sweep
+julia --project e01.jl              # Clarabel baseline
+julia --project e01.jl --mosek      # + Mosek
+julia --project e01.jl --quick      # quick (smaller) sweep
 ```
 
 ## Overview
@@ -259,7 +256,7 @@ m = 4, T = 200, λ = 1.5, three 8-step bursts):
   independent algorithms agree — RTS recursion vs information form
   2.0e-14; conic quadratic MAP vs RTS 4.6e-15.
 * FORMULATION CERTIFICATE: the pair-stalk + agreement + SOC-tie assembly
-  (exactly what e09/def.jl builds) equals the native norm-sum formulation to
+  (exactly what e09.jl builds) equals the native norm-sum formulation to
   ‖Δx‖∞ = 7.4e-7; the pair-Gram split identity holds at random points to
   4.7e-16.
 * DEFORMATION: x(δ) → RTS at measured rate δ^−1.98 (predicted −2).
@@ -283,7 +280,7 @@ work constant, cf. E06/E08); benchmark rows time a single solve.
 DOF = 30T + 6, N1 = 17T − 7, median block 24.
 
 
-## E10: Compositional Lyapunov certification on a K×K torus (`e10/`)
+## E10: Compositional Lyapunov certification on a K×K torus (`e10.jl`)
 
 The suite's control-theory pillar, designed at the conjunction of the two
 measured win-conditions — **dense Q** and **small balanced blocks** — on
@@ -355,10 +352,10 @@ Dials: torus size K (DOF = 82K²) and subsystem dim d; γ, ε as physics
 knobs. B has full row rank with a wide aspect — the clean structural
 opposite of a coboundary-constrained (rank-deficient) program on the same graph.
 
-Files: `e10/`, `tools/torus_lyapunov_oracle.py`.
+Files: `e10.jl`, `tools/torus_lyapunov_oracle.py`.
 
 
-## E11: Multichannel FIR equalizer bank design (`e11/`)
+## E11: Multichannel FIR equalizer bank design (`e11.jl`)
 
 Short multichannel FIR equalizer-bank design under colored noise — regularized
 MINT (Miyoshi–Kaneda 1988) at D = 1. M sensors observe a source through
@@ -390,10 +387,10 @@ in the scaling.
 
 Dials: channel count M (DOF = M(2Lf+2)+1) and block size Lf (--ldial).
 
-Files: `e11/`, `tools/mint_equalizer_oracle.py`.
+Files: `e11.jl`, `tools/mint_equalizer_oracle.py`.
 
 
-## E12: Distributed sound zones — cooperative multizone rendering (`e12/`)
+## E12: Distributed sound zones — cooperative multizone rendering (`e12.jl`)
 
 Z zones on a path, each with a 4-speaker array and 3 control points;
 reverberant FIR acoustics (Lh = 96) with inter-zone gain γ^{|Δz|}. Every
@@ -446,11 +443,11 @@ shows decomposition-awareness (1.55 → 1.29); Clarabel does not (1.10).
 NOT stable — Clarabel steepest (2.77, IPM win grows to 4.02×), Mosek
 shallowest (1.90); see the count-vs-size regime rule below.
 
-Files: `e12/`, `tools/soundzone_oracle.py`.
+Files: `e12.jl`, `tools/soundzone_oracle.py`.
 
 ---
 
-## E13: Minimum-fuel soft landing with tracking (`e13/`)
+## E13: Minimum-fuel soft landing with tracking (`e13.jl`)
 
 3-DoF powered descent, fixed mass, exact-ZOH discretization — the convex
 (SOC) lossless-convexification relaxation of Açıkmeşe–Ploen minimum-fuel
@@ -493,11 +490,11 @@ through: boundary quantities (active sets, margins) must be measured at tight
 (1e-11) tolerance, not benchmark-tolerance iterates that sit ~1e-4 off the
 boundary. HSD is the solver at scale here.
 
-Files: `e13/`, `tools/soft_landing_oracle.py`.
+Files: `e13.jl`, `tools/soft_landing_oracle.py`.
 
 ---
 
-## E14: Gyre-aware robust flow recovery on a punctured grid (`e14/`)
+## E14: Gyre-aware robust flow recovery on a punctured grid (`e14.jl`)
 
 Drifter-style flow measurements `g_e ∈ ℝ^T` on the edges of a K×K planar grid
 with **islands** (removed faces → `dim H¹ = #islands`). Recover the Hodge
@@ -537,7 +534,7 @@ directly — `T` scales the u-stalk dimension, the dense `W_e` (T×T), and the e
 row groups at fixed K = 12. Registered prediction: margins vs *both* baselines
 widen with `T`, since the sheaf per-block work is BLAS-3 GEMM (`b³`) while the
 conic baselines pay nodal scalar ops / growing `Q = FᵀF` rows. Outcome
-(`e14/run.jl`): **confirmed at the fat end** — at T = 48 HSD leads Mosek 3.36× and
+(`e14.jl`): **confirmed at the fat end** — at T = 48 HSD leads Mosek 3.36× and
 Clarabel 1.32× — but **non-monotone**: both baselines briefly close in at T = 24
 (Mosek to 1.26×) before the margin reopens. That mid-range flat spot distorts the
 log-log slope fit, so the endpoint *ratios*, not the slopes, are the honest
@@ -552,11 +549,11 @@ localization has a 14.1× screening margin (burst support recovery is
 draw-dependent — the shipped draw finds 5/6 vs the oracle's 6/6 — while the
 structure and objective gates are exact).
 
-Files: `e14/`, `tools/ocean_gyre_oracle.py`.
+Files: `e14.jl`, `tools/ocean_gyre_oracle.py`.
 
 ---
 
-## E15: Orbital formation-keeping under Clohessy–Wiltshire dynamics (`e15/`)
+## E15: Orbital formation-keeping under Clohessy–Wiltshire dynamics (`e15.jl`)
 
 `V` spacecraft hold a rigid formation (LVLH slots `d_v`) around a circular
 reference orbit with mean motion `ω`. Over horizon `N`:
@@ -603,7 +600,7 @@ The affine IPM and Clarabel both hit the oracle value to ~1e-5, so the frontier
 gate is verified with IPM. The mechanism (a suspected step-length / cone-boundary
 issue) is being instrumented.
 
-Files: `e15/`, `tools/cw_oracle.py`.
+Files: `e15.jl`, `tools/cw_oracle.py`.
 
 ---
 
@@ -646,21 +643,21 @@ the flagship exact-slice split (zero conservatism) up to M ~ 16; the
 ## Files
 
 - `utils.jl` — Shared utilities (command-line parsing, timing, baselines)
-- `e01/` — American basket put chain under Merton jumps (dense NOC)
-- `e02/` — Quantum marginal (non-chordal SDP)
-- `e03/` — Tensor-spline regression (dense QP)
-- `e04/` — SOS-certified regression (dense SDP)
-- `e05/` — Galerkin-compressed nonlocal TV (dense-map SOCP)
-- `e06/` — Sqrt-loss spectral regression (whitened SOC chain)
-- `e07/` — Poisson-TV photon-limited deconvolution (exp + SOC + NOC)
-- `e08/` — Optimal execution with 3/2-power impact (dense-Q pow chain)
-- `e09/` — Robust Kalman smoothing, burst corruption (dense-Q + SOC chain)
-- `e10/` — Compositional Lyapunov on a K×K torus (dense-Q dense-SDP)
-- `e11/` — Multichannel FIR equalizer bank (dense-Q + SOC, Cholesky ties)
-- `e12/` — Distributed sound-zone control (dense-Q + SOC, bounded degree)
-- `e13/` — Min-fuel soft landing with tracking (dense-Q SOC chain, LCvx)
-- `e14/` — Gyre-aware robust flow recovery (full-Hodge: dense-map + dense-Q + SOC)
-- `e15/` — Orbital formation-keeping (Clohessy–Wiltshire; dense-Q SOC chains × ring)
+- `e01.jl` — American basket put chain under Merton jumps (dense NOC)
+- `e02.jl` — Quantum marginal (non-chordal SDP)
+- `e03.jl` — Tensor-spline regression (dense QP)
+- `e04.jl` — SOS-certified regression (dense SDP)
+- `e05.jl` — Galerkin-compressed nonlocal TV (dense-map SOCP)
+- `e06.jl` — Sqrt-loss spectral regression (whitened SOC chain)
+- `e07.jl` — Poisson-TV photon-limited deconvolution (exp + SOC + NOC)
+- `e08.jl` — Optimal execution with 3/2-power impact (dense-Q pow chain)
+- `e09.jl` — Robust Kalman smoothing, burst corruption (dense-Q + SOC chain)
+- `e10.jl` — Compositional Lyapunov on a K×K torus (dense-Q dense-SDP)
+- `e11.jl` — Multichannel FIR equalizer bank (dense-Q + SOC, Cholesky ties)
+- `e12.jl` — Distributed sound-zone control (dense-Q + SOC, bounded degree)
+- `e13.jl` — Min-fuel soft landing with tracking (dense-Q SOC chain, LCvx)
+- `e14.jl` — Gyre-aware robust flow recovery (full-Hodge: dense-map + dense-Q + SOC)
+- `e15.jl` — Orbital formation-keeping (Clohessy–Wiltshire; dense-Q SOC chains × ring)
 
 ## Reference documentation
 

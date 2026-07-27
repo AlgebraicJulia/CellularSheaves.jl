@@ -1,15 +1,15 @@
 # =============================================================================
-# e12/def.jl — Distributed sound-zone control: cooperative multizone
+# e12.jl — Distributed sound-zone control: cooperative multizone
 #              rendering with local coupling (E11 tiled over a zone graph —
 #              dense-Q + SOC at bounded degree, coupling mass O(Z))
 #
 # Usage:
-#   julia --project e12/run.jl              # Clarabel baseline
-#   julia --project e12/run.jl --mosek      # + Mosek
-#   julia --project e12/run.jl --quick      # quick (smaller) sweep
-#   julia --project e12/run.jl --joint      # per-ball joint SOCs (ablation)
-#   julia --project e12/run.jl --nobudget   # drop amplifier caps (ablation)
-#   julia --project e12/run.jl --ldial      # block-size dial Lf at fixed Z
+#   julia --project e12.jl              # Clarabel baseline
+#   julia --project e12.jl --mosek      # + Mosek
+#   julia --project e12.jl --quick      # quick (smaller) sweep
+#   julia --project e12.jl --joint      # per-ball joint SOCs (ablation)
+#   julia --project e12.jl --nobudget   # drop amplifier caps (ablation)
+#   julia --project e12.jl --ldial      # block-size dial Lf at fixed Z
 #
 # Problem. Z zones on a path, each with an array of S loudspeakers and C
 # control points. Acoustic paths are reverberant FIRs (length Lh, decay τ)
@@ -138,7 +138,7 @@
 using AppleAccelerate
 using LinearAlgebra, SparseArrays, Printf, Random
 
-include("../utils.jl")
+include("utils.jl")
 
 using CellularSheaves.IPM: SecondOrderCone, CofreeCone
 using CellularSheaves.BlockSparseArrays: rowrange
@@ -800,3 +800,16 @@ function run()
     end
     println()
 end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    run()
+end
+
+# =============================================================================
+# Sample run: 2026-07-25 (--quick --mosek)  [Mosek benchmarked DUAL — ~1.1x faster than primal]
+# -----------------------------------------------------------------------------
+# Z=4    dof=3040   n1=2364   blk=65    IPM   65.6ms  HSD   72.6ms (1.11x)  Cla  200.3ms (3.05x)  Msk  188.9ms (2.88x)
+# Z=8    dof=7004   n1=5512   blk=65    IPM  167.5ms  HSD  179.9ms (1.07x)  Cla  528.3ms (3.15x)  Msk  501.6ms (2.99x)
+# Z=16   dof=14932  n1=11808  blk=65    IPM  381.8ms  HSD  444.0ms (1.16x)  Cla 1151.6ms (3.02x)  Msk 1282.6ms (3.36x)
+# IPM: DOF^1.11  HSD: DOF^1.14  Clarabel: DOF^1.10  Mosek: DOF^1.20  (dual shaves ~12% off primal at Z=16; sheaf still leads)
+# =============================================================================
