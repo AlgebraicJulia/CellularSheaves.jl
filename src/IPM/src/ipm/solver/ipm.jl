@@ -681,15 +681,17 @@ function CommonSolve.solve(prob::IPMProblem{T}; kw...) where {T}
 end
 
 """
-    reinit!(solver, prob; frac=0.1, rgfrac=0.0)
+    reinit!(solver, prob; frac=0.1)
 
 Reinitialize an [`IPMSolver`](@ref), updating the vectors `b` and `g`.
 """
-function reinit!(solver::IPMSolver{T}, prob::IPMProblem{T}; frac::Real=0.1, rgfrac::Real=0.0) where {T}
+function reinit!(solver::IPMSolver{T}, prob::IPMProblem{T}; frac::Real=0.1) where {T}
     @assert ncols(prob.B) == ncols(solver.B)
     @assert nrows(prob.B) == nrows(solver.B)
     @assert nvtxs(prob.B) == nvtxs(solver.B)
     @assert nouts(prob.B) == nouts(solver.B)
+
+    n = ncols(solver.B)
 
     c = copy(prob.c)
     g = copy(prob.g)
@@ -718,9 +720,12 @@ function reinit!(solver::IPMSolver{T}, prob::IPMProblem{T}; frac::Real=0.1, rgfr
 
     empty!(solver.hist)
 
-    ρprev = solver.ρ[]
-    ρcold = solver.settings.rgmin
-    solver.ρ[] = rgfrac * ρprev + (1 - rgfrac) * ρcold
+    solver.ρ[] = solver.settings.rgmin
+
+    nH = (sd / sp) * sqrt(T(n))
+    nQ = norm(Symmetric(solver.Q, :L))
+    nB = norm(solver.B)
+    solver.α[] = solver.settings.aaug + solver.settings.raug * (nH + nQ) / nB^2
 
     return solver
 end

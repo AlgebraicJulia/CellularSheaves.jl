@@ -1135,11 +1135,13 @@ function step!(s::HSDSolver{T}) where {T}
     return status
 end
 
-function reinit!(solver::HSDSolver{T}, prob::IPMProblem{T}; frac::Real=0.1, rgfrac::Real=0.0) where {T}
+function reinit!(solver::HSDSolver{T}, prob::IPMProblem{T}; frac::Real=0.1) where {T}
     @assert ncols(prob.B) == ncols(solver.B)
     @assert nrows(prob.B) == nrows(solver.B)
     @assert nvtxs(prob.B) == nvtxs(solver.B)
     @assert nouts(prob.B) == nouts(solver.B)
+
+    n = ncols(solver.B)
 
     c = copy(prob.c)
     g = copy(prob.g)
@@ -1189,9 +1191,12 @@ function reinit!(solver::HSDSolver{T}, prob::IPMProblem{T}; frac::Real=0.1, rgfr
         initcache!(cache(solver.caches, v, solver.K[v]))
     end
 
-    ρprev = solver.ρ[]
-    ρcold = solver.settings.rgmin
-    solver.ρ[] = rgfrac * ρprev + (1 - rgfrac) * ρcold
+    solver.ρ[] = solver.settings.rgmin
+
+    nH = sqrt(T(n))
+    nQ = norm(Symmetric(solver.Q, :L))
+    nB = norm(solver.B)
+    solver.α[] = solver.settings.aaug + solver.settings.raug * (nH + nQ) / nB^2
 
     return solver
 end
