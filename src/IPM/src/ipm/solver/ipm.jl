@@ -632,11 +632,6 @@ function step!(s::IPMSolver{T}) where {T}
     end
 
     push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat))
-    #
-    # update the augmentation parameter
-    #
-    updateaug!(s)
-
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"
