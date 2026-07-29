@@ -122,6 +122,7 @@ function refinekkt!(
     npass = 0
     status = REFINE_ITMAX
     prv = typemax(T)
+    res0 = res1 = T(NaN)       # residual entering pass 1 (post base solve) and pass 2
 
     for i in 1:itmax
         #
@@ -137,6 +138,8 @@ function refinekkt!(
         dres = norm(sd, Inf) / (one(T) + nc)
         pres = norm(sp, Inf) / (one(T) + ng)
         res = max(dres, pres)
+        i == 1 && (res0 = res)
+        i == 2 && (res1 = res)
 
         if res ≤ force_tol
             status = REACHED_FORCE
@@ -172,7 +175,7 @@ function refinekkt!(
         axpy!(one(T), dy, Δy)
     end
 
-    return npass, niter, status
+    return npass, niter, status, res0, res1
 end
 
 ############################################################################################
@@ -219,7 +222,7 @@ function solvepredictor!(
     #
     # refine Δpa, Δya to force_tol
     #
-    ppass, prefn, pstat = refinekkt!(
+    ppass, prefn, pstat, pres0, pres1 = refinekkt!(
         w.Δpa, w.Δya, kkt, H, B,
         w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
@@ -233,7 +236,7 @@ function solvepredictor!(
     mul!(w.Δda, B', w.Δya, -1, -1)
     mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
 
-    return pbase, prefn, ppass, pstat
+    return pbase, prefn, ppass, pstat, pres0, pres1
 end
 
 #
@@ -331,7 +334,7 @@ function solvecorrector!(
     # use iterative refinement to improve
     # the solutions Δp and Δy
     #
-    cpass, crefn, cstat = refinekkt!(
+    cpass, crefn, cstat, cres0, cres1 = refinekkt!(
         w.Δp, w.Δy, kkt, H, B,
         w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
@@ -345,7 +348,7 @@ function solvecorrector!(
     mul!(w.Δd, B', w.Δy, -1, -1)
     mul!(w.Δd, Symmetric(Q, :L), w.Δp, 1, 1)
 
-    return cbase, crefn, cpass, cstat
+    return cbase, crefn, cpass, cstat, cres0, cres1
 end
 
 ############################################################################################
@@ -487,6 +490,7 @@ function step!(s::IPMSolver{T}) where {T}
     prefn = crefn = 0       # refinement CRAIG per role
     ppass = cpass = 0       # refinement passes per role
     pstat = cstat = REACHED_FORCE   # refinement exit status per role
+    pres0 = pres1 = cres0 = cres1 = T(NaN)   # pass-0/pass-1 residuals per role
     step = zero(T)
 
     w = s.wrk
@@ -565,7 +569,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                pbase, prefn, ppass, pstat = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, pres0, pres1 = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -580,7 +584,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                cbase, crefn, cpass, cstat = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, cres0, cres1 = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -631,7 +635,7 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat))
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"

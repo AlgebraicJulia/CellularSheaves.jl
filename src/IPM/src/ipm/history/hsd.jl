@@ -1,7 +1,8 @@
 const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, gap::T, α::T, ρ::T, τ::T, κ::T,
     pbase::Int, prefn::Int, ppass::Int, pstat::RefStatus,
     cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus,
-    wbase::Int, wrefn::Int, wpass::Int, wstat::RefStatus}
+    wbase::Int, wrefn::Int, wpass::Int, wstat::RefStatus,
+    pres0::T, pres1::T, cres0::T, cres1::T, wres0::T, wres1::T}
 
 struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     μ::Vector{T}
@@ -25,13 +26,20 @@ struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     wrefn::Vector{Int}
     wpass::Vector{Int}
     wstat::Vector{RefStatus}
+    pres0::Vector{T}
+    pres1::Vector{T}
+    cres0::Vector{T}
+    cres1::Vector{T}
+    wres0::Vector{T}
+    wres1::Vector{T}
 end
 
 function HSDHistory{T}() where {T}
     return HSDHistory{T}(T[], T[], T[], T[], T[], T[], T[], T[], T[],
         Int[], Int[], Int[], RefStatus[],
         Int[], Int[], Int[], RefStatus[],
-        Int[], Int[], Int[], RefStatus[])
+        Int[], Int[], Int[], RefStatus[],
+        T[], T[], T[], T[], T[], T[])
 end
 
 function Base.getindex(hist::HSDHistory, i::Int)
@@ -47,8 +55,9 @@ function Base.getindex(hist::HSDHistory, i::Int)
     pbase   = hist.pbase[i]; prefn = hist.prefn[i]; ppass = hist.ppass[i]; pstat = hist.pstat[i]
     cbase   = hist.cbase[i]; crefn = hist.crefn[i]; cpass = hist.cpass[i]; cstat = hist.cstat[i]
     wbase   = hist.wbase[i]; wrefn = hist.wrefn[i]; wpass = hist.wpass[i]; wstat = hist.wstat[i]
+    pres0 = hist.pres0[i]; pres1 = hist.pres1[i]; cres0 = hist.cres0[i]; cres1 = hist.cres1[i]; wres0 = hist.wres0[i]; wres1 = hist.wres1[i]
     return (; μ, step, pres, dres, gap, α, ρ, τ, κ,
-        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat)
+        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat, pres0, pres1, cres0, cres1, wres0, wres1)
 end
 
 function Base.push!(hist::HSDHistory, row::NamedTuple)
@@ -64,6 +73,7 @@ function Base.push!(hist::HSDHistory, row::NamedTuple)
     push!(hist.pbase,   row.pbase); push!(hist.prefn, row.prefn); push!(hist.ppass, row.ppass); push!(hist.pstat, row.pstat)
     push!(hist.cbase,   row.cbase); push!(hist.crefn, row.crefn); push!(hist.cpass, row.cpass); push!(hist.cstat, row.cstat)
     push!(hist.wbase,   row.wbase); push!(hist.wrefn, row.wrefn); push!(hist.wpass, row.wpass); push!(hist.wstat, row.wstat)
+    push!(hist.pres0, row.pres0); push!(hist.pres1, row.pres1); push!(hist.cres0, row.cres0); push!(hist.cres1, row.cres1); push!(hist.wres0, row.wres0); push!(hist.wres1, row.wres1)
     return hist
 end
 
@@ -80,6 +90,7 @@ function Base.empty!(hist::HSDHistory)
     empty!(hist.pbase); empty!(hist.prefn); empty!(hist.ppass); empty!(hist.pstat)
     empty!(hist.cbase); empty!(hist.crefn); empty!(hist.cpass); empty!(hist.cstat)
     empty!(hist.wbase); empty!(hist.wrefn); empty!(hist.wpass); empty!(hist.wstat)
+    empty!(hist.pres0); empty!(hist.pres1); empty!(hist.cres0); empty!(hist.cres1); empty!(hist.wres0); empty!(hist.wres1)
     return hist
 end
 

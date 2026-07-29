@@ -1,6 +1,7 @@
 const IPMHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, α::T, ρ::T,
     pbase::Int, prefn::Int, ppass::Int, pstat::RefStatus,
-    cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus}
+    cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus,
+    pres0::T, pres1::T, cres0::T, cres1::T}
 
 struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     μ::Vector{T}
@@ -17,12 +18,17 @@ struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     crefn::Vector{Int}
     cpass::Vector{Int}
     cstat::Vector{RefStatus}
+    pres0::Vector{T}
+    pres1::Vector{T}
+    cres0::Vector{T}
+    cres1::Vector{T}
 end
 
 function IPMHistory{T}() where {T}
     return IPMHistory{T}(T[], T[], T[], T[], T[], T[],
         Int[], Int[], Int[], RefStatus[],
-        Int[], Int[], Int[], RefStatus[])
+        Int[], Int[], Int[], RefStatus[],
+        T[], T[], T[], T[])
 end
 
 function Base.getindex(hist::IPMHistory, i::Int)
@@ -40,7 +46,11 @@ function Base.getindex(hist::IPMHistory, i::Int)
     crefn   = hist.crefn[i]
     cpass   = hist.cpass[i]
     cstat   = hist.cstat[i]
-    return (; μ, step, pres, dres, α, ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat)
+    pres0   = hist.pres0[i]
+    pres1   = hist.pres1[i]
+    cres0   = hist.cres0[i]
+    cres1   = hist.cres1[i]
+    return (; μ, step, pres, dres, α, ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1)
 end
 
 function Base.push!(hist::IPMHistory, row::NamedTuple)
@@ -58,6 +68,10 @@ function Base.push!(hist::IPMHistory, row::NamedTuple)
     push!(hist.crefn,   row.crefn)
     push!(hist.cpass,   row.cpass)
     push!(hist.cstat,   row.cstat)
+    push!(hist.pres0,   row.pres0)
+    push!(hist.pres1,   row.pres1)
+    push!(hist.cres0,   row.cres0)
+    push!(hist.cres1,   row.cres1)
     return hist
 end
 
@@ -76,6 +90,10 @@ function Base.empty!(hist::IPMHistory)
     empty!(hist.crefn)
     empty!(hist.cpass)
     empty!(hist.cstat)
+    empty!(hist.pres0)
+    empty!(hist.pres1)
+    empty!(hist.cres0)
+    empty!(hist.cres1)
     return hist
 end
 
