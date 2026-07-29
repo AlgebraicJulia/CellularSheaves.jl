@@ -50,8 +50,39 @@ settings = solv == "ipm" ?
     IPMSettings{Float64}(feas_tol=tol, gap_tol=tol, itmax=300) :
     HSDSettings{Float64}(feas_tol=tol, gap_tol=tol, itmax=300)
 
+using LinearAlgebra, SparseArrays
 s0 = init(buildprob(key), settings)
 final, records = solve_logged(s0)
-path = joinpath(OUT, "$(key)_$(ARGS[2])_$(solv).csv")
+base = "$(key)_$(ARGS[2])_$(solv)"
+path = joinpath(OUT, "$base.csv")
 write_oracle_csv(path, records)
-println("wrote $(length(records)) records ($(maximum(r.iter for r in records)) iters) -> $path")
+
+# ---- metadata sidecar (once per run): anchoring, normalization, settings, shape, identity ----
+jval(v::AbstractString) = "\"$v\""
+jval(v::Bool) = string(v)
+jval(v::Real) = isfinite(v) ? string(v) : "null"
+jval(v::AbstractVector) = "[" * join(jval.(v), ",") * "]"
+jval(v::AbstractDict) = "{" * join(("\"$k\":$(jval(x))" for (k, x) in v), ",") * "}"
+jval(v) = "\"$(string(v))\""
+setget(k) = hasproperty(settings, k) ? getproperty(settings, k) : nothing
+nH = sqrt(size(s0.B, 2)); nQ = norm(Symmetric(s0.Q, :L)); nB = norm(s0.B)
+cones = Dict{String,Int}()
+for k in s0.K; t = string(nameof(typeof(k))); cones[t] = get(cones, t, 0) + 1; end
+gitshort = try readchomp(`git -C $EX rev-parse --short HEAD`) catch; "unknown" end
+meta = [
+    "problem"=>key, "solver"=>solv, "tol"=>ARGS[2], "git"=>gitshort,
+    "grid"=>collect(CellularSheaves.IPM.DEFAULT_ALPHA_GRID),
+    "raug"=>setget(:raug), "aaug"=>setget(:aaug), "alpha_anchor"=>s0.α[],
+    "nH"=>nH, "nQ"=>nQ, "nB"=>nB,
+    "nc"=>final.nc[], "ng"=>final.ng[], "mu_1"=>first(final.hist.μ),
+    "feas_tol"=>setget(:feas_tol), "gap_tol"=>setget(:gap_tol),
+    "forcing_frac"=>setget(:forcing_frac), "forcing_ceil"=>setget(:forcing_ceil),
+    "refine_itmax"=>setget(:refine_itmax), "refine_stall"=>setget(:refine_stall),
+    "floor_patience"=>setget(:floor_patience), "rgmin"=>setget(:rgmin), "rgmax"=>setget(:rgmax),
+    "itmax"=>setget(:itmax), "step_frac"=>setget(:step_frac),
+    "m"=>size(s0.B, 1), "n"=>size(s0.B, 2), "nu"=>s0.ν, "cones"=>cones,
+]
+open(joinpath(OUT, "$base.meta.json"), "w") do io
+    println(io, "{" * join(("\"$k\":$(jval(v))" for (k, v) in meta), ",") * "}")
+end
+println("wrote $(length(records)) records ($(maximum(r.iter for r in records)) iters) + meta -> $base")
