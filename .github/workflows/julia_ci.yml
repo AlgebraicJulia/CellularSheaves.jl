@@ -123,7 +123,7 @@ jobs:
           srun --partition=hpg-dev \
                --cpus-per-task=8 \
                --job-name="gha-cluster-test" \
-               bash -c "
+               bash -c "set -e;
                   source /etc/profile.d/modules.sh
                   module load julia
                   export JULIA_DEPOT_PATH=$DEPOT_PATH:\$SLURM_TMPDIR/.julia
