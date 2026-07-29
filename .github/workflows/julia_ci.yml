@@ -113,7 +113,6 @@ jobs:
           fi
 
       - name: "🚀 Execute Test Suite via Slurm"
-        continue-on-error: true
         run: |
           set -x
           source /etc/profile.d/slurm.sh
