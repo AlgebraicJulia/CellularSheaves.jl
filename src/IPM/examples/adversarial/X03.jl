@@ -43,15 +43,16 @@ end
 _colnorm_ratio(Bd) = (ns = [norm(@view Bd[:, j]) for j in axes(Bd, 2)]; maximum(ns) / minimum(ns))
 
 """
-    build_narrow(; npos=24, spread=8.0, rows_per_col=3, ridge=1e-6, seed=1) -> (prob, meta)
+    build_narrow(; npos=24, spread=8.0, rows_per_col=3, seed=1) -> (prob, meta)
 
 Single PositiveCone block of dim `npos`, split into a band (`npos÷2` full-scale columns, one pinning each
 row) and a graded tail (`npos÷2` columns spanning `spread` decades). Within-block column-norm ratio ≈
 10^spread survives equilibration (invariant I1). `spread=0` is the matched benign twin. **`spread` is the
-dial** (expected small effect — see header). `meta`: `pstar`, `colratio` (raw within-block spread), dials.
+dial** (expected small effect — see header). Q is a modest PD diagonal (not a 1e-6 ridge) so the interior
+p* is uniquely identified for the gate; it cannot mask the B pathology (see X04 header). `meta`: `pstar`,
+`colratio` (raw within-block spread), dials.
 """
-function build_narrow(; npos::Int = 24, spread::Float64 = 8.0, rows_per_col::Int = 3,
-                      ridge::Float64 = 1e-6, seed::Int = 1)
+function build_narrow(; npos::Int = 24, spread::Float64 = 8.0, rows_per_col::Int = 3, seed::Int = 1)
     rng = MersenneTwister(seed)
     nb = max(npos ÷ 2, 1)                 # band (full-scale) columns
     nt = npos - nb                        # graded-tail columns
@@ -74,12 +75,13 @@ function build_narrow(; npos::Int = 24, spread::Float64 = 8.0, rows_per_col::Int
 
     pstar = 1.0 .+ 0.5 .* rand(rng, npos)     # strictly interior
     ystar = randn(rng, m)
+    Qdiag = 1.0 .+ 0.5 .* rand(rng, npos)     # modest PD diagonal ⇒ interior p* uniquely identified
     g = Bd * pstar
-    c = fill(ridge, npos) .* pstar .- Bd' * ystar     # d* = 0
+    c = Qdiag .* pstar .- Bd' * ystar         # d* = 0
 
     B = _scalar_blocksparse(Bd)
     Q = IPM.allocblockdiag(B); fill!(Q, 0)
-    for v in 1:npos; IPM.block(Q, v, v, v) .= ridge; end
+    for v in 1:npos; IPM.block(Q, v, v, v) .= Qdiag[v]; end
     K = IPM.AbstractCone[PositiveCone() for _ in 1:npos]
 
     meta = (npos = npos, nband = nb, ntail = nt, spread = spread, nv = npos, nrows = m,

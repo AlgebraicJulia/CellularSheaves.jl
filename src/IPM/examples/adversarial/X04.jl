@@ -57,21 +57,23 @@ function _min_row_angle(Bd, parents)
 end
 
 """
-    build_degenerate(; n=16, nfree=4, degen=8, rowscale=8.0, eps=1e-6, ridge=1e-6, benign=false, seed=1)
+    build_degenerate(; n=16, nfree=4, degen=8, rowscale=8.0, eps=1e-6, benign=false, seed=1)
         -> (prob, meta)
 
 Near-dependent-row LP/QP. `n` PositiveCone (x) + `nfree` CofreeCone (z, free) variables; `m0 = n÷2`
 well-conditioned base rows, then `degen` appended rows each a near-copy of a base row with principal
 angle ~`eps`, rescaled over `rowscale` decades. **`eps` is the hardness dial** (σ_min(B̂) ~ eps survives
 equilibration; addendum: plateau collapses near μ ≈ 1e2·eps²); `rowscale` is the deliberately
-equilibrator-removable knob (separates "Ruiz fixes it" from the residual angle pathology). `ridge` is a
-tiny Q so H stays PD (avoids the semidefinite-H affine-solver failure) with negligible nQ. `benign=true`
-gives the matched independent-rows twin.
+equilibrator-removable knob (separates "Ruiz fixes it" from the residual angle pathology).
 
-`meta`: `pstar` (manufactured optimum), `sigmin`/`min_angle` (raw pre-equilibration severity), dials.
+Q is a modest PD diagonal (1 + 0.5·U) — NOT the spec's 1e-6 ridge: with an interior optimum and a ~0 Q
+the objective is constant on the feasible set (c ⟂ null(B)) and p* is non-unique, so a modest Q uniquely
+identifies p* for the gate. It cannot mask the adversary — the high-α wall lives in F ≈ BᵀB where
+(1/α)Q → 0 — and post-equilibration nQ stays O(1), negligible vs the B pathology. `benign=true` gives the
+matched independent-rows twin. `meta`: `pstar`, `sigmin`/`min_angle` (raw severity), dials.
 """
 function build_degenerate(; n::Int = 16, nfree::Int = 4, degen::Int = 8, rowscale::Float64 = 8.0,
-                          eps::Float64 = 1e-6, ridge::Float64 = 1e-6, benign::Bool = false, seed::Int = 1)
+                          eps::Float64 = 1e-6, benign::Bool = false, seed::Int = 1)
     rng = MersenneTwister(seed)
     m0 = max(n ÷ 2, 1)
     nv = n + nfree
@@ -97,13 +99,13 @@ function build_degenerate(; n::Int = 16, nfree::Int = 4, degen::Int = 8, rowscal
     pstar[1:n] .= 1.0 .+ 0.5 .* rand(rng, n)          # PositiveCone part strictly interior
     pstar[n+1:nv] .= randn(rng, nfree)                # free part arbitrary
     ystar = randn(rng, m0 + degen)
-    Qdiag = fill(ridge, nv)
+    Qdiag = 1.0 .+ 0.5 .* rand(rng, nv)               # modest PD diagonal ⇒ interior p* uniquely identified
     g = Bd * pstar
     c = Qdiag .* pstar .- Bd' * ystar                 # d* = 0
 
     B = _scalar_blocksparse(Bd)
     Q = IPM.allocblockdiag(B); fill!(Q, 0)
-    for v in 1:nv; IPM.block(Q, v, v, v) .= ridge; end
+    for v in 1:nv; IPM.block(Q, v, v, v) .= Qdiag[v]; end
     K = IPM.AbstractCone[PositiveCone() for _ in 1:n]
     append!(K, IPM.AbstractCone[CofreeCone() for _ in 1:nfree])
 
