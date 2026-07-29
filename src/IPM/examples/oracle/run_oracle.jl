@@ -12,13 +12,18 @@ const EX = dirname(@__DIR__)          # examples/
 const OUT = @__DIR__                  # examples/oracle/
 gp(x) = x isa Tuple ? x[1] : x
 
-incfile = key == "X03" ? "$EX/adversarial/X03.jl" : key == "X04" ? "$EX/adversarial/X04.jl" :
+xbase = startswith(key, "X") ? key[1:min(3, length(key))] : key      # X04b → X04
+incfile = startswith(key, "X") ? "$EX/adversarial/$xbase.jl" :
           key == "06" ? "$EX/e06.jl" : key == "07" ? "$EX/e07.jl" : key == "13" ? "$EX/e13.jl" : "$EX/$key.jl"
 include(incfile)
 
 function buildprob(key)
-    key == "X03" && return gp(build_narrow(; npos=12, nfree=12, spread=8.0))
-    key == "X04" && return gp(build_degenerate(; n=16, degen=8, rowscale=8.0))
+    key == "X03"  && return gp(build_narrow())              # within-block col-spread [I1]
+    key == "X03b" && return gp(build_narrow_twin())         # benign twin (spread=0)
+    key == "X04"  && return gp(build_degenerate())          # near-dependent rows [I2] — PRIMARY
+    key == "X04b" && return gp(build_degenerate_twin())     # benign twin (independent rows)
+    key == "X06"  && return gp(build_corner_soc())          # SOC corner (cone-generality control)
+    key == "X06b" && return gp(build_corner_soc_twin())     # benign twin (all interior)
     key == "06"  && return gp(build_sqrtloss(sqrtloss_instance(; P=12)))
     key == "07"  && return gp(build_poisson_tv(poisson_instance(; N=128, Tsz=16, m=16, k=-1, K=6, R=12, q=3, seed=3)))
     key == "13"  && return gp(build_landing(landing_instance(), 60.0, 20))
@@ -52,7 +57,11 @@ settings = solv == "ipm" ?
 
 using LinearAlgebra, SparseArrays
 s0 = init(buildprob(key), settings)
-final, records = solve_logged(s0)
+# scaling instances (X03/X04) can push the plateau past 1e10 (addendum: window seen at [3e12, 1e14]) —
+# extend the grid to 1e14 for them; everyone else uses the standard half-decade 1e0–1e10 grid.
+grid = (startswith(key, "X03") || startswith(key, "X04")) ?
+    [round(10.0^e, sigdigits=4) for e in 0.0:0.5:14.0] : collect(CellularSheaves.IPM.DEFAULT_ALPHA_GRID)
+final, records = solve_logged(s0, grid)
 base = "$(key)_$(ARGS[2])_$(solv)"
 path = joinpath(OUT, "$base.csv")
 write_oracle_csv(path, records)
@@ -71,7 +80,7 @@ for k in s0.K; t = string(nameof(typeof(k))); cones[t] = get(cones, t, 0) + 1; e
 gitshort = try readchomp(`git -C $EX rev-parse --short HEAD`) catch; "unknown" end
 meta = [
     "problem"=>key, "solver"=>solv, "tol"=>ARGS[2], "git"=>gitshort,
-    "grid"=>collect(CellularSheaves.IPM.DEFAULT_ALPHA_GRID),
+    "grid"=>collect(grid),
     "raug"=>setget(:raug), "aaug"=>setget(:aaug), "alpha_anchor"=>s0.α[],
     "nH"=>nH, "nQ"=>nQ, "nB"=>nB,
     "nc"=>final.nc[], "ng"=>final.ng[], "mu_1"=>first(final.hist.μ),
