@@ -1119,8 +1119,6 @@ function step!(s::HSDSolver{T}) where {T}
 
     push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ=s.ρ[], τ=s.τ[], κ=s.κ[],
         pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat))
-    # α is fixed at its construction anchor (raug); no controller updates it.
-
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"
