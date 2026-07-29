@@ -1,7 +1,7 @@
 const IPMHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, α::T, ρ::T,
     pbase::Int, prefn::Int, ppass::Int, pstat::RefStatus,
     cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus,
-    pres0::T, pres1::T, cres0::T, cres1::T}
+    pres0::T, pres1::T, cres0::T, cres1::T, r0_p::T, r0_c::T, craig_p::String, craig_c::String}
 
 struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     μ::Vector{T}
@@ -22,13 +22,19 @@ struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     pres1::Vector{T}
     cres0::Vector{T}
     cres1::Vector{T}
+    r0_p::Vector{T}
+    r0_c::Vector{T}
+    craig_p::Vector{String}
+    craig_c::Vector{String}
 end
 
 function IPMHistory{T}() where {T}
     return IPMHistory{T}(T[], T[], T[], T[], T[], T[],
         Int[], Int[], Int[], RefStatus[],
         Int[], Int[], Int[], RefStatus[],
-        T[], T[], T[], T[])
+        T[], T[], T[], T[],
+        T[], T[],
+        String[], String[])
 end
 
 function Base.getindex(hist::IPMHistory, i::Int)
@@ -50,7 +56,11 @@ function Base.getindex(hist::IPMHistory, i::Int)
     pres1   = hist.pres1[i]
     cres0   = hist.cres0[i]
     cres1   = hist.cres1[i]
-    return (; μ, step, pres, dres, α, ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1)
+    r0_p    = hist.r0_p[i]
+    r0_c    = hist.r0_c[i]
+    craig_p = hist.craig_p[i]
+    craig_c = hist.craig_c[i]
+    return (; μ, step, pres, dres, α, ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c)
 end
 
 function Base.push!(hist::IPMHistory, row::NamedTuple)
@@ -72,6 +82,10 @@ function Base.push!(hist::IPMHistory, row::NamedTuple)
     push!(hist.pres1,   row.pres1)
     push!(hist.cres0,   row.cres0)
     push!(hist.cres1,   row.cres1)
+    push!(hist.r0_p,    row.r0_p)
+    push!(hist.r0_c,    row.r0_c)
+    push!(hist.craig_p, row.craig_p)
+    push!(hist.craig_c, row.craig_c)
     return hist
 end
 
@@ -94,6 +108,10 @@ function Base.empty!(hist::IPMHistory)
     empty!(hist.pres1)
     empty!(hist.cres0)
     empty!(hist.cres1)
+    empty!(hist.r0_p)
+    empty!(hist.r0_c)
+    empty!(hist.craig_p)
+    empty!(hist.craig_c)
     return hist
 end
 

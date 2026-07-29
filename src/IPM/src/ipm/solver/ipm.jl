@@ -219,6 +219,7 @@ function solvepredictor!(
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
     pbase = solve_kkt!(kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
+    r0_p = kkt.r0[]; craig_p = kkt.itrwrk.stats.status
     #
     # refine Δpa, Δya to force_tol
     #
@@ -236,7 +237,7 @@ function solvepredictor!(
     mul!(w.Δda, B', w.Δya, -1, -1)
     mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
 
-    return pbase, prefn, ppass, pstat, pres0, pres1
+    return pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p
 end
 
 #
@@ -330,6 +331,7 @@ function solvecorrector!(
     #   [ B   0  ] [ Δy ] = [ rp  ]
     #
     cbase = solve_kkt!(kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
+    r0_c = kkt.r0[]; craig_c = kkt.itrwrk.stats.status
     #
     # use iterative refinement to improve
     # the solutions Δp and Δy
@@ -348,7 +350,7 @@ function solvecorrector!(
     mul!(w.Δd, B', w.Δy, -1, -1)
     mul!(w.Δd, Symmetric(Q, :L), w.Δp, 1, 1)
 
-    return cbase, crefn, cpass, cstat, cres0, cres1
+    return cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c
 end
 
 ############################################################################################
@@ -491,6 +493,8 @@ function step!(s::IPMSolver{T}) where {T}
     ppass = cpass = 0       # refinement passes per role
     pstat = cstat = REACHED_FORCE   # refinement exit status per role
     pres0 = pres1 = cres0 = cres1 = T(NaN)   # pass-0/pass-1 residuals per role
+    r0_p = r0_c = T(NaN)                     # pre-CRAIG base residual per role
+    craig_p = craig_c = ""                   # CRAIG termination status per role
     step = zero(T)
 
     w = s.wrk
@@ -569,7 +573,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                pbase, prefn, ppass, pstat, pres0, pres1 = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -584,7 +588,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                cbase, crefn, cpass, cstat, cres0, cres1 = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -635,7 +639,7 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1))
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"

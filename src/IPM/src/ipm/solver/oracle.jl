@@ -79,17 +79,25 @@ function _oracle_record(i, α, sc, st)
     # exact recomputation of the tolerances step! used this iteration (μ + settings; persisted rp/rd)
     ftol  = min(sc.settings.forcing_frac * μ / μ1, sc.settings.forcing_ceil)
     fltol = 100 * eps(T) * (one(T) + max(norm(sc.wrk.rp, Inf), norm(sc.wrk.rd, Inf)))
+    hasw  = hasproperty(row, :wstat)
+    dg    = diag(sparse(sc.H))                     # scaled-Hessian diagonal (α-independent within an iter)
     return (iter = i, alpha = α, state = _oracle_state(row), ncraig = _oracle_craig(row),
-            ipm_status = st, mu = μ, rho = row.ρ, force_tol = ftol, floor_tol = fltol,
-            sigma2min = oracle_sigma2min(sc.kkt, sc.B, T(α)),
-            pstat = row.pstat, cstat = row.cstat,
-            wstat = hasproperty(row, :wstat) ? row.wstat : nothing,
-            pbase = row.pbase, prefn = row.prefn, cbase = row.cbase, crefn = row.crefn,
-            wbase = hasproperty(row, :wbase) ? row.wbase : 0,
-            wrefn = hasproperty(row, :wrefn) ? row.wrefn : 0,
+            ipm_status = st, mu = μ, mu_next = mu(sc), rho = row.ρ,
+            force_tol = ftol, floor_tol = fltol, sigma2min = oracle_sigma2min(sc.kkt, sc.B, T(α)),
+            step = row.step,
+            tau = hasproperty(row, :τ) ? row.τ : nothing,
+            kappa = hasproperty(row, :κ) ? row.κ : nothing,
+            norm_dp = norm(sc.wrk.Δp), norm_dy = norm(sc.wrk.Δy), norm_y = norm(sc.y),
+            hdiag_min = minimum(dg), hdiag_max = maximum(dg),
+            pstat = row.pstat, cstat = row.cstat, wstat = hasw ? row.wstat : nothing,
+            pbase = row.pbase, prefn = row.prefn, ppass = row.ppass,
+            cbase = row.cbase, crefn = row.crefn, cpass = row.cpass,
+            wbase = hasw ? row.wbase : nothing, wrefn = hasw ? row.wrefn : nothing,
+            wpass = hasw ? row.wpass : nothing,
             pres0 = row.pres0, pres1 = row.pres1, cres0 = row.cres0, cres1 = row.cres1,
-            wres0 = hasproperty(row, :wres0) ? row.wres0 : nothing,
-            wres1 = hasproperty(row, :wres1) ? row.wres1 : nothing,
+            wres0 = hasw ? row.wres0 : nothing, wres1 = hasw ? row.wres1 : nothing,
+            r0_p = row.r0_p, r0_c = row.r0_c, r0_w = hasw ? row.r0_w : nothing,
+            craig_p = row.craig_p, craig_c = row.craig_c, craig_w = hasw ? row.craig_w : nothing,
             chosen = false)
 end
 
@@ -117,6 +125,7 @@ function solve_logged(s0::AbstractSolver, grid = DEFAULT_ALPHA_GRID; itmax::Inte
     i = 0
     while i < itmax
         i += 1
+        iter_recs = NamedTuple[]
         best = nothing
         bestscore = (typemax(Int), typemax(Int))
         beststatus = CONTINUE
@@ -125,17 +134,22 @@ function solve_logged(s0::AbstractSolver, grid = DEFAULT_ALPHA_GRID; itmax::Inte
             sc = deepcopy(s)
             sc.α[] = α
             st = step!(sc)
-            row = sc.hist[end]
-            push!(records, _oracle_record(i, α, sc, st))
-            score = (_oracle_state(row), _oracle_craig(row))
+            push!(iter_recs, _oracle_record(i, α, sc, st))
+            score = (iter_recs[end].state, iter_recs[end].ncraig)
             if score < bestscore                   # strict: first (lowest) α at the best score wins
                 bestscore = score
                 best = sc
                 beststatus = st
-                bestidx = lastindex(records)
+                bestidx = lastindex(iter_recs)
             end
         end
-        records[bestidx] = merge(records[bestidx], (chosen = true,))
+        # skip the terminal-at-entry sweep: if the entry state is already converged every candidate
+        # trivially returns ncraig=0 at a terminal status — record nothing and stop (removes the artifact).
+        if beststatus !== CONTINUE && iter_recs[bestidx].ncraig == 0
+            break
+        end
+        iter_recs[bestidx] = merge(iter_recs[bestidx], (chosen = true,))
+        append!(records, iter_recs)
         s = best
         beststatus === CONTINUE || break           # terminal status at the chosen α ⇒ done
     end

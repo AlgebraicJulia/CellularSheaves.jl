@@ -15,6 +15,7 @@ struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     itrwrk::CraigWorkspace{T, T, Vector{T}}
     r::Vector{T}
     α::Scalar{T}
+    r0::Scalar{T}               # pre-CRAIG residual ‖g-Bx‖ of the last base solve
     rgmin::T                    # baked: ρ-shift ladder lower bound
     rgmax::T                    # baked: ρ-shift ladder upper bound
 end
@@ -27,7 +28,8 @@ function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMat
     itrwrk = CraigWorkspace(m, n, Vector{T})
     r = zeros(T, m)
     α = ones(T)
-    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, rgmin, rgmax)
+    r0 = fill(T(NaN))
+    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, r0, rgmin, rgmax)
 end
 
 function make_kkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAULT_ELIMINATION_ALGORITHM,
@@ -104,7 +106,7 @@ function solve_kkt!(
     atol::T,
 ) where {UPLO, T}
     return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, A, B,
-                      f, g, wrk.α[], atol, y0)
+                      f, g, wrk.α[], atol, y0, wrk.r0)
 end
 
 #
@@ -127,6 +129,7 @@ function solve_uzw!(
         α::T,
         atol::T,
         y0 = nothing,
+        r0ref = nothing,
     ) where {UPLO, T}
     m, n = size(B)
 
@@ -178,6 +181,7 @@ function solve_uzw!(
     end
 
     N = LinearOperator(T, n, n, true, true, prec!)
+    r0ref === nothing || (r0ref[] = norm(r))    # pre-CRAIG residual of the base solve
     craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol)
     niter += itrwrk.stats.niter
     #
