@@ -20,7 +20,7 @@ struct IPMSolver{T, I, W, C} <: AbstractSolver{T}
     ρ::FScalar{T}
     nc::FScalar{T}
     ng::FScalar{T}
-    α::FScalar{T}       # effective augmentation penalty; anchored at construction, owned by updateaug!
+    α::FScalar{T}       # effective augmentation penalty; fixed at construction (raug); no controller
     timers::TimerOutput
 end
 

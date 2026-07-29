@@ -3,6 +3,7 @@ abstract type AbstractSolver{T} end
 include("ipm.jl")
 include("hsd.jl")
 include("utils.jl")
+include("oracle.jl")
 
 function showsolver(io::IO, s::AbstractSolver; indent::Integer=0)
     return showsettings(io, s.settings; indent)

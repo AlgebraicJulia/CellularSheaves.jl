@@ -1,6 +1,5 @@
 # Augmentation KKT backend (rebuilt — rebuild_spec.md §1). There is no settings object: α is a
-# per-call argument (a trajectory-level parameter owned by the IPM, held as solver state and mutated
-# only by updateaug!), and the ρ-shift ladder bounds are baked into the workspace at construction. The
+# per-call argument (a trajectory-level parameter owned by the IPM, held as solver state, fixed at construction), and the ρ-shift ladder bounds are baked into the workspace at construction. The
 # augmented system is F = (1/α)·H + BᵀB. There is no CRAIG iteration budget of our own: CRAIG terminates
 # in exact arithmetic by iteration n+m, and Krylov.jl caps at its dimension-based default when itmax is
 # unset — the hang guard belongs to the library that owns the iteration, at its termination bound.
