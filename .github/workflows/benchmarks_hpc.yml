@@ -1,0 +1,240 @@
+name: Benchmarks (HPC)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Benchmark profile (small, large, full)"
+        required: false
+        default: "full"
+        type: choice
+        options:
+          - small
+          - large
+          - full
+      seconds:
+        description: "Benchmark seconds per leaf"
+        required: false
+        default: "5"
+      samples:
+        description: "Benchmark samples per leaf"
+        required: false
+        default: "25"
+
+env:
+  HPC_SYSIMAGE_DIR: "/blue/fairbanksj/gha/sysimages/cellularsheaves"
+  HPC_SHARED_WORK: "/blue/fairbanksj/gha/work/cellularsheaves"
+  HPC_SCRIPT_DIR: ".github/scripts"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-hpc:
+    if: (github.event_name == 'push') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, hpc-gpu]
+    steps:
+      - name: "🗂️ Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "🔄 Resolve Dynamic Library Manifest"
+        run: |
+          source /etc/profile.d/modules.sh
+          module load julia/1.12.6
+          julia --project=. -e 'using Pkg; Pkg.resolve()'
+
+      - name: "🔑 Compute Cache Keys and Paths"
+        id: cache-setup
+        run: |
+          set -x
+          MANIFEST_HASH=$(sha256sum Manifest.toml | awk '{print $1}')
+          SYSIMAGE_PATH="$HPC_SYSIMAGE_DIR/sysimage-${MANIFEST_HASH}.so"
+          DEPOT_PATH="$HPC_SYSIMAGE_DIR/depots/$MANIFEST_HASH"
+          echo "SYSIMAGE_PATH=$SYSIMAGE_PATH" >> $GITHUB_ENV
+          echo "DEPOT_PATH=$DEPOT_PATH" >> $GITHUB_ENV
+
+      - name: "🛠️ System Image Cache Validation"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+          WORK_SHARED="$HPC_SHARED_WORK/$GITHUB_RUN_ID"
+          mkdir -p "$WORK_SHARED"
+          rsync -a --delete "$GITHUB_WORKSPACE/" "$WORK_SHARED/"
+
+          if [ ! -f "$SYSIMAGE_PATH" ] || [ ! -d "$DEPOT_PATH" ]; then
+            echo "❌ Cache Miss: System image or depot missing. Launching pre-compilation routine"
+            TEMP_DEPOT="$HPC_SYSIMAGE_DIR/depots/tmp_$GITHUB_RUN_ID"
+            TEMP_SYSIMAGE="$HPC_SYSIMAGE_DIR/tmp_sysimage_$GITHUB_RUN_ID.so"
+            mkdir -p "$HPC_SYSIMAGE_DIR/depots"
+
+            srun --partition=hpg-dev \
+                 --time=01:00:00 \
+                 --cpus-per-task=8 \
+                 --job-name="gha-sysimg-compile" \
+                 bash -c "
+                     source /etc/profile.d/modules.sh
+                     module load julia/1.12.6
+                     export JULIA_DEPOT_PATH=$TEMP_DEPOT
+                     mkdir -p $TEMP_DEPOT
+                     cd $WORK_SHARED
+                     julia -e 'using Pkg; Pkg.add(\"PackageCompiler\")'
+                     julia --project=. $HPC_SCRIPT_DIR/compile_sysimage.jl '$TEMP_SYSIMAGE'
+                 "
+
+            echo "Promoting build to shared cache..."
+            if [[ -n "$DEPOT_PATH" && "$DEPOT_PATH" =~ ^/blue/fairbanksj/gha/sysimages/cellularsheaves/depots/[a-f0-9]{64}$ ]]; then
+              rm -rf "$DEPOT_PATH"
+            else
+              echo "❌ SAFETY ERROR: Path '$DEPOT_PATH' does not match the strict depot pattern. Aborting to protect /blue/fairbanksj/" && exit 1
+            fi
+            mv "$TEMP_DEPOT" "$DEPOT_PATH"
+            mv "$TEMP_SYSIMAGE" "$SYSIMAGE_PATH"
+          else
+            echo "✅ Cache Hit: Both optimized binary blob and artifact depot found"
+          fi
+
+      - name: "📦 Instantiate Benchmark Environment"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+          WORK_SHARED="$HPC_SHARED_WORK/$GITHUB_RUN_ID"
+
+          srun --partition=hpg-dev \
+               --time=00:30:00 \
+               --cpus-per-task=4 \
+               --job-name="gha-bench-instantiate" \
+               bash -c "
+                   source /etc/profile.d/modules.sh
+                   module load julia/1.12.6
+                   export JULIA_DEPOT_PATH=$DEPOT_PATH:\$SLURM_TMPDIR/.julia
+                   mkdir -p \$SLURM_TMPDIR/.julia
+                   cd $WORK_SHARED
+                   julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+               "
+
+      - name: "🚀 Run Benchmark Shards via Slurm Array"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+          WORK_SHARED="$HPC_SHARED_WORK/$GITHUB_RUN_ID"
+
+          # Use "small" on PRs, "full" on main push, and the user-specified profile on workflow_dispatch
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PROFILE="${{ github.event.inputs.profile }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            PROFILE="small"
+          else
+            PROFILE="full"
+          fi
+
+          RESULT_DIR="$WORK_SHARED/bench/results/slurm/$GITHUB_RUN_ID"
+          SECONDS_PER_LEAF="${{ github.event.inputs.seconds || '5' }}"
+          SAMPLES_PER_LEAF="${{ github.event.inputs.samples || '25' }}"
+
+          if [ "$PROFILE" = "small" ]; then
+            SHARDS=("assembly-small" "solver-small" "extension-small")
+          elif [ "$PROFILE" = "large" ]; then
+            SHARDS=("assembly-large" "solver-large" "extension-large")
+          else
+            SHARDS=("assembly-small" "solver-small" "extension-small" "assembly-large" "solver-large" "extension-large")
+          fi
+          COUNT="${#SHARDS[@]}"
+          EXPECTED_SHARDS="$(IFS=,; echo "${SHARDS[*]}")"
+
+          # Write the per-shard runner script to shared storage so the batch job can source it
+          SHARD_SCRIPT="$WORK_SHARED/.github/bench_shard_runner.sh"
+          mkdir -p "$(dirname "$SHARD_SCRIPT")"
+          cat > "$SHARD_SCRIPT" << 'SHARD_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+source /etc/profile.d/modules.sh
+module load julia/1.12.6
+export JULIA_DEPOT_PATH="$BENCH_DEPOT_PATH:$SLURM_TMPDIR/.julia"
+mkdir -p "$SLURM_TMPDIR/.julia"
+cd "$BENCH_WORK_SHARED"
+IFS=',' read -ra SHARDS_ARR <<< "$BENCH_EXPECTED_SHARDS"
+export BENCHMARK_SHARD="${SHARDS_ARR[$((SLURM_ARRAY_TASK_ID - 1))]}"
+julia -J "$BENCH_SYSIMAGE_PATH" --project=bench bench/run_benchmarks.jl
+SHARD_EOF
+          chmod +x "$SHARD_SCRIPT"
+
+          # Submit the array job and block until all shards complete.
+          # BENCH_* prefixed variables are used to pass context without
+          # exporting GITHUB_ACTIONS, which would confuse the runner detection
+          # logic in BenchmarkShards.jl and cause the large-profile guard to fire.
+          SBATCH_EXPORT="NONE"
+          SBATCH_EXPORT+=",HOME=$HOME,USER=$USER,PATH=$PATH"
+          SBATCH_EXPORT+=",BENCH_DEPOT_PATH=$DEPOT_PATH"
+          SBATCH_EXPORT+=",BENCH_WORK_SHARED=$WORK_SHARED"
+          SBATCH_EXPORT+=",BENCH_SYSIMAGE_PATH=$SYSIMAGE_PATH"
+          SBATCH_EXPORT+=",BENCH_EXPECTED_SHARDS=$EXPECTED_SHARDS"
+          SBATCH_EXPORT+=",BENCHMARK_PROFILE=$PROFILE"
+          SBATCH_EXPORT+=",BENCHMARK_RESULT_DIR=$RESULT_DIR"
+          SBATCH_EXPORT+=",BENCHMARK_SECONDS=$SECONDS_PER_LEAF"
+          SBATCH_EXPORT+=",BENCHMARK_SAMPLES=$SAMPLES_PER_LEAF"
+          SBATCH_EXPORT+=",BENCHMARK_REF=$GITHUB_SHA"
+
+          sbatch --wait \
+            --partition=hpg-dev \
+            --time=02:00:00 \
+            --cpus-per-task=8 \
+            --array="1-${COUNT}" \
+            --job-name="gha-bench-shards" \
+            --export="$SBATCH_EXPORT" \
+            "$SHARD_SCRIPT"
+
+          echo "RESULT_DIR=$RESULT_DIR" >> $GITHUB_ENV
+          echo "EXPECTED_SHARDS=$EXPECTED_SHARDS" >> $GITHUB_ENV
+          echo "PROFILE=$PROFILE" >> $GITHUB_ENV
+
+      - name: "📊 Render Merged Benchmark Report"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+          WORK_SHARED="$HPC_SHARED_WORK/$GITHUB_RUN_ID"
+          REPORT_DIR="$WORK_SHARED/bench/results/slurm/$GITHUB_RUN_ID/report"
+
+          srun --partition=hpg-dev \
+               --time=00:30:00 \
+               --cpus-per-task=4 \
+               --job-name="gha-bench-report" \
+               bash -c "
+                   source /etc/profile.d/modules.sh
+                   module load julia/1.12.6
+                   export JULIA_DEPOT_PATH=$DEPOT_PATH:\$SLURM_TMPDIR/.julia
+                   mkdir -p \$SLURM_TMPDIR/.julia
+                   cd $WORK_SHARED
+                   BENCHMARK_INPUT_DIR='$RESULT_DIR' \
+                   BENCHMARK_OUTPUT_DIR='$REPORT_DIR' \
+                   BENCHMARK_PROFILE='$PROFILE' \
+                   BENCHMARK_EXPECTED_SHARDS='$EXPECTED_SHARDS' \
+                   julia -J '$SYSIMAGE_PATH' --project=bench bench/render_report.jl
+               "
+
+          echo "REPORT_DIR=$REPORT_DIR" >> $GITHUB_ENV
+
+      - name: "📥 Copy Results to Runner Workspace"
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/bench/results/shards"
+          mkdir -p "$GITHUB_WORKSPACE/bench/results/report"
+          rsync -a "$RESULT_DIR/" "$GITHUB_WORKSPACE/bench/results/shards/" || true
+          rsync -a "$REPORT_DIR/" "$GITHUB_WORKSPACE/bench/results/report/" || true
+
+      - name: "📤 Upload Benchmark Artifacts"
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-hpc
+          path: bench/results
+
+      - name: "🧹 Clean Up Staged Workspace"
+        if: always()
+        run: |
+          TARGET_CLEAN="$HPC_SHARED_WORK/$GITHUB_RUN_ID"
+          if [[ -n "$TARGET_CLEAN" && "$TARGET_CLEAN" =~ ^/blue/fairbanksj/gha/work/cellularsheaves/[0-9]+$ ]]; then
+            rm -rf "$TARGET_CLEAN"
+          else
+            echo "❌ SAFETY ERROR: Path '$TARGET_CLEAN' does not match the strict workspace pattern. Aborting to protect /blue/fairbanksj/" && exit 1
+          fi
