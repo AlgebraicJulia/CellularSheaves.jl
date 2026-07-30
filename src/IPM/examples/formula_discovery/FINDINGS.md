@@ -121,15 +121,64 @@ tight (e.g. `mg` ∈ [−0.525, −0.470]). The last two terms are droppable (�
 
 Decision rule (beat champion at ≤12 terms, tiebreak to fewer): **met** — 7-term formula 1.204 < champion
 1.320. **Gap to forest: 0.095 (all) / 0.135 (ex-X04)** — within the 0.15 freeze band. That residual gap is
-the honest **price of legibility**: the forest mines the diffuse `cbase`/`tolratio`/`r0_c` signal across
-hundreds of rules; no compact term captures it (confirmed by the 8-feature wash). **Phase 1 frozen.**
+the honest **price of legibility** — but note it is NOT explained by the extra features (forest 5≈8): the
+forest mines diffuse structure **within the same five** (hundreds of small threshold rules) that no compact
+term reproduces. The 8-feature wash confirms adding features won't close it. **Phase 1 frozen.**
 
 **Artifacts:** `canonical_folds.json` · `ebm_ckpt/ipm_floor_forest5.pkl` (THE reference, provenance
 inline) · `phase1_frozen_formula.json` (formula + audits) · scripts `canonical_folds.py`,
 `make_canonical_forest.py`, `phase1_rfe_canonical.py`, `phase1_L0.py`/`phase1_L0v2.py` (single-support,
 pre-canonical — superseded), `phase1_nested.py`, `phase1_L0_eight.py`, `phase1_freeze_probe.py`,
 `phase1_freeze.py`, `rfe_pure_ipm.py` (leaky, superseded). Deprecated forests → `ebm_ckpt/*.DEPRECATED`.
-**Next: Phase 2 (HSD/floor by transfer ladder).**
+
+## PHASE 1b — IPM / ceiling sensor (`d_hi`)  ✅ FROZEN
+
+Same recipe (canonical RFE → forest ref → nested L0 → freeze+audits), target `d_hi`. **The ceiling is
+different physics from the floor and it is COMPACTIFIABLE — the formula BEATS its forest** (mirror of the
+floor, where the formula loses). This confirms the old Stage-A/D split: ceiling = smooth additive function;
+floor = smooth mains + diffuse residual.
+
+**RFE (`phase1_rfe_ceiling.py`):** noisier / greedy-unstable curve (ceiling harder to pin), min at n=4 =
+**1.080**: **`{Ldiag_min, c_res0_dual, force_tol, cpass}`** — the **λ_min-shrink ceiling** exactly as
+Stage-A predicted (conditioning driver + residual + tolerance + a corrector counter). Almost disjoint from
+the floor's five (only `c_res0_dual` shared); **α drops out** (its effect flows through `Ldiag_min`). For
+the ceiling, *more* features hurt: forest(4) 1.080 < forest(6) 1.130 — the 4 are the sweet spot.
+
+**Nested L0 (`phase1_L0_ceiling.py`, 6-feat basis {Ld,cd,ft,pd,la}+cpass, canonical folds):** frontier
+1.044/1.011/0.984 at 8/10/12; stability better than the floor (4 terms at 5/5 vs 2). Frozen stable-core
+(≥3/5) then trimmed by drop-test (3 dead terms removed) → **8-term formula**:
+
+```
+d_hi ≈ −0.917  (features centered at medians: Ld −4.40, ft −4.95, pd −7.38, la 9.0)
+       +0.870·relu(ft+9.86)     tolerance hinge (dominant, drop-Δ +0.43)
+       +0.712·Ld                Ldiag_min = λ_min(F) proxy — conditioning driver
+       −0.432·pd                dual residual   (pd = log p_res0_dual, centered)
+       −0.375·relu(pd+10.21)    dual-residual hinge
+       −0.068·Ld·la             Ldiag_min × α = the α-window "ceilmargin" as a real interaction
+       +0.052·Ld·ft  +0.047·ft·la  +0.026·ft·pd
+```
+**Canonical CV MAE: all 0.933 / ex-X04 0.845** — **beats forest(4) 1.080 by ~0.15.** ft = log force_tol,
+Ld = log Ldiag_min, pd = log p_res0_dual, la = log α (all centered at medians).
+
+**Audits:** in-window **0.713** (strong sensor), below 0.960, above 1.188; α-bins U-shaped (0.79 mid →
+1.23 high-α, worst where the ceiling descends). **Per-family the hard cases differ from the floor:** `07`
+= 3.56 (a real hole), `e14` 2.03, `X03` 1.61 — **X04 is only 1.43 (a floor-wrecker, not a ceiling one).**
+Drop-test: `relu(ft+9.86)` (+0.43) ≫ `Ld`/`relu(pd+10.21)` (+0.09) > `pd`/interactions (+0.02–0.04).
+
+**Physics:** the ceiling is a **roundoff crossing** — dominant `relu(force_tol+9.86)` (tolerance) against
+`Ldiag_min` (conditioning) and the dual residual `pd`, with `Ld·α` validating the α-window ceiling theory.
+
+**Ceiling artifacts:** `phase1_frozen_ceiling.json` · scripts `phase1_rfe_ceiling.py`,
+`phase1_L0_ceiling.py`, `phase1_freeze_ceiling.py`.
+
+**Phase-1 summary (IPM, canonical folds):**
+
+| sensor | frozen formula (all / ex-X04) | forest ref | formula vs forest | physics |
+|---|---|---|---|---|
+| floor `d_lo`   | 1.204 / 0.944 | 1.109 | −0.10 (loses; diffuse) | α-geometry + residual-vs-tol margin |
+| ceiling `d_hi` | **0.933 / 0.845** | 1.080 | **+0.15 (wins; compact)** | conditioning (Ldiag_min) + tol + dual residual |
+
+**Next: Phase 2 (HSD floor + ceiling by transfer ladder).**
 
 ---
 
