@@ -130,8 +130,6 @@ jobs:
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             PROFILE="${{ github.event.inputs.profile }}"
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            PROFILE="small"
           else
             PROFILE="full"
           fi
