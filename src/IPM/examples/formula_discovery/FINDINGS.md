@@ -56,10 +56,18 @@ buy a better *formula*. **They do not** — the frozen stable-core is a **wash**
 | off-the-dome champion (hand-built) | 7 | 1.320 | 1.048 |
 | forest(5) reference | — | 1.109 | 0.809 |
 
-The extra three are **forest-essential but formula-diffuse**: `cbase` contributes **0.003** (one 23%-active
-triple), `tolratio` appears only in weather triples, `r0_c` is a ≤0.013 touch-up. Per-fold they *help*
-X09 extrapolation (1.23→0.99) but *hurt* X04 (2.6→3.6–4.1) — net wash. **8 features are no better than 5
-for the compact formula**, so we freeze the simpler, more parsimonious five.
+The extra three are **near-redundant with the five, on BOTH models** — not merely formula-diffuse. Direct
+measurement: **forest(5) = 1.109 vs forest(8) = 1.108** (the RFE's n=8 row is the forest on exactly the
+five + `r0_c`/`tolratio`/`cbase`) — Δ 0.001, the three add nothing to the forest. And in the formula they
+only reach microscopic terms (`cbase` → one 23%-active triple, coef **0.003**; `tolratio` → weather
+triples; `r0_c` → a ≤0.013 touch-up). So they fail on both fronts: no forest-usable signal (5≈8) and no
+formula-usable signal (5-core 1.204 ≈ 8-core 1.211). This is stronger than the classic "forest-essential
+but formula-diffuse" case (where a feature helps the forest via interactions a linear form can't reach —
+`σ²min` earlier was arguably that); these three don't even earn their keep in the forest. Per-fold they
+*help* X09 extrapolation (1.23→0.99) but *hurt* X04 (2.6→3.6–4.1) — net wash. **8 features are no better
+than 5 for either model**, so we freeze the simpler, more parsimonious five. (The RFE's "knee at 8" was a
+greedy-elimination artifact — it dropped `hdiag_max` too early and propped the curve back up with these
+near-equivalent substitutes; there is a broad 5–8 feature plateau at ~1.11.)
 
 ## How the formula is fit — L0 + the leakage correction
 
