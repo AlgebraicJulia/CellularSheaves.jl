@@ -25,11 +25,11 @@ def job(tag, target, fold):
     y = D[target].to_numpy(float)
     t0 = time.time()
     if fold is None:
-        m = ExplainableBoostingRegressor(interactions=0, random_state=0).fit(X_ALL, y)
+        m = ExplainableBoostingRegressor(interactions=0, outer_bags=4, max_rounds=3000, random_state=0).fit(X_ALL, y)
         rec = {"tag": tag, "target": target, "fold": None, "model": m, "secs": time.time()-t0}
     else:
         tr, te = folds[fold]
-        m = ExplainableBoostingRegressor(interactions=0, random_state=0).fit(X_ALL[tr], y[tr])
+        m = ExplainableBoostingRegressor(interactions=0, outer_bags=4, max_rounds=3000, random_state=0).fit(X_ALL[tr], y[tr])
         rec = {"tag": tag, "target": target, "fold": fold, "model": m,
                "te": te, "pred": m.predict(X_ALL[te]), "secs": time.time()-t0}
     pickle.dump(rec, open(ckf, "wb"))

@@ -60,3 +60,24 @@ staircase; ceiling = residual + **`Ldiag_min`** + `force_tol/μ`.
   `Ldiag_min`.
 
 _(EBM shape functions appended below when the fit completes.)_
+
+**EBM (full 76k, all 96 problems, weak settings interactions=0/outer_bags=4/max_rounds=3000):**
+grouped-CV MAE **d_lo=0.729, d_hi=0.731** — additive-model level (between depth-1 stumps 1.07 and
+depth-4 forest 0.61; ~0.11 interaction gap). Far better than diversity-starved subsamples (6 problems
+→1.42; 14→1.09), confirming the bottleneck was **problem diversity, not rows**.
+
+_Timing lesson (this cost a detour): EBM's `max_rounds` default=50000 causes super-linear blowup
+(8s@2k→60s@4k); the fix is `max_rounds≈3000` → linear ~0.5s/1k, full 76k = **37s/fit**. `outer_bags`
+(14→4) is a flat ~3.5× on top. `interactions` was 0 throughout — never the issue. Fit on numpy array ⇒
+EBM has no feature names; index shapes by CORE position, not `term_names_`._
+
+**Shape functions (x=feature value, y=±decades contributed):**
+- `d_lo`: `alpha` linear ramp (+0.54/dec); `force_tol` ramp↑; `r0` ramp↓; **`pbase` saturating
+  staircase** (0→−2.4, flat past ~17) — spec's counter staircase confirmed.
+- `d_hi`: `alpha`↑; `force_tol` ramp↑; **`Ldiag_min` ramp↑** (−0.65 near-singular → +2.07 well-cond, the
+  λ_min-shrink ceiling as a shape); `hdiag_min`↑; **`p_res0_dual` ramp↓** (+2.4→−1.7, the dual-side
+  residual crossing — what v3's dual split was built for).
+
+**Physical reading:** both sensors = α-geometry + tolerance ramp + residual ramp; **ceiling adds
+conditioning (`Ldiag_min`/`hdiag_min`) + dual residual**, floor adds the **pbase staircase**. Knots for
+Stage C: force_tol≈−5, Ldiag_min≈−2, pbase saturates≈17. Models pickled in `ebm_ckpt/full_{d_lo,d_hi}.pkl`.
