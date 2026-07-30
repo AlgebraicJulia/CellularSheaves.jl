@@ -1,0 +1,4 @@
+Deprecated forest scaffolding. THE canonical IPM-floor reference is ipm_floor_forest5.pkl
+scored on canonical_folds.json. Do not adopt the *.DEPRECATED pickles:
+  - forest_d_lo/hi.pkl: 16-feature MIXED-data forests trained container-side (superseded)
+  - forest5_ipm_d_lo.pkl: earlier 5-feature forest on non-canonical (31-family) folds (superseded)
