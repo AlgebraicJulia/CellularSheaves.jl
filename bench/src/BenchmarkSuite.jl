@@ -62,7 +62,6 @@ function build_suite(sizes::Vector{Int}=ALL_SIZES)
         for n in sizes
             s = sheaves[(family, n)]
             suite["laplacian"]["matrix"][family]["n$n"] = @benchmarkable sparse(sheaf_laplacian_matrix($s))
-            suite["laplacian"]["matrix_direct"][family]["n$n"] = @benchmarkable sheaf_laplacian_matrix_direct($s)
         end
     end
 
