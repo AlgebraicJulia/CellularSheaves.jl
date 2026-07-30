@@ -178,7 +178,64 @@ Drop-test: `relu(ft+9.86)` (+0.43) ≫ `Ld`/`relu(pd+10.21)` (+0.09) > `pd`/inte
 | floor `d_lo`   | 1.204 / 0.944 | 1.109 | −0.10 (loses; diffuse) | α-geometry + residual-vs-tol margin |
 | ceiling `d_hi` | **0.933 / 0.845** | 1.080 | **+0.15 (wins; compact)** | conditioning (Ldiag_min) + tol + dual residual |
 
-**Next: Phase 2 (HSD floor + ceiling by transfer ladder).**
+# PHASE 2 — HSD sensors (transfer ladder → free redo)  ✅
+
+Same canonical folds (family→fold map is solver-agnostic), applied to the 36,445 HSD rows. First the
+transfer ladder (`phase2_transfer.py`), then the free HSD RFE+L0 where it was warranted
+(`phase2_rfe_hsd_*.py`, `phase2_L0_hsd.py`).
+
+**Transfer ladder** (IPM formula → HSD; MAE on canonical folds):
+
+| rung | FLOOR d_lo | CEILING d_hi |
+|---|---|---|
+| (i) IPM formula **verbatim** | 1.574 | **1.106** |
+| (ii) coefficients refit | 1.617 | 1.351 |
+| (iii) coefs + knots refit | 1.568 | 1.299 |
+| HSD forest ref (achievable) | 0.703 | 0.963 |
+
+Two ladder findings: **(a) coef-refit (ii) is *worse* than verbatim (i) for both** — the brief's "differences
+are offsets" hypothesis is **refuted**; the IPM coefficients (fit on 40k rows) are a better prior than
+HSD-family-CV refit (which overfits training families). **(b) The floor's (iii)→forest gap is huge (1.57→
+0.70), the ceiling's is small (1.11→0.96)** — floor is solver-specific, ceiling mostly shared. So the free
+rung (iv) was run for both.
+
+**Free redo — the two solvers split cleanly:**
+
+**HSD FLOOR = solver-specific, and SIMPLER.** RFE essential set = `{alpha, force_tol, p_res0_dual, margin}`
+(min n=10, 0.604) — shares only **α + margin** with the IPM floor; drops `c_res0_dual`/`hdiag_max`/
+`bar_hdiag_med`, adds `force_tol` + the **primal** residual `p_res0_dual`. Native nested-L0 frozen formula:
+```
+d_lo(HSD) ≈ +5.29 + 1.00·(logα−9) + 0.47·relu(log force_tol + 6.42)   (+ negligible tail)
+```
+**Canonical CV all 0.767 / ex-X04 0.681** (forest 0.668) — vs IPM-verbatim-transfer 1.574: **the free redo
+halved the error.** The woodbury floor is essentially just **α + a tolerance hinge** — a different, simpler
+law than the IPM floor's α-geometry+margin+conditioning. Ship the native formula. (`phase2_frozen_hsd_floor.json`)
+
+**HSD CEILING = shared physics, no native gain, DIFFUSE.** RFE essential = `{Ldiag_min, alpha, c_res0_dual,
+force_tol, r0_p, ceilmargin, ppass}` — shares the whole λ_min core with IPM. But the native L0 finds **no
+stable compact formula**: the stable-core (≥3/5) is weather-heavy triples and scores **1.466**, *worse* than
+the IPM ceiling formula transferred **verbatim (1.106)**. Best compact option = **transfer the IPM ceiling
+formula as-is.** HSD ceiling forest 0.825 shows a ~0.28 diffuse gap — so unlike the IPM ceiling (which
+*compactified*, formula 0.933 < forest 1.080), **the HSD ceiling is diffuse** (formula ~1.1 > forest 0.825),
+more like the IPM *floor*. Ship IPM-verbatim. (`phase2_frozen_hsd_ceiling.json` records the verdict.)
+
+**Phase-2 summary (per solver × edge, canonical folds):**
+
+| cell | best legible formula | MAE (all) | forest | verdict |
+|---|---|---|---|---|
+| IPM floor    | native 7-term | 1.204 | 1.109 | diffuse (−0.10) |
+| IPM ceiling  | native 8-term | 0.933 | 1.080 | **compact (+0.15)** |
+| HSD floor    | **native 2-term** (α + force_tol) | **0.767** | 0.668 | solver-specific, simple |
+| HSD ceiling  | **IPM formula verbatim** | 1.106 | 0.825 | shared-but-diffuse |
+
+**Headline:** the **floor is solver-specific** (IPM and HSD floors are different laws — different features,
+HSD's far simpler), while the **ceiling is shared physics** (IPM formula transfers) but **compactifiability
+flips by solver** (IPM ceiling compact, HSD ceiling diffuse). The "diffuse vs compact" axis and the
+"solver-specific vs shared" axis are independent, and all four combinations appear across the 2×2.
+
+**Phase-2 artifacts:** `phase2_transfer.py` + `phase2_ladder.json`; `phase2_rfe_hsd_{floor,ceiling}.py` +
+`.json`; `phase2_L0_hsd.py`; `phase2_frozen_hsd_floor.json` (native formula), `phase2_frozen_hsd_ceiling.json`
+(verdict: use IPM-verbatim).
 
 ---
 

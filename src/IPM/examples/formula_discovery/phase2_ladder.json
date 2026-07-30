@@ -1,0 +1,18 @@
+{
+ "floor": {
+  "i_verbatim": 1.574,
+  "ii_coef": 1.617,
+  "iii_knot": 1.568,
+  "forest_ref": 0.703,
+  "hsd_cd_knot": 4.86,
+  "ipm_cd_knot": -10.52
+ },
+ "ceiling": {
+  "i_verbatim": 1.106,
+  "ii_coef": 1.351,
+  "iii_knot": 1.299,
+  "forest_ref": 0.963,
+  "hsd_ft_knot": -9.04,
+  "hsd_pd_knot": -3.42
+ }
+}
