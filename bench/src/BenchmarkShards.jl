@@ -50,10 +50,10 @@ function available_shards(profile::AbstractString)
 end
 
 function runner_kind_from_env()
-    if haskey(ENV, "GITHUB_ACTIONS")
-        return "github-actions"
-    elseif haskey(ENV, "SLURM_JOB_ID")
+    if haskey(ENV, "SLURM_JOB_ID")
         return "slurm"
+    elseif haskey(ENV, "GITHUB_ACTIONS")
+        return "github-actions"
     end
     "local"
 end
