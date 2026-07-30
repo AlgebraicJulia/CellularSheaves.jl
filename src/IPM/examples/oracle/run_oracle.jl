@@ -28,6 +28,8 @@ function buildprob(key)
     key == "X04b" && return build_degenerate_twin()                                  # benign (independent rows)
     key == "X06"  && return build_corner_soc(; corner_r = dial === nothing ? 0.1 : dial)  # SOC corner
     key == "X06b" && return build_corner_soc_twin()                                  # benign (all interior)
+    key == "X08"  && return build_nonstrict(; degen_frac = dial === nothing ? 0.5 : dial) # non-strict comp
+    key == "X08b" && return build_nonstrict_twin()                                   # benign (disjoint patterns)
     key == "06"  && return gp(build_sqrtloss(sqrtloss_instance(; P=12)))
     key == "07"  && return gp(build_poisson_tv(poisson_instance(; N=128, Tsz=16, m=16, k=-1, K=6, R=12, q=3, seed=3)))
     key == "13"  && return gp(build_landing(landing_instance(), 60.0, 20))
