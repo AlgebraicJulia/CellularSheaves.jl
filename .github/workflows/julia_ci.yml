@@ -1,4 +1,4 @@
-name: Julia CI/CD
+qname: Julia CI/CD
 
 on:
   schedule:
@@ -59,7 +59,7 @@ jobs:
       - name: "🔄 Resolve Dynamic Library Manifest"
         run: |
           source /etc/profile.d/modules.sh
-          module load julia
+          module load julia/1.12.6
           julia --project=. -e 'using Pkg; Pkg.resolve()'
 
       - name: "🔑 Compute Cache Keys and Paths"
@@ -92,7 +92,7 @@ jobs:
                  --job-name="gha-sysimg-compile" \
                  bash -c "
                      source /etc/profile.d/modules.sh
-                     module load julia
+                     module load julia/1.12.6
                      export JULIA_DEPOT_PATH=$TEMP_DEPOT
                      mkdir -p $TEMP_DEPOT
                      cd $WORK_SHARED
@@ -124,7 +124,7 @@ jobs:
                --job-name="gha-cluster-test" \
                bash -c "set -e;
                   source /etc/profile.d/modules.sh
-                  module load julia
+                  module load julia/1.12.6
                   export JULIA_DEPOT_PATH=$DEPOT_PATH:\$SLURM_TMPDIR/.julia
                   mkdir -p \$SLURM_TMPDIR/.julia
                   cd $WORK_SHARED
