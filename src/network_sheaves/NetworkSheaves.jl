@@ -1,10 +1,11 @@
 module NetworkSheaves
 
 using Reexport
+using ..BlockSparseArrays
 
-include("BlockSparseArrays.jl")
 include("SheafInterface.jl")
 include("EuclideanSheaves.jl")
+include("DistributedSolve.jl")
 include("PotentialSheaves.jl")
 include("ADT.jl")
 include("Parser.jl")
@@ -15,9 +16,10 @@ include("Pushouts.jl")
 include("TrajectorySheaf.jl")
 include("asynch/AsynchSheaves.jl")
 
-@reexport using .BlockSparseArrays
+@reexport using ..BlockSparseArrays
 @reexport using .SheafInterface
 @reexport using .EuclideanSheaves
+@reexport using .DistributedSolve
 @reexport using .PotentialSheaves
 @reexport using .CellularSheafTerm
 @reexport using .CellularSheafParser: @cellular_sheaf

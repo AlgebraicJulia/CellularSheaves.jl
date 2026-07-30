@@ -11,7 +11,10 @@ function benchmark_ids(operation::String, sizes::Vector{Int})
     if operation == "coboundary_map"
         return [join((operation, family, "n$n"), "/") for family in GRAPH_FAMILIES for n in sizes]
     elseif operation == "laplacian"
-        return [join((operation, "matrix_direct", family, "n$n"), "/") for family in GRAPH_FAMILIES for n in sizes]
+        return vcat(
+            [join((operation, "matrix", family, "n$n"), "/") for family in GRAPH_FAMILIES for n in sizes],
+            [join((operation, "matrix_direct", family, "n$n"), "/") for family in GRAPH_FAMILIES for n in sizes],
+        )
     elseif operation == "harmonic_extension"
         return [join((operation, family, "n$n"), "/") for family in GRAPH_FAMILIES for n in sizes]
     elseif operation == "nearest_global_section"

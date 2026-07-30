@@ -4,12 +4,17 @@ using Test
   include("aqua.jl")
 end
 
+@testset "Block Sparse Arrays" begin
+  include("block_sparse_arrays.jl")
+end
+
 @testset "Network Sheaves" begin
   include("network_sheaves/Asynch.jl")
   include("network_sheaves/ADT.jl")
   include("network_sheaves/Parser.jl")
   include("network_sheaves/SheafLaplacian.jl")
   include("network_sheaves/HarmonicExtension.jl")
+  include("network_sheaves/DistributedSolve.jl")
   include("network_sheaves/Morphisms.jl")
   include("network_sheaves/GraphHomomorphisms.jl")
   include("network_sheaves/Morphisms.jl")

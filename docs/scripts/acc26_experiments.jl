@@ -37,7 +37,7 @@ end
 function generate_convergence_trajectories(file_path::String, s::EuclideanSheaf)
     ensure_dir(file_path)
     n_agents = length(vertex_stalks(s))
-    L = sheaf_laplacian_matrix_direct(s)
+    L = sparse(sheaf_laplacian_matrix(s))
     K = opnorm(Array(L), 2)
     γ = 1 / K
     x0 = rand(5.0:0.001:15.0, 4 * n_agents)
@@ -90,7 +90,7 @@ function generate_stepsize_trajectories(file_path::String)
     n_agents = 20
     g = random_regular_graph(n_agents, 4)
     s = sheaf_from_graph(g, 4, dim -> random_semi_orthogonal_matrix(2, dim))
-    L = sheaf_laplacian_matrix_direct(s)
+    L = sparse(sheaf_laplacian_matrix(s))
     K = opnorm(Array(L), 2)
     γ1 = 1 / K
     B = 50
@@ -155,7 +155,7 @@ function run_op_experiment(file_path::String)
     n_agents = 20
     g = random_regular_graph(n_agents, 4)
     s = sheaf_from_graph(g, 4, dim -> random_semi_orthogonal_matrix(1, dim))
-    L = sheaf_laplacian_matrix_direct(s)
+    L = sparse(sheaf_laplacian_matrix(s))
     K = opnorm(Array(L), 2)
     γ = 1 / K
     T = Int(1e5)

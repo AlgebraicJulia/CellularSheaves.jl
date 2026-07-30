@@ -54,11 +54,14 @@ function build_suite(sizes::Vector{Int}=ALL_SIZES)
     end
 
     suite["laplacian"] = BenchmarkGroup()
+    suite["laplacian"]["matrix"] = BenchmarkGroup()
     suite["laplacian"]["matrix_direct"] = BenchmarkGroup()
     for family in GRAPH_FAMILIES
+        suite["laplacian"]["matrix"][family] = BenchmarkGroup()
         suite["laplacian"]["matrix_direct"][family] = BenchmarkGroup()
         for n in sizes
             s = sheaves[(family, n)]
+            suite["laplacian"]["matrix"][family]["n$n"] = @benchmarkable sparse(sheaf_laplacian_matrix($s))
             suite["laplacian"]["matrix_direct"][family]["n$n"] = @benchmarkable sheaf_laplacian_matrix_direct($s)
         end
     end

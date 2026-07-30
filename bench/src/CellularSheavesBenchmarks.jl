@@ -11,6 +11,7 @@ using PkgBenchmark
 using Printf
 using Random
 using Sockets
+using SparseArrays
 
 include("BenchmarkSuite.jl")
 include("BenchmarkShards.jl")
