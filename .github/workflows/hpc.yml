@@ -147,33 +147,62 @@ jobs:
           fi
           COUNT="${#SHARDS[@]}"
           EXPECTED_SHARDS="$(IFS=,; echo "${SHARDS[*]}")"
+          SHARD_TASK_SCRIPT="$WORK_SHARED/.github/scripts/bench_shard_task.sh"
+          LOG_DIR="$RESULT_DIR/slurm-logs"
+          mkdir -p "$(dirname "$SHARD_TASK_SCRIPT")"
+          mkdir -p "$LOG_DIR"
+
+          {
+            printf '%s\n' '#!/usr/bin/env bash'
+            printf '%s\n' 'set -euo pipefail'
+            printf '%s\n' 'source /etc/profile.d/modules.sh'
+            printf '%s\n' 'module load julia/1.12.6'
+            printf '%s\n' 'export JULIA_DEPOT_PATH="${DEPOT_PATH}:${SLURM_TMPDIR}/.julia"'
+            printf '%s\n' 'mkdir -p "${SLURM_TMPDIR}/.julia"'
+            printf '%s\n' 'cd "$WORK_SHARED"'
+            printf '%s\n' 'IFS='\'','\'' read -ra SHARDS_ARR <<< "${BENCH_EXPECTED_SHARDS}"'
+            printf '%s\n' 'export BENCHMARK_SHARD="${SHARDS_ARR[$((SLURM_ARRAY_TASK_ID - 1))]}"'
+            printf '%s\n' 'julia -J "$SYSIMAGE_PATH" --project=bench bench/run_benchmarks.jl'
+          } > "$SHARD_TASK_SCRIPT"
+          chmod +x "$SHARD_TASK_SCRIPT"
 
           # Submit the array job and block until all shards complete.
           # SLURM_JOB_ID is set inside each task, so runner_kind_from_env() in
           # BenchmarkShards.jl returns "slurm" even though GITHUB_ACTIONS is
           # also present in the inherited environment.
-          sbatch --wait \
+          set +e
+          ARRAY_JOB_ID="$(sbatch --parsable --wait \
             --partition=hpg-dev \
             --time=02:00:00 \
             --cpus-per-task=8 \
             --array="1-${COUNT}" \
             --job-name="gha-bench-shards" \
+            --output="$LOG_DIR/%A_%a.out" \
+            --error="$LOG_DIR/%A_%a.err" \
             --export=ALL,BENCHMARK_PROFILE="$PROFILE",BENCHMARK_RESULT_DIR="$RESULT_DIR",BENCHMARK_REF="$GITHUB_SHA",BENCHMARK_SECONDS="${{ github.event.inputs.seconds || '5' }}",BENCHMARK_SAMPLES="${{ github.event.inputs.samples || '25' }}",BENCH_EXPECTED_SHARDS="$EXPECTED_SHARDS" \
-            --wrap="
-                set -euo pipefail
-                source /etc/profile.d/modules.sh
-                module load julia/1.12.6
-                export JULIA_DEPOT_PATH=\"$DEPOT_PATH:\$SLURM_TMPDIR/.julia\"
-                mkdir -p \"\$SLURM_TMPDIR/.julia\"
-                cd $WORK_SHARED
-                IFS=',' read -ra SHARDS_ARR <<< \"\$BENCH_EXPECTED_SHARDS\"
-                export BENCHMARK_SHARD=\"\${SHARDS_ARR[\$((SLURM_ARRAY_TASK_ID - 1))]}\"
-                julia -J '$SYSIMAGE_PATH' --project=bench bench/run_benchmarks.jl
-            "
+            "$SHARD_TASK_SCRIPT")"
+          ARRAY_STATUS=$?
+          set -e
+
+          if [ "$ARRAY_STATUS" -ne 0 ]; then
+            echo "❌ Slurm benchmark array failed (exit $ARRAY_STATUS, job ${ARRAY_JOB_ID:-unknown})."
+            BASE_ARRAY_JOB_ID="${ARRAY_JOB_ID%%;*}"
+            if command -v sacct >/dev/null 2>&1 && [ -n "$BASE_ARRAY_JOB_ID" ]; then
+              echo "---- sacct status ----"
+              sacct -j "$BASE_ARRAY_JOB_ID" --format=JobID,JobName,State,ExitCode,Elapsed -P || true
+            fi
+            for f in "$LOG_DIR"/*.out "$LOG_DIR"/*.err; do
+              [ -e "$f" ] || continue
+              echo "===== tail: $f ====="
+              tail -n 200 "$f" || true
+            done
+            exit "$ARRAY_STATUS"
+          fi
 
           echo "RESULT_DIR=$RESULT_DIR" >> $GITHUB_ENV
           echo "EXPECTED_SHARDS=$EXPECTED_SHARDS" >> $GITHUB_ENV
           echo "PROFILE=$PROFILE" >> $GITHUB_ENV
+          echo "SLURM_ARRAY_JOB_ID=$ARRAY_JOB_ID" >> $GITHUB_ENV
 
       - name: "📊 Render Merged Benchmark Report"
         run: |
