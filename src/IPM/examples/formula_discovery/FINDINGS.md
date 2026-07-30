@@ -81,3 +81,25 @@ EBM has no feature names; index shapes by CORE position, not `term_names_`._
 **Physical reading:** both sensors = α-geometry + tolerance ramp + residual ramp; **ceiling adds
 conditioning (`Ldiag_min`/`hdiag_min`) + dual residual**, floor adds the **pbase staircase**. Knots for
 Stage C: force_tol≈−5, Ldiag_min≈−2, pbase saturates≈17. Models pickled in `ebm_ckpt/full_{d_lo,d_hi}.pkl`.
+
+---
+
+## Stage C — sparse SINDy-style formula  ✅
+
+Library: survivors + physics composites (margin, logN, κ=Ldmax−Ldmin, ceilmargin=Ldmin+α) + hinges at
+quantile AND EBM-indicated knots (force_tol≈−5, Ldiag_min≈−2) + counter indicators `[c≥k]`. Lasso *path*
+→ pick α for target sparsity → OLS-refit → grouped-CV. _(Bug fixed: LassoCV given a one-shot generator cv
+underregularized to 49 terms/MAE 2.05; switched to path + explicit sparsity.)_
+
+**8-term formulas (grouped-CV MAE d_lo=1.17, d_hi=1.02):**
+- `d_lo ≈ −0.29 + 0.70·logα − 0.94·[pbase≥3] − 0.36·[pbase≥2] + 0.27·(force_tol+4.6)₊ + 0.11·p_res0_dual − …`
+  → α-geometry + **saturating pbase staircase** + tolerance hinge + residual. The floor law, as written.
+- `d_hi ≈ +5.11 − 1.02·stall − 0.61·logα + 0.60·(Ldiag_min+4.4)₊ + 0.33·(force_tol+7.5)₊ + 0.26·(hdiag_min+7.1)₊ − 0.21·p_res0_dual + …`
+  → **conditioning hinges (Ldiag_min, hdiag_min) + dual residual + tolerance** = the λ_min-shrink ceiling,
+  exactly the EBM/Stage-A ingredients.
+
+**Sparsity/accuracy frontier:** `d_lo` improves monotonically to ~0.92 @29 terms (≈ linear baseline).
+**`d_hi` caps at ~0.99 (@12 terms) then OVERFITS** (collinear conditioning-hinges destabilize OLS: 1.79
+@20). Both plateau **above** EBM (0.73) / forest (0.62): the additive main-effect form gets the physics
+right but can't form **interactions** — which the ladder proved the ceiling needs (linear 2.85 → forest
+0.62). → Stage D (PySR, with ×/÷) is the route to close the gap: discover `residual/tolerance`, `α·λ_min`.

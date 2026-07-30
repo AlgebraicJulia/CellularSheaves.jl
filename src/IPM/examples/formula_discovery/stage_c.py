@@ -4,7 +4,7 @@ Term library: curated survivors + physics composites (margin, logN, tol-ratio, c
 hinges at quantile knots + counter indicators/ramps + a few pairwise products. Lasso (grouped-CV
 alpha) -> OLS refit on the selected support -> grouped-CV MAE. Prints the readable formula."""
 import os, numpy as np, pandas as pd
-from sklearn.linear_model import LassoCV, LinearRegression
+from sklearn.linear_model import lasso_path, LinearRegression
 from sklearn.model_selection import GroupKFold
 from sklearn.metrics import mean_absolute_error
 
@@ -35,32 +35,39 @@ def library(df):
         x = T[c] if c in T else L(c)
         for q in (0.25,0.5,0.75):
             k = np.quantile(x, q); T[f"({c}-{k:.1f})+"] = np.maximum(x-k,0.0)
-    # counter indicators + ramps
+    # hinges at EBM-indicated bends (Stage B shapes)
+    EBMK = {"L_force_tol":[-5.0], "L_Ldiag_min":[-2.0], "L_hdiag_min":[-2.0], "L_p_res0_dual":[-5.0]}
+    for c,ks in EBMK.items():
+        x = T[c] if c in T else L(c)
+        for k in ks: T[f"({c}-{k:.1f})+ebm"] = np.maximum(x-k,0.0)
+    # counter indicators + ramps (extended to cover the pbase staircase saturating ~17)
     for c in ["pbase","cbase","ncraig"]:
         x = df[c].fillna(0).to_numpy(float)
-        for kk in (2,3,4,5): T[f"[{c}>={kk}]"] = (x>=kk).astype(float)
+        for kk in (2,3,5,8,12,17): T[f"[{c}>={kk}]"] = (x>=kk).astype(float)
         T[f"({c}-2)+"] = np.maximum(x-2,0.0)
     return pd.DataFrame(T)
 
-def fit(target):
+def cvmae(Xr, y):
+    pred = np.full(len(y), np.nan)
+    for tr,te in gkf.split(Xr,y,groups):
+        pred[te] = LinearRegression().fit(Xr[tr],y[tr]).predict(Xr[te])
+    z = {zz: mean_absolute_error(y[D.zone==zz], pred[D.zone==zz]) for zz in ("below","in","above")}
+    return mean_absolute_error(y,pred), z
+
+def fit(target, nterms=8):
     Xdf = library(D); names = list(Xdf.columns)
     X = Xdf.to_numpy(float); y = D[target].to_numpy(float)
     Xs = (X - X.mean(0)) / (X.std(0)+1e-12)
-    # Lasso with grouped CV to choose alpha
-    las = LassoCV(cv=GroupKFold(5).split(Xs,y,groups), n_alphas=60, max_iter=20000, random_state=0)
-    las.fit(Xs, y)
-    supp = [i for i in range(len(names)) if abs(las.coef_[i])>1e-8]
-    # OLS refit on selected support (raw, un-standardized) + grouped-CV MAE
+    # walk the lasso path; pick the alpha whose support size is closest to nterms
+    alphas, coefs, _ = lasso_path(Xs, y, n_alphas=100, max_iter=20000)
+    supps = (np.abs(coefs) > 1e-8).sum(0)                    # support size per alpha
+    j = int(np.argmin(np.abs(supps - nterms)))
+    supp = [i for i in range(len(names)) if abs(coefs[i,j]) > 1e-8]
     Xr = X[:, supp]
-    pred = np.full(len(y), np.nan)
-    for tr,te in gkf.split(Xr,y,groups):
-        m=LinearRegression().fit(Xr[tr],y[tr]); pred[te]=m.predict(Xr[te])
-    mae = mean_absolute_error(y,pred)
-    zmae={z:mean_absolute_error(y[D.zone==z],pred[D.zone==z]) for z in ("below","in","above")}
-    # full-fit coefficients for display
-    mf=LinearRegression().fit(Xr,y)
-    terms=sorted(zip([names[i] for i in supp], mf.coef_), key=lambda kv:-abs(kv[1]))
-    return mae, zmae, mf.intercept_, terms, len(supp)
+    mae, z = cvmae(Xr, y)
+    mf = LinearRegression().fit(Xr, y)                        # full-fit coefs for display
+    terms = sorted(zip([names[i] for i in supp], mf.coef_), key=lambda kv: -abs(kv[1]))
+    return mae, z, mf.intercept_, terms, len(supp)
 
 if __name__=="__main__":
     for target,ops in (("d_lo",("below","in")),("d_hi",("in","above"))):
