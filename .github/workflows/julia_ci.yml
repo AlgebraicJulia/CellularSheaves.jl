@@ -1,4 +1,4 @@
-qname: Julia CI/CD
+name: Julia CI/CD
 
 on:
   schedule:
