@@ -111,7 +111,7 @@ function build_degenerate(; n::Int = 16, nfree::Int = 4, degen::Int = 8, rowscal
 
     meta = (n = n, nfree = nfree, degen = degen, rowscale = rowscale, eps = eps, benign = benign,
             nv = nv, nrows = m0 + degen, sigmin = minimum(svdvals(Bd)), min_angle = _min_row_angle(Bd, parents),
-            pstar = pstar)
+            pstar = pstar, Qdiag = Qdiag, Bd = Bd, g = g)
     return IPMProblem(Q, B, c, g, K), meta
 end
 
@@ -126,15 +126,19 @@ Solve at 1e-8 (both solvers) and check the manufactured optimum: ‖p−p*‖∞
 """
 function gate(; tol = 1e-8, kw...)
     prob, meta = build_degenerate(; kw...)
+    # near-singular B (σmin ~ eps) makes p ill-determined along null(B) — check objective + feasibility,
+    # not ‖p−p*‖ (spec: "check objective value and residuals instead" where p* is non-unique).
+    obj(p) = 0.5 * dot(p, meta.Qdiag .* p) - dot(prob.c, p)
     @printf("X04 near-dependent-rows  n=%d nfree=%d degen=%d rowscale=%.0f eps=%.0e  σmin(B)=%.2e  min∠=%.2e rad\n",
         meta.n, meta.nfree, meta.degen, meta.rowscale, meta.eps, meta.sigmin, meta.min_angle)
     for (tag, S) in (("HSD", HSDSettings), ("IPM", IPMSettings))
         r = solve!(init(prob, S{Float64}(feas_tol = tol, gap_tol = tol, itmax = 300)))
         αs = [row.α for row in r.history]
-        relerr = norm(r.p .- meta.pstar, Inf) / (1 + norm(meta.pstar, Inf))
-        @printf("  %-3s status=%-15s niter=%-3d  relerr(p,p*)=%.2e  α∈[%.1e,%.1e]  %s\n",
-            tag, string(r.status), r.niter, relerr, minimum(αs), maximum(αs),
-            relerr ≤ 1e-5 ? "PASS" : "CHECK obj/residuals (p* may be non-unique)")
+        objgap = abs(obj(r.p) - obj(meta.pstar)) / (1 + abs(obj(meta.pstar)))
+        feas = norm(meta.Bd * r.p .- meta.g, Inf) / (1 + norm(meta.g, Inf))
+        @printf("  %-3s status=%-15s niter=%-3d  objgap=%.2e  feas=%.2e  α∈[%.1e,%.1e]  %s\n",
+            tag, string(r.status), r.niter, objgap, feas, minimum(αs), maximum(αs),
+            (objgap ≤ 1e-6 && feas ≤ 1e-6) ? "PASS (obj+feas)" : "CHECK")
     end
     return nothing
 end
