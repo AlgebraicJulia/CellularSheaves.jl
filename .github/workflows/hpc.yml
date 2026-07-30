@@ -160,7 +160,7 @@ jobs:
             printf '%s\n' 'export JULIA_DEPOT_PATH="${DEPOT_PATH}:${SLURM_TMPDIR}/.julia"'
             printf '%s\n' 'mkdir -p "${SLURM_TMPDIR}/.julia"'
             printf '%s\n' 'cd "$WORK_SHARED"'
-            printf '%s\n' 'IFS='\'','\'' read -ra SHARDS_ARR <<< "${BENCH_EXPECTED_SHARDS}"'
+            printf '%s\n' "SHARDS_ARR=(${SHARDS[*]})"
             printf '%s\n' 'export BENCHMARK_SHARD="${SHARDS_ARR[$((SLURM_ARRAY_TASK_ID - 1))]}"'
             printf '%s\n' 'julia -J "$SYSIMAGE_PATH" --project=bench bench/run_benchmarks.jl'
           } > "$SHARD_TASK_SCRIPT"
@@ -179,7 +179,7 @@ jobs:
             --job-name="gha-bench-shards" \
             --output="$LOG_DIR/%A_%a.out" \
             --error="$LOG_DIR/%A_%a.err" \
-            --export=ALL,BENCHMARK_PROFILE="$PROFILE",BENCHMARK_RESULT_DIR="$RESULT_DIR",BENCHMARK_REF="$GITHUB_SHA",BENCHMARK_SECONDS="${{ github.event.inputs.seconds || '5' }}",BENCHMARK_SAMPLES="${{ github.event.inputs.samples || '25' }}",BENCH_EXPECTED_SHARDS="$EXPECTED_SHARDS" \
+            --export=ALL,BENCHMARK_PROFILE="$PROFILE",BENCHMARK_RESULT_DIR="$RESULT_DIR",BENCHMARK_REF="$GITHUB_SHA",BENCHMARK_SECONDS="${{ github.event.inputs.seconds || '5' }}",BENCHMARK_SAMPLES="${{ github.event.inputs.samples || '25' }}" \
             "$SHARD_TASK_SCRIPT")"
           ARRAY_STATUS=$?
           set -e
