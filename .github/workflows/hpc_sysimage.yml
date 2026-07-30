@@ -1,0 +1,95 @@
+name: HPC System Image Cache
+
+on:
+  workflow_call:
+    outputs:
+      sysimage_path:
+        description: "Absolute path to the compiled system image .so"
+        value: ${{ jobs.sysimage-cache.outputs.sysimage_path }}
+      depot_path:
+        description: "Absolute path to the Julia depot for this manifest"
+        value: ${{ jobs.sysimage-cache.outputs.depot_path }}
+
+env:
+  HPC_SYSIMAGE_DIR: "/blue/fairbanksj/gha/sysimages/cellularsheaves"
+  HPC_SHARED_WORK: "/blue/fairbanksj/gha/work/cellularsheaves"
+  HPC_SCRIPT_DIR: ".github/scripts"
+
+jobs:
+  sysimage-cache:
+    runs-on: [self-hosted, hpc-gpu]
+    outputs:
+      sysimage_path: ${{ steps.paths.outputs.sysimage_path }}
+      depot_path: ${{ steps.paths.outputs.depot_path }}
+    steps:
+      - name: "🗂️ Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "🔄 Resolve Dynamic Library Manifest"
+        run: |
+          source /etc/profile.d/modules.sh
+          module load julia/1.12.6
+          julia --project=. -e 'using Pkg; Pkg.resolve()'
+
+      - name: "🔑 Compute Cache Keys and Paths"
+        id: paths
+        run: |
+          set -x
+          MANIFEST_HASH=$(sha256sum Manifest.toml | awk '{print $1}')
+          SYSIMAGE_PATH="$HPC_SYSIMAGE_DIR/sysimage-${MANIFEST_HASH}.so"
+          DEPOT_PATH="$HPC_SYSIMAGE_DIR/depots/$MANIFEST_HASH"
+          echo "sysimage_path=$SYSIMAGE_PATH" >> $GITHUB_OUTPUT
+          echo "depot_path=$DEPOT_PATH" >> $GITHUB_OUTPUT
+          # Also expose as env vars for subsequent steps in this job
+          echo "SYSIMAGE_PATH=$SYSIMAGE_PATH" >> $GITHUB_ENV
+          echo "DEPOT_PATH=$DEPOT_PATH" >> $GITHUB_ENV
+
+      - name: "🛠️ Build System Image (cache miss only)"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+
+          if [ -f "$SYSIMAGE_PATH" ] && [ -d "$DEPOT_PATH" ]; then
+            echo "✅ Cache Hit: Both system image and depot found"
+            exit 0
+          fi
+
+          echo "❌ Cache Miss: Launching pre-compilation routine"
+          WORK_SHARED="$HPC_SHARED_WORK/${GITHUB_RUN_ID}-sysimage"
+          TEMP_DEPOT="$HPC_SYSIMAGE_DIR/depots/tmp_$GITHUB_RUN_ID"
+          TEMP_SYSIMAGE="$HPC_SYSIMAGE_DIR/tmp_sysimage_$GITHUB_RUN_ID.so"
+          mkdir -p "$WORK_SHARED" "$HPC_SYSIMAGE_DIR/depots"
+          rsync -a --delete "$GITHUB_WORKSPACE/" "$WORK_SHARED/"
+
+          srun --partition=hpg-dev \
+               --time=01:00:00 \
+               --cpus-per-task=8 \
+               --job-name="gha-sysimg-compile" \
+               bash -c "
+                   source /etc/profile.d/modules.sh
+                   module load julia/1.12.6
+                   export JULIA_DEPOT_PATH=$TEMP_DEPOT
+                   mkdir -p $TEMP_DEPOT
+                   cd $WORK_SHARED
+                   julia -e 'using Pkg; Pkg.add(\"PackageCompiler\")'
+                   julia --project=. $HPC_SCRIPT_DIR/compile_sysimage.jl '$TEMP_SYSIMAGE'
+               "
+
+          echo "Promoting build to shared cache..."
+          if [[ -n "$DEPOT_PATH" && "$DEPOT_PATH" =~ ^/blue/fairbanksj/gha/sysimages/cellularsheaves/depots/[a-f0-9]{64}$ ]]; then
+            rm -rf "$DEPOT_PATH"
+          else
+            echo "❌ SAFETY ERROR: Path '$DEPOT_PATH' does not match the strict depot pattern. Aborting to protect /blue/fairbanksj/" && exit 1
+          fi
+          mv "$TEMP_DEPOT" "$DEPOT_PATH"
+          mv "$TEMP_SYSIMAGE" "$SYSIMAGE_PATH"
+
+      - name: "🧹 Clean Up Build Workspace"
+        if: always()
+        run: |
+          TARGET_CLEAN="$HPC_SHARED_WORK/${GITHUB_RUN_ID}-sysimage"
+          if [[ -n "$TARGET_CLEAN" && "$TARGET_CLEAN" =~ ^/blue/fairbanksj/gha/work/cellularsheaves/[0-9]+-sysimage$ ]]; then
+            rm -rf "$TARGET_CLEAN"
+          else
+            echo "⚠️ Path '$TARGET_CLEAN' does not match expected pattern; skipping cleanup"
+          fi
