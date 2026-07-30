@@ -2,9 +2,12 @@
 # per-(iter, α) record — score + μ/ρ/force_tol/floor_tol/σ²_min + all three solves' res0/res1 — to
 # oracle/<key>_<tol>_<solver>.csv (this directory).
 #
-# Usage:  julia --project=examples examples/oracle/run_oracle.jl <key> <tol> <hsd|ipm>
+# Usage:  julia --project=examples examples/oracle/run_oracle.jl <key> <tol> <hsd|ipm> [dial]
 #   e.g.  julia --project=examples examples/oracle/run_oracle.jl e08 1e-8 hsd
+#   [dial] (adversarials only): X04/X04b → eps, X03/X03b → spread, X06/X06b → corner_r. CSV names
+#   pick up the dial (e.g. X04_1e-8_hsd_eps1e-4.csv) so sweeps don't clobber each other.
 key = ARGS[1]; tol = parse(Float64, ARGS[2]); solv = length(ARGS) ≥ 3 ? ARGS[3] : "hsd"
+dial = length(ARGS) ≥ 4 ? parse(Float64, ARGS[4]) : nothing
 using CellularSheaves
 using CellularSheaves.IPM: HSDSettings, IPMSettings, init, solve_logged, write_oracle_csv
 import CellularSheaves.IPM as IPM
@@ -18,12 +21,12 @@ incfile = startswith(key, "X") ? "$EX/adversarial/$xbase.jl" :
 include(incfile)
 
 function buildprob(key)
-    key == "X03"  && return gp(build_narrow())              # within-block col-spread [I1]
-    key == "X03b" && return gp(build_narrow_twin())         # benign twin (spread=0)
-    key == "X04"  && return gp(build_degenerate())          # near-dependent rows [I2] — PRIMARY
-    key == "X04b" && return gp(build_degenerate_twin())     # benign twin (independent rows)
-    key == "X06"  && return gp(build_corner_soc())          # SOC corner (cone-generality control)
-    key == "X06b" && return gp(build_corner_soc_twin())     # benign twin (all interior)
+    key == "X03"  && return gp(build_narrow(; spread = dial === nothing ? 8.0 : dial))   # col-spread [I1]
+    key == "X03b" && return gp(build_narrow_twin())                                      # benign (spread=0)
+    key == "X04"  && return gp(build_degenerate(; eps = dial === nothing ? 1e-4 : dial)) # near-dep rows [I2] PRIMARY
+    key == "X04b" && return gp(build_degenerate_twin())                                  # benign (independent rows)
+    key == "X06"  && return gp(build_corner_soc(; corner_r = dial === nothing ? 0.1 : dial))  # SOC corner
+    key == "X06b" && return gp(build_corner_soc_twin())                                  # benign (all interior)
     key == "06"  && return gp(build_sqrtloss(sqrtloss_instance(; P=12)))
     key == "07"  && return gp(build_poisson_tv(poisson_instance(; N=128, Tsz=16, m=16, k=-1, K=6, R=12, q=3, seed=3)))
     key == "13"  && return gp(build_landing(landing_instance(), 60.0, 20))
@@ -62,7 +65,8 @@ s0 = init(buildprob(key), settings)
 grid = (startswith(key, "X03") || startswith(key, "X04")) ?
     [round(10.0^e, sigdigits=4) for e in 0.0:0.5:14.0] : collect(CellularSheaves.IPM.DEFAULT_ALPHA_GRID)
 final, records = solve_logged(s0, grid)
-base = "$(key)_$(ARGS[2])_$(solv)"
+dsuf = dial === nothing ? "" : "_dial$(ARGS[4])"
+base = "$(key)_$(ARGS[2])_$(solv)$(dsuf)"
 path = joinpath(OUT, "$base.csv")
 write_oracle_csv(path, records)
 
