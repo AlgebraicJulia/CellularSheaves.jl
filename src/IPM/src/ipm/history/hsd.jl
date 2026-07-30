@@ -2,7 +2,9 @@ const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, gap::T, �
     pbase::Int, prefn::Int, ppass::Int, pstat::RefStatus,
     cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus,
     wbase::Int, wrefn::Int, wpass::Int, wstat::RefStatus,
-    pres0::T, pres1::T, cres0::T, cres1::T, wres0::T, wres1::T, r0_p::T, r0_c::T, r0_w::T, craig_p::String, craig_c::String, craig_w::String}
+    pres0::T, pres1::T, cres0::T, cres1::T, wres0::T, wres1::T, r0_p::T, r0_c::T, r0_w::T, craig_p::String, craig_c::String, craig_w::String,
+    r1_p::T, r1_c::T, r1_w::T, pres0_d::T, pres0_p::T, cres0_d::T, cres0_p::T, wres0_d::T, wres0_p::T,
+    pres_exit::T, cres_exit::T, wres_exit::T, bar_hdiag_med::T, bar_hdiag_frac_mid::T}
 
 struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     μ::Vector{T}
@@ -38,6 +40,20 @@ struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     craig_p::Vector{String}
     craig_c::Vector{String}
     craig_w::Vector{String}
+    r1_p::Vector{T}
+    r1_c::Vector{T}
+    r1_w::Vector{T}
+    pres0_d::Vector{T}
+    pres0_p::Vector{T}
+    cres0_d::Vector{T}
+    cres0_p::Vector{T}
+    wres0_d::Vector{T}
+    wres0_p::Vector{T}
+    pres_exit::Vector{T}
+    cres_exit::Vector{T}
+    wres_exit::Vector{T}
+    bar_hdiag_med::Vector{T}
+    bar_hdiag_frac_mid::Vector{T}
 end
 
 function HSDHistory{T}() where {T}
@@ -47,7 +63,9 @@ function HSDHistory{T}() where {T}
         Int[], Int[], Int[], RefStatus[],
         T[], T[], T[], T[], T[], T[],
         T[], T[], T[],
-        String[], String[], String[])
+        String[], String[], String[],
+        T[], T[], T[], T[], T[], T[], T[], T[], T[],
+        T[], T[], T[], T[], T[])
 end
 
 function Base.getindex(hist::HSDHistory, i::Int)
@@ -66,8 +84,14 @@ function Base.getindex(hist::HSDHistory, i::Int)
     pres0 = hist.pres0[i]; pres1 = hist.pres1[i]; cres0 = hist.cres0[i]; cres1 = hist.cres1[i]; wres0 = hist.wres0[i]; wres1 = hist.wres1[i]
     r0_p = hist.r0_p[i]; r0_c = hist.r0_c[i]; r0_w = hist.r0_w[i]
     craig_p = hist.craig_p[i]; craig_c = hist.craig_c[i]; craig_w = hist.craig_w[i]
+    r1_p = hist.r1_p[i]; r1_c = hist.r1_c[i]; r1_w = hist.r1_w[i]
+    pres0_d = hist.pres0_d[i]; pres0_p = hist.pres0_p[i]; cres0_d = hist.cres0_d[i]; cres0_p = hist.cres0_p[i]; wres0_d = hist.wres0_d[i]; wres0_p = hist.wres0_p[i]
+    pres_exit = hist.pres_exit[i]; cres_exit = hist.cres_exit[i]; wres_exit = hist.wres_exit[i]
+    bar_hdiag_med = hist.bar_hdiag_med[i]; bar_hdiag_frac_mid = hist.bar_hdiag_frac_mid[i]
     return (; μ, step, pres, dres, gap, α, ρ, τ, κ,
-        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat, pres0, pres1, cres0, cres1, wres0, wres1, r0_p, r0_c, r0_w, craig_p, craig_c, craig_w)
+        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat, pres0, pres1, cres0, cres1, wres0, wres1, r0_p, r0_c, r0_w, craig_p, craig_c, craig_w,
+        r1_p, r1_c, r1_w, pres0_d, pres0_p, cres0_d, cres0_p, wres0_d, wres0_p,
+        pres_exit, cres_exit, wres_exit, bar_hdiag_med, bar_hdiag_frac_mid)
 end
 
 function Base.push!(hist::HSDHistory, row::NamedTuple)
@@ -86,6 +110,10 @@ function Base.push!(hist::HSDHistory, row::NamedTuple)
     push!(hist.pres0, row.pres0); push!(hist.pres1, row.pres1); push!(hist.cres0, row.cres0); push!(hist.cres1, row.cres1); push!(hist.wres0, row.wres0); push!(hist.wres1, row.wres1)
     push!(hist.r0_p, row.r0_p); push!(hist.r0_c, row.r0_c); push!(hist.r0_w, row.r0_w)
     push!(hist.craig_p, row.craig_p); push!(hist.craig_c, row.craig_c); push!(hist.craig_w, row.craig_w)
+    push!(hist.r1_p, row.r1_p); push!(hist.r1_c, row.r1_c); push!(hist.r1_w, row.r1_w)
+    push!(hist.pres0_d, row.pres0_d); push!(hist.pres0_p, row.pres0_p); push!(hist.cres0_d, row.cres0_d); push!(hist.cres0_p, row.cres0_p); push!(hist.wres0_d, row.wres0_d); push!(hist.wres0_p, row.wres0_p)
+    push!(hist.pres_exit, row.pres_exit); push!(hist.cres_exit, row.cres_exit); push!(hist.wres_exit, row.wres_exit)
+    push!(hist.bar_hdiag_med, row.bar_hdiag_med); push!(hist.bar_hdiag_frac_mid, row.bar_hdiag_frac_mid)
     return hist
 end
 
@@ -105,6 +133,10 @@ function Base.empty!(hist::HSDHistory)
     empty!(hist.pres0); empty!(hist.pres1); empty!(hist.cres0); empty!(hist.cres1); empty!(hist.wres0); empty!(hist.wres1)
     empty!(hist.r0_p); empty!(hist.r0_c); empty!(hist.r0_w)
     empty!(hist.craig_p); empty!(hist.craig_c); empty!(hist.craig_w)
+    empty!(hist.r1_p); empty!(hist.r1_c); empty!(hist.r1_w)
+    empty!(hist.pres0_d); empty!(hist.pres0_p); empty!(hist.cres0_d); empty!(hist.cres0_p); empty!(hist.wres0_d); empty!(hist.wres0_p)
+    empty!(hist.pres_exit); empty!(hist.cres_exit); empty!(hist.wres_exit)
+    empty!(hist.bar_hdiag_med); empty!(hist.bar_hdiag_frac_mid)
     return hist
 end
 

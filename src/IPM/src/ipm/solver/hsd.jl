@@ -233,18 +233,18 @@ function woodbury!(
     #   [ B   0  ] [ Δy2 ] = [ g ]
     #
     wbase = solve_kkt!(kkt, w.Δp2, w.Δy2, H, B, c, g, y0; atol)
-    r0_w = kkt.r0[]; craig_w = kkt.itrwrk.stats.status
+    r0_w = kkt.r0[]; r1_w = kkt.r1[]; craig_w = kkt.itrwrk.stats.status
     #
     # use iterative refinement to improve tha
     # accuracy of the solutions Δp2, Δy2
     #
-    wpass, wrefn, wstat, wres0, wres1 = refinekkt!(
+    wpass, wrefn, wstat, wres0, wres1, wres0_d, wres0_p, wres_exit = refinekkt!(
         w.Δp2, w.Δy2, kkt, H, B,
         c, g, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
 
-    return wbase, wrefn, wpass, wstat, wres0, wres1, r0_w, craig_w
+    return wbase, wrefn, wpass, wstat, wres0, wres1, r0_w, craig_w, r1_w, wres0_d, wres0_p, wres_exit
 end
 
 function capacitance!(
@@ -326,6 +326,8 @@ function refinehsd!(
     npass = 0
     status = REFINE_ITMAX
     res0 = res1 = T(NaN)       # residual entering pass 1 (post base solve) and pass 2
+    res0_d = res0_p = T(NaN)   # its dual /(1+nc) and primal /(1+ng) components (the ceiling lives in the dual)
+    res_exit = T(NaN)          # last residual before returning (any status) — graded severity of the exit
     prv = typemax(T)
     #
     # compute the sum
@@ -357,7 +359,8 @@ function refinehsd!(
         τres = abs(sτ) / (1 + nc + ng)
 
         res = max(pres, dres, τres)
-        i == 1 && (res0 = res)
+        res_exit = res
+        i == 1 && (res0 = res; res0_d = dres; res0_p = pres)
         i == 2 && (res1 = res)
 
         if res ≤ force_tol
@@ -410,7 +413,7 @@ function refinehsd!(
         Δτ += dτ
     end
 
-    return npass, niter, status, Δτ, res0, res1
+    return npass, niter, status, Δτ, res0, res1, res0_d, res0_p, res_exit
 end
 
 #
@@ -527,8 +530,8 @@ function solvepredictor!(
     # use iterative refinement to improve
     # the solutions Δpa, Δya, and Δτa
     #
-    r0_p = kkt.r0[]; craig_p = kkt.itrwrk.stats.status
-    ppass, prefn, pstat, Δτa, pres0, pres1 = refinehsd!(
+    r0_p = kkt.r0[]; r1_p = kkt.r1[]; craig_p = kkt.itrwrk.stats.status
+    ppass, prefn, pstat, Δτa, pres0, pres1, pres0_d, pres0_p, pres_exit = refinehsd!(
         w.Δpa, w.Δya, Δτa,
         kkt, H, B, c, g, w.Qp, p, aτ,
         τ, κ, w.rp, w.f, gap, w.Δp2, w.Δy2, S,
@@ -550,7 +553,7 @@ function solvepredictor!(
     #   Δκa = -κ (1 + 1/τ Δτa)
     #
     Δκa = -κ * (τ + Δτa) / τ
-    return pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p
+    return pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit
 end
 
 #
@@ -686,8 +689,8 @@ function solvecorrector!(
     # use iterative refinement to improve
     # the solutions Δp, Δy, and Δτ
     #
-    r0_c = kkt.r0[]; craig_c = kkt.itrwrk.stats.status
-    cpass, crefn, cstat, Δτ, cres0, cres1 = refinehsd!(
+    r0_c = kkt.r0[]; r1_c = kkt.r1[]; craig_c = kkt.itrwrk.stats.status
+    cpass, crefn, cstat, Δτ, cres0, cres1, cres0_d, cres0_p, cres_exit = refinehsd!(
         w.Δp, w.Δy, Δτ,
         kkt, H, B, c, g, w.Qp, p, aτ,
         τ, κ, w.rp, w.f, fτ, w.Δp2, w.Δy2, S,
@@ -709,7 +712,7 @@ function solvecorrector!(
     #   Δκ ← (fκ - κ Δτ) / τ
     #
     Δκ = (fκ - κ * Δτ) / τ
-    return cbase, crefn, cpass, cstat, Δτ, Δκ, cres0, cres1, r0_c, craig_c
+    return cbase, crefn, cpass, cstat, Δτ, Δκ, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit
 end
 
 ############################################################################################
@@ -932,8 +935,12 @@ function step!(s::HSDSolver{T}) where {T}
     ppass = cpass = wpass = 0   # refinement passes per role
     pstat = cstat = wstat = REACHED_FORCE   # refinement exit status per role
     pres0 = pres1 = cres0 = cres1 = wres0 = wres1 = T(NaN)   # pass-0/pass-1 residuals per role
+    pres0_d = pres0_p = cres0_d = cres0_p = wres0_d = wres0_p = T(NaN)   # pass-1 residual split into dual/primal per role
+    pres_exit = cres_exit = wres_exit = T(NaN)              # refinement exit residual per role (graded severity)
     r0_p = r0_c = r0_w = T(NaN)                              # pre-CRAIG base residual per role
+    r1_p = r1_c = r1_w = T(NaN)                              # post-CRAIG base residual per role
     craig_p = craig_c = craig_w = ""                        # CRAIG termination status per role
+    bar_hdiag_med = bar_hdiag_frac_mid = T(NaN)             # pre-Q barrier-Hessian diagonal stats (cone coords)
 
     step = zero(T)
 
@@ -980,6 +987,10 @@ function step!(s::HSDSolver{T}) where {T}
         #
         @timeit s.timers "scale" flag = scale!(s)
         #
+        # barrier-Hessian diagonal stats (pre-Q: the dⱼ/pⱼ degeneracy signature, before Q masks it)
+        #
+        bar_hdiag_med, bar_hdiag_frac_mid = barrier_hdiag_stats(s)
+        #
         # cache H and add the quadratic term
         #
         #   H ← H + Q
@@ -1024,7 +1035,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
                 #   [ B   0  ] [ Δy2 ] = [ g ]
                 #
-                wbase, wrefn, wpass, wstat, wres0, wres1, r0_w, craig_w = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
+                wbase, wrefn, wpass, wstat, wres0, wres1, r0_w, craig_w, r1_w, wres0_d, wres0_p, wres_exit = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
                 copyto!(s.Δy0, w.Δy2)
                 #
                 # compute the Woodbury capacitance scalar
@@ -1043,7 +1054,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκa = (-τκ - κ Δτa) / τ
                 #
-                pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -1061,7 +1072,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
                 #
-                cbase, crefn, cpass, cstat, Δτ, Δκ, cres0, cres1, r0_c, craig_c = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, Δτ, Δκ, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -1127,7 +1138,9 @@ function step!(s::HSDSolver{T}) where {T}
     end
 
     push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ=s.ρ[], τ=s.τ[], κ=s.κ[],
-        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat, pres0, pres1, cres0, cres1, wres0, wres1, r0_p, r0_c, r0_w, craig_p, craig_c, craig_w))
+        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat, pres0, pres1, cres0, cres1, wres0, wres1, r0_p, r0_c, r0_w, craig_p, craig_c, craig_w,
+        r1_p, r1_c, r1_w, pres0_d, pres0_p, cres0_d, cres0_p, wres0_d, wres0_p,
+        pres_exit, cres_exit, wres_exit, bar_hdiag_med, bar_hdiag_frac_mid))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"

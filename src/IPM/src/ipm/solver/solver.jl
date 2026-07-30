@@ -34,6 +34,27 @@ function atfloor(s::AbstractSolver)
     return atfloor(s.hist; patience=s.settings.floor_patience)
 end
 
+# Median and mid-cluster fraction of the (pre-Q) barrier-Hessian diagonal over cone-constrained
+# coordinates. Free-cone columns contribute zero barrier curvature and are excluded. Must be called
+# AFTER scale!(s) but BEFORE Q is folded into s.H: the diagonal hⱼ = dⱼ/pⱼ is the complementarity
+# (degeneracy) signature, which a nonzero Q would mask. Diagnostic-only (observation, no side effects).
+function barrier_hdiag_stats(s::AbstractSolver{T}) where {T}
+    hs = T[]
+    for v in vtxs(s.B)
+        s.K[v] isa CofreeCone && continue
+        Hvv = block(s.H, v, v, v)
+        @inbounds for k in 1:size(Hvv, 1)
+            push!(hs, Hvv[k, k])
+        end
+    end
+    isempty(hs) && return T(NaN), T(NaN)
+    sort!(hs)
+    n = length(hs)
+    med = isodd(n) ? hs[(n + 1) ÷ 2] : (hs[n ÷ 2] + hs[n ÷ 2 + 1]) / 2
+    mid = count(h -> h > zero(T) && abs(log10(h)) ≤ one(T), hs) / n
+    return med, T(mid)
+end
+
 function initkkt!(s::AbstractSolver{T}) where {T}
     flag, s.ρ[] = initkkt!(s.kkt, s.H; α=s.α[])
     return flag

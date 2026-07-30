@@ -12,7 +12,7 @@ using CellularSheaves
 using CellularSheaves.IPM: HSDSettings, IPMSettings, init, solve_logged, write_oracle_csv
 import CellularSheaves.IPM as IPM
 const EX = dirname(@__DIR__)          # examples/
-const OUT = @__DIR__                  # examples/oracle/
+const OUT = get(ENV, "ORACLE_OUT", @__DIR__)   # examples/oracle/ (override with ORACLE_OUT, e.g. oracle2 for v3)
 gp(x) = x isa Tuple ? x[1] : x
 
 xbase = startswith(key, "X") ? key[1:min(3, length(key))] : key      # X04b → X04
@@ -21,12 +21,13 @@ incfile = startswith(key, "X") ? "$EX/adversarial/$xbase.jl" :
 include(incfile)
 
 function buildprob(key)
-    key == "X03"  && return gp(build_narrow(; spread = dial === nothing ? 8.0 : dial))   # col-spread [I1]
-    key == "X03b" && return gp(build_narrow_twin())                                      # benign (spread=0)
-    key == "X04"  && return gp(build_degenerate(; eps = dial === nothing ? 1e-4 : dial)) # near-dep rows [I2] PRIMARY
-    key == "X04b" && return gp(build_degenerate_twin())                                  # benign (independent rows)
-    key == "X06"  && return gp(build_corner_soc(; corner_r = dial === nothing ? 0.1 : dial))  # SOC corner
-    key == "X06b" && return gp(build_corner_soc_twin())                                  # benign (all interior)
+    # X-instances return the raw (prob, meta) tuple so run_oracle can record generator params + severity.
+    key == "X03"  && return build_narrow(; spread = dial === nothing ? 8.0 : dial)   # col-spread [I1]
+    key == "X03b" && return build_narrow_twin()                                      # benign (spread=0)
+    key == "X04"  && return build_degenerate(; eps = dial === nothing ? 1e-4 : dial) # near-dep rows [I2] PRIMARY
+    key == "X04b" && return build_degenerate_twin()                                  # benign (independent rows)
+    key == "X06"  && return build_corner_soc(; corner_r = dial === nothing ? 0.1 : dial)  # SOC corner
+    key == "X06b" && return build_corner_soc_twin()                                  # benign (all interior)
     key == "06"  && return gp(build_sqrtloss(sqrtloss_instance(; P=12)))
     key == "07"  && return gp(build_poisson_tv(poisson_instance(; N=128, Tsz=16, m=16, k=-1, K=6, R=12, q=3, seed=3)))
     key == "13"  && return gp(build_landing(landing_instance(), 60.0, 20))
@@ -59,12 +60,16 @@ settings = solv == "ipm" ?
     HSDSettings{Float64}(feas_tol=tol, gap_tol=tol, itmax=300)
 
 using LinearAlgebra, SparseArrays
-s0 = init(buildprob(key), settings)
-# scaling instances (X03/X04) can push the plateau past 1e10 (addendum: window seen at [3e12, 1e14]) —
-# extend the grid to 1e14 for them; everyone else uses the standard half-decade 1e0–1e10 grid.
-grid = (startswith(key, "X03") || startswith(key, "X04")) ?
-    [round(10.0^e, sigdigits=4) for e in 0.0:0.5:14.0] : collect(CellularSheaves.IPM.DEFAULT_ALPHA_GRID)
+raw = buildprob(key)
+prob = gp(raw)
+bmeta = (startswith(key, "X") && raw isa Tuple && length(raw) ≥ 2) ? raw[2] : nothing  # X generator/severity meta
+s0 = init(prob, settings)
+# v3: uniform 1e0–1e18 half-decade grid (37 pts) for ALL problems — de-censors window ceilings.
+grid = collect(CellularSheaves.IPM.DEFAULT_ALPHA_GRID)
 final, records = solve_logged(s0, grid)
+niter = isempty(records) ? 0 : maximum(r.iter for r in records)
+chosenrows = filter(r -> r.chosen, records)
+final_status = isempty(chosenrows) ? "NONE" : string(last(chosenrows).ipm_status)
 dsuf = dial === nothing ? "" : "_dial$(ARGS[4])"
 base = "$(key)_$(ARGS[2])_$(solv)$(dsuf)"
 path = joinpath(OUT, "$base.csv")
@@ -82,8 +87,9 @@ nH = sqrt(size(s0.B, 2)); nQ = norm(Symmetric(s0.Q, :L)); nB = norm(s0.B)
 cones = Dict{String,Int}()
 for k in s0.K; t = string(nameof(typeof(k))); cones[t] = get(cones, t, 0) + 1; end
 gitshort = try readchomp(`git -C $EX rev-parse --short HEAD`) catch; "unknown" end
+gitdirty = try !isempty(readchomp(`git -C $EX status --porcelain`)) catch; true end
 meta = [
-    "problem"=>key, "solver"=>solv, "tol"=>ARGS[2], "git"=>gitshort,
+    "problem"=>key, "solver"=>solv, "tol"=>ARGS[2], "git"=>gitshort, "git_dirty"=>gitdirty,
     "grid"=>collect(grid),
     "raug"=>setget(:raug), "aaug"=>setget(:aaug), "alpha_anchor"=>s0.α[],
     "nH"=>nH, "nQ"=>nQ, "nB"=>nB,
@@ -94,7 +100,15 @@ meta = [
     "floor_patience"=>setget(:floor_patience), "rgmin"=>setget(:rgmin), "rgmax"=>setget(:rgmax),
     "itmax"=>setget(:itmax), "step_frac"=>setget(:step_frac),
     "m"=>size(s0.B, 1), "n"=>size(s0.B, 2), "nu"=>s0.ν, "cones"=>cones,
+    "final_status"=>final_status, "niter"=>niter,
 ]
+# X-instances: fold in generator params + severity diagnostics (scalars only; skip pstar/Bd/Qd arrays).
+if bmeta !== nothing
+    for k in keys(bmeta)
+        v = getproperty(bmeta, k)
+        v isa Union{Real, Bool, AbstractString} && push!(meta, "x_$(k)"=>v)
+    end
+end
 open(joinpath(OUT, "$base.meta.json"), "w") do io
     println(io, "{" * join(("\"$k\":$(jval(v))" for (k, v) in meta), ",") * "}")
 end

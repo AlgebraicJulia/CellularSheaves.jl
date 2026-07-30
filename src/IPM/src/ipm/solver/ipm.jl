@@ -123,6 +123,8 @@ function refinekkt!(
     status = REFINE_ITMAX
     prv = typemax(T)
     res0 = res1 = T(NaN)       # residual entering pass 1 (post base solve) and pass 2
+    res0_d = res0_p = T(NaN)   # its dual /(1+nc) and primal /(1+ng) components (the ceiling lives in the dual)
+    res_exit = T(NaN)          # last residual before returning (any status) — graded severity of the exit
 
     for i in 1:itmax
         #
@@ -138,7 +140,8 @@ function refinekkt!(
         dres = norm(sd, Inf) / (one(T) + nc)
         pres = norm(sp, Inf) / (one(T) + ng)
         res = max(dres, pres)
-        i == 1 && (res0 = res)
+        res_exit = res
+        i == 1 && (res0 = res; res0_d = dres; res0_p = pres)
         i == 2 && (res1 = res)
 
         if res ≤ force_tol
@@ -175,7 +178,7 @@ function refinekkt!(
         axpy!(one(T), dy, Δy)
     end
 
-    return npass, niter, status, res0, res1
+    return npass, niter, status, res0, res1, res0_d, res0_p, res_exit
 end
 
 ############################################################################################
@@ -219,11 +222,11 @@ function solvepredictor!(
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
     pbase = solve_kkt!(kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
-    r0_p = kkt.r0[]; craig_p = kkt.itrwrk.stats.status
+    r0_p = kkt.r0[]; r1_p = kkt.r1[]; craig_p = kkt.itrwrk.stats.status
     #
     # refine Δpa, Δya to force_tol
     #
-    ppass, prefn, pstat, pres0, pres1 = refinekkt!(
+    ppass, prefn, pstat, pres0, pres1, pres0_d, pres0_p, pres_exit = refinekkt!(
         w.Δpa, w.Δya, kkt, H, B,
         w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
@@ -237,7 +240,7 @@ function solvepredictor!(
     mul!(w.Δda, B', w.Δya, -1, -1)
     mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
 
-    return pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p
+    return pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit
 end
 
 #
@@ -331,12 +334,12 @@ function solvecorrector!(
     #   [ B   0  ] [ Δy ] = [ rp  ]
     #
     cbase = solve_kkt!(kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
-    r0_c = kkt.r0[]; craig_c = kkt.itrwrk.stats.status
+    r0_c = kkt.r0[]; r1_c = kkt.r1[]; craig_c = kkt.itrwrk.stats.status
     #
     # use iterative refinement to improve
     # the solutions Δp and Δy
     #
-    cpass, crefn, cstat, cres0, cres1 = refinekkt!(
+    cpass, crefn, cstat, cres0, cres1, cres0_d, cres0_p, cres_exit = refinekkt!(
         w.Δp, w.Δy, kkt, H, B,
         w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
@@ -350,7 +353,7 @@ function solvecorrector!(
     mul!(w.Δd, B', w.Δy, -1, -1)
     mul!(w.Δd, Symmetric(Q, :L), w.Δp, 1, 1)
 
-    return cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c
+    return cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit
 end
 
 ############################################################################################
@@ -493,8 +496,12 @@ function step!(s::IPMSolver{T}) where {T}
     ppass = cpass = 0       # refinement passes per role
     pstat = cstat = REACHED_FORCE   # refinement exit status per role
     pres0 = pres1 = cres0 = cres1 = T(NaN)   # pass-0/pass-1 residuals per role
+    pres0_d = pres0_p = cres0_d = cres0_p = T(NaN)   # pass-1 residual split into dual/primal per role
+    pres_exit = cres_exit = T(NaN)           # refinement exit residual per role (graded severity)
     r0_p = r0_c = T(NaN)                     # pre-CRAIG base residual per role
+    r1_p = r1_c = T(NaN)                     # post-CRAIG base residual per role
     craig_p = craig_c = ""                   # CRAIG termination status per role
+    bar_hdiag_med = bar_hdiag_frac_mid = T(NaN)   # pre-Q barrier-Hessian diagonal stats (cone coords)
     step = zero(T)
 
     w = s.wrk
@@ -530,6 +537,10 @@ function step!(s::IPMSolver{T}) where {T}
         # by a Tuncel scaling matrix
         #
         @timeit s.timers "scale" flag = scale!(s)
+        #
+        # barrier-Hessian diagonal stats (pre-Q: the dⱼ/pⱼ degeneracy signature, before Q masks it)
+        #
+        bar_hdiag_med, bar_hdiag_frac_mid = barrier_hdiag_stats(s)
         #
         # add the quadratic term
         #
@@ -573,7 +584,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -588,7 +599,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -639,7 +650,7 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c))
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c, r1_p, r1_c, pres0_d, pres0_p, cres0_d, cres0_p, pres_exit, cres_exit, bar_hdiag_med, bar_hdiag_frac_mid))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"

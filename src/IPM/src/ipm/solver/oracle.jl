@@ -15,7 +15,7 @@
 # Returns (final_solver, records), where records is one NamedTuple per (iteration, α) carrying the
 # FULL score — every per-role refinement status and CRAIG count — plus `chosen` marking the winner.
 
-const DEFAULT_ALPHA_GRID = [round(10.0^e, sigdigits=4) for e in 0.0:0.5:10.0]   # half-decades 1e0..1e10
+const DEFAULT_ALPHA_GRID = [round(10.0^e, sigdigits=4) for e in 0.0:0.5:18.0]   # half-decades 1e0..1e18 (37 pts)
 
 # σ̂²_min from a Golub-Kahan lower-bidiagonal (dv=diagonal αₖ, ev=subdiagonal βₖ): μ = smallest Ritz
 # value = min singular value², recovered to the augmented σ² via μ/(α(1-μ)) (μ∈(0,1) for F=βH+BᵀB).
@@ -81,6 +81,7 @@ function _oracle_record(i, α, sc, st)
     fltol = 100 * eps(T) * (one(T) + max(norm(sc.wrk.rp, Inf), norm(sc.wrk.rd, Inf)))
     hasw  = hasproperty(row, :wstat)
     dg    = diag(sparse(sc.H))                     # scaled-Hessian diagonal (α-independent within an iter)
+    Ld    = diag(sc.kkt.F)                          # Cholesky factor diagonal — κ(F) proxy / ρ-ladder early warning
     return (iter = i, alpha = α, state = _oracle_state(row), ncraig = _oracle_craig(row),
             ipm_status = st, mu = μ, mu_next = mu(sc), rho = row.ρ,
             force_tol = ftol, floor_tol = fltol, sigma2min = oracle_sigma2min(sc.kkt, sc.B, T(α)),
@@ -98,6 +99,15 @@ function _oracle_record(i, α, sc, st)
             wres0 = hasw ? row.wres0 : nothing, wres1 = hasw ? row.wres1 : nothing,
             r0_p = row.r0_p, r0_c = row.r0_c, r0_w = hasw ? row.r0_w : nothing,
             craig_p = row.craig_p, craig_c = row.craig_c, craig_w = hasw ? row.craig_w : nothing,
+            r1_p = row.r1_p, r1_c = row.r1_c, r1_w = hasw ? row.r1_w : nothing,
+            p_res0_dual = row.pres0_d, p_res0_prim = row.pres0_p,
+            c_res0_dual = row.cres0_d, c_res0_prim = row.cres0_p,
+            w_res0_dual = hasw ? row.wres0_d : nothing, w_res0_prim = hasw ? row.wres0_p : nothing,
+            p_res_exit = row.pres_exit, c_res_exit = row.cres_exit,
+            w_res_exit = hasw ? row.wres_exit : nothing,
+            Ldiag_min = minimum(abs, Ld), Ldiag_max = maximum(abs, Ld),
+            ipm_pres = row.pres, ipm_dres = row.dres,
+            bar_hdiag_med = row.bar_hdiag_med, bar_hdiag_frac_mid = row.bar_hdiag_frac_mid,
             chosen = false)
 end
 
