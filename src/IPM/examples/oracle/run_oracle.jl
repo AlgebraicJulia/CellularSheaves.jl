@@ -30,6 +30,12 @@ function buildprob(key)
     key == "X06b" && return build_corner_soc_twin()                                  # benign (all interior)
     key == "X08"  && return build_nonstrict(; degen_frac = dial === nothing ? 0.5 : dial) # non-strict comp
     key == "X08b" && return build_nonstrict_twin()                                   # benign (disjoint patterns)
+    key == "X09"   && return build_ceiling_base(; S = dial === nothing ? 1e2 : dial)  # planted ceiling μ/S²
+    key == "X09t"  && return build_ceiling_base(; benign = true)                      # benign (p*=O(1))
+    key == "X09c"  && return build_ceiling_ridge(; S = dial === nothing ? 1e2 : dial) # ridge → flatten
+    key == "X09ct" && return build_ceiling_ridge(; benign = true)
+    key == "X09b"  && return build_ceiling_kink()                                     # two pairs → kink
+    key == "X09bt" && return build_ceiling_kink(; benign = true)
     key == "06"  && return gp(build_sqrtloss(sqrtloss_instance(; P=12)))
     key == "07"  && return gp(build_poisson_tv(poisson_instance(; N=128, Tsz=16, m=16, k=-1, K=6, R=12, q=3, seed=3)))
     key == "13"  && return gp(build_landing(landing_instance(), 60.0, 20))
