@@ -68,6 +68,7 @@ jobs:
           rsync -a --delete "$GITHUB_WORKSPACE/" "$WORK_SHARED/"
 
           srun --partition=hpg-dev \
+               --time=02:00:00 \
                --cpus-per-task=8 \
                --job-name="gha-cluster-test" \
                bash -c "set -e

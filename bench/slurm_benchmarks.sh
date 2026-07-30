@@ -2,12 +2,11 @@
 
 set -euo pipefail
 
-# LARGE_SHARDS=("assembly-large" "solver-large" "extension-large")
-LARGE_SHARDS=("assembly-small" "solver-small" "extension-small" "assembly-large" "solver-large" "extension-large")
+ALL_SHARDS=("assembly-small" "solver-small" "extension-small" "assembly-large" "solver-large" "extension-large")
 MODE="${1:-submit}"
 RESULT_DIR="${BENCHMARK_RESULT_DIR:-bench/results/slurm}"
 PROFILE="${BENCHMARK_PROFILE:-full}"
-EXPECTED_SHARDS="$(IFS=,; echo "${LARGE_SHARDS[*]}")"
+EXPECTED_SHARDS="$(IFS=,; echo "${ALL_SHARDS[*]}")"
 
 run_shard() {
   local shard="$1"
@@ -19,7 +18,7 @@ run_shard() {
 
 case "${MODE}" in
   submit)
-    count="${#LARGE_SHARDS[@]}"
+    count="${#ALL_SHARDS[@]}"
     shard_job_id="$(
       sbatch --parsable \
         --array="1-${count}" \
@@ -28,12 +27,12 @@ case "${MODE}" in
     )"
     sbatch \
       --dependency="afterok:${shard_job_id}" \
-      --export=ALL,BENCHMARK_PROFILE="${PROFILE}",BENCHMARK_RESULT_DIR="${RESULT_DIR}",BENCHMARK_EXPECTED_SHARDS="${EXPECTED_SHARDS}",BENCHMARK_REPORT_MODE=summary \
+      --export=ALL,BENCHMARK_PROFILE="${PROFILE}",BENCHMARK_RESULT_DIR="${RESULT_DIR}",BENCHMARK_REPORT_MODE=summary \
       "$0" aggregate
     ;;
   run-array)
     : "${SLURM_ARRAY_TASK_ID:?SLURM_ARRAY_TASK_ID is required for run-array mode}"
-    shard="${LARGE_SHARDS[$((SLURM_ARRAY_TASK_ID - 1))]}"
+    shard="${ALL_SHARDS[$((SLURM_ARRAY_TASK_ID - 1))]}"
     run_shard "${shard}"
     ;;
   aggregate)
