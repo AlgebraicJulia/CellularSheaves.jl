@@ -11,7 +11,121 @@ solvers. (Spec was written against 23 problems — fingerprint/overfit worries a
 
 ---
 
-## Stage A — forest reference + feature discovery  ✅
+# PHASE 1 — IPM / floor sensor (per-solver, canonical folds)  ✅ FROZEN
+
+> **This is the current, authoritative result.** The Stage A–D sections below are earlier
+> mixed-solver exploration (pre-pivot) — kept for history. Phase 1 rebuilds the floor (`d_lo`)
+> sensor for the **IPM solver only**, on **leak-free canonical folds**, and freezes a legible formula.
+
+## The evaluation is the artifact — `canonical_folds.json`
+
+A week of this project taught us that *evaluation details silently decide everything*, so the folds are
+committed, not recomputed. **Canonical family rule:** `family = problem.split('_')[0]`; if it matches
+`X<digits><suffix>`, strip the suffix to the X-base (`X09bt`→`X09`, `X04b`→`X04`); else verbatim. This
+collapses dial/twin variants so a family never leaks across folds via its near-twin → **21 families**
+(was 31 with the naïve split). Balanced deterministic 5-fold map (no RNG) in `canonical_folds.json`.
+
+- **X09 is 37% of all IPM rows** (14,911) — the merged ceiling-generation family. Whichever fold holds
+  it dominates, so any 5-fold family-CV over 21 families is inherently high-variance (~±0.05).
+- **Handshake (forest-5 on canonical folds):** in-sample **0.512**, family-CV **1.109**. (Earlier naïve
+  31-family folds gave 0.936 — the twin-leakage was worth ~0.13 MAE. This is why we canonicalized.)
+- **All Phase-1 numbers are quoted against these folds**, means with per-fold spread where it matters.
+
+## Essential features — RFE redone honestly (the "8 vs 5" story)
+
+The five `{log α, c_res0_dual, hdiag_max, bar_hdiag_med, margin}` were originally distilled from the
+**mixed** dataset via a **problem-level 80/20** RFE — which is *leakier* than the 31-family folds (every
+family scatters ~80/20 across train/test, so held-out problems always have near-twins in train). We
+**redid the RFE on canonical folds** (`phase1_rfe_canonical.py`):
+
+- **The greedy knee moved 5 → 8.** Honest curve is flat ~1.10–1.15 down to **n=8 (1.108)**, then breaks
+  hard at n=7 (+0.19). Honest-8 set = the five **plus** `r0_c`, `tolratio`, and — notably — a counter,
+  `cbase`. (The "no counters in this cell" note was itself a leaky-fold artifact.)
+- **But the five are NOT refuted.** Greedy RFE is *path*-unstable in its tail: on canonical folds it drops
+  `hdiag_max` too early and lands on a worse 5-set (1.308). Meanwhile **forest on our exact five = 1.109
+  = forest-8 (1.108) = forest-25 (1.150)**. So the five are a fully valid essential set; there is a broad
+  **5–8 feature plateau** (~1.11), and greedy just picks different members under different folds.
+
+**Then we redid L0 with the honest eight** (`phase1_L0_eight.py`) to see if `r0_c`/`tolratio`/`cbase`
+buy a better *formula*. **They do not** — the frozen stable-core is a **wash**:
+
+| frozen stable-core (canonical CV) | terms | all-families | ex-X04 |
+|---|---|---|---|
+| 5-feature basis  | 7 | **1.204** | 0.944 |
+| 8-feature basis  | 9 | 1.211 | **0.929** |
+| off-the-dome champion (hand-built) | 7 | 1.320 | 1.048 |
+| forest(5) reference | — | 1.109 | 0.809 |
+
+The extra three are **forest-essential but formula-diffuse**: `cbase` contributes **0.003** (one 23%-active
+triple), `tolratio` appears only in weather triples, `r0_c` is a ≤0.013 touch-up. Per-fold they *help*
+X09 extrapolation (1.23→0.99) but *hurt* X04 (2.6→3.6–4.1) — net wash. **8 features are no better than 5
+for the compact formula**, so we freeze the simpler, more parsimonious five.
+
+## How the formula is fit — L0 + the leakage correction
+
+Basis: order-≤3 over the five, **centered at operating medians** (so main effects keep physical slopes
+and interactions encode deviations — coefficients readable and fold-stable), hinges at **EBM bend
+points** (`relu(f − knot)`, activity-% reported), pairwise + triple products. Selection: **greedy-forward
++ swap**, L0 (pick exactly *k* terms, no shrinkage — beats lasso's shrink-hedging tax, 1.58→).
+
+**The correction that mattered:** an early single-support run scored **0.955** and "beat" the champion —
+but that was inflated by *both* the easy 31-family folds *and* **support-selection leakage** (terms chosen
+on inner folds drawn from all families, incl. test). The **nested** run (`phase1_nested.py`, select on
+each fold's *training* families only) is honest, and it **overturned** that: per-fold greedy selection
+generalizes to only **1.40** (loses to the champion's 1.32). Stability audit: only `la`, `mg` are
+selected 5/5; every interaction term is ≤3/5 ("weather"). **The fix:** don't re-select per fold — *freeze
+the terms that were stable across folds* (5/5 + 3/5), refit only coefficients. That fixed structure is the
+deliverable and it honestly beats the champion.
+
+## FROZEN FORMULA (IPM, floor; canonical CV MAE all **1.204** / ex-X04 **0.944**)
+
+```
+d_lo ≈ +5.511
+       +0.529·la              (la = log₁₀α − 9.0)          [dominant: drop-Δ +0.33]
+       −0.485·mg              (mg = margin + 3.86)         [dominant: drop-Δ +0.42]
+       +0.025·relu(cd−10.52)·la                            [real:     drop-Δ +0.13]
+       −0.034·relu(cd−10.52)·bm                            [real:     drop-Δ +0.09]
+       −0.023·hx·bm           (hx = log hdiag_max − 1.63)  [minor:    drop-Δ +0.05]
+       −0.003·cd·hx·mg        (cd = log c_res0_dual + 7.27)[near-dead: drop-Δ +0.035]
+       −0.001·la·cd·bm        (bm = log bar_hdiag_med+0.87)[near-dead: drop-Δ +0.011]
+```
+`margin = log₁₀ max(r0_c, r0_p) − log₁₀ max(force_tol, floor_tol)`. All features centered at the medians
+shown (medians: la 9.0, cd −7.27, hx 1.63, bm −0.87, mg −3.86). Output = signed decades above the window
+floor (positive = safe; negative = below floor by |d|). Coefficients are all-data OLS; per-fold ranges are
+tight (e.g. `mg` ∈ [−0.525, −0.470]). The last two terms are droppable (→ effectively a 5-term formula).
+
+## Audits (all mandatory, on canonical folds)
+
+- **By zone:** in-window **0.814**; **below 1.338 (bias +0.88 — optimistic near the floor)**; above 1.559.
+  The formula is a good in-window sensor and degrades in the extrapolation zones — the "below" optimism
+  (it says *safer than you are*) is the one caveat to flag for a controller.
+- **By log α:** gently rising, 1.09 (low α) → 1.32 (high α) — worst where conditioning is hardest. Not
+  flat, but a ~0.23 slope, explainable.
+- **Per-family:** most families 0.24–1.04 (X09 itself only 1.038). **Two extrapolation holes dominate the
+  pool: X04 = 2.67 and e15 = 3.49.** ex-X04 = 0.944; excluding e15 too would drop it further. X04 is the
+  known adversary (routes to the presolve track); **e15 is a newly-surfaced hard family worth a look.**
+- **Drop-test:** `mg`(+0.42) > `la`(+0.33) > `relu(cd−10.52)·la`(+0.13) > `relu(cd−10.52)·bm`(+0.09) >
+  `hx·bm`(+0.05) > `cd·hx·mg`(+0.035) > `la·cd·bm`(+0.011). The physics: **α-geometry + residual-vs-
+  tolerance margin** carry the formula; the `c_res0_dual`-hinge × {α, barrier-median} interactions add
+  real signal; a 2-term tail is noise.
+
+## Verdict + gap-to-forest
+
+Decision rule (beat champion at ≤12 terms, tiebreak to fewer): **met** — 7-term formula 1.204 < champion
+1.320. **Gap to forest: 0.095 (all) / 0.135 (ex-X04)** — within the 0.15 freeze band. That residual gap is
+the honest **price of legibility**: the forest mines the diffuse `cbase`/`tolratio`/`r0_c` signal across
+hundreds of rules; no compact term captures it (confirmed by the 8-feature wash). **Phase 1 frozen.**
+
+**Artifacts:** `canonical_folds.json` · `ebm_ckpt/ipm_floor_forest5.pkl` (THE reference, provenance
+inline) · `phase1_frozen_formula.json` (formula + audits) · scripts `canonical_folds.py`,
+`make_canonical_forest.py`, `phase1_rfe_canonical.py`, `phase1_L0.py`/`phase1_L0v2.py` (single-support,
+pre-canonical — superseded), `phase1_nested.py`, `phase1_L0_eight.py`, `phase1_freeze_probe.py`,
+`phase1_freeze.py`, `rfe_pure_ipm.py` (leaky, superseded). Deprecated forests → `ebm_ckpt/*.DEPRECATED`.
+**Next: Phase 2 (HSD/floor by transfer ladder).**
+
+---
+
+## Stage A — forest reference + feature discovery  ✅  _(earlier exploration; mixed-data, pre-pivot — superseded by Phase 1 above)_
 
 **Reference forest** (HistGradientBoosting depth 4, grouped 5-fold CV, MAE in decades):
 
