@@ -118,6 +118,7 @@ meta = [
     "itmax"=>setget(:itmax), "step_frac"=>setget(:step_frac),
     "m"=>size(s0.B, 1), "n"=>size(s0.B, 2), "nu"=>s0.ν, "cones"=>cones,
     "final_status"=>final_status, "niter"=>niter,
+    "ritz_note"=>"Gauss-quadrature of the predictor base-solve rhs spectral measure (GK on r, the rhs craig! consumes; kmax=10). ritz_t1..10 = Ritz nodes μ (=sv², preconditioned B F^-1 Bᵀ at the row's α, DESCENDING, μ-units, NaN-padded when k<10). ritz_w1..10 = NORMALIZED weights U[1,i]² (Σw=1); absolute quadrature mass = r0_p² (‖seed‖₂², same point/norm as r0_p). omm = 1-μmax (raw, computed directly). ritz_beta = last GK β. sigma2min/sigma2max unchanged (sigma2max<0 = saturation sentinel carrying raw −μmax).",
 ]
 # X-instances: fold in generator params + severity diagnostics (scalars only; skip pstar/Bd/Qd arrays).
 if bmeta !== nothing

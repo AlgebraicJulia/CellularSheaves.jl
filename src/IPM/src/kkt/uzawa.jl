@@ -19,6 +19,10 @@ struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     r1::Scalar{T}               # post-CRAIG residual ‖g-Bx‖ of the last base solve
     s2min::Scalar{T}            # σ̂²min of B on the last base solve's rhs subspace (GK on r; HACK: stand-in
     s2max::Scalar{T}            #   for a future inline-CRAIG harvest — same rhs craig! sees, same factor F)
+    ritz_θ::Vector{T}           # Ritz nodes μ (descending, μ-units), fixed length kmax=10, NaN-padded when k<10
+    ritz_w::Vector{T}           # normalized quadrature weights (Σw=1), NaN-padded to match ritz_θ
+    ritz_beta::Scalar{T}        # last GK β (truncation residual) of the last base solve's harvest
+    omm::Scalar{T}             # 1 - μ̂max, raw (logged separately: nodes near 1 lose the small complement)
     rgmin::T                    # baked: ρ-shift ladder lower bound
     rgmax::T                    # baked: ρ-shift ladder upper bound
 end
@@ -35,7 +39,11 @@ function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMat
     r1 = fill(T(NaN))
     s2min = fill(T(NaN))
     s2max = fill(T(NaN))
-    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, r0, r1, s2min, s2max, rgmin, rgmax)
+    ritz_θ = fill(T(NaN), 10)   # kmax=10 (fixed; GK kmax is out-of-scope to change)
+    ritz_w = fill(T(NaN), 10)
+    ritz_beta = fill(T(NaN))
+    omm = fill(T(NaN))
+    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, r0, r1, s2min, s2max, ritz_θ, ritz_w, ritz_beta, omm, rgmin, rgmax)
 end
 
 function make_kkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAULT_ELIMINATION_ALGORITHM,
@@ -99,23 +107,32 @@ function init_uzw!(
     return iszero(info), ρ
 end
 
-# Ritz recovery from a Golub-Kahan lower-bidiagonal (dv=diag αₖ, ev=subdiag βₖ). Ritz μ = singular(Bk)²
-# approximate the preconditioned spectrum; recover to σ² via μ/(α(1-μ)) (μ∈(0,1) for F=(1/α)A+BᵀB).
-# Returns (s2min, s2max, ritz_beta, ritz_gap). σ²max saturation guard: μ_max→1 (incl. numerical
-# overshoot μ≥1) blows the recovery up → emit −μ_max (negative sentinel carrying raw μ) instead of Inf.
+# Gauss-quadrature representation of the rhs spectral measure from a Golub-Kahan lower-bidiagonal (dv=diag
+# αₖ, ev=subdiag βₖ). Ritz μ = singular(Bk)² approximate the preconditioned spectrum B F⁻¹ Bᵀ; recover to
+# σ² via μ/(α(1-μ)) (μ∈(0,1) for F=(1/α)A+BᵀB). Returns (s2min, s2max, ritz_beta, ritz_gap, θ, w, omm):
+#   θ[i] = svᵢ²           — Ritz nodes (μ-units), DESCENDING, length k (k<kmax on early GK termination)
+#   w[i] = U[1,i]²         — normalized quadrature weight of node i w.r.t. the rhs (Σw=1); the u-basis is
+#                            seeded by the rhs, so U[1,·] is the seed's coordinate. Absolute mass = ‖seed‖²
+#                            = r0² (r0_p column), same point/norm as r0ref.
+#   omm  = 1 - sv[1]²      — 1-μ̂max computed DIRECTLY (not reconstructed from the s2max sentinel; nodes
+#                            near 1 lose their small complement to roundoff, so it is logged separately).
+# s2min/s2max and the σ²max saturation sentinel (μ_max→1 or overshoot μ≥1 → −μ_max) are UNCHANGED.
 function ritz_spectral(dv::AbstractVector{T}, ev::AbstractVector{T}, α_aug::T) where {T}
     k = length(dv)
-    k ≥ 1 || return (T(NaN), T(NaN), T(NaN), T(NaN))
+    k ≥ 1 || return (T(NaN), T(NaN), T(NaN), T(NaN), T[], T[], T(NaN))
     Bk = k == 1 ? Bidiagonal(T[dv[1]], T[], :L) : Bidiagonal(collect(dv), collect(@view ev[1:k-1]), :L)
-    sv = svdvals(Bk)                                     # descending: sv[1]=max, sv[end]=min
-    μmin = sv[end]^2; μmax = sv[1]^2
+    S = svd(Matrix(Bk))                                  # need S.U (left singular vectors) for the weights
+    θ = S.S .^ 2                                          # Ritz nodes μ, descending
+    w = vec(S.U[1, :]) .^ 2                               # normalized weights, Σw=1 (U orthogonal, row 1 unit)
+    μmin = θ[end]; μmax = θ[1]
     s2min = (zero(T) < μmin < one(T)) ? μmin / (α_aug * (one(T) - μmin)) : T(NaN)
     s2max = if μmax ≤ zero(T); T(NaN)
             elseif μmax ≥ one(T) - T(1e-12); -μmax
             else μmax / (α_aug * (one(T) - μmax)) end
     ritz_beta = isempty(ev) ? T(NaN) : ev[end]
-    ritz_gap  = k ≥ 2 ? (sv[end-1]^2 - sv[end]^2) : T(NaN)
-    return (s2min, s2max, ritz_beta, ritz_gap)
+    ritz_gap  = k ≥ 2 ? (θ[end-1] - θ[end]) : T(NaN)
+    omm = one(T) - μmax                                   # 1 - μ̂max, raw (may be ≤0 on numerical overshoot)
+    return (s2min, s2max, ritz_beta, ritz_gap, θ, w, omm)
 end
 
 # k-step preconditioned Golub-Kahan bidiagonalization of B under N = F⁻¹, seeded by `seed` (copied, not
@@ -127,7 +144,7 @@ function gk_spectral(divwrk::DivisionWorkspace{T}, F::ChordalTriangular{:N, UPLO
     u = copy(seed)
     Nv = zeros(T, n); v = zeros(T, n); Atu = zeros(T, n); Av = zeros(T, m)
     dv = T[]; ev = T[]
-    β = norm(u); β == zero(T) && return (T(NaN), T(NaN), T(NaN), T(NaN))
+    β = norm(u); β == zero(T) && return (T(NaN), T(NaN), T(NaN), T(NaN), T[], T[], T(NaN))
     u ./= β
     for _ in 1:kmax
         mul!(Atu, B', u)
@@ -160,7 +177,8 @@ function solve_kkt!(
     atol::T,
 ) where {UPLO, T}
     return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, A, B,
-                      f, g, wrk.α[], atol, y0, wrk.r0, wrk.r1, wrk.s2min, wrk.s2max)
+                      f, g, wrk.α[], atol, y0, wrk.r0, wrk.r1, wrk.s2min, wrk.s2max,
+                      wrk.ritz_beta, wrk.omm, wrk.ritz_θ, wrk.ritz_w)
 end
 
 #
@@ -187,6 +205,10 @@ function solve_uzw!(
         r1ref = nothing,
         s2minref = nothing,
         s2maxref = nothing,
+        ritzβref = nothing,
+        ommref = nothing,
+        ritzθbuf = nothing,
+        ritzwbuf = nothing,
     ) where {UPLO, T}
     m, n = size(B)
 
@@ -242,10 +264,18 @@ function solve_uzw!(
     # HACK (stand-in for a future inline-CRAIG harvest): run a k-step preconditioned Golub-Kahan on the
     # EXACT rhs r craig! is about to consume, reusing the same F/divwrk, to read σ̂²min/σ̂²max of B on the
     # solve's own rhs subspace. Off-books extra ldivs; nothing craig! reads is mutated (GK copies r).
-    if s2minref !== nothing || s2maxref !== nothing
-        s2min, s2max, _, _ = gk_spectral(divwrk, F, B, r, α; kmax = 10)
+    if s2minref !== nothing || s2maxref !== nothing || ritzθbuf !== nothing
+        s2min, s2max, rβ, _, θ, w, omm = gk_spectral(divwrk, F, B, r, α; kmax = 10)
         s2minref === nothing || (s2minref[] = s2min)
         s2maxref === nothing || (s2maxref[] = s2max)
+        ritzβref === nothing || (ritzβref[] = rβ)
+        ommref   === nothing || (ommref[]   = omm)
+        if ritzθbuf !== nothing
+            fill!(ritzθbuf, T(NaN)); kk = min(length(θ), length(ritzθbuf)); @views ritzθbuf[1:kk] .= θ[1:kk]
+        end
+        if ritzwbuf !== nothing
+            fill!(ritzwbuf, T(NaN)); kk = min(length(w), length(ritzwbuf)); @views ritzwbuf[1:kk] .= w[1:kk]
+        end
     end
     craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol)
     niter += itrwrk.stats.niter

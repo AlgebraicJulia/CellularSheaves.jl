@@ -224,6 +224,7 @@ function solvepredictor!(
     pbase = solve_kkt!(kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
     r0_p = kkt.r0[]; r1_p = kkt.r1[]; craig_p = kkt.itrwrk.stats.status
     s2min_p = kkt.s2min[]; s2max_p = kkt.s2max[]   # σ̂² of B on the predictor base-solve rhs subspace
+    ritz_beta_p = kkt.ritz_beta[]; omm_p = kkt.omm[]; ritz_θ_p = copy(kkt.ritz_θ); ritz_w_p = copy(kkt.ritz_w)
     #
     # refine Δpa, Δya to force_tol
     #
@@ -241,7 +242,7 @@ function solvepredictor!(
     mul!(w.Δda, B', w.Δya, -1, -1)
     mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
 
-    return pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p
+    return pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p
 end
 
 #
@@ -502,6 +503,7 @@ function step!(s::IPMSolver{T}) where {T}
     r0_p = r0_c = T(NaN)                     # pre-CRAIG base residual per role
     r1_p = r1_c = T(NaN)                     # post-CRAIG base residual per role
     s2min_p = s2max_p = T(NaN)               # σ̂²min/max of B on the predictor base-solve rhs subspace
+    ritz_beta_p = omm_p = T(NaN); ritz_θ_p = fill(T(NaN), 10); ritz_w_p = fill(T(NaN), 10)   # Gauss-quadrature harvest
     craig_p = craig_c = ""                   # CRAIG termination status per role
     bar_hdiag_med = bar_hdiag_frac_mid = T(NaN)   # pre-Q barrier-Hessian diagonal stats (cone coords)
     step = zero(T)
@@ -586,7 +588,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -652,7 +654,7 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c, r1_p, r1_c, pres0_d, pres0_p, cres0_d, cres0_p, pres_exit, cres_exit, bar_hdiag_med, bar_hdiag_frac_mid, s2min_p, s2max_p))
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c, r1_p, r1_c, pres0_d, pres0_p, cres0_d, cres0_p, pres_exit, cres_exit, bar_hdiag_med, bar_hdiag_frac_mid, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"

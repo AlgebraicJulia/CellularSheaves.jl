@@ -46,7 +46,7 @@ function _oracle_record(i, α, sc, st)
     hasw  = hasproperty(row, :wstat)
     dg    = diag(sparse(sc.H))                     # scaled-Hessian diagonal (α-independent within an iter)
     Ld    = diag(sc.kkt.F)                          # Cholesky factor diagonal — κ(F) proxy / ρ-ladder early warning
-    return (iter = i, alpha = α, state = _oracle_state(row), ncraig = _oracle_craig(row),
+    base = (iter = i, alpha = α, state = _oracle_state(row), ncraig = _oracle_craig(row),
             ipm_status = st, mu = μ, mu_next = mu(sc), rho = row.ρ,
             force_tol = ftol, floor_tol = fltol,
             sigma2min = row.s2min_p, sigma2max = row.s2max_p,   # harvested in the predictor base solve (rhs r)
@@ -72,14 +72,19 @@ function _oracle_record(i, α, sc, st)
             w_res_exit = hasw ? row.wres_exit : nothing,
             Ldiag_min = minimum(abs, Ld), Ldiag_max = maximum(abs, Ld),
             ipm_pres = row.pres, ipm_dres = row.dres,
-            bar_hdiag_med = row.bar_hdiag_med, bar_hdiag_frac_mid = row.bar_hdiag_frac_mid,
-            chosen = false)
+            bar_hdiag_med = row.bar_hdiag_med, bar_hdiag_frac_mid = row.bar_hdiag_frac_mid)
+    # append the Gauss-quadrature harvest of the predictor rhs measure (nodes θ, weights w, len 10 NaN-padded)
+    θ = row.ritz_θ_p; wq = row.ritz_w_p
+    ritzcols = (; ritz_beta = row.ritz_beta_p, omm = row.omm_p,
+        (Symbol(:ritz_t, j) => (j ≤ length(θ)  ? θ[j]  : T(NaN)) for j in 1:10)...,
+        (Symbol(:ritz_w, j) => (j ≤ length(wq) ? wq[j] : T(NaN)) for j in 1:10)...)
+    return merge(base, ritzcols, (chosen = false,))
 end
 
 # Serialize solve_logged records to a CSV at `path`. Generic over the record fields; enums are
 # stringified, `nothing` becomes empty, floats use scientific notation (NaN preserved).
 _csvcell(::Nothing) = ""
-_csvcell(x::AbstractFloat) = isnan(x) ? "NaN" : @sprintf("%.6e", x)
+_csvcell(x::AbstractFloat) = isnan(x) ? "NaN" : @sprintf("%.15e", x)   # full precision: nodes near 1 carry info in last digits
 _csvcell(x) = string(x)
 function write_oracle_csv(path::AbstractString, records::AbstractVector{<:NamedTuple})
     open(path, "w") do io
