@@ -1,6 +1,7 @@
 const IPMHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, α::T, ρ::T,
     pbase::Int, prefn::Int, ppass::Int, pstat::RefStatus,
-    cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus}
+    cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus,
+    pfres::T, ppres::T, pdres::T, cfres::T, cpres::T, cdres::T, αmin::T, αmax::T}
 
 struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     μ::Vector{T}
@@ -17,12 +18,21 @@ struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     crefn::Vector{Int}
     cpass::Vector{Int}
     cstat::Vector{RefStatus}
+    pfres::Vector{T}
+    ppres::Vector{T}
+    pdres::Vector{T}
+    cfres::Vector{T}
+    cpres::Vector{T}
+    cdres::Vector{T}
+    αmin::Vector{T}
+    αmax::Vector{T}
 end
 
 function IPMHistory{T}() where {T}
     return IPMHistory{T}(T[], T[], T[], T[], T[], T[],
         Int[], Int[], Int[], RefStatus[],
-        Int[], Int[], Int[], RefStatus[])
+        Int[], Int[], Int[], RefStatus[],
+        T[], T[], T[], T[], T[], T[], T[], T[])
 end
 
 function Base.getindex(hist::IPMHistory, i::Int)
@@ -40,7 +50,11 @@ function Base.getindex(hist::IPMHistory, i::Int)
     crefn   = hist.crefn[i]
     cpass   = hist.cpass[i]
     cstat   = hist.cstat[i]
-    return (; μ, step, pres, dres, α, ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat)
+    pfres   = hist.pfres[i]; ppres = hist.ppres[i]; pdres = hist.pdres[i]
+    cfres   = hist.cfres[i]; cpres = hist.cpres[i]; cdres = hist.cdres[i]
+    αmin    = hist.αmin[i];  αmax  = hist.αmax[i]
+    return (; μ, step, pres, dres, α, ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat,
+        pfres, ppres, pdres, cfres, cpres, cdres, αmin, αmax)
 end
 
 function Base.push!(hist::IPMHistory, row::NamedTuple)
@@ -58,6 +72,9 @@ function Base.push!(hist::IPMHistory, row::NamedTuple)
     push!(hist.crefn,   row.crefn)
     push!(hist.cpass,   row.cpass)
     push!(hist.cstat,   row.cstat)
+    push!(hist.pfres, row.pfres); push!(hist.ppres, row.ppres); push!(hist.pdres, row.pdres)
+    push!(hist.cfres, row.cfres); push!(hist.cpres, row.cpres); push!(hist.cdres, row.cdres)
+    push!(hist.αmin, row.αmin); push!(hist.αmax, row.αmax)
     return hist
 end
 
@@ -76,6 +93,9 @@ function Base.empty!(hist::IPMHistory)
     empty!(hist.crefn)
     empty!(hist.cpass)
     empty!(hist.cstat)
+    empty!(hist.pfres); empty!(hist.ppres); empty!(hist.pdres)
+    empty!(hist.cfres); empty!(hist.cpres); empty!(hist.cdres)
+    empty!(hist.αmin); empty!(hist.αmax)
     return hist
 end
 

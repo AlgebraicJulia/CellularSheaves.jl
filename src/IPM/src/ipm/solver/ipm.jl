@@ -1,3 +1,8 @@
+# α-window controller constants (alpha_window_laws.md §7): floor budget, ceiling gap, controller cap.
+const CTRL_BDG_IPM =  0.3
+const CTRL_GAP_IPM = -0.3
+const CTRL_CAP_IPM =  1.0
+
 struct IPMSolver{T, I, W, C} <: AbstractSolver{T}
     Q::BlockSparseMatrix{T, I}
     H::BlockSparseMatrix{T, I}
@@ -122,6 +127,8 @@ function refinekkt!(
     npass = 0
     status = REFINE_ITMAX
     prv = typemax(T)
+    pres1 = T(NaN)
+    dres1 = T(NaN)
 
     for i in 1:itmax
         #
@@ -137,6 +144,11 @@ function refinekkt!(
         dres = norm(sd, Inf) / (one(T) + nc)
         pres = norm(sp, Inf) / (one(T) + ng)
         res = max(dres, pres)
+
+        if isone(i)
+            pres1 = pres
+            dres1 = dres
+        end
 
         if res ≤ force_tol
             status = REACHED_FORCE
@@ -160,7 +172,8 @@ function refinekkt!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        niter += solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        n, _ = solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        niter += n
         npass += 1
         #
         # update Δp and Δy:
@@ -172,7 +185,7 @@ function refinekkt!(
         axpy!(one(T), dy, Δy)
     end
 
-    return npass, niter, status
+    return npass, niter, status, pres1, dres1
 end
 
 ############################################################################################
@@ -215,11 +228,11 @@ function solvepredictor!(
     #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
-    pbase = solve_kkt!(kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
+    pbase, pfres = solve_kkt!(kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
     #
     # refine Δpa, Δya to force_tol
     #
-    ppass, prefn, pstat = refinekkt!(
+    ppass, prefn, pstat, ppres, pdres = refinekkt!(
         w.Δpa, w.Δya, kkt, H, B,
         w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
@@ -233,7 +246,7 @@ function solvepredictor!(
     mul!(w.Δda, B', w.Δya, -1, -1)
     mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
 
-    return pbase, prefn, ppass, pstat
+    return pbase, prefn, ppass, pstat, pfres, ppres, pdres
 end
 
 #
@@ -326,12 +339,12 @@ function solvecorrector!(
     #   [ H  -Bᵀ ] [ Δp ]   [ rd* ]
     #   [ B   0  ] [ Δy ] = [ rp  ]
     #
-    cbase = solve_kkt!(kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
+    cbase, cfres = solve_kkt!(kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
     #
     # use iterative refinement to improve
     # the solutions Δp and Δy
     #
-    cpass, crefn, cstat = refinekkt!(
+    cpass, crefn, cstat, cpres, cdres = refinekkt!(
         w.Δp, w.Δy, kkt, H, B,
         w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
@@ -345,7 +358,7 @@ function solvecorrector!(
     mul!(w.Δd, B', w.Δy, -1, -1)
     mul!(w.Δd, Symmetric(Q, :L), w.Δp, 1, 1)
 
-    return cbase, crefn, cpass, cstat
+    return cbase, crefn, cpass, cstat, cfres, cpres, cdres
 end
 
 ############################################################################################
@@ -483,11 +496,19 @@ end
 function step!(s::IPMSolver{T}) where {T}
     status = CONTINUE
 
+    #
+    # choose augmentation parameter α
+    #
+    setaug!(s, CTRL_CAP_IPM)
+
     pbase = cbase = 0       # base-solve CRAIG per role
     prefn = crefn = 0       # refinement CRAIG per role
     ppass = cpass = 0       # refinement passes per role
     pstat = cstat = REACHED_FORCE   # refinement exit status per role
     step = zero(T)
+    pfres = ppres = pdres = T(NaN)
+    cfres = cpres = cdres = T(NaN)
+    αmin = αmax = T(NaN)
 
     w = s.wrk
     #
@@ -565,7 +586,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                pbase, prefn, ppass, pstat = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -580,7 +601,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                cbase, crefn, cpass, cstat = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -613,6 +634,18 @@ function step!(s::IPMSolver{T}) where {T}
                 axpy!(step, w.Δp, s.p)
                 axpy!(step, w.Δd, s.d)
                 axpy!(step, w.Δy, s.y)
+                #
+                # compute optimal augmentation window
+                #
+                #   α* ∈ [αmin, αmax]
+                #
+                pok = pstat === REACHED_FORCE || pstat === REACHED_FLOOR
+                cok = cstat === REACHED_FORCE || cstat === REACHED_FLOOR
+                state = pok && cok
+                tol = max(force_tol, floor_tol)
+
+                αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass), CTRL_BDG_IPM)
+                αmax = augmax(s.α[], pdres, tol, state, pbase, CTRL_GAP_IPM)
 
                 if isstalled(s)
                     if s.settings.verbose > 1
@@ -631,7 +664,8 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat))
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat,
+        pfres, ppres, pdres, cfres, cpres, cdres, αmin, αmax))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"

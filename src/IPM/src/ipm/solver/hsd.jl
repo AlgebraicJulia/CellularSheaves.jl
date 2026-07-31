@@ -1,3 +1,9 @@
+# α-window controller constants (alpha_window_laws.md §7): floor budget, ceiling gap, controller cap.
+# budget_hsd=0 (universal minus the hidden ~0.3 woodbury workload); cap=1.5 = 1 + 0.5 near-edge bias.
+const CTRL_BDG_HSD =  0.0
+const CTRL_GAP_HSD = -0.4
+const CTRL_CAP_HSD =  1.5
+
 struct HSDSolver{T, I, W, C} <: AbstractSolver{T}
     Q::BlockSparseMatrix{T, I}
     H::BlockSparseMatrix{T, I}
@@ -232,18 +238,18 @@ function woodbury!(
     #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
     #   [ B   0  ] [ Δy2 ] = [ g ]
     #
-    wbase = solve_kkt!(kkt, w.Δp2, w.Δy2, H, B, c, g, y0; atol)
+    wbase, wfres = solve_kkt!(kkt, w.Δp2, w.Δy2, H, B, c, g, y0; atol)
     #
     # use iterative refinement to improve tha
     # accuracy of the solutions Δp2, Δy2
     #
-    wpass, wrefn, wstat = refinekkt!(
+    wpass, wrefn, wstat, wpres, wdres = refinekkt!(
         w.Δp2, w.Δy2, kkt, H, B,
         c, g, w.sy, w.sp, w.dp, w.dy, nc, ng;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
 
-    return wbase, wrefn, wpass, wstat
+    return wbase, wrefn, wpass, wstat, wfres, wpres, wdres
 end
 
 function capacitance!(
@@ -331,6 +337,8 @@ function refinehsd!(
     #   1/τ pᵀQp + κ
     #
     pQpτκ = dot(p, Qp) / τ + κ
+    pres1 = T(NaN)
+    dres1 = T(NaN)
 
     for i in 1:itmax
         #
@@ -353,6 +361,11 @@ function refinehsd!(
         pres = norm(sp, Inf) / (1 + ng)
         dres = norm(sd, Inf) / (1 + nc)
         τres = abs(sτ) / (1 + nc + ng)
+
+        if isone(i)
+            pres1 = pres
+            dres1 = dres
+        end
 
         res = max(pres, dres, τres)
 
@@ -378,7 +391,8 @@ function refinehsd!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        niter += solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        n, _ = solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        niter += n
         npass += 1
         #
         # apply the Schur lift (aτ = c - 2Qp/τ):
@@ -406,7 +420,7 @@ function refinehsd!(
         Δτ += dτ
     end
 
-    return npass, niter, status, Δτ
+    return npass, niter, status, Δτ, pres1, dres1
 end
 
 #
@@ -439,7 +453,7 @@ function newton!(
     #   [ H -Bᵀ ] [ Δp ] = [ f  ]
     #   [ B  0  ] [ Δy ]   [ rp ]
     #
-    niter = solve_kkt!(wrk, Δp, Δy, H, B, f, rp, y0; atol)
+    niter, nr0 = solve_kkt!(wrk, Δp, Δy, H, B, f, rp, y0; atol)
     #
     # apply the Schur lift:
     #
@@ -455,7 +469,7 @@ function newton!(
     axpy!(Δτ, Δp2, Δp)
     axpy!(Δτ, Δy2, Δy)
 
-    return niter, Δτ
+    return niter, Δτ, nr0
 end
 
 ############################################################################################
@@ -513,7 +527,7 @@ function solvepredictor!(
     #   [  B           0              -g ] [ Δya ] = [ rp     ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
-    pbase, Δτa = newton!(
+    pbase, Δτa, pfres = newton!(
         w.Δpa, w.Δya,
         kkt, H, B, g,
         w.f, w.rp, gap, w.Δp2, w.Δy2, aτ, S;
@@ -523,7 +537,7 @@ function solvepredictor!(
     # use iterative refinement to improve
     # the solutions Δpa, Δya, and Δτa
     #
-    ppass, prefn, pstat, Δτa = refinehsd!(
+    ppass, prefn, pstat, Δτa, ppres, pdres = refinehsd!(
         w.Δpa, w.Δya, Δτa,
         kkt, H, B, c, g, w.Qp, p, aτ,
         τ, κ, w.rp, w.f, gap, w.Δp2, w.Δy2, S,
@@ -545,7 +559,7 @@ function solvepredictor!(
     #   Δκa = -κ (1 + 1/τ Δτa)
     #
     Δκa = -κ * (τ + Δτa) / τ
-    return pbase, prefn, ppass, pstat, Δτa, Δκa
+    return pbase, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres
 end
 
 #
@@ -671,7 +685,7 @@ function solvecorrector!(
     #   [ B            0                -g ] [ Δy ] = [ rp                          ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
-    cbase, Δτ = newton!(
+    cbase, Δτ, cfres = newton!(
         w.Δp, w.Δy,
         kkt, H, B, g,
         w.f, w.rp, fτ, w.Δp2, w.Δy2, aτ, S, w.Δya;
@@ -681,7 +695,7 @@ function solvecorrector!(
     # use iterative refinement to improve
     # the solutions Δp, Δy, and Δτ
     #
-    cpass, crefn, cstat, Δτ = refinehsd!(
+    cpass, crefn, cstat, Δτ, cpres, cdres = refinehsd!(
         w.Δp, w.Δy, Δτ,
         kkt, H, B, c, g, w.Qp, p, aτ,
         τ, κ, w.rp, w.f, fτ, w.Δp2, w.Δy2, S,
@@ -703,7 +717,7 @@ function solvecorrector!(
     #   Δκ ← (fκ - κ Δτ) / τ
     #
     Δκ = (fκ - κ * Δτ) / τ
-    return cbase, crefn, cpass, cstat, Δτ, Δκ
+    return cbase, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres
 end
 
 ############################################################################################
@@ -921,12 +935,21 @@ end
 function step!(s::HSDSolver{T}) where {T}
     status = CONTINUE
 
+    #
+    # choose augmentation parameter α
+    #
+    setaug!(s, CTRL_CAP_HSD)
+
     pbase = cbase = wbase = 0   # base-solve CRAIG per role (woodbury counted into craig1, archive-wins)
     prefn = crefn = wrefn = 0   # refinement CRAIG per role
     ppass = cpass = wpass = 0   # refinement passes per role
     pstat = cstat = wstat = REACHED_FORCE   # refinement exit status per role
 
     step = zero(T)
+    pfres = ppres = pdres = T(NaN)
+    cfres = cpres = cdres = T(NaN)
+    wfres = wpres = wdres = T(NaN)
+    αmin = αmax = T(NaN)
 
     w = s.wrk
     τ = s.τ[]
@@ -1015,7 +1038,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
                 #   [ B   0  ] [ Δy2 ] = [ g ]
                 #
-                wbase, wrefn, wpass, wstat = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
+                wbase, wrefn, wpass, wstat, wfres, wpres, wdres = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
                 copyto!(s.Δy0, w.Δy2)
                 #
                 # compute the Woodbury capacitance scalar
@@ -1034,7 +1057,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκa = (-τκ - κ Δτa) / τ
                 #
-                pbase, prefn, ppass, pstat, Δτa, Δκa = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -1052,7 +1075,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
                 #
-                cbase, crefn, cpass, cstat, Δτ, Δκ = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -1099,6 +1122,19 @@ function step!(s::HSDSolver{T}) where {T}
 
                 s.τ[] = τ + step * Δτ
                 s.κ[] = κ + step * Δκ
+                #   
+                # compute optimal augmentation window
+                #
+                #   α* ∈ [αmin, αmax]
+                #
+                pok = pstat === REACHED_FORCE || pstat === REACHED_FLOOR
+                cok = cstat === REACHED_FORCE || cstat === REACHED_FLOOR
+                wok = wstat === REACHED_FORCE || wstat === REACHED_FLOOR
+                state = pok && cok && wok
+                tol = max(force_tol, floor_tol)
+
+                αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass, wpass), CTRL_BDG_HSD)
+                αmax = augmax(s.α[], pdres, tol, state, pbase, CTRL_GAP_HSD)
 
                 if isstalled(s)
                     if s.settings.verbose > 1
@@ -1118,7 +1154,8 @@ function step!(s::HSDSolver{T}) where {T}
     end
 
     push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ=s.ρ[], τ=s.τ[], κ=s.κ[],
-        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat))
+        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat,
+        pfres, ppres, pdres, cfres, cpres, cdres, wfres, wpres, wdres, αmin, αmax))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"

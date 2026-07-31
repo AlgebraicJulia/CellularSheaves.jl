@@ -162,6 +162,12 @@ function solve_uzw!(
     copyto!(r, g)
     mul!(r, B, x, -one(T), one(T))
     #
+    # compute the residual norm
+    #
+    #   nr₀ = ‖ g - B x ‖
+    #
+    nr0 = norm(r)
+    #
     # solve for δx and δy:
     #
     #   [ β A + Bᵀ B  -Bᵀ ] [ δx ] = [ 0 ]
@@ -202,5 +208,5 @@ function solve_uzw!(
         axpy!(one(T), y0, y)
     end
 
-    return niter
+    return niter, nr0
 end

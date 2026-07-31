@@ -7,6 +7,24 @@ function Base.size(hist::AbstractHistory)
     return size(hist.μ)
 end
 
+function getaug(hist::AbstractHistory{T}, cap::Real) where {T}
+    row = last(hist)
+
+    if isnan(row.αmin)
+        return row.α / 100
+    end
+
+    αmin = log10(row.αmin)
+
+    if isnan(row.αmax)
+        return exp10(αmin + T(1.5))
+    end
+
+    αmax = log10(row.αmax)
+
+    return exp10(min((αmin + αmax) / 2, αmax - T(cap)))
+end
+
 function atfloor(hist::AbstractHistory; patience::Int=3)
     n = length(hist)
     return n ≥ patience && all(hist.cstat[i] != REACHED_FORCE for i in n-patience+1:n)
