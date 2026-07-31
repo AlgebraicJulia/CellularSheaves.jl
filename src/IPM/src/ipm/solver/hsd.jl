@@ -30,7 +30,8 @@ struct HSDSolver{T, I, W, C} <: AbstractSolver{T}
     Δy0::FVector{T}
     nc::FScalar{T}
     ng::FScalar{T}
-    α::FScalar{T}       # effective augmentation penalty; anchored at construction, owned by updateaug!
+    nB::FScalar{T}      # ‖B‖ — fixed for the solver's lifetime; the cold-start augmentation anchor
+    α::FScalar{T}       # effective augmentation penalty; owned by setaug!
     timers::TimerOutput
 end
 
@@ -793,24 +794,21 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::HSDSettings{T}) wher
     κ = FScalar{T}(undef)
     nc = FScalar{T}(undef)
     ng = FScalar{T}(undef)
+    nB = FScalar{T}(undef)
     α = FScalar{T}(undef)
 
     ρ[] = settings.rgmin
     nc[] = norm(c)
     ng[] = norm(g)
+    nB[] = norm(B)
     Δy0 = FVector{T}(undef, m); fill!(Δy0, false)
 
     τ[] = one(T)
     κ[] = one(T)
 
-    nH = sqrt(n)
-    nQ = norm(Symmetric(Q, :L))
-    nB = norm(B)
-    α[] = settings.aaug + settings.raug * (nH + nQ) / nB^2
-
     solver = HSDSolver(Q, H, Hc, B, c, g, p, d, y, cones,
         scaling, P, hsdwrk, caches, conewrk, kkt,
-        hist, ν, settings, ρ, τ, κ, Δy0, nc, ng, α, TimerOutput()
+        hist, ν, settings, ρ, τ, κ, Δy0, nc, ng, nB, α, TimerOutput()
     )
 
     return solver
@@ -935,11 +933,6 @@ end
 function step!(s::HSDSolver{T}) where {T}
     status = CONTINUE
 
-    #
-    # choose augmentation parameter α
-    #
-    setaug!(s, CTRL_CAP_HSD)
-
     pbase = cbase = wbase = 0   # base-solve CRAIG per role (woodbury counted into craig1, archive-wins)
     prefn = crefn = wrefn = 0   # refinement CRAIG per role
     ppass = cpass = wpass = 0   # refinement passes per role
@@ -1011,6 +1004,11 @@ function step!(s::HSDSolver{T}) where {T}
 
             status = nearstatus(s, NUMERICAL_FAILURE)
         else
+            #
+            # choose augmentation parameter α
+            #
+            setaug!(s, T(CTRL_CAP_HSD))
+
             if !@timeit s.timers "initkkt" initkkt!(s)
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
@@ -1133,8 +1131,8 @@ function step!(s::HSDSolver{T}) where {T}
                 state = pok && cok && wok
                 tol = max(force_tol, floor_tol)
 
-                αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass, wpass), CTRL_BDG_HSD)
-                αmax = augmax(s.α[], pdres, tol, state, pbase, CTRL_GAP_HSD)
+                αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass, wpass), T(CTRL_BDG_HSD))
+                αmax = augmax(s.α[], pdres, tol, state, pbase, T(CTRL_GAP_HSD))
 
                 if isstalled(s)
                     if s.settings.verbose > 1
@@ -1172,8 +1170,6 @@ function reinit!(solver::HSDSolver{T}, prob::IPMProblem{T}; frac::Real=0.1) wher
     @assert nrows(prob.B) == nrows(solver.B)
     @assert nvtxs(prob.B) == nvtxs(solver.B)
     @assert nouts(prob.B) == nouts(solver.B)
-
-    n = ncols(solver.B)
 
     c = copy(prob.c)
     g = copy(prob.g)
@@ -1224,11 +1220,6 @@ function reinit!(solver::HSDSolver{T}, prob::IPMProblem{T}; frac::Real=0.1) wher
     end
 
     solver.ρ[] = solver.settings.rgmin
-
-    nH = sqrt(T(n))
-    nQ = norm(Symmetric(solver.Q, :L))
-    nB = norm(solver.B)
-    solver.α[] = solver.settings.aaug + solver.settings.raug * (nH + nQ) / nB^2
 
     return solver
 end

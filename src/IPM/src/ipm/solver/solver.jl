@@ -4,36 +4,30 @@ include("ipm.jl")
 include("hsd.jl")
 include("utils.jl")
 
-############################################################################################
-# α-window controller  (alpha_window_laws.md — floor law §3, ceiling law §4, controller §6)
-############################################################################################
+function augmin(α::T, pfres::T, tol::T, state::Bool, pbase::Int, npass::Int, bdg::T) where {T}
+    αmin = T(NaN)
 
-# augmin: the floor law (§3) — the window's lower α-edge from the predictor f-res (start-gap altimeter).
-# NaN ⇒ ABSTAIN (breach, or the ceiling symptom npass>1). tol = max(force_tol, floor_tol) of the solve.
-function augmin(α::T, pfres::T, tol::T, state::Bool, pbase::Int, npass::Int, c::Real) where {T}
-    if !(state && npass <= 1 && isfinite(pfres) && pfres > zero(T))
-        return T(NaN)
+    if state && npass <= 1 && isfinite(pfres) && pfres > zero(T)
+        αmin = α * pfres / tol / exp10(bdg - max(pbase - 1, 0) / T(20))
     end
 
-    mg   = log10(pfres) - log10(tol)
-    d_lo = -mg + T(c) - T(0.05) * max(pbase - 1, 0)
-    return exp10(log10(α) - d_lo)
+    return αmin
 end
 
-# augmax: the ceiling law (§4) — the window's upper α-edge from the predictor dual residual.
-# NaN ⇒ ABSTAIN (breach, or the floor symptom pbase>3, i.e. below the floor).
-function augmax(α::T, pdres::T, tol::T, state::Bool, pbase::Int, c2::Real) where {T}
-    if !(state && pbase <= 3 && isfinite(pdres) && pdres > zero(T))
-        return T(NaN)
+function augmax(α::T, pdres::T, tol::T, state::Bool, pbase::Int, gap::T) where {T}
+    αmax = T(NaN)
+
+    if state && pbase <= 3 && isfinite(pdres) && pdres > zero(T)
+        αmax = α * tol / pdres * exp10(gap)
     end
 
-    d_hi = log10(tol) - log10(pdres) + T(c2)
-    return exp10(log10(α) + d_hi)
+    return αmax
 end
 
-# setaug!: place α for the step about to run. On empty history the construction anchor stands.
-function setaug!(s::AbstractSolver, cap::Real)
-    if !isempty(s.hist)
+function setaug!(s::AbstractSolver{T}, cap::T) where {T}
+    if isempty(s.hist)
+        s.α[] = s.settings.aaug + s.settings.raug * norm(Symmetric(s.H, :L)) / s.nB[]^2
+    else
         s.α[] = getaug(s.hist, cap)
     end
 

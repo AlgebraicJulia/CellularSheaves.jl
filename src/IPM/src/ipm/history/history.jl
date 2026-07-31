@@ -7,22 +7,20 @@ function Base.size(hist::AbstractHistory)
     return size(hist.μ)
 end
 
-function getaug(hist::AbstractHistory{T}, cap::Real) where {T}
-    row = last(hist)
+function getaug(hist::AbstractHistory{T}, cap::T) where {T}
+    α = hist.α[end]
+    αmin = hist.αmin[end]
+    αmax = hist.αmax[end]
 
-    if isnan(row.αmin)
-        return row.α / 100
+    if isnan(αmin)
+        α /= 100
+    elseif isnan(αmax)
+        α = αmin * exp10(T(1.5))
+    else
+        α = min(sqrt(αmin) * sqrt(αmax), αmax / exp10(cap))
     end
 
-    αmin = log10(row.αmin)
-
-    if isnan(row.αmax)
-        return exp10(αmin + T(1.5))
-    end
-
-    αmax = log10(row.αmax)
-
-    return exp10(min((αmin + αmax) / 2, αmax - T(cap)))
+    return α
 end
 
 function atfloor(hist::AbstractHistory; patience::Int=3)

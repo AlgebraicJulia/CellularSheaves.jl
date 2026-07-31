@@ -25,7 +25,8 @@ struct IPMSolver{T, I, W, C} <: AbstractSolver{T}
     ρ::FScalar{T}
     nc::FScalar{T}
     ng::FScalar{T}
-    α::FScalar{T}       # effective augmentation penalty; anchored at construction, owned by updateaug!
+    nB::FScalar{T}      # ‖B‖ — fixed for the solver's lifetime; the cold-start augmentation anchor
+    α::FScalar{T}       # effective augmentation penalty; owned by setaug!
     timers::TimerOutput
 end
 
@@ -439,20 +440,17 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::IPMSettings{T}) wher
     ρ = FScalar{T}(undef)
     nc = FScalar{T}(undef)
     ng = FScalar{T}(undef)
+    nB = FScalar{T}(undef)
     α = FScalar{T}(undef)
 
     ρ[] = settings.rgmin
     nc[] = norm(c)
     ng[] = norm(g)
-
-    nH = (sd / sp) * sqrt(n)
-    nQ = norm(Symmetric(Q, :L))
-    nB = norm(B)
-    α[] = settings.aaug + settings.raug * (nH + nQ) / nB^2
+    nB[] = norm(B)
 
     return IPMSolver(Q, H, B, c, g, p, d, y, cones,
         scaling, P, ipmwrk, caches, conewrk, kkt,
-        hist, ν, settings, ρ, nc, ng, α, TimerOutput()
+        hist, ν, settings, ρ, nc, ng, nB, α, TimerOutput()
     )
 end
 
@@ -495,11 +493,6 @@ end
 
 function step!(s::IPMSolver{T}) where {T}
     status = CONTINUE
-
-    #
-    # choose augmentation parameter α
-    #
-    setaug!(s, CTRL_CAP_IPM)
 
     pbase = cbase = 0       # base-solve CRAIG per role
     prefn = crefn = 0       # refinement CRAIG per role
@@ -559,6 +552,11 @@ function step!(s::IPMSolver{T}) where {T}
 
             status = nearstatus(s, NUMERICAL_FAILURE)
         else
+            #
+            # choose augmentation parameter α
+            #
+            setaug!(s, T(CTRL_CAP_IPM))
+
             if !@timeit s.timers "initkkt" initkkt!(s)
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
@@ -644,8 +642,8 @@ function step!(s::IPMSolver{T}) where {T}
                 state = pok && cok
                 tol = max(force_tol, floor_tol)
 
-                αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass), CTRL_BDG_IPM)
-                αmax = augmax(s.α[], pdres, tol, state, pbase, CTRL_GAP_IPM)
+                αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass), T(CTRL_BDG_IPM))
+                αmax = augmax(s.α[], pdres, tol, state, pbase, T(CTRL_GAP_IPM))
 
                 if isstalled(s)
                     if s.settings.verbose > 1
@@ -720,8 +718,6 @@ function reinit!(solver::IPMSolver{T}, prob::IPMProblem{T}; frac::Real=0.1) wher
     @assert nvtxs(prob.B) == nvtxs(solver.B)
     @assert nouts(prob.B) == nouts(solver.B)
 
-    n = ncols(solver.B)
-
     c = copy(prob.c)
     g = copy(prob.g)
 
@@ -750,11 +746,6 @@ function reinit!(solver::IPMSolver{T}, prob::IPMProblem{T}; frac::Real=0.1) wher
     empty!(solver.hist)
 
     solver.ρ[] = solver.settings.rgmin
-
-    nH = (sd / sp) * sqrt(T(n))
-    nQ = norm(Symmetric(solver.Q, :L))
-    nB = norm(solver.B)
-    solver.α[] = solver.settings.aaug + solver.settings.raug * (nH + nQ) / nB^2
 
     return solver
 end
