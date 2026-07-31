@@ -234,6 +234,7 @@ function woodbury!(
     #
     wbase = solve_kkt!(kkt, w.Δp2, w.Δy2, H, B, c, g, y0; atol)
     r0_w = kkt.r0[]; r1_w = kkt.r1[]; craig_w = kkt.itrwrk.stats.status
+    wh10 = kkt.harvest10[]; whN = kkt.harvestN[]   # woodbury spectral harvest (kmax=10 / kmax=ncraig)
     #
     # use iterative refinement to improve tha
     # accuracy of the solutions Δp2, Δy2
@@ -244,7 +245,7 @@ function woodbury!(
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
 
-    return wbase, wrefn, wpass, wstat, wres0, wres1, r0_w, craig_w, r1_w, wres0_d, wres0_p, wres_exit
+    return wbase, wrefn, wpass, wstat, wres0, wres1, r0_w, craig_w, r1_w, wres0_d, wres0_p, wres_exit, wh10, whN
 end
 
 function capacitance!(
@@ -531,8 +532,7 @@ function solvepredictor!(
     # the solutions Δpa, Δya, and Δτa
     #
     r0_p = kkt.r0[]; r1_p = kkt.r1[]; craig_p = kkt.itrwrk.stats.status
-    s2min_p = kkt.s2min[]; s2max_p = kkt.s2max[]   # σ̂² of B on the predictor base-solve rhs subspace
-    ritz_beta_p = kkt.ritz_beta[]; omm_p = kkt.omm[]; ritz_θ_p = copy(kkt.ritz_θ); ritz_w_p = copy(kkt.ritz_w)
+    ph10 = kkt.harvest10[]; phN = kkt.harvestN[]   # predictor spectral harvest (kmax=10 / kmax=ncraig)
     ppass, prefn, pstat, Δτa, pres0, pres1, pres0_d, pres0_p, pres_exit = refinehsd!(
         w.Δpa, w.Δya, Δτa,
         kkt, H, B, c, g, w.Qp, p, aτ,
@@ -555,7 +555,7 @@ function solvepredictor!(
     #   Δκa = -κ (1 + 1/τ Δτa)
     #
     Δκa = -κ * (τ + Δτa) / τ
-    return pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p
+    return pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, ph10, phN
 end
 
 #
@@ -692,6 +692,7 @@ function solvecorrector!(
     # the solutions Δp, Δy, and Δτ
     #
     r0_c = kkt.r0[]; r1_c = kkt.r1[]; craig_c = kkt.itrwrk.stats.status
+    ch10 = kkt.harvest10[]; chN = kkt.harvestN[]   # corrector spectral harvest (kmax=10 / kmax=ncraig)
     cpass, crefn, cstat, Δτ, cres0, cres1, cres0_d, cres0_p, cres_exit = refinehsd!(
         w.Δp, w.Δy, Δτ,
         kkt, H, B, c, g, w.Qp, p, aτ,
@@ -714,7 +715,7 @@ function solvecorrector!(
     #   Δκ ← (fκ - κ Δτ) / τ
     #
     Δκ = (fκ - κ * Δτ) / τ
-    return cbase, crefn, cpass, cstat, Δτ, Δκ, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit
+    return cbase, crefn, cpass, cstat, Δτ, Δκ, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit, ch10, chN
 end
 
 ############################################################################################
@@ -940,8 +941,7 @@ function step!(s::HSDSolver{T}) where {T}
     pres0_d = pres0_p = cres0_d = cres0_p = wres0_d = wres0_p = T(NaN)   # pass-1 residual split into dual/primal per role
     pres_exit = cres_exit = wres_exit = T(NaN)              # refinement exit residual per role (graded severity)
     r0_p = r0_c = r0_w = T(NaN)                              # pre-CRAIG base residual per role
-    s2min_p = s2max_p = T(NaN)                               # σ̂²min/max of B on the predictor base-solve rhs subspace
-    ritz_beta_p = omm_p = T(NaN); ritz_θ_p = fill(T(NaN), 10); ritz_w_p = fill(T(NaN), 10)   # Gauss-quadrature harvest
+    ph10 = phN = ch10 = chN = wh10 = whN = SpectralHarvest{T}()   # per-role spectral harvest (kmax=10 / kmax=ncraig)
     r1_p = r1_c = r1_w = T(NaN)                              # post-CRAIG base residual per role
     craig_p = craig_c = craig_w = ""                        # CRAIG termination status per role
     bar_hdiag_med = bar_hdiag_frac_mid = T(NaN)             # pre-Q barrier-Hessian diagonal stats (cone coords)
@@ -1039,7 +1039,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
                 #   [ B   0  ] [ Δy2 ] = [ g ]
                 #
-                wbase, wrefn, wpass, wstat, wres0, wres1, r0_w, craig_w, r1_w, wres0_d, wres0_p, wres_exit = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
+                wbase, wrefn, wpass, wstat, wres0, wres1, r0_w, craig_w, r1_w, wres0_d, wres0_p, wres_exit, wh10, whN = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
                 copyto!(s.Δy0, w.Δy2)
                 #
                 # compute the Woodbury capacitance scalar
@@ -1058,7 +1058,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκa = (-τκ - κ Δτa) / τ
                 #
-                pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, ph10, phN = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -1076,7 +1076,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
                 #
-                cbase, crefn, cpass, cstat, Δτ, Δκ, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, Δτ, Δκ, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit, ch10, chN = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -1144,7 +1144,7 @@ function step!(s::HSDSolver{T}) where {T}
     push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ=s.ρ[], τ=s.τ[], κ=s.κ[],
         pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat, pres0, pres1, cres0, cres1, wres0, wres1, r0_p, r0_c, r0_w, craig_p, craig_c, craig_w,
         r1_p, r1_c, r1_w, pres0_d, pres0_p, cres0_d, cres0_p, wres0_d, wres0_p,
-        pres_exit, cres_exit, wres_exit, bar_hdiag_med, bar_hdiag_frac_mid, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p))
+        pres_exit, cres_exit, wres_exit, bar_hdiag_med, bar_hdiag_frac_mid, ph10, phN, ch10, chN, wh10, whN))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"

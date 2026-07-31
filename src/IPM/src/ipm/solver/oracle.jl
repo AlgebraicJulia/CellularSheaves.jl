@@ -17,9 +17,10 @@
 
 const DEFAULT_ALPHA_GRID = [round(10.0^e, sigdigits=4) for e in 0.0:0.5:18.0]   # half-decades 1e0..1e18 (37 pts)
 
-# NOTE: σ̂²min/σ̂²max are no longer computed here. They are harvested INSIDE the predictor's base solve
-# (`solve_uzw!` in kkt/uzawa.jl, via `gk_spectral`), on the exact rhs `r` that `craig!` consumes, and
-# ride the history row as `s2min_p`/`s2max_p` — a stand-in for a future inline-CRAIG spectral harvest.
+# NOTE: the spectral harvest is no longer computed here. Every base solve (`solve_uzw!` in kkt/uzawa.jl,
+# via `gk_spectral`) reads B's rhs measure AFTER craig!, on the exact rhs craig! consumed, at BOTH kmax=10
+# and kmax=ncraig (a stand-in for a future inline-CRAIG harvest). Each of the step's base solves — predictor,
+# corrector, and (HSD) woodbury — rides a SpectralHarvest per variant on the history row (ph10/phN/…/whN).
 
 _reached(st) = st === REACHED_FORCE || st === REACHED_FLOOR
 
@@ -33,6 +34,19 @@ function _oracle_craig(row)
     c = row.pbase + row.prefn + row.cbase + row.crefn
     hasproperty(row, :wbase) && (c += row.wbase + row.wrefn)
     return c
+end
+
+# Flatten one SpectralHarvest into CSV columns under a role/variant prefix (e.g. :p10, :pn, :c10, :cn,
+# :w10, :wn): the σ̂² extremes, GK truncation β, 1-μ̂max, the actual GK step count k, and the top-10
+# nodes/weights (NaN-padded).
+function _harvest_cols(h::SpectralHarvest{T}, pre::Symbol) where {T}
+    return (; Symbol(pre, :_s2min) => h.s2min,
+              Symbol(pre, :_s2max) => h.s2max,
+              Symbol(pre, :_beta)  => h.ritz_beta,
+              Symbol(pre, :_omm)   => h.omm,
+              Symbol(pre, :_k)     => h.k,
+              (Symbol(pre, :_t, j) => h.θ[j] for j in 1:10)...,
+              (Symbol(pre, :_w, j) => h.w[j] for j in 1:10)...)
 end
 
 function _oracle_record(i, α, sc, st)
@@ -49,7 +63,7 @@ function _oracle_record(i, α, sc, st)
     base = (iter = i, alpha = α, state = _oracle_state(row), ncraig = _oracle_craig(row),
             ipm_status = st, mu = μ, mu_next = mu(sc), rho = row.ρ,
             force_tol = ftol, floor_tol = fltol,
-            sigma2min = row.s2min_p, sigma2max = row.s2max_p,   # harvested in the predictor base solve (rhs r)
+            sigma2min = row.ph10.s2min, sigma2max = row.ph10.s2max,   # predictor kmax=10 harvest (back-compat alias)
             step = row.step,
             tau = hasproperty(row, :τ) ? row.τ : nothing,
             kappa = hasproperty(row, :κ) ? row.κ : nothing,
@@ -73,11 +87,13 @@ function _oracle_record(i, α, sc, st)
             Ldiag_min = minimum(abs, Ld), Ldiag_max = maximum(abs, Ld),
             ipm_pres = row.pres, ipm_dres = row.dres,
             bar_hdiag_med = row.bar_hdiag_med, bar_hdiag_frac_mid = row.bar_hdiag_frac_mid)
-    # append the Gauss-quadrature harvest of the predictor rhs measure (nodes θ, weights w, len 10 NaN-padded)
-    θ = row.ritz_θ_p; wq = row.ritz_w_p
-    ritzcols = (; ritz_beta = row.ritz_beta_p, omm = row.omm_p,
-        (Symbol(:ritz_t, j) => (j ≤ length(θ)  ? θ[j]  : T(NaN)) for j in 1:10)...,
-        (Symbol(:ritz_w, j) => (j ≤ length(wq) ? wq[j] : T(NaN)) for j in 1:10)...)
+    # append the two-variant (kmax=10 / kmax=ncraig) spectral harvests for every base solve this step —
+    # predictor & corrector always, woodbury on HSD — each flattened under its role/variant prefix.
+    ritzcols = merge(_harvest_cols(row.ph10, :p10), _harvest_cols(row.phN, :pn),
+                     _harvest_cols(row.ch10, :c10), _harvest_cols(row.chN, :cn))
+    if hasw
+        ritzcols = merge(ritzcols, _harvest_cols(row.wh10, :w10), _harvest_cols(row.whN, :wn))
+    end
     return merge(base, ritzcols, (chosen = false,))
 end
 

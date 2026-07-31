@@ -3,8 +3,8 @@ const IPMHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, α::T, ρ
     cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus,
     pres0::T, pres1::T, cres0::T, cres1::T, r0_p::T, r0_c::T, craig_p::String, craig_c::String,
     r1_p::T, r1_c::T, pres0_d::T, pres0_p::T, cres0_d::T, cres0_p::T, pres_exit::T, cres_exit::T,
-    bar_hdiag_med::T, bar_hdiag_frac_mid::T, s2min_p::T, s2max_p::T,
-    ritz_beta_p::T, omm_p::T, ritz_θ_p::Vector{T}, ritz_w_p::Vector{T}}
+    bar_hdiag_med::T, bar_hdiag_frac_mid::T,
+    ph10::SpectralHarvest{T}, phN::SpectralHarvest{T}, ch10::SpectralHarvest{T}, chN::SpectralHarvest{T}}
 
 struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     μ::Vector{T}
@@ -39,12 +39,10 @@ struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     cres_exit::Vector{T}
     bar_hdiag_med::Vector{T}
     bar_hdiag_frac_mid::Vector{T}
-    s2min_p::Vector{T}
-    s2max_p::Vector{T}
-    ritz_beta_p::Vector{T}
-    omm_p::Vector{T}
-    ritz_θ_p::Vector{Vector{T}}
-    ritz_w_p::Vector{Vector{T}}
+    ph10::Vector{SpectralHarvest{T}}
+    phN::Vector{SpectralHarvest{T}}
+    ch10::Vector{SpectralHarvest{T}}
+    chN::Vector{SpectralHarvest{T}}
 end
 
 function IPMHistory{T}() where {T}
@@ -54,8 +52,8 @@ function IPMHistory{T}() where {T}
         T[], T[], T[], T[],
         T[], T[],
         String[], String[],
-        T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[],
-        T[], T[], Vector{T}[], Vector{T}[])
+        T[], T[], T[], T[], T[], T[], T[], T[], T[], T[],
+        SpectralHarvest{T}[], SpectralHarvest{T}[], SpectralHarvest{T}[], SpectralHarvest{T}[])
 end
 
 function Base.getindex(hist::IPMHistory, i::Int)
@@ -91,10 +89,8 @@ function Base.getindex(hist::IPMHistory, i::Int)
     cres_exit = hist.cres_exit[i]
     bar_hdiag_med = hist.bar_hdiag_med[i]
     bar_hdiag_frac_mid = hist.bar_hdiag_frac_mid[i]
-    s2min_p = hist.s2min_p[i]
-    s2max_p = hist.s2max_p[i]
-    ritz_beta_p = hist.ritz_beta_p[i]; omm_p = hist.omm_p[i]; ritz_θ_p = hist.ritz_θ_p[i]; ritz_w_p = hist.ritz_w_p[i]
-    return (; μ, step, pres, dres, α, ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c, r1_p, r1_c, pres0_d, pres0_p, cres0_d, cres0_p, pres_exit, cres_exit, bar_hdiag_med, bar_hdiag_frac_mid, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p)
+    ph10 = hist.ph10[i]; phN = hist.phN[i]; ch10 = hist.ch10[i]; chN = hist.chN[i]
+    return (; μ, step, pres, dres, α, ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c, r1_p, r1_c, pres0_d, pres0_p, cres0_d, cres0_p, pres_exit, cres_exit, bar_hdiag_med, bar_hdiag_frac_mid, ph10, phN, ch10, chN)
 end
 
 function Base.push!(hist::IPMHistory, row::NamedTuple)
@@ -130,12 +126,10 @@ function Base.push!(hist::IPMHistory, row::NamedTuple)
     push!(hist.cres_exit, row.cres_exit)
     push!(hist.bar_hdiag_med, row.bar_hdiag_med)
     push!(hist.bar_hdiag_frac_mid, row.bar_hdiag_frac_mid)
-    push!(hist.s2min_p, row.s2min_p)
-    push!(hist.s2max_p, row.s2max_p)
-    push!(hist.ritz_beta_p, row.ritz_beta_p)
-    push!(hist.omm_p, row.omm_p)
-    push!(hist.ritz_θ_p, row.ritz_θ_p)
-    push!(hist.ritz_w_p, row.ritz_w_p)
+    push!(hist.ph10, row.ph10)
+    push!(hist.phN,  row.phN)
+    push!(hist.ch10, row.ch10)
+    push!(hist.chN,  row.chN)
     return hist
 end
 
@@ -172,12 +166,10 @@ function Base.empty!(hist::IPMHistory)
     empty!(hist.cres_exit)
     empty!(hist.bar_hdiag_med)
     empty!(hist.bar_hdiag_frac_mid)
-    empty!(hist.s2min_p)
-    empty!(hist.s2max_p)
-    empty!(hist.ritz_beta_p)
-    empty!(hist.omm_p)
-    empty!(hist.ritz_θ_p)
-    empty!(hist.ritz_w_p)
+    empty!(hist.ph10)
+    empty!(hist.phN)
+    empty!(hist.ch10)
+    empty!(hist.chN)
     return hist
 end
 

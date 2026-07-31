@@ -223,8 +223,7 @@ function solvepredictor!(
     #
     pbase = solve_kkt!(kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
     r0_p = kkt.r0[]; r1_p = kkt.r1[]; craig_p = kkt.itrwrk.stats.status
-    s2min_p = kkt.s2min[]; s2max_p = kkt.s2max[]   # σ̂² of B on the predictor base-solve rhs subspace
-    ritz_beta_p = kkt.ritz_beta[]; omm_p = kkt.omm[]; ritz_θ_p = copy(kkt.ritz_θ); ritz_w_p = copy(kkt.ritz_w)
+    ph10 = kkt.harvest10[]; phN = kkt.harvestN[]   # predictor spectral harvest (kmax=10 / kmax=ncraig)
     #
     # refine Δpa, Δya to force_tol
     #
@@ -242,7 +241,7 @@ function solvepredictor!(
     mul!(w.Δda, B', w.Δya, -1, -1)
     mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
 
-    return pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p
+    return pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, ph10, phN
 end
 
 #
@@ -337,6 +336,7 @@ function solvecorrector!(
     #
     cbase = solve_kkt!(kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
     r0_c = kkt.r0[]; r1_c = kkt.r1[]; craig_c = kkt.itrwrk.stats.status
+    ch10 = kkt.harvest10[]; chN = kkt.harvestN[]   # corrector spectral harvest (kmax=10 / kmax=ncraig)
     #
     # use iterative refinement to improve
     # the solutions Δp and Δy
@@ -355,7 +355,7 @@ function solvecorrector!(
     mul!(w.Δd, B', w.Δy, -1, -1)
     mul!(w.Δd, Symmetric(Q, :L), w.Δp, 1, 1)
 
-    return cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit
+    return cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit, ch10, chN
 end
 
 ############################################################################################
@@ -502,8 +502,7 @@ function step!(s::IPMSolver{T}) where {T}
     pres_exit = cres_exit = T(NaN)           # refinement exit residual per role (graded severity)
     r0_p = r0_c = T(NaN)                     # pre-CRAIG base residual per role
     r1_p = r1_c = T(NaN)                     # post-CRAIG base residual per role
-    s2min_p = s2max_p = T(NaN)               # σ̂²min/max of B on the predictor base-solve rhs subspace
-    ritz_beta_p = omm_p = T(NaN); ritz_θ_p = fill(T(NaN), 10); ritz_w_p = fill(T(NaN), 10)   # Gauss-quadrature harvest
+    ph10 = phN = ch10 = chN = SpectralHarvest{T}()   # per-role spectral harvest (kmax=10 / kmax=ncraig)
     craig_p = craig_c = ""                   # CRAIG termination status per role
     bar_hdiag_med = bar_hdiag_frac_mid = T(NaN)   # pre-Q barrier-Hessian diagonal stats (cone coords)
     step = zero(T)
@@ -588,7 +587,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, ph10, phN = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -603,7 +602,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, cres0, cres1, r0_c, craig_c, r1_c, cres0_d, cres0_p, cres_exit, ch10, chN = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -654,7 +653,7 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c, r1_p, r1_c, pres0_d, pres0_p, cres0_d, cres0_p, pres_exit, cres_exit, bar_hdiag_med, bar_hdiag_frac_mid, s2min_p, s2max_p, ritz_beta_p, omm_p, ritz_θ_p, ritz_w_p))
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, pres0, pres1, cres0, cres1, r0_p, r0_c, craig_p, craig_c, r1_p, r1_c, pres0_d, pres0_p, cres0_d, cres0_p, pres_exit, cres_exit, bar_hdiag_med, bar_hdiag_frac_mid, ph10, phN, ch10, chN))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"

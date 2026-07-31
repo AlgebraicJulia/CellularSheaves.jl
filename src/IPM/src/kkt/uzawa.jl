@@ -7,6 +7,35 @@
 # A different KKT backend is a different workspace type behind the same α/atol argument interface —
 # there is no settings-level polymorphism (the KKTWorkspace abstract type is the only extension point).
 
+# Bundled Gauss-quadrature (Ritz) reading of B on one base solve's rhs subspace — the σ̂² extremes plus the
+# top-10 nodes/weights of the rhs spectral measure. Produced TWICE per base solve: at the fixed kmax=10
+# budget and at kmax = the actual CRAIG iteration count (`k`), the latter a stand-in for a future inline-
+# CRAIG harvest that would reuse the Lanczos vectors instead of re-bidiagonalizing off-books.
+#   θ[i] = μ̂ᵢ  (Ritz nodes, DESCENDING, top-10 by μ, NaN-padded)   w[i] = quadrature weight (Σw=1)
+#   k     = full GK step count (may exceed 10; θ/w keep only the leading 10)
+struct SpectralHarvest{T}
+    s2min::T
+    s2max::T
+    ritz_beta::T
+    omm::T
+    k::Int
+    θ::Vector{T}
+    w::Vector{T}
+end
+
+SpectralHarvest{T}() where {T} =
+    SpectralHarvest{T}(T(NaN), T(NaN), T(NaN), T(NaN), 0, fill(T(NaN), 10), fill(T(NaN), 10))
+
+# build from a ritz_spectral result — θraw/wraw are full-length (descending); retain the leading 10.
+function SpectralHarvest(s2min::T, s2max::T, ritz_beta::T, omm::T,
+                         θraw::AbstractVector{T}, wraw::AbstractVector{T}) where {T}
+    θ = fill(T(NaN), 10); w = fill(T(NaN), 10)
+    kk = min(length(θraw), 10)
+    @views θ[1:kk] .= θraw[1:kk]
+    @views w[1:kk] .= wraw[1:kk]
+    return SpectralHarvest{T}(s2min, s2max, ritz_beta, omm, length(θraw), θ, w)
+end
+
 struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     F::FChordalTriangular{:N, UPLO, T, I}
     L::BlockSparseMatrix{T, I}
@@ -15,16 +44,12 @@ struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     itrwrk::CraigWorkspace{T, T, Vector{T}}
     r::Vector{T}
     α::Scalar{T}
-    r0::Scalar{T}               # pre-CRAIG residual ‖g-Bx‖ of the last base solve
-    r1::Scalar{T}               # post-CRAIG residual ‖g-Bx‖ of the last base solve
-    s2min::Scalar{T}            # σ̂²min of B on the last base solve's rhs subspace (GK on r; HACK: stand-in
-    s2max::Scalar{T}            #   for a future inline-CRAIG harvest — same rhs craig! sees, same factor F)
-    ritz_θ::Vector{T}           # Ritz nodes μ (descending, μ-units), fixed length kmax=10, NaN-padded when k<10
-    ritz_w::Vector{T}           # normalized quadrature weights (Σw=1), NaN-padded to match ritz_θ
-    ritz_beta::Scalar{T}        # last GK β (truncation residual) of the last base solve's harvest
-    omm::Scalar{T}             # 1 - μ̂max, raw (logged separately: nodes near 1 lose the small complement)
-    rgmin::T                    # baked: ρ-shift ladder lower bound
-    rgmax::T                    # baked: ρ-shift ladder upper bound
+    r0::Scalar{T}                                  # pre-CRAIG residual ‖g-Bx‖ of the last base solve
+    r1::Scalar{T}                                  # post-CRAIG residual ‖g-Bx‖ of the last base solve
+    harvest10::Base.RefValue{SpectralHarvest{T}}   # last base solve's spectral reading at kmax=10
+    harvestN::Base.RefValue{SpectralHarvest{T}}    # ... and at kmax = the base solve's actual CRAIG iters
+    rgmin::T                                        # baked: ρ-shift ladder lower bound
+    rgmax::T                                        # baked: ρ-shift ladder upper bound
 end
 
 function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I};
@@ -37,13 +62,9 @@ function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMat
     α = ones(T)
     r0 = fill(T(NaN))
     r1 = fill(T(NaN))
-    s2min = fill(T(NaN))
-    s2max = fill(T(NaN))
-    ritz_θ = fill(T(NaN), 10)   # kmax=10 (fixed; GK kmax is out-of-scope to change)
-    ritz_w = fill(T(NaN), 10)
-    ritz_beta = fill(T(NaN))
-    omm = fill(T(NaN))
-    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, r0, r1, s2min, s2max, ritz_θ, ritz_w, ritz_beta, omm, rgmin, rgmax)
+    harvest10 = Ref(SpectralHarvest{T}())
+    harvestN  = Ref(SpectralHarvest{T}())
+    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, r0, r1, harvest10, harvestN, rgmin, rgmax)
 end
 
 function make_kkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAULT_ELIMINATION_ALGORITHM,
@@ -177,8 +198,7 @@ function solve_kkt!(
     atol::T,
 ) where {UPLO, T}
     return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, A, B,
-                      f, g, wrk.α[], atol, y0, wrk.r0, wrk.r1, wrk.s2min, wrk.s2max,
-                      wrk.ritz_beta, wrk.omm, wrk.ritz_θ, wrk.ritz_w)
+                      f, g, wrk.α[], atol, y0, wrk.r0, wrk.r1, wrk.harvest10, wrk.harvestN)
 end
 
 #
@@ -203,12 +223,8 @@ function solve_uzw!(
         y0 = nothing,
         r0ref = nothing,
         r1ref = nothing,
-        s2minref = nothing,
-        s2maxref = nothing,
-        ritzβref = nothing,
-        ommref = nothing,
-        ritzθbuf = nothing,
-        ritzwbuf = nothing,
+        harvest10ref = nothing,
+        harvestNref = nothing,
     ) where {UPLO, T}
     m, n = size(B)
 
@@ -261,24 +277,28 @@ function solve_uzw!(
 
     N = LinearOperator(T, n, n, true, true, prec!)
     r0ref === nothing || (r0ref[] = norm(r))    # pre-CRAIG residual of the base solve
-    # HACK (stand-in for a future inline-CRAIG harvest): run a k-step preconditioned Golub-Kahan on the
-    # EXACT rhs r craig! is about to consume, reusing the same F/divwrk, to read σ̂²min/σ̂²max of B on the
-    # solve's own rhs subspace. Off-books extra ldivs; nothing craig! reads is mutated (GK copies r).
-    if s2minref !== nothing || s2maxref !== nothing || ritzθbuf !== nothing
-        s2min, s2max, rβ, _, θ, w, omm = gk_spectral(divwrk, F, B, r, α; kmax = 10)
-        s2minref === nothing || (s2minref[] = s2min)
-        s2maxref === nothing || (s2maxref[] = s2max)
-        ritzβref === nothing || (ritzβref[] = rβ)
-        ommref   === nothing || (ommref[]   = omm)
-        if ritzθbuf !== nothing
-            fill!(ritzθbuf, T(NaN)); kk = min(length(θ), length(ritzθbuf)); @views ritzθbuf[1:kk] .= θ[1:kk]
-        end
-        if ritzwbuf !== nothing
-            fill!(ritzwbuf, T(NaN)); kk = min(length(w), length(ritzwbuf)); @views ritzwbuf[1:kk] .= w[1:kk]
-        end
-    end
+    #
+    # Snapshot the EXACT rhs craig! is about to consume (the post-update recompute below overwrites r),
+    # so the spectral harvest runs on craig!'s own rhs subspace.
+    #
+    harvesting = harvest10ref !== nothing || harvestNref !== nothing
+    rseed = harvesting ? copy(r) : r
     craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol)
-    niter += itrwrk.stats.niter
+    ncraig = itrwrk.stats.niter
+    niter += ncraig
+    #
+    # HACK (stand-in for a future inline-CRAIG harvest): AFTER craig! — now the true CRAIG iteration count
+    # is known — run preconditioned Golub-Kahan on the snapshotted rhs, reusing the same F/divwrk, at BOTH
+    # the fixed kmax=10 budget and kmax=ncraig (what an instrumented CRAIG would have produced in-flight).
+    #
+    if harvest10ref !== nothing
+        s2min, s2max, rβ, _, θ, w, omm = gk_spectral(divwrk, F, B, rseed, α; kmax = 10)
+        harvest10ref[] = SpectralHarvest(s2min, s2max, rβ, omm, θ, w)
+    end
+    if harvestNref !== nothing
+        s2min, s2max, rβ, _, θ, w, omm = gk_spectral(divwrk, F, B, rseed, α; kmax = ncraig)
+        harvestNref[] = SpectralHarvest(s2min, s2max, rβ, omm, θ, w)
+    end
     #
     # update x:
     #
