@@ -17,59 +17,9 @@
 
 const DEFAULT_ALPHA_GRID = [round(10.0^e, sigdigits=4) for e in 0.0:0.5:18.0]   # half-decades 1e0..1e18 (37 pts)
 
-# Spectral pair + reliability tag from a Golub-Kahan lower-bidiagonal (dv=diagonal αₖ, ev=subdiagonal
-# βₖ). Ritz values μ = singular(Bk)² approximate the augmented-system spectrum; recover to σ² via
-# μ/(α(1-μ)) (μ∈(0,1) for F=βH+BᵀB). Returns (s2min, s2max, ritz_beta, ritz_gap):
-#   • s2min    — recovered σ²_min (smallest Ritz), NaN if degenerate
-#   • s2max    — recovered σ²_max (largest Ritz). SATURATION GUARD: μ_max→1 at moderate/high α blows
-#                the recovery up; when (1-μ_max)<1e-12 we emit −μ_max (a NEGATIVE sentinel carrying the
-#                raw Ritz value) instead of Inf. Downstream: s2max<0 ⇒ saturated, raw μ = |s2max|.
-#   • ritz_beta — last GK β (truncation residual): GK-convergence reliability of the spectral readings
-#   • ritz_gap  — gap between the two smallest Ritz values (μ units): spectral-resolution reliability
-function ritz_spectral(dv::AbstractVector{T}, ev::AbstractVector{T}, α_aug::T) where {T}
-    k = length(dv)
-    k ≥ 1 || return (T(NaN), T(NaN), T(NaN), T(NaN))
-    Bk = k == 1 ? Bidiagonal(T[dv[1]], T[], :L) : Bidiagonal(collect(dv), collect(@view ev[1:k-1]), :L)
-    sv = svdvals(Bk)                                     # descending: sv[1]=max, sv[end]=min
-    μmin = sv[end]^2; μmax = sv[1]^2
-    s2min = (zero(T) < μmin < one(T)) ? μmin / (α_aug * (one(T) - μmin)) : T(NaN)
-    s2max = if μmax ≤ zero(T); T(NaN)                                     # truly degenerate
-            elseif μmax ≥ one(T) - T(1e-12); -μmax                        # saturated (incl. numerical
-            else μmax / (α_aug * (one(T) - μmax)) end                     # overshoot μ≥1): neg sentinel = raw μ
-    ritz_beta = isempty(ev) ? T(NaN) : ev[end]                            # last GK β (truncation resid)
-    ritz_gap  = k ≥ 2 ? (sv[end-1]^2 - sv[end]^2) : T(NaN)                # two-smallest Ritz gap (μ)
-    return (s2min, s2max, ritz_beta, ritz_gap)
-end
-
-# Standalone spectral estimate — DECOUPLED from the base solve. Runs its own k-step preconditioned
-# Golub-Kahan bidiagonalization of B under N = F⁻¹ (reusing only the factorization F/divwrk), with
-# internally-allocated work vectors. Nothing in the live solve is read or mutated; the extra ldivs
-# are off-books (the oracle scores the real step!). Returns (s2min, s2max, ritz_beta, ritz_gap).
-function oracle_spectral(kkt, B, α_aug::T; kmax::Int = 10, b::Union{Nothing, AbstractVector{T}} = nothing) where {T}
-    m, n = size(B)
-    F = kkt.F; dw = kkt.divwrk
-    u = b === nothing ? ones(T, m) : copy(b)
-    Nv = zeros(T, n); v = zeros(T, n); Atu = zeros(T, n); Av = zeros(T, m)
-    dv = T[]; ev = T[]
-    β = norm(u); β == zero(T) && return (T(NaN), T(NaN), T(NaN), T(NaN))
-    u ./= β
-    for _ in 1:kmax
-        mul!(Atu, B', u)                                 # Bᵀ u
-        @. Nv = Atu - β * Nv
-        copyto!(v, Nv); ldiv!(dw, F, v); ldiv!(dw, F', v)   # v = F⁻¹ Nv
-        α = sqrt(max(real(dot(v, Nv)), zero(T)))            # elliptic norm √(v·Nv)
-        α == zero(T) && break
-        push!(dv, α)
-        v ./= α; Nv ./= α
-        mul!(Av, B, v)                                    # B v
-        @. u = Av - α * u
-        β = norm(u)
-        push!(ev, β)
-        β == zero(T) && break
-        u ./= β
-    end
-    return ritz_spectral(dv, ev, α_aug)
-end
+# NOTE: σ̂²min/σ̂²max are no longer computed here. They are harvested INSIDE the predictor's base solve
+# (`solve_uzw!` in kkt/uzawa.jl, via `gk_spectral`), on the exact rhs `r` that `craig!` consumes, and
+# ride the history row as `s2min_p`/`s2max_p` — a stand-in for a future inline-CRAIG spectral harvest.
 
 _reached(st) = st === REACHED_FORCE || st === REACHED_FLOOR
 
@@ -85,7 +35,7 @@ function _oracle_craig(row)
     return c
 end
 
-function _oracle_record(i, α, sc, st; kmax::Int = 10)
+function _oracle_record(i, α, sc, st)
     row = sc.hist[end]
     μ   = row.μ
     μ1  = first(sc.hist.μ)
@@ -96,11 +46,10 @@ function _oracle_record(i, α, sc, st; kmax::Int = 10)
     hasw  = hasproperty(row, :wstat)
     dg    = diag(sparse(sc.H))                     # scaled-Hessian diagonal (α-independent within an iter)
     Ld    = diag(sc.kkt.F)                          # Cholesky factor diagonal — κ(F) proxy / ρ-ladder early warning
-    s2min, s2max, ritz_beta, ritz_gap = oracle_spectral(sc.kkt, sc.B, T(α); kmax = kmax)   # one GK bidiagonalization
     return (iter = i, alpha = α, state = _oracle_state(row), ncraig = _oracle_craig(row),
             ipm_status = st, mu = μ, mu_next = mu(sc), rho = row.ρ,
-            force_tol = ftol, floor_tol = fltol, sigma2min = s2min,
-            sigma2max = s2max, ritz_beta = ritz_beta, ritz_gap = ritz_gap,
+            force_tol = ftol, floor_tol = fltol,
+            sigma2min = row.s2min_p, sigma2max = row.s2max_p,   # harvested in the predictor base solve (rhs r)
             step = row.step,
             tau = hasproperty(row, :τ) ? row.τ : nothing,
             kappa = hasproperty(row, :κ) ? row.κ : nothing,
@@ -144,7 +93,7 @@ function write_oracle_csv(path::AbstractString, records::AbstractVector{<:NamedT
     return path
 end
 
-function solve_logged(s0::AbstractSolver, grid = DEFAULT_ALPHA_GRID; itmax::Integer = s0.settings.itmax, kmax::Int = 10)
+function solve_logged(s0::AbstractSolver, grid = DEFAULT_ALPHA_GRID; itmax::Integer = s0.settings.itmax)
     s = s0
     records = NamedTuple[]
     gs = sort(collect(grid))                       # ascending ⇒ ties on (state,ncraig) → lowest α
@@ -160,7 +109,7 @@ function solve_logged(s0::AbstractSolver, grid = DEFAULT_ALPHA_GRID; itmax::Inte
             sc = deepcopy(s)
             sc.α[] = α
             st = step!(sc)
-            push!(iter_recs, _oracle_record(i, α, sc, st; kmax = kmax))
+            push!(iter_recs, _oracle_record(i, α, sc, st))
             score = (iter_recs[end].state, iter_recs[end].ncraig)
             if score < bestscore                   # strict: first (lowest) α at the best score wins
                 bestscore = score

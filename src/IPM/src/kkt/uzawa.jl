@@ -17,6 +17,8 @@ struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     α::Scalar{T}
     r0::Scalar{T}               # pre-CRAIG residual ‖g-Bx‖ of the last base solve
     r1::Scalar{T}               # post-CRAIG residual ‖g-Bx‖ of the last base solve
+    s2min::Scalar{T}            # σ̂²min of B on the last base solve's rhs subspace (GK on r; HACK: stand-in
+    s2max::Scalar{T}            #   for a future inline-CRAIG harvest — same rhs craig! sees, same factor F)
     rgmin::T                    # baked: ρ-shift ladder lower bound
     rgmax::T                    # baked: ρ-shift ladder upper bound
 end
@@ -31,7 +33,9 @@ function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMat
     α = ones(T)
     r0 = fill(T(NaN))
     r1 = fill(T(NaN))
-    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, r0, r1, rgmin, rgmax)
+    s2min = fill(T(NaN))
+    s2max = fill(T(NaN))
+    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, r0, r1, s2min, s2max, rgmin, rgmax)
 end
 
 function make_kkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAULT_ELIMINATION_ALGORITHM,
@@ -95,6 +99,54 @@ function init_uzw!(
     return iszero(info), ρ
 end
 
+# Ritz recovery from a Golub-Kahan lower-bidiagonal (dv=diag αₖ, ev=subdiag βₖ). Ritz μ = singular(Bk)²
+# approximate the preconditioned spectrum; recover to σ² via μ/(α(1-μ)) (μ∈(0,1) for F=(1/α)A+BᵀB).
+# Returns (s2min, s2max, ritz_beta, ritz_gap). σ²max saturation guard: μ_max→1 (incl. numerical
+# overshoot μ≥1) blows the recovery up → emit −μ_max (negative sentinel carrying raw μ) instead of Inf.
+function ritz_spectral(dv::AbstractVector{T}, ev::AbstractVector{T}, α_aug::T) where {T}
+    k = length(dv)
+    k ≥ 1 || return (T(NaN), T(NaN), T(NaN), T(NaN))
+    Bk = k == 1 ? Bidiagonal(T[dv[1]], T[], :L) : Bidiagonal(collect(dv), collect(@view ev[1:k-1]), :L)
+    sv = svdvals(Bk)                                     # descending: sv[1]=max, sv[end]=min
+    μmin = sv[end]^2; μmax = sv[1]^2
+    s2min = (zero(T) < μmin < one(T)) ? μmin / (α_aug * (one(T) - μmin)) : T(NaN)
+    s2max = if μmax ≤ zero(T); T(NaN)
+            elseif μmax ≥ one(T) - T(1e-12); -μmax
+            else μmax / (α_aug * (one(T) - μmax)) end
+    ritz_beta = isempty(ev) ? T(NaN) : ev[end]
+    ritz_gap  = k ≥ 2 ? (sv[end-1]^2 - sv[end]^2) : T(NaN)
+    return (s2min, s2max, ritz_beta, ritz_gap)
+end
+
+# k-step preconditioned Golub-Kahan bidiagonalization of B under N = F⁻¹, seeded by `seed` (copied, not
+# mutated), reusing the caller's factor F / divwrk. Internally-allocated work vectors (hack; a real
+# inline-CRAIG harvest would reuse the Krylov workspace). Returns ritz_spectral(...).
+function gk_spectral(divwrk::DivisionWorkspace{T}, F::ChordalTriangular{:N, UPLO, T},
+                     B::BlockSparseMatrix{T}, seed::AbstractVector{T}, α_aug::T; kmax::Int = 10) where {UPLO, T}
+    m, n = size(B)
+    u = copy(seed)
+    Nv = zeros(T, n); v = zeros(T, n); Atu = zeros(T, n); Av = zeros(T, m)
+    dv = T[]; ev = T[]
+    β = norm(u); β == zero(T) && return (T(NaN), T(NaN), T(NaN), T(NaN))
+    u ./= β
+    for _ in 1:kmax
+        mul!(Atu, B', u)
+        @. Nv = Atu - β * Nv
+        copyto!(v, Nv); ldiv!(divwrk, F, v); ldiv!(divwrk, F', v)
+        a = sqrt(max(real(dot(v, Nv)), zero(T)))
+        a == zero(T) && break
+        push!(dv, a)
+        v ./= a; Nv ./= a
+        mul!(Av, B, v)
+        @. u = Av - a * u
+        β = norm(u)
+        push!(ev, β)
+        β == zero(T) && break
+        u ./= β
+    end
+    return ritz_spectral(dv, ev, α_aug)
+end
+
 # base KKT solve to `atol`; returns the base CRAIG iteration count (Krylov's dimension-based cap on hang).
 function solve_kkt!(
     wrk::UzawaWorkspace{UPLO, T},
@@ -108,7 +160,7 @@ function solve_kkt!(
     atol::T,
 ) where {UPLO, T}
     return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, A, B,
-                      f, g, wrk.α[], atol, y0, wrk.r0, wrk.r1)
+                      f, g, wrk.α[], atol, y0, wrk.r0, wrk.r1, wrk.s2min, wrk.s2max)
 end
 
 #
@@ -133,6 +185,8 @@ function solve_uzw!(
         y0 = nothing,
         r0ref = nothing,
         r1ref = nothing,
+        s2minref = nothing,
+        s2maxref = nothing,
     ) where {UPLO, T}
     m, n = size(B)
 
@@ -185,6 +239,14 @@ function solve_uzw!(
 
     N = LinearOperator(T, n, n, true, true, prec!)
     r0ref === nothing || (r0ref[] = norm(r))    # pre-CRAIG residual of the base solve
+    # HACK (stand-in for a future inline-CRAIG harvest): run a k-step preconditioned Golub-Kahan on the
+    # EXACT rhs r craig! is about to consume, reusing the same F/divwrk, to read σ̂²min/σ̂²max of B on the
+    # solve's own rhs subspace. Off-books extra ldivs; nothing craig! reads is mutated (GK copies r).
+    if s2minref !== nothing || s2maxref !== nothing
+        s2min, s2max, _, _ = gk_spectral(divwrk, F, B, r, α; kmax = 10)
+        s2minref === nothing || (s2minref[] = s2min)
+        s2maxref === nothing || (s2maxref[] = s2max)
+    end
     craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol)
     niter += itrwrk.stats.niter
     #

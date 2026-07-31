@@ -531,6 +531,7 @@ function solvepredictor!(
     # the solutions Δpa, Δya, and Δτa
     #
     r0_p = kkt.r0[]; r1_p = kkt.r1[]; craig_p = kkt.itrwrk.stats.status
+    s2min_p = kkt.s2min[]; s2max_p = kkt.s2max[]   # σ̂² of B on the predictor base-solve rhs subspace
     ppass, prefn, pstat, Δτa, pres0, pres1, pres0_d, pres0_p, pres_exit = refinehsd!(
         w.Δpa, w.Δya, Δτa,
         kkt, H, B, c, g, w.Qp, p, aτ,
@@ -553,7 +554,7 @@ function solvepredictor!(
     #   Δκa = -κ (1 + 1/τ Δτa)
     #
     Δκa = -κ * (τ + Δτa) / τ
-    return pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit
+    return pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p
 end
 
 #
@@ -938,6 +939,7 @@ function step!(s::HSDSolver{T}) where {T}
     pres0_d = pres0_p = cres0_d = cres0_p = wres0_d = wres0_p = T(NaN)   # pass-1 residual split into dual/primal per role
     pres_exit = cres_exit = wres_exit = T(NaN)              # refinement exit residual per role (graded severity)
     r0_p = r0_c = r0_w = T(NaN)                              # pre-CRAIG base residual per role
+    s2min_p = s2max_p = T(NaN)                               # σ̂²min/max of B on the predictor base-solve rhs subspace
     r1_p = r1_c = r1_w = T(NaN)                              # post-CRAIG base residual per role
     craig_p = craig_c = craig_w = ""                        # CRAIG termination status per role
     bar_hdiag_med = bar_hdiag_frac_mid = T(NaN)             # pre-Q barrier-Hessian diagonal stats (cone coords)
@@ -1054,7 +1056,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   Δκa = (-τκ - κ Δτa) / τ
                 #
-                pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, Δτa, Δκa, pres0, pres1, r0_p, craig_p, r1_p, pres0_d, pres0_p, pres_exit, s2min_p, s2max_p = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -1140,7 +1142,7 @@ function step!(s::HSDSolver{T}) where {T}
     push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ=s.ρ[], τ=s.τ[], κ=s.κ[],
         pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat, pres0, pres1, cres0, cres1, wres0, wres1, r0_p, r0_c, r0_w, craig_p, craig_c, craig_w,
         r1_p, r1_c, r1_w, pres0_d, pres0_p, cres0_d, cres0_p, wres0_d, wres0_p,
-        pres_exit, cres_exit, wres_exit, bar_hdiag_med, bar_hdiag_frac_mid))
+        pres_exit, cres_exit, wres_exit, bar_hdiag_med, bar_hdiag_frac_mid, s2min_p, s2max_p))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
             @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"
