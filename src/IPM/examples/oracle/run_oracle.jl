@@ -15,12 +15,18 @@ const EX = dirname(@__DIR__)          # examples/
 const OUT = get(ENV, "ORACLE_OUT", @__DIR__)   # examples/oracle/ (override with ORACLE_OUT, e.g. oracle2 for v3)
 gp(x) = x isa Tuple ? x[1] : x
 
-xbase = startswith(key, "X") ? key[1:min(3, length(key))] : key      # X04b → X04
-incfile = startswith(key, "X") ? "$EX/adversarial/$xbase.jl" :
+xbase = startswith(key, "X") ? key[1:min(3, length(key))] : key      # X04b → X04, X04_e-7_s1 → X04
+incfile = startswith(key, "SOS") ? "$EX/e04.jl" :                     # parametrized SOS spline (P/n/seed)
+          startswith(key, "X") ? "$EX/adversarial/$xbase.jl" :
           key == "06" ? "$EX/e06.jl" : key == "07" ? "$EX/e07.jl" : key == "13" ? "$EX/e13.jl" : "$EX/$key.jl"
 include(incfile)
 
 function buildprob(key)
+    # parametrized fleet keys (name encodes generator knobs; tol is dropped from the filename below)
+    ms = match(r"^SOS_P(\d+)_n(\d+)_s(\d+)$", key)                                    # SOS_P8_n9_s1
+    ms !== nothing && return gp(build_sos_spline(sos_instance(; P = parse(Int, ms[1]), n = parse(Int, ms[2]), seed = parse(Int, ms[3]))))
+    mx = match(r"^X04_e(-?\d+)_s(\d+)$", key)                                         # X04_e-7_s1 → eps=1e-7, seed=1
+    mx !== nothing && return build_degenerate(; eps = 10.0^parse(Int, mx[1]), seed = parse(Int, mx[2]))
     # X-instances return the raw (prob, meta) tuple so run_oracle can record generator params + severity.
     key == "X03"  && return build_narrow(; spread = dial === nothing ? 8.0 : dial)   # col-spread [I1]
     key == "X03b" && return build_narrow_twin()                                      # benign (spread=0)
@@ -79,7 +85,10 @@ niter = isempty(records) ? 0 : maximum(r.iter for r in records)
 chosenrows = filter(r -> r.chosen, records)
 final_status = isempty(chosenrows) ? "NONE" : string(last(chosenrows).ipm_status)
 dsuf = dial === nothing ? "" : "_dial$(ARGS[4])"
-base = "$(key)_$(ARGS[2])_$(solv)$(dsuf)"
+# parametrized fleet keys (SOS_P.._n.._s.., X04_e.._s..) carry their knobs in the key → drop the tol from
+# the filename to match the fleet's <params>_<solver> convention; everything else stays <key>_<tol>_<solver>.
+isparam = startswith(key, "SOS_P") || occursin(r"^X04_e", key)
+base = isparam ? "$(key)_$(solv)" : "$(key)_$(ARGS[2])_$(solv)$(dsuf)"
 path = joinpath(OUT, "$base.csv")
 write_oracle_csv(path, records)
 
