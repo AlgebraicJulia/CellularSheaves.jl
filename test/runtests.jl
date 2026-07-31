@@ -4,6 +4,10 @@ using Test
   include("aqua.jl")
 end
 
+@testset "Tikhonov Filter" begin
+  include("ControlSheaves/Tikhonov.jl")
+end
+
 @testset "Block Sparse Arrays" begin
   include("block_sparse_arrays.jl")
 end
