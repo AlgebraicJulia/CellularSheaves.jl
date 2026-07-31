@@ -69,9 +69,11 @@ function buildprob(key)
     error("no recipe for $key")
 end
 
+ff = get(ENV, "ORACLE_FF", nothing)                       # forcing_frac override (default 0.1)
+ffkw = ff === nothing ? (;) : (; forcing_frac = parse(Float64, ff))
 settings = solv == "ipm" ?
-    IPMSettings{Float64}(feas_tol=tol, gap_tol=tol, itmax=300) :
-    HSDSettings{Float64}(feas_tol=tol, gap_tol=tol, itmax=300)
+    IPMSettings{Float64}(; feas_tol=tol, gap_tol=tol, itmax=300, ffkw...) :
+    HSDSettings{Float64}(; feas_tol=tol, gap_tol=tol, itmax=300, ffkw...)
 
 using LinearAlgebra, SparseArrays
 raw = buildprob(key)
@@ -88,7 +90,8 @@ dsuf = dial === nothing ? "" : "_dial$(ARGS[4])"
 # parametrized fleet keys (SOS_P.._n.._s.., X04_e.._s..) carry their knobs in the key → drop the tol from
 # the filename to match the fleet's <params>_<solver> convention; everything else stays <key>_<tol>_<solver>.
 isparam = startswith(key, "SOS_P") || occursin(r"^X04_e", key)
-base = isparam ? "$(key)_$(solv)" : "$(key)_$(ARGS[2])_$(solv)$(dsuf)"
+ffsuf = ff === nothing ? "" : "_ff$(ff)"                   # forcing_frac dial suffix so sweeps don't collide
+base = (isparam ? "$(key)_$(solv)" : "$(key)_$(ARGS[2])_$(solv)$(dsuf)") * ffsuf
 path = joinpath(OUT, "$base.csv")
 write_oracle_csv(path, records)
 
