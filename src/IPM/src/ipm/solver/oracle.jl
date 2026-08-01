@@ -356,6 +356,43 @@ function snapshot_capture(s0::AbstractSolver, K::Integer, grid = DEFAULT_ALPHA_G
     return (; chosenα, entry, snaps, row, status = st, force_tol = ftol, floor_tol = fltol)
 end
 
+# snapshot_capture_at (snapshots3 spec) — like snapshot_capture, but run the captured step at a SPECIFIED
+# α (not the chosen one), so the same iterate can be captured on either side of the ρ-shift transition.
+# The trajectory to iteration K's entry still follows the chosen-α path. Also reports norm_dp/norm_dy and
+# the step's ρ (row.ρ), for the shifted-regime meta fields.
+function snapshot_capture_at(s0::AbstractSolver, K::Integer, alpha::Real, grid = DEFAULT_ALPHA_GRID)
+    s = s0
+    gs = sort(collect(grid))
+    i = 0
+    while i < K
+        i += 1
+        best = nothing; bestscore = (typemax(Int), typemax(Int)); beststatus = CONTINUE
+        for α in gs
+            sc = deepcopy(s); sc.α[] = α; st = step!(sc); row = sc.hist[end]
+            score = (_oracle_state(row), _oracle_craig(row))
+            if score < bestscore
+                bestscore = score; best = sc; beststatus = st
+            end
+        end
+        best === nothing && return nothing
+        i == K && break                       # reached iteration K's entry iterate (s)
+        s = best
+        beststatus === CONTINUE || return nothing
+    end
+    entry = (mu = mu(s), nc = s.nc[], ng = s.ng[],
+             tau = hasproperty(s, :τ) ? s.τ[] : NaN, kappa = hasproperty(s, :κ) ? s.κ[] : NaN)
+    SNAP[] = NamedTuple[]
+    sc = deepcopy(s); sc.α[] = oftype(sc.α[], alpha); st = step!(sc)
+    snaps = SNAP[]::Vector; SNAP[] = nothing
+    row = sc.hist[end]
+    T = eltype(sc.wrk.rp)
+    μ1 = first(sc.hist.μ)
+    ftol  = min(sc.settings.forcing_frac * row.μ / μ1, sc.settings.forcing_ceil)
+    fltol = 100 * eps(T) * (one(T) + max(norm(sc.wrk.rp, Inf), norm(sc.wrk.rd, Inf)))
+    return (; alpha = sc.α[], entry, snaps, row, status = st, force_tol = ftol, floor_tol = fltol,
+            norm_dp = norm(sc.wrk.Δp), norm_dy = norm(sc.wrk.Δy))
+end
+
 # μ per iteration along the chosen-α trajectory (for matching the X03 ipm/hsd pair by μ).
 function oracle_mu_trajectory(s0::AbstractSolver, maxit::Integer, grid = DEFAULT_ALPHA_GRID)
     s = s0; gs = sort(collect(grid)); mus = Float64[]

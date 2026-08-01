@@ -106,6 +106,12 @@ function init_uzw!(
     axpy!(β, A, F)
     info = cholesky!(facwrk, F; check=false)
     #
+    # ρ_applied is the diagonal shift ACTUALLY added — zero when the unshifted factorization succeeds,
+    # otherwise the rung the ρ-ladder stopped on. (rgmin is the ladder's first rung, not "no shift"; the
+    # two must be distinguishable, so we report the applied shift rather than the ladder's lower bound.)
+    #
+    ρ_applied = zero(T)
+    #
     # on failure, add a diagonal shift ρ I and retry:
     #
     #   F ← β A + Bᵀ B + ρ I
@@ -115,6 +121,7 @@ function init_uzw!(
         axpy!(β, A, F)
         axpy!(ρ, I, F)
         info = cholesky!(facwrk, F; check=false)
+        ρ_applied = ρ
     end
 
     while !iszero(info) && 8ρ ≤ rgmax
@@ -123,9 +130,10 @@ function init_uzw!(
         axpy!(β, A, F)
         axpy!(ρ, I, F)
         info = cholesky!(facwrk, F; check=false)
+        ρ_applied = ρ
     end
 
-    return iszero(info), ρ
+    return iszero(info), ρ_applied
 end
 
 # Gauss-quadrature representation of the rhs spectral measure from a Golub-Kahan lower-bidiagonal (dv=diag
