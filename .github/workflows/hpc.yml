@@ -161,6 +161,7 @@ jobs:
             printf '%s\n' 'cd "$WORK_SHARED"'
             printf '%s\n' "SHARDS_ARR=(${SHARDS[*]})"
             printf '%s\n' 'export BENCHMARK_SHARD="${SHARDS_ARR[$((SLURM_ARRAY_TASK_ID - 1))]}"'
+            printf '%s\n' 'export BENCHMARK_RENDER_REPORT="false"'
             printf '%s\n' 'julia -J "$SYSIMAGE_PATH" --project=bench bench/run_benchmarks.jl'
           } > "$SHARD_TASK_SCRIPT"
           chmod +x "$SHARD_TASK_SCRIPT"

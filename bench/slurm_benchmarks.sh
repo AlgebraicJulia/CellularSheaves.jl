@@ -13,6 +13,7 @@ run_shard() {
   export BENCHMARK_PROFILE="${PROFILE}"
   export BENCHMARK_SHARD="${shard}"
   export BENCHMARK_RESULT_DIR="${RESULT_DIR}"
+  export BENCHMARK_RENDER_REPORT="false"
   julia --project=bench bench/run_benchmarks.jl
 }
 
