@@ -16,6 +16,14 @@ import CellularSheaves.NetworkSheaves.EuclideanSheaves:
     @test_throws ArgumentError TikhonovFilter(zeros(2); epsilon = 0.0)
     @test_throws ArgumentError tikhonov_step!(TikhonovFilter(zeros(2); epsilon = 0.1), zeros(2), zeros(2), 0.0)
 
+    @testset "Factorization overloads" begin
+        F = factorize(H)
+        rhs_rate = [0.2, -0.1]
+        @test tikhonov_equilibrium(F, rhs) ≈ tikhonov_equilibrium(H, rhs)
+        @test tikhonov_reference_rate(F, rhs_rate) ≈ tikhonov_reference_rate(H, rhs_rate)
+        @test tikhonov_equilibrium(F, rhs) ≈ H \ rhs
+    end
+
     @testset "constant reference exact solution" begin
         epsilon = 0.2
         x0 = [3.0, -2.0]

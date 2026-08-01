@@ -1,4 +1,4 @@
-using LinearAlgebra
+using LinearAlgebra: Factorization
 
 """
     TikhonovFilter(x0; epsilon) -> TikhonovFilter
@@ -22,8 +22,13 @@ function TikhonovFilter(x0::AbstractVector{T}; epsilon::Real) where {T <: Real}
     return TikhonovFilter(Vector{S}(x0), S(epsilon))
 end
 
-"""Return the instantaneous harmonic reference solving `H * qstar = rhs`."""
-function tikhonov_equilibrium(H::AbstractMatrix, rhs::AbstractVector)
+"""Return the instantaneous harmonic reference solving `H * qstar = rhs`.
+
+`H` may be an `AbstractMatrix` or a pre-computed `Factorization` (e.g.
+`factorize(H)`). Passing a cached factorization avoids repeated factorization
+when solving for many right-hand sides in a loop.
+"""
+function tikhonov_equilibrium(H::Union{AbstractMatrix, Factorization}, rhs::AbstractVector)
     size(H, 1) == size(H, 2) || throw(ArgumentError("H must be square"))
     size(H, 1) == length(rhs) || throw(DimensionMismatch("rhs must have length size(H, 1)"))
     return H \ rhs
@@ -35,8 +40,12 @@ end
 Return `qstar_dot` by solving `H * qstar_dot = rhs_rate`. This identity applies
 when the sheaf topology is fixed and target motion changes only the right-hand
 side of the harmonic system.
+
+`H` may be an `AbstractMatrix` or a pre-computed `Factorization` (e.g.
+`factorize(H)`). Passing a cached factorization avoids repeated factorization
+when computing reference rates in a loop.
 """
-function tikhonov_reference_rate(H::AbstractMatrix, rhs_rate::AbstractVector)
+function tikhonov_reference_rate(H::Union{AbstractMatrix, Factorization}, rhs_rate::AbstractVector)
     return tikhonov_equilibrium(H, rhs_rate)
 end
 
