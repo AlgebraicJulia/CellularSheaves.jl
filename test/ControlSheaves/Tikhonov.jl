@@ -1,6 +1,6 @@
 using Test
 using CellularSheaves
-using CellularSheaves.ControlSheaves
+using CellularSheaves.ControlSheaves.Tikhonov
 using LinearAlgebra
 import CellularSheaves.NetworkSheaves.EuclideanSheaves:
     _harmonic_extension_restricted_laplacian
