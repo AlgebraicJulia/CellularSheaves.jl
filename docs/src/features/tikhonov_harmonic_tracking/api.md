@@ -8,7 +8,7 @@ tree, distributed message passing, or differentiable conic layer.
 ## Basic use
 
 ```julia
-using CellularSheaves.ControlSheaves
+using CellularSheaves.ControlSheaves.Tikhonov
 
 q0 = tikhonov_equilibrium(H, rhs0)
 q1 = tikhonov_equilibrium(H, rhs1)
@@ -91,10 +91,10 @@ homogeneous part of the derivative; include the
 ## API reference
 
 ```@docs
-CellularSheaves.ControlSheaves.TikhonovFilter
-CellularSheaves.ControlSheaves.tikhonov_equilibrium
-CellularSheaves.ControlSheaves.tikhonov_reference_rate
-CellularSheaves.ControlSheaves.tikhonov_feedforward_reference
-CellularSheaves.ControlSheaves.tikhonov_dissipation
-CellularSheaves.ControlSheaves.tikhonov_step!
+CellularSheaves.ControlSheaves.Tikhonov.TikhonovFilter
+CellularSheaves.ControlSheaves.Tikhonov.tikhonov_equilibrium
+CellularSheaves.ControlSheaves.Tikhonov.tikhonov_reference_rate
+CellularSheaves.ControlSheaves.Tikhonov.tikhonov_feedforward_reference
+CellularSheaves.ControlSheaves.Tikhonov.tikhonov_dissipation
+CellularSheaves.ControlSheaves.Tikhonov.tikhonov_step!
 ```

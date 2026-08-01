@@ -7,7 +7,7 @@
 get!(ENV, "GKSwstype", "100")
 
 using CellularSheaves
-using CellularSheaves.ControlSheaves
+using CellularSheaves.ControlSheaves.Tikhonov
 using LinearAlgebra
 using Plots
 using Printf

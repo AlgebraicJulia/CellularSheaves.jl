@@ -1,4 +1,22 @@
+"""
+    Tikhonov
+
+Normalized Tikhonov planner for harmonic-extension references.
+
+Provides a stateful first-order filter `TikhonovFilter` and helpers for
+computing harmonic equilibria, reference rates, feedforward corrections,
+and Lyapunov diagnostics.
+"""
+module Tikhonov
+
 using LinearAlgebra: Factorization
+
+export TikhonovFilter,
+       tikhonov_equilibrium,
+       tikhonov_reference_rate,
+       tikhonov_feedforward_reference,
+       tikhonov_dissipation,
+       tikhonov_step!
 
 """
     TikhonovFilter(x0; epsilon) -> TikhonovFilter
@@ -123,3 +141,5 @@ end
 function tikhonov_step!(filter::TikhonovFilter, reference_at, t::Real, dt::Real)
     return tikhonov_step!(filter, reference_at(t), reference_at(t + dt), dt)
 end
+
+end # module Tikhonov

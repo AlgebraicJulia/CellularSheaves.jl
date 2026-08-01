@@ -1,7 +1,7 @@
 module TikhonovGuideScenario
 
 using CellularSheaves
-using CellularSheaves.ControlSheaves
+using CellularSheaves.ControlSheaves.Tikhonov
 using CellularSheaves.NetworkSheaves.DistributedSolve
 using CliqueTrees.Multifrontal
 using LinearAlgebra

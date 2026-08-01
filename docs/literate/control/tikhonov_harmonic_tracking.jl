@@ -12,7 +12,7 @@
 get!(ENV, "GKSwstype", "100")
 
 using CellularSheaves
-using CellularSheaves.ControlSheaves
+using CellularSheaves.ControlSheaves.Tikhonov
 using LinearAlgebra, Plots, Statistics
 import CellularSheaves.NetworkSheaves.EuclideanSheaves:
     _harmonic_extension_restricted_laplacian

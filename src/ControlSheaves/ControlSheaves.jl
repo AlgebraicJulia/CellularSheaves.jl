@@ -16,13 +16,7 @@ export AbstractDynamics,
        build_ode_problem,
        build_integrator,
        integrate_step,
-       integrate_step!,
-       TikhonovFilter,
-       tikhonov_equilibrium,
-       tikhonov_reference_rate,
-       tikhonov_feedforward_reference,
-       tikhonov_dissipation,
-       tikhonov_step!
+       integrate_step!
 
 abstract type AbstractDynamics end
 struct NoDynamics <: AbstractDynamics end
@@ -35,6 +29,9 @@ include("Tikhonov.jl")
 include("entity.jl")
 include("MultiAgentTracking.jl")
 include("TrackingDSL/TrackingDSL.jl")
+
+import .Tikhonov
+export Tikhonov
 
 import .MultiAgentTracking
 export MultiAgentTracking
