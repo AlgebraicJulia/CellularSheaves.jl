@@ -88,10 +88,11 @@ makedocs(
         "generated/control/controlled_mass_spring_damper_chain.md",
         "control/single_integrator_target_tracking.md",
         "generated/control/multi_quadrotor_target_tracking.md",
-        "generated/control/mpc_target_tracking.md",
+        "generated/control/mpc_target_tracking.md"],
+      "Layered Control Architecture Examples" => Any[
         "generated/control/distributed_harmonic_tracking.md",
-        "generated/control/tikhonov_harmonic_tracking.md"
-
+        "generated/control/tikhonov_harmonic_tracking.md",
+        "generated/control/layered_mpc_tikhonov_scenario5.md",
         ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
