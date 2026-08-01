@@ -122,6 +122,10 @@ makedocs(
         "features/tikhonov_harmonic_tracking/api.md",
       ],
     ],
+    "Benchmarks"=>Any[
+      "benchmarks.md",
+      "benchmark_report.md",
+    ],
     "API Reference"=>Any[
       "api/index.md",
       "api/network_sheaves.md",

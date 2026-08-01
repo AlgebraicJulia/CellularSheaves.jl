@@ -1,0 +1,252 @@
+name: HPC CI and Benchmarks
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Which HPC jobs to run"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - test
+          - benchmark
+      profile:
+        description: "Benchmark profile (small, large, full)"
+        required: false
+        default: "full"
+        type: choice
+        options:
+          - small
+          - large
+          - full
+      seconds:
+        description: "Benchmark seconds per leaf"
+        required: false
+        default: "5"
+      samples:
+        description: "Benchmark samples per leaf"
+        required: false
+        default: "25"
+
+env:
+  HPC_SYSIMAGE_DIR: "/blue/fairbanksj/gha/sysimages/cellularsheaves"
+  HPC_SHARED_WORK: "/blue/fairbanksj/gha/work/cellularsheaves"
+
+permissions:
+  contents: read
+
+jobs:
+  sysimage-cache:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    uses: ./.github/workflows/hpc_sysimage.yml
+    secrets: inherit
+
+  ci-hpc:
+    needs: sysimage-cache
+    if: needs.sysimage-cache.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.action != 'benchmark')
+    runs-on: [self-hosted, hpc-gpu]
+    steps:
+      - name: "🗂️ Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "🔑 Set Paths from Sysimage Cache"
+        run: |
+          echo "SYSIMAGE_PATH=${{ needs.sysimage-cache.outputs.sysimage_path }}" >> $GITHUB_ENV
+          echo "DEPOT_PATH=${{ needs.sysimage-cache.outputs.depot_path }}" >> $GITHUB_ENV
+
+      - name: "🚀 Execute Test Suite via Slurm"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+          WORK_SHARED="$HPC_SHARED_WORK/${GITHUB_RUN_ID}-ci"
+          mkdir -p "$WORK_SHARED"
+          rsync -a --delete "$GITHUB_WORKSPACE/" "$WORK_SHARED/"
+
+          srun --partition=hpg-dev \
+               --time=02:00:00 \
+               --cpus-per-task=8 \
+               --job-name="gha-cluster-test" \
+               bash -c "set -e
+                   source /etc/profile.d/modules.sh
+                   module load julia/1.12.6
+                   export JULIA_DEPOT_PATH=$DEPOT_PATH:\$SLURM_TMPDIR/.julia
+                   mkdir -p \$SLURM_TMPDIR/.julia
+                   cd $WORK_SHARED
+                   julia -J '$SYSIMAGE_PATH' --project=. -e 'using Pkg; Pkg.test()'
+               "
+
+      - name: "🧹 Clean Up Staged Workspace"
+        if: always()
+        run: |
+          TARGET_CLEAN="$HPC_SHARED_WORK/${GITHUB_RUN_ID}-ci"
+          if [[ -n "$TARGET_CLEAN" && "$TARGET_CLEAN" =~ ^/blue/fairbanksj/gha/work/cellularsheaves/[0-9]+-ci$ ]]; then
+            rm -rf "$TARGET_CLEAN"
+          else
+            echo "❌ SAFETY ERROR: Path '$TARGET_CLEAN' does not match the strict workspace pattern. Aborting to protect /blue/fairbanksj/" && exit 1
+          fi
+
+  benchmark-hpc:
+    needs: sysimage-cache
+    if: needs.sysimage-cache.result == 'success' && (github.event_name != 'workflow_dispatch' || inputs.action != 'test')
+    runs-on: [self-hosted, hpc-gpu]
+    steps:
+      - name: "🗂️ Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "🔑 Set Paths from Sysimage Cache"
+        run: |
+          echo "SYSIMAGE_PATH=${{ needs.sysimage-cache.outputs.sysimage_path }}" >> $GITHUB_ENV
+          echo "DEPOT_PATH=${{ needs.sysimage-cache.outputs.depot_path }}" >> $GITHUB_ENV
+          echo "WORK_SHARED=$HPC_SHARED_WORK/${GITHUB_RUN_ID}-bench" >> $GITHUB_ENV
+
+      - name: "📦 Instantiate Benchmark Environment"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+          mkdir -p "$WORK_SHARED"
+          rsync -a --delete "$GITHUB_WORKSPACE/" "$WORK_SHARED/"
+
+          srun --partition=hpg-dev \
+               --time=00:30:00 \
+               --cpus-per-task=4 \
+               --job-name="gha-bench-instantiate" \
+               bash -c "
+                   source /etc/profile.d/modules.sh
+                   module load julia/1.12.6
+                   export JULIA_DEPOT_PATH=$DEPOT_PATH:\$SLURM_TMPDIR/.julia
+                   mkdir -p \$SLURM_TMPDIR/.julia
+                   cd $WORK_SHARED
+                   julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+               "
+
+      - name: "🚀 Run Benchmark Shards via Slurm Array"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PROFILE="${{ github.event.inputs.profile }}"
+          else
+            PROFILE="full"
+          fi
+
+          RESULT_DIR="$WORK_SHARED/bench/results/slurm/$GITHUB_RUN_ID"
+
+          if [ "$PROFILE" = "small" ]; then
+            SHARDS=("assembly-small" "solver-small" "extension-small")
+          elif [ "$PROFILE" = "large" ]; then
+            SHARDS=("assembly-large" "solver-large" "extension-large")
+          else
+            SHARDS=("assembly-small" "solver-small" "extension-small" "assembly-large" "solver-large" "extension-large")
+          fi
+          COUNT="${#SHARDS[@]}"
+          EXPECTED_SHARDS="$(IFS=,; echo "${SHARDS[*]}")"
+          SHARD_TASK_SCRIPT="$WORK_SHARED/.github/scripts/bench_shard_task.sh"
+          LOG_DIR="$RESULT_DIR/slurm-logs"
+          mkdir -p "$(dirname "$SHARD_TASK_SCRIPT")"
+          mkdir -p "$LOG_DIR"
+
+          {
+            printf '%s\n' '#!/usr/bin/env bash'
+            printf '%s\n' 'set -euo pipefail'
+            printf '%s\n' 'source /etc/profile.d/modules.sh'
+            printf '%s\n' 'module load julia/1.12.6'
+            printf '%s\n' 'export JULIA_DEPOT_PATH="${DEPOT_PATH}:${SLURM_TMPDIR}/.julia"'
+            printf '%s\n' 'mkdir -p "${SLURM_TMPDIR}/.julia"'
+            printf '%s\n' 'cd "$WORK_SHARED"'
+            printf '%s\n' "SHARDS_ARR=(${SHARDS[*]})"
+            printf '%s\n' 'export BENCHMARK_SHARD="${SHARDS_ARR[$((SLURM_ARRAY_TASK_ID - 1))]}"'
+            printf '%s\n' 'julia -J "$SYSIMAGE_PATH" --project=bench bench/run_benchmarks.jl'
+          } > "$SHARD_TASK_SCRIPT"
+          chmod +x "$SHARD_TASK_SCRIPT"
+
+          # Submit the array job and block until all shards complete.
+          # SLURM_JOB_ID is set inside each task, so runner_kind_from_env() in
+          # BenchmarkShards.jl returns "slurm" even though GITHUB_ACTIONS is
+          # also present in the inherited environment.
+          set +e
+          ARRAY_JOB_ID="$(sbatch --parsable --wait \
+            --partition=hpg-dev \
+            --time=02:00:00 \
+            --cpus-per-task=8 \
+            --array="1-${COUNT}" \
+            --job-name="gha-bench-shards" \
+            --output="$LOG_DIR/%A_%a.out" \
+            --error="$LOG_DIR/%A_%a.err" \
+            --export=ALL,BENCHMARK_PROFILE="$PROFILE",BENCHMARK_RESULT_DIR="$RESULT_DIR",BENCHMARK_REF="$GITHUB_SHA",BENCHMARK_SECONDS="${{ github.event.inputs.seconds || '5' }}",BENCHMARK_SAMPLES="${{ github.event.inputs.samples || '25' }}" \
+            "$SHARD_TASK_SCRIPT")"
+          ARRAY_STATUS=$?
+          set -e
+
+          if [ "$ARRAY_STATUS" -ne 0 ]; then
+            echo "❌ Slurm benchmark array failed (exit $ARRAY_STATUS, job ${ARRAY_JOB_ID:-unknown})."
+            BASE_ARRAY_JOB_ID="${ARRAY_JOB_ID%%;*}"
+            if command -v sacct >/dev/null 2>&1 && [ -n "$BASE_ARRAY_JOB_ID" ]; then
+              echo "---- sacct status ----"
+              sacct -j "$BASE_ARRAY_JOB_ID" --format=JobID,JobName,State,ExitCode,Elapsed -P || true
+            fi
+            for f in "$LOG_DIR"/*.out "$LOG_DIR"/*.err; do
+              [ -e "$f" ] || continue
+              echo "===== tail: $f ====="
+              tail -n 200 "$f" || true
+            done
+            exit "$ARRAY_STATUS"
+          fi
+
+          echo "RESULT_DIR=$RESULT_DIR" >> $GITHUB_ENV
+          echo "EXPECTED_SHARDS=$EXPECTED_SHARDS" >> $GITHUB_ENV
+          echo "PROFILE=$PROFILE" >> $GITHUB_ENV
+          echo "SLURM_ARRAY_JOB_ID=$ARRAY_JOB_ID" >> $GITHUB_ENV
+
+      - name: "📊 Render Merged Benchmark Report"
+        run: |
+          set -x
+          source /etc/profile.d/slurm.sh
+          REPORT_DIR="$WORK_SHARED/bench/results/slurm/$GITHUB_RUN_ID/report"
+
+          srun --partition=hpg-dev \
+               --time=00:30:00 \
+               --cpus-per-task=4 \
+               --job-name="gha-bench-report" \
+               bash -c "
+                   source /etc/profile.d/modules.sh
+                   module load julia/1.12.6
+                   export JULIA_DEPOT_PATH=$DEPOT_PATH:\$SLURM_TMPDIR/.julia
+                   mkdir -p \$SLURM_TMPDIR/.julia
+                   cd $WORK_SHARED
+                   BENCHMARK_INPUT_DIR='$RESULT_DIR' \
+                   BENCHMARK_OUTPUT_DIR='$REPORT_DIR' \
+                   BENCHMARK_PROFILE='$PROFILE' \
+                   BENCHMARK_EXPECTED_SHARDS='$EXPECTED_SHARDS' \
+                   julia -J '$SYSIMAGE_PATH' --project=bench bench/render_report.jl
+               "
+
+          echo "REPORT_DIR=$REPORT_DIR" >> $GITHUB_ENV
+
+      - name: "📥 Copy Results to Runner Workspace"
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/bench/results/shards"
+          mkdir -p "$GITHUB_WORKSPACE/bench/results/report"
+          rsync -a "$RESULT_DIR/" "$GITHUB_WORKSPACE/bench/results/shards/" || true
+          rsync -a "$REPORT_DIR/" "$GITHUB_WORKSPACE/bench/results/report/" || true
+
+      - name: "📤 Upload Benchmark Artifacts"
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-hpc
+          path: bench/results
+
+      - name: "🧹 Clean Up Staged Workspace"
+        if: always()
+        run: |
+          TARGET_CLEAN="$HPC_SHARED_WORK/${GITHUB_RUN_ID}-bench"
+          if [[ -n "$TARGET_CLEAN" && "$TARGET_CLEAN" =~ ^/blue/fairbanksj/gha/work/cellularsheaves/[0-9]+-bench$ ]]; then
+            rm -rf "$TARGET_CLEAN"
+          else
+            echo "❌ SAFETY ERROR: Path '$TARGET_CLEAN' does not match the strict workspace pattern. Aborting to protect /blue/fairbanksj/" && exit 1
+          fi
