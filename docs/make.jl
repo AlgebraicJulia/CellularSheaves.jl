@@ -54,9 +54,17 @@ let src = joinpath(@__DIR__, "figures", "distributed_solve"),
   end
 end
 
+let src = joinpath(@__DIR__, "figures", "tikhonov"),
+    dst = joinpath(@__DIR__, "src", "assets", "figures", "tikhonov")
+  if isdir(src)
+    mkpath(dirname(dst))
+    cp(src, dst; force=true)
+  end
+end
+
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
   draft=false,
   format=Documenter.HTML(assets=["assets/benchtables.css"]),
   sitename="CellularSheaves.jl",
@@ -81,7 +89,8 @@ makedocs(
         "control/single_integrator_target_tracking.md",
         "generated/control/multi_quadrotor_target_tracking.md",
         "generated/control/mpc_target_tracking.md",
-        "generated/control/distributed_harmonic_tracking.md"
+        "generated/control/distributed_harmonic_tracking.md",
+        "generated/control/tikhonov_harmonic_tracking.md"
 
         ],
       "Asynchronous Diffusion"=>Any[
@@ -103,6 +112,14 @@ makedocs(
         "features/distributed_sheaf_solve/comparison.md",
         "features/distributed_sheaf_solve/benchmarks.md",
         "features/distributed_sheaf_solve/api.md",
+      ],
+      "Tikhonov Harmonic Tracking"=>Any[
+        "features/tikhonov_harmonic_tracking/index.md",
+        "features/tikhonov_harmonic_tracking/harmonic_manifold.md",
+        "features/tikhonov_harmonic_tracking/stability.md",
+        "features/tikhonov_harmonic_tracking/feedforward.md",
+        "features/tikhonov_harmonic_tracking/scenarios.md",
+        "features/tikhonov_harmonic_tracking/api.md",
       ],
     ],
     "Benchmarks"=>Any[
