@@ -1,5 +1,19 @@
 abstract type AbstractSolver{T} end
 
+# ── solve-state snapshot hook (snapshots spec) ──────────────────────────────────────────
+# SNAP is nothing in production (the guard below is a single === test — no behavior change).
+# When a capture driver arms it (SNAP[] = NamedTuple[]), each base solve records its pre-solve
+# input state — the symmetric first block A (= H completed from its lower triangle, the operator
+# the solver factors), the constraint block B, and the rhs pair f/g plus warm start y0.
+const SNAP = Base.RefValue{Any}(nothing)
+function _snap!(role::Symbol, H, B, f, g, y0)
+    S = sparse(H); L = tril(S)
+    A = L + permutedims(L) - spdiagm(0 => diag(L))     # full symmetric operator, storage-agnostic
+    push!(SNAP[]::Vector, (; role, A = A, Bmat = sparse(B),
+        f = Vector(f), g = Vector(g), y0 = y0 === nothing ? nothing : Vector(y0)))
+    return
+end
+
 include("ipm.jl")
 include("hsd.jl")
 include("utils.jl")

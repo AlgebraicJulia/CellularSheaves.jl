@@ -221,6 +221,7 @@ function solvepredictor!(
     #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
+    SNAP[] === nothing || _snap!(:p, H, B, w.f, w.rp, nothing)
     pbase = solve_kkt!(kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
     r0_p = kkt.r0[]; r1_p = kkt.r1[]; craig_p = kkt.itrwrk.stats.status
     ph10 = kkt.harvest10[]; phN = kkt.harvestN[]   # predictor spectral harvest (kmax=10 / kmax=ncraig)
@@ -334,6 +335,7 @@ function solvecorrector!(
     #   [ H  -Bᵀ ] [ Δp ]   [ rd* ]
     #   [ B   0  ] [ Δy ] = [ rp  ]
     #
+    SNAP[] === nothing || _snap!(:c, H, B, w.f, w.rp, w.Δya)
     cbase = solve_kkt!(kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
     r0_c = kkt.r0[]; r1_c = kkt.r1[]; craig_c = kkt.itrwrk.stats.status
     ch10 = kkt.harvest10[]; chN = kkt.harvestN[]   # corrector spectral harvest (kmax=10 / kmax=ncraig)

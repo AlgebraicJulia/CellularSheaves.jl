@@ -232,6 +232,7 @@ function woodbury!(
     #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
     #   [ B   0  ] [ Δy2 ] = [ g ]
     #
+    SNAP[] === nothing || _snap!(:w, H, B, c, g, y0)
     wbase = solve_kkt!(kkt, w.Δp2, w.Δy2, H, B, c, g, y0; atol)
     r0_w = kkt.r0[]; r1_w = kkt.r1[]; craig_w = kkt.itrwrk.stats.status
     wh10 = kkt.harvest10[]; whN = kkt.harvestN[]   # woodbury spectral harvest (kmax=10 / kmax=ncraig)
@@ -447,6 +448,7 @@ function newton!(
     #   [ H -Bᵀ ] [ Δp ] = [ f  ]
     #   [ B  0  ] [ Δy ]   [ rp ]
     #
+    SNAP[] === nothing || _snap!(:newton, H, B, f, rp, y0)
     niter = solve_kkt!(wrk, Δp, Δy, H, B, f, rp, y0; atol)
     #
     # apply the Schur lift:
