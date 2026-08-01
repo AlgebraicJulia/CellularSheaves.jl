@@ -40,3 +40,4 @@ e14	ipm	9	9	0.89	0.22	0.0e+00	3.5	1:ceil,2:ceil,3:ceil,4:ceil,5:ceil,6:ceil,7:ce
 e14	hsd	7	6	0.50	0.83	0.0e+00	3.5	1:floor,1:ceil,3:ceil,4:ceil,5:ceil,6:floor,6:ceil	62.8	684
 e15	ipm	7	7	0.43	0.00	0.0e+00	3.5	3:ceil,4:ceil,5:ceil,6:ceil,7:ceil	67.7	1022
 e15	hsd	7	7	1.00	0.57	0.0e+00	3.5	2:ceil,3:ceil,4:ceil,5:ceil,6:ceil,7:ceil	69.1	635
+X06	ipm	11	11	1.00	0.45	0.0e+00	3.5	1:ceil,3:ceil,4:ceil,5:ceil,6:ceil,11:ceil	46.4	1039
