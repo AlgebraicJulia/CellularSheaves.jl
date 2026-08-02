@@ -242,7 +242,7 @@ function woodbury!(
     #
     wpass, wrefn, wstat, wres0, wres1, wres0_d, wres0_p, wres_exit = refinekkt!(
         w.Δp2, w.Δy2, kkt, H, B,
-        c, g, w.sy, w.sp, w.dp, w.dy, nc, ng;
+        c, g, w.sy, w.sp, w.dp, w.dy, nc, ng, kkt.wtrace;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
 
@@ -318,12 +318,14 @@ function refinehsd!(
     dp::AbstractVector{T},  # scratch for correction
     dy::AbstractVector{T},
     nc::T,
-    ng::T;
+    ng::T,
+    trace::PassTrace{T};
     itmax::Int,
     force_tol::T,
     floor_tol::T,
     stall::T,
 ) where {T}
+    reset!(trace)              # per-pass entry-residual / Krylov trace (E-series instrumentation)
     niter = 0
     npass = 0
     status = REFINE_ITMAX
@@ -364,6 +366,11 @@ function refinehsd!(
         res_exit = res
         i == 1 && (res0 = res; res0_d = dres; res0_p = pres)
         i == 2 && (res1 = res)
+        if i ≤ PASSTRACE_LEN                    # entry residual of pass i (dual/primal/τ split on the 3-row system)
+            trace.dres[i] = dres
+            trace.pres[i] = pres
+            trace.tres[i] = τres
+        end
 
         if res ≤ force_tol
             status = REACHED_FORCE
@@ -387,7 +394,9 @@ function refinehsd!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        niter += solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        nk = solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        niter += nk
+        i ≤ PASSTRACE_LEN && (trace.nkry[i] = nk - 1)   # CRAIG iters of pass i (return − 1 for the direct solve)
         npass += 1
         #
         # apply the Schur lift (aτ = c - 2Qp/τ):
@@ -539,7 +548,7 @@ function solvepredictor!(
         w.Δpa, w.Δya, Δτa,
         kkt, H, B, c, g, w.Qp, p, aτ,
         τ, κ, w.rp, w.f, gap, w.Δp2, w.Δy2, S,
-        w.sy, w.sp, w.dp, w.dy, nc, ng;
+        w.sy, w.sp, w.dp, w.dy, nc, ng, kkt.ptrace;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall
     )
     #
@@ -699,7 +708,7 @@ function solvecorrector!(
         w.Δp, w.Δy, Δτ,
         kkt, H, B, c, g, w.Qp, p, aτ,
         τ, κ, w.rp, w.f, fτ, w.Δp2, w.Δy2, S,
-        w.sy, w.sp, w.dp, w.dy, nc, ng;
+        w.sy, w.sp, w.dp, w.dy, nc, ng, kkt.ctrace;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall
     )
     #

@@ -36,6 +36,37 @@ function SpectralHarvest(s2min::T, s2max::T, ritz_beta::T, omm::T,
     return SpectralHarvest{T}(s2min, s2max, ritz_beta, omm, length(θraw), θ, w)
 end
 
+# Per-refinement-pass trace (E-series per-pass instrumentation). Fixed capture of the first
+# PASSTRACE_LEN refinement passes (observed pass-count median 3, max 10; 6 covers the modelled regime).
+# For refinement pass i = 1..PASSTRACE_LEN (pass i = the i-th refinement invocation AFTER the base solve):
+#   dres[i]/pres[i]/tres[i] = the dual/primal/τ residual components at the TOP of refinement iteration i,
+#       i.e. the ENTRY residual of pass i (the residual left by base + passes 1..i-1, which pass i's inner
+#       solve consumes). NaN where the loop never reached iteration i. tres is the HSD 3-row τ-component
+#       (NaN on the IPM 2-row system, which has no τ row).
+#   nkry[i] = CRAIG iterations spent by pass i's inner solve (solve_kkt! return − 1, since the return
+#       counts the direct solve as 1); −1 when pass i did NOT fire (the loop broke at the force/floor/stall
+#       test before solving at iteration i).
+# The base invocation (k=0) is NOT in here — its entry residual is the r0_* column, its Krylov is
+# (pbase−1), and its post-solve residual equals this trace's pass-1 entry (dres[1]/pres[1]).
+# Buffers are workspace-resident and filled in place (zero per-call allocation); a caller passes the
+# per-role trace object (ptrace/ctrace/wtrace) so predictor/corrector/woodbury never clobber each other.
+struct PassTrace{T}
+    dres::Vector{T}
+    pres::Vector{T}
+    tres::Vector{T}
+    nkry::Vector{Int}
+end
+
+const PASSTRACE_LEN = 6
+PassTrace{T}() where {T} = PassTrace{T}(fill(T(NaN), PASSTRACE_LEN), fill(T(NaN), PASSTRACE_LEN),
+                                        fill(T(NaN), PASSTRACE_LEN), fill(-1, PASSTRACE_LEN))
+
+# reset to the empty state (no iteration reached, no pass fired) before a refinement loop fills it.
+function reset!(t::PassTrace{T}) where {T}
+    fill!(t.dres, T(NaN)); fill!(t.pres, T(NaN)); fill!(t.tres, T(NaN)); fill!(t.nkry, -1)
+    return t
+end
+
 struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     F::FChordalTriangular{:N, UPLO, T, I}
     L::BlockSparseMatrix{T, I}
@@ -48,6 +79,9 @@ struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     r1::Scalar{T}                                  # post-CRAIG residual ‖g-Bx‖ of the last base solve
     harvest10::Base.RefValue{SpectralHarvest{T}}   # last base solve's spectral reading at kmax=10
     harvestN::Base.RefValue{SpectralHarvest{T}}    # ... and at kmax = the base solve's actual CRAIG iters
+    ptrace::PassTrace{T}                            # per-pass refinement trace, last predictor solve
+    ctrace::PassTrace{T}                            # ... last corrector solve
+    wtrace::PassTrace{T}                            # ... last woodbury solve (HSD; unused/empty on IPM)
     rgmin::T                                        # baked: ρ-shift ladder lower bound
     rgmax::T                                        # baked: ρ-shift ladder upper bound
 end
@@ -64,7 +98,9 @@ function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMat
     r1 = fill(T(NaN))
     harvest10 = Ref(SpectralHarvest{T}())
     harvestN  = Ref(SpectralHarvest{T}())
-    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, r0, r1, harvest10, harvestN, rgmin, rgmax)
+    ptrace = PassTrace{T}(); ctrace = PassTrace{T}(); wtrace = PassTrace{T}()
+    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α, r0, r1, harvest10, harvestN,
+                          ptrace, ctrace, wtrace, rgmin, rgmax)
 end
 
 function make_kkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAULT_ELIMINATION_ALGORITHM,
@@ -149,8 +185,19 @@ end
 function ritz_spectral(dv::AbstractVector{T}, ev::AbstractVector{T}, α_aug::T) where {T}
     k = length(dv)
     k ≥ 1 || return (T(NaN), T(NaN), T(NaN), T(NaN), T[], T[], T(NaN))
+    # svd(Bk) calls LAPACK, which errors (not NaN-returns) on any non-finite entry — refuse those inputs.
+    (all(isfinite, dv) && all(isfinite, @view ev[1:k-1])) ||
+        return (T(NaN), T(NaN), T(NaN), T(NaN), T[], T[], T(NaN))
     Bk = k == 1 ? Bidiagonal(T[dv[1]], T[], :L) : Bidiagonal(collect(dv), collect(@view ev[1:k-1]), :L)
-    S = svd(Matrix(Bk))                                  # need S.U (left singular vectors) for the weights
+    # need S.U (left singular vectors) for the weights. gesdd (divide-and-conquer) can throw
+    # LAPACKException on a pathological but finite bidiagonal (non-convergence) — the harvest is
+    # diagnostic-only, so degrade to an all-NaN reading rather than aborting the whole solve/sweep.
+    S = try
+        svd(Matrix(Bk))
+    catch err
+        err isa LinearAlgebra.LAPACKException || rethrow()
+        return (T(NaN), T(NaN), T(NaN), T(NaN), T[], T[], T(NaN))
+    end
     θ = S.S .^ 2                                          # Ritz nodes μ, descending
     w = vec(S.U[1, :]) .^ 2                               # normalized weights, Σw=1 (U orthogonal, row 1 unit)
     μmin = θ[end]; μmax = θ[1]
@@ -173,19 +220,23 @@ function gk_spectral(divwrk::DivisionWorkspace{T}, F::ChordalTriangular{:N, UPLO
     u = copy(seed)
     Nv = zeros(T, n); v = zeros(T, n); Atu = zeros(T, n); Av = zeros(T, m)
     dv = T[]; ev = T[]
-    β = norm(u); β == zero(T) && return (T(NaN), T(NaN), T(NaN), T(NaN), T[], T[], T(NaN))
+    β = norm(u); (β == zero(T) || !isfinite(β)) && return (T(NaN), T(NaN), T(NaN), T(NaN), T[], T[], T(NaN))
     u ./= β
     for _ in 1:kmax
         mul!(Atu, B', u)
         @. Nv = Atu - β * Nv
         copyto!(v, Nv); ldiv!(divwrk, F, v); ldiv!(divwrk, F', v)
         a = sqrt(max(real(dot(v, Nv)), zero(T)))
-        a == zero(T) && break
+        # stop the harvest before a non-finite bidiagonal entry can reach svd (a diverging refinement
+        # direction at an extreme α seeds a non-finite rhs; svd(Bk) throws in LAPACK on NaN/Inf). The
+        # harvest is diagnostic-only, so truncating to the finite prefix is the correct degradation.
+        (a == zero(T) || !isfinite(a)) && break
         push!(dv, a)
         v ./= a; Nv ./= a
         mul!(Av, B, v)
         @. u = Av - a * u
         β = norm(u)
+        !isfinite(β) && break
         push!(ev, β)
         β == zero(T) && break
         u ./= β

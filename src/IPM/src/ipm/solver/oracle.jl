@@ -49,6 +49,17 @@ function _harvest_cols(h::SpectralHarvest{T}, pre::Symbol) where {T}
               (Symbol(pre, :_w, j) => h.w[j] for j in 1:10)...)
 end
 
+# Flatten one PassTrace into CSV columns under a role prefix (:p, :c, :w): the per-pass ENTRY residual
+# (dual/primal/τ split) and per-pass CRAIG count for refinement passes 1..PASSTRACE_LEN. NaN residual =
+# the loop never reached that pass; nkry = −1 = that pass did not fire. See PassTrace docstring for the
+# base-invocation (pass 0) mapping (r0_* / pbase−1 / this trace's pass-1 entry).
+function _pass_cols(t::PassTrace{T}, pre::Symbol) where {T}
+    return (; (Symbol(pre, :_dres, j) => t.dres[j] for j in 1:PASSTRACE_LEN)...,
+              (Symbol(pre, :_pres, j) => t.pres[j] for j in 1:PASSTRACE_LEN)...,
+              (Symbol(pre, :_tres, j) => t.tres[j] for j in 1:PASSTRACE_LEN)...,
+              (Symbol(pre, :_nkry, j) => t.nkry[j] for j in 1:PASSTRACE_LEN)...)
+end
+
 function _oracle_record(i, α, sc, st)
     row = sc.hist[end]
     μ   = row.μ
@@ -63,7 +74,9 @@ function _oracle_record(i, α, sc, st)
     base = (iter = i, alpha = α, state = _oracle_state(row), ncraig = _oracle_craig(row),
             ipm_status = st, mu = μ, mu_next = mu(sc), rho = row.ρ,
             force_tol = ftol, floor_tol = fltol,
-            sigma2min = row.ph10.s2min, sigma2max = row.ph10.s2max,   # predictor kmax=10 harvest (back-compat alias)
+            tau_stall = sc.settings.refine_stall, refine_cap = sc.settings.refine_itmax,   # refinement stall threshold + pass cap actually in force (run1 vs run2)
+            normB2 = norm(sc.B)^2,                    # ordinary ‖B‖² (Frobenius) — the OTHER sense of "σ²max"; sigma2max below is the preconditioned Ritz σ̂²max
+            sigma2min = row.ph10.s2min, sigma2max = row.ph10.s2max,   # predictor kmax=10 harvest (back-compat alias) — preconditioned B F⁻¹ Bᵀ Ritz, NOT ‖B‖²
             step = row.step,
             tau = hasproperty(row, :τ) ? row.τ : nothing,
             kappa = hasproperty(row, :κ) ? row.κ : nothing,
@@ -94,7 +107,13 @@ function _oracle_record(i, α, sc, st)
     if hasw
         ritzcols = merge(ritzcols, _harvest_cols(row.wh10, :w10), _harvest_cols(row.whN, :wn))
     end
-    return merge(base, ritzcols, (chosen = false,))
+    # per-pass refinement trace (entry residuals + CRAIG per pass) read from the workspace the captured
+    # step just filled — predictor & corrector always, woodbury on HSD.
+    passcols = merge(_pass_cols(sc.kkt.ptrace, :p), _pass_cols(sc.kkt.ctrace, :c))
+    if hasw
+        passcols = merge(passcols, _pass_cols(sc.kkt.wtrace, :w))
+    end
+    return merge(base, ritzcols, passcols, (chosen = false,))
 end
 
 # Serialize solve_logged records to a CSV at `path`. Generic over the record fields; enums are

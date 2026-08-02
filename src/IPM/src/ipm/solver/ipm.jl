@@ -112,12 +112,14 @@ function refinekkt!(
     dp::AbstractVector{T},
     dy::AbstractVector{T},
     nc::T,
-    ng::T;
+    ng::T,
+    trace::PassTrace{T};
     itmax::Int,
     force_tol::T,
     floor_tol::T,
     stall::T,
 ) where {T}
+    reset!(trace)              # per-pass entry-residual / Krylov trace (E-series instrumentation)
     niter = 0
     npass = 0
     status = REFINE_ITMAX
@@ -143,6 +145,10 @@ function refinekkt!(
         res_exit = res
         i == 1 && (res0 = res; res0_d = dres; res0_p = pres)
         i == 2 && (res1 = res)
+        if i ≤ PASSTRACE_LEN                    # entry residual of pass i (dual/primal split; τ n/a on 2-row)
+            trace.dres[i] = dres
+            trace.pres[i] = pres
+        end
 
         if res ≤ force_tol
             status = REACHED_FORCE
@@ -166,7 +172,9 @@ function refinekkt!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        niter += solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        nk = solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        niter += nk
+        i ≤ PASSTRACE_LEN && (trace.nkry[i] = nk - 1)   # CRAIG iters of pass i (return − 1 for the direct solve)
         npass += 1
         #
         # update Δp and Δy:
@@ -230,7 +238,7 @@ function solvepredictor!(
     #
     ppass, prefn, pstat, pres0, pres1, pres0_d, pres0_p, pres_exit = refinekkt!(
         w.Δpa, w.Δya, kkt, H, B,
-        w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
+        w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng, kkt.ptrace;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
     #
@@ -345,7 +353,7 @@ function solvecorrector!(
     #
     cpass, crefn, cstat, cres0, cres1, cres0_d, cres0_p, cres_exit = refinekkt!(
         w.Δp, w.Δy, kkt, H, B,
-        w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
+        w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng, kkt.ctrace;
         itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
     )
     #
