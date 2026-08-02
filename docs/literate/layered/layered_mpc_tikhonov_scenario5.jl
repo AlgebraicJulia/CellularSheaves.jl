@@ -185,16 +185,14 @@ end
 function plot_results(sim_fixed, q_fixed, ref_fixed, t1_fixed, t2_fixed, sim_bob, q_bob, ref_bob, t1_bob, t2_bob, filename)
     ## Create a 2x2 layout: Fixed targets on top, Bobbing targets on bottom
     p = plot(layout=(2, 2), size=(1200, 800), plot_title="Layered Control: Scenario 5 Analysis")
-    t_axis = 0:0.05:2
-    
-    ## --- Row 1: Fixed Targets (Y and Z) ---
-    ## Fixed Y
+    t_axis = range(0, step=h, length=size(sim_fixed, 1))
+
     plot!(p[1], t_axis, sim_fixed[:, 1, 1], label="A1 Actual", color=:steelblue, lw=2)
     plot!(p[1], t_axis, sim_fixed[:, 2, 1], label="A2 Actual", color=:darkorange, lw=2)
-    plot!(p[1], t_axis, [q_fixed[t, 1, 1] for t in 1:41], label="A1 q*", color=:steelblue, alpha=0.5, ls=:dash, marker=:circle, ms=2)
-    plot!(p[1], t_axis, [q_fixed[t, 2, 1] for t in 1:41], label="A2 q*", color=:darkorange, alpha=0.5, ls=:dash, marker=:circle, ms=2)
-    plot!(p[1], t_axis, [ref_fixed[t, 1, 1] for t in 1:41], label="A1 Ref (Tikh)", color=:steelblue, ls=:dot, lw=1.5)
-    plot!(p[1], t_axis, [ref_fixed[t, 2, 1] for t in 1:41], label="A2 Ref (Tikh)", color=:darkorange, ls=:dot, lw=1.5)
+    plot!(p[1], t_axis, q_fixed[:, 1, 1], label="A1 q*", color=:steelblue, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[1], t_axis, q_fixed[:, 2, 1], label="A2 q*", color=:darkorange, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[1], t_axis, ref_fixed[:, 1, 1], label="A1 Ref (Tikh)", color=:steelblue, ls=:dot, lw=1.5)
+    plot!(p[1], t_axis, ref_fixed[:, 2, 1], label="A2 Ref (Tikh)", color=:darkorange, ls=:dot, lw=1.5)
     plot!(p[1], t_axis, [t1_fixed(t)[1] for t in t_axis], label="Target 1", color=:gray, ls=:dot)
     plot!(p[1], t_axis, [t2_fixed(t)[1] for t in t_axis], label="Target 2", color=:black, ls=:dot)
     title!(p[1], "Fixed: Lateral Position (y)")
