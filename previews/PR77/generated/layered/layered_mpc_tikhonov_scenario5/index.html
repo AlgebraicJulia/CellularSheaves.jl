@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Layered Control Architecture for Multi-Quadrotor Tracking · CellularSheaves.jl</title><meta name="title" content="Layered Control Architecture for Multi-Quadrotor Tracking · CellularSheaves.jl"/><meta property="og:title" content="Layered Control Architecture for Multi-Quadrotor Tracking · CellularSheaves.jl"/><meta property="twitter:title" content="Layered Control Architecture for Multi-Quadrotor Tracking · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../search_index.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script><link href="../../../assets/benchtables.css" rel="stylesheet" type="text/css"/></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../../literate_example/">Code Example</a></li><li><a class="tocitem" href="../../sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../nullspace/">Computing the Nullspace of the Sheaf Laplacian</a></li><li><a class="tocitem" href="../../nearest_global_section_iterative/">Nearest Global Section: Iterative Method</a></li><li><a class="tocitem" href="../../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li><li><a class="tocitem" href="../../trajectory_sheaf/">Spring Oscillator: Four Colocation Methods Compared</a></li><li><input class="collapse-toggle" id="menuitem-2-7" type="checkbox"/><label class="tocitem" for="menuitem-2-7"><span class="docs-label">Control Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../control/simple_integrator/">Controlled Trajectory Examples: 0 — Scalar Integrator</a></li><li><a class="tocitem" href="../../control/controlled_double_integrator/">Controlled Trajectory Examples: 1 — Double Integrator</a></li><li><a class="tocitem" href="../../control/controlled_vehicle_platoon/">Controlled Trajectory Examples: 2 — Vehicle Platoon</a></li><li><a class="tocitem" href="../../control/controlled_planar_quadrotor/">Controlled Trajectory Examples: 3 — Planar Quadrotor</a></li><li><a class="tocitem" href="../../control/controlled_mass_spring_damper_chain/">Controlled Trajectory Examples: 4 — Mass-Spring-Damper Chain</a></li><li><a class="tocitem" href="../../../control/single_integrator_target_tracking/">Single‑Integrator Target Tracking (DSL Version)</a></li><li><a class="tocitem" href="../../control/multi_quadrotor_target_tracking/">Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a></li><li><a class="tocitem" href="../../control/mpc_target_tracking/">Receding-Horizon MPC via a Cached Harmonic Extension</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-8" type="checkbox" checked/><label class="tocitem" for="menuitem-2-8"><span class="docs-label">Layered Control Architecture Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../distributed_harmonic_tracking/">Distributed Harmonic Extension: Tracking Without a Central Solver</a></li><li><a class="tocitem" href="../tikhonov_harmonic_tracking/">Tikhonov-Filtered Harmonic Extension</a></li><li class="is-active"><a class="tocitem" href>Layered Control Architecture for Multi-Quadrotor Tracking</a><ul class="internal"><li><a class="tocitem" href="#Architecture-Overview"><span>Architecture Overview</span></a></li><li><a class="tocitem" href="#Setup-Dynamics-and-Constants"><span>Setup Dynamics &amp; Constants</span></a></li><li><a class="tocitem" href="#Coordination-Sheaf-Construction"><span>Coordination Sheaf Construction</span></a></li><li><a class="tocitem" href="#Simulation-Framework"><span>Simulation Framework</span></a></li><li><a class="tocitem" href="#Execution-and-Visualization"><span>Execution and Visualization</span></a></li></ul></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-9" type="checkbox"/><label class="tocitem" for="menuitem-2-9"><span class="docs-label">Asynchronous Diffusion</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B</a></li><li><a class="tocitem" href="../../asynch/step_size_comparison/">Step Size Comparison: Optimal vs. Conservative</a></li><li><a class="tocitem" href="../../asynch/restriction_map_comparison/">Restriction Map Type Comparison</a></li><li><a class="tocitem" href="../../asynch/orthogonal_projection/">Convergence Bounds vs. Maximum Delay B</a></li></ul></li></ul></li><li><span class="tocitem">Feature Guides</span><ul><li><a class="tocitem" href="../../../features/core_sheaf_workflows/">Core Sheaf Workflows</a></li><li><a class="tocitem" href="../../../features/morphisms_and_pushforwards/">Morphisms and Pushforwards</a></li><li><a class="tocitem" href="../../../features/trajectory_and_control/">Trajectory and Control</a></li><li><input class="collapse-toggle" id="menuitem-3-4" type="checkbox"/><label class="tocitem" for="menuitem-3-4"><span class="docs-label">Distributed Sheaf Solve</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/">Distributed Sheaf Solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_coordination/">Coordination as a harmonic extension</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_multifrontal/">The multifrontal factorization</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_distributed/">Distributing the solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/comparison/">Three methods, one communication model</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/api/">Usage and API</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-3-5" type="checkbox"/><label class="tocitem" for="menuitem-3-5"><span class="docs-label">Tikhonov Harmonic Tracking</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/">Tikhonov Harmonic Tracking</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/harmonic_manifold/">The Harmonic Manifold</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/stability/">Boundary-Layer Stability and ISS</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/feedforward/">Analytic Feedforward</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/scenarios/">Complete Tracking Scenarios</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/api/">Usage and API</a></li></ul></li></ul></li><li><span class="tocitem">Benchmarks</span><ul><li><a class="tocitem" href="../../../benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../benchmark_report/">Benchmark report</a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../../api/">API Reference</a></li><li><a class="tocitem" href="../../../api/network_sheaves/">Network Sheaves</a></li><li><a class="tocitem" href="../../../api/sheaf_interface/">Sheaf Interface</a></li><li><a class="tocitem" href="../../../api/euclidean_sheaves/">Euclidean Sheaves</a></li><li><a class="tocitem" href="../../../api/distributed_solve/">Distributed Solve</a></li><li><a class="tocitem" href="../../../api/graph_homomorphisms/">Graph Homomorphisms</a></li><li><a class="tocitem" href="../../../api/sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../../api/pushforwards/">Pushforwards</a></li><li><a class="tocitem" href="../../../api/pushouts/">Pushouts</a></li><li><a class="tocitem" href="../../../api/dsl/">Cellular Sheaf DSL</a></li><li><a class="tocitem" href="../../../api/block_sparse_arrays/">Block Sparse Arrays</a></li><li><a class="tocitem" href="../../../api/potential_sheaves/">Potential Sheaves</a></li><li><a class="tocitem" href="../../../api/trajectory_sheaves/">Trajectory Sheaves</a></li><li><a class="tocitem" href="../../../api/herding_platoon/">Herding Platoon Utilities</a></li><li><a class="tocitem" href="../../../api/multi_agent_tracking/">Multi-Agent Tracking</a></li><li><a class="tocitem" href="../../../api/quadratic_costs/">Quadratic Costs</a></li><li><a class="tocitem" href="../../../api/asynch/">Asynchronous Sheaf Diffusion</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li><a class="is-disabled">Layered Control Architecture Examples</a></li><li class="is-active"><a href>Layered Control Architecture for Multi-Quadrotor Tracking</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Layered Control Architecture for Multi-Quadrotor Tracking</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/literate/layered/layered_mpc_tikhonov_scenario5.jl" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Layered-Control-Architecture-for-Multi-Quadrotor-Tracking"><a class="docs-heading-anchor" href="#Layered-Control-Architecture-for-Multi-Quadrotor-Tracking">Layered Control Architecture for Multi-Quadrotor Tracking</a><a id="Layered-Control-Architecture-for-Multi-Quadrotor-Tracking-1"></a><a class="docs-heading-anchor-permalink" href="#Layered-Control-Architecture-for-Multi-Quadrotor-Tracking" title="Permalink"></a></h1><p>This example demonstrates a layered control architecture designed for multi-agent target tracking where high-level coordination is handled by a static cellular sheaf and low-level tracking is managed by independent LQR controllers.</p><h2 id="Architecture-Overview"><a class="docs-heading-anchor" href="#Architecture-Overview">Architecture Overview</a><a id="Architecture-Overview-1"></a><a class="docs-heading-anchor-permalink" href="#Architecture-Overview" title="Permalink"></a></h2><p>The control pipeline is structured as follows:</p><ol><li><strong>Coordination Sheaf</strong>: Resolves the conflict between target tracking and agent consensus by computing a harmonic extension <span>$\mathbf{q}^*$</span> that minimizes a global energy functional.</li><li><strong>Tikhonov Filter</strong>: Smooths the resulting harmonic reference to ensure physical realizability and eliminate instantaneous jumps in the reference.</li><li><strong>LQR Control</strong>: Drives each agent to the filtered reference using an optimal state-feedback gain computed via the Discrete Algebraic Riccati Equation (DARE).</li></ol><p>This separation of concerns allows the system to handle complex coordination constraints (like the &quot;mirror <span>$y$</span>-consensus&quot; in Scenario 5) independently of the low-level vehicle dynamics.</p><pre><code class="language-julia hljs">using CellularSheaves
+import CellularSheaves.NetworkSheaves.EuclideanSheaves: _harmonic_extension_restricted_laplacian
+using CellularSheaves.ControlSheaves.Tikhonov
+using CellularSheaves.TrajectorySheaves: continuous_to_discrete_zoh
+using LinearAlgebra
+using Plots
+using Printf</code></pre><h2 id="Setup-Dynamics-and-Constants"><a class="docs-heading-anchor" href="#Setup-Dynamics-and-Constants">Setup Dynamics &amp; Constants</a><a id="Setup-Dynamics-and-Constants-1"></a><a class="docs-heading-anchor-permalink" href="#Setup-Dynamics-and-Constants" title="Permalink"></a></h2><p>Quadrotor parameters</p><pre><code class="language-julia hljs">g = 9.81
+m_veh = 0.5
+I_quad = 0.01
+ell = 0.25</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">0.25</code></pre><p>Continuous-time dynamics: x<em>dot = Ac<em>x + Bc</em>u State x = [y, z, theta, y</em>dot, z<em>dot, theta</em>dot]</p><pre><code class="language-julia hljs">Ac = [0.0  0.0   0.0   1.0  0.0  0.0;
+      0.0  0.0   0.0   0.0  1.0  0.0;
+      0.0  0.0   0.0   0.0  0.0  1.0;
+      0.0  0.0  -g     0.0  0.0  0.0;
+      0.0  0.0   0.0   0.0  0.0  0.0;
+      0.0  0.0   0.0   0.0  0.0  0.0]
+
+Bc = [0.0               0.0;
+      0.0               0.0;
+      0.0               0.0;
+      0.0               0.0;
+      1.0 / m_veh       1.0 / m_veh;
+      ell / (2I_quad)  -ell / (2I_quad)]
+
+h = 0.05 # Time step
+Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
+
+nx = size(Ad, 1) # State dimension
+nu = size(Bd, 2) # Input dimension</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2</code></pre><p>Compute Optimal LQR Gain (Discrete-time) We use a non-uniform Q matrix to penalize position errors more than velocity errors, reducing overshoot while maintaining a fast response.</p><pre><code class="language-julia hljs">Q_diag = zeros(nx)
+Q_diag[1:2] .= 10000.0  # Position penalty
+Q_diag[3] = 50.0        # Lower penalty on angle
+Q_diag[4] = 500.0       # Damping for y-velocity
+Q_diag[5:6] .= 10.0     # Other velocity penalties
+Q_lqr = Matrix{Float64}(Diagonal(Q_diag))
+R_lqr = Matrix{Float64}(I, nu, nu) * 0.0001
+
+function solve_dare(A, B, Q, R)
+    # Iteratively solve the Discrete Algebraic Riccati Equation (DARE)
+    P = Q
+    for i in 1:100
+        P_next = A&#39; * P * A - (A&#39; * P * B) * inv(R + B&#39; * P * B) * (B&#39; * P * A) + Q
+        if norm(P_next - P) &lt; 1e-6
+            break
+        end
+        P = P_next
+    end
+    return (R + B&#39; * P * B) \ (B&#39; * P * A)
+end
+
+K_lqr = solve_dare(Ad, Bd, Q_lqr, R_lqr)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2×6 Matrix{Float64}:
+ -17.1445  88.2682   12.1291  -7.55591  7.20593   1.07321
+  17.1445  88.2682  -12.1291   7.55591  7.20593  -1.07321</code></pre><p>Verify stability: Spectral radius of (Ad - Bd*K) must be &lt; 1</p><pre><code class="language-julia hljs">A_cl = Ad - Bd * K_lqr
+rho = maximum(abs.(eigvals(A_cl)))
+@printf(&quot;Closed-loop spectral radius: %.4f\n&quot;, rho)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Closed-loop spectral radius: 0.8043</code></pre><h2 id="Coordination-Sheaf-Construction"><a class="docs-heading-anchor" href="#Coordination-Sheaf-Construction">Coordination Sheaf Construction</a><a id="Coordination-Sheaf-Construction-1"></a><a class="docs-heading-anchor-permalink" href="#Coordination-Sheaf-Construction" title="Permalink"></a></h2><p>Scenario 5 Configuration:</p><ul><li>Agent 1 tracks Target 1 in z</li><li>Agent 2 tracks Target 2 in yz</li><li>Agents agree in y (Consensus)</li></ul><pre><code class="language-julia hljs">D = nx
+NA = 2 # Number of Agents
+NT = 2 # Number of Targets
+TotalV = NA + NT
+
+sheaf = EuclideanSheaf{Float64}(fill(D, TotalV))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">A network sheaf with 4 vertex stalks and 0 edge stalks.
+</code></pre><p>Coordinate projection matrices</p><pre><code class="language-julia hljs">R_y  = zeros(1, D); R_y[1] = 1.0
+R_z  = zeros(1, D); R_z[2] = 1.0
+R_yz = zeros(2, D); R_yz[1, 1] = 1.0; R_yz[2, 2] = 1.0</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1.0</code></pre><p>Setup coordination edges</p><pre><code class="language-julia hljs">add_sheaf_edge!(sheaf, 1, 2, R_y, R_y)    # Consensus: A1 &lt;-&gt; A2 in y
+add_sheaf_edge!(sheaf, 1, 3, R_z, R_z)    # Tracking: A1 -&gt; T1 in z
+add_sheaf_edge!(sheaf, 2, 4, R_yz, R_yz)  # Tracking: A2 -&gt; T2 in yz</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">3</code></pre><p>Boundary conditions for restricted Laplacian</p><pre><code class="language-julia hljs">boundary0 = Dict{Int, Vector{Float64}}()
+boundary0[3] = zeros(D)
+boundary0[4] = zeros(D)
+
+_, _, Hraw, LIBraw = _harmonic_extension_restricted_laplacian(sheaf, boundary0)
+H = Matrix(Hraw)
+LIB = Matrix(LIBraw)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">12×12 Matrix{Float64}:
+ -0.0  -0.0  -0.0  -0.0  -0.0  -0.0   0.0   0.0   0.0   0.0   0.0   0.0
+ -0.0  -1.0  -0.0  -0.0  -0.0  -0.0   0.0   0.0   0.0   0.0   0.0   0.0
+ -0.0  -0.0  -0.0  -0.0  -0.0  -0.0   0.0   0.0   0.0   0.0   0.0   0.0
+ -0.0  -0.0  -0.0  -0.0  -0.0  -0.0   0.0   0.0   0.0   0.0   0.0   0.0
+ -0.0  -0.0  -0.0  -0.0  -0.0  -0.0   0.0   0.0   0.0   0.0   0.0   0.0
+ -0.0  -0.0  -0.0  -0.0  -0.0  -0.0   0.0   0.0   0.0   0.0   0.0   0.0
+  0.0   0.0   0.0   0.0   0.0   0.0  -1.0  -0.0  -0.0  -0.0  -0.0  -0.0
+  0.0   0.0   0.0   0.0   0.0   0.0  -0.0  -1.0  -0.0  -0.0  -0.0  -0.0
+  0.0   0.0   0.0   0.0   0.0   0.0  -0.0  -0.0  -0.0  -0.0  -0.0  -0.0
+  0.0   0.0   0.0   0.0   0.0   0.0  -0.0  -0.0  -0.0  -0.0  -0.0  -0.0
+  0.0   0.0   0.0   0.0   0.0   0.0  -0.0  -0.0  -0.0  -0.0  -0.0  -0.0
+  0.0   0.0   0.0   0.0   0.0   0.0  -0.0  -0.0  -0.0  -0.0  -0.0  -0.0</code></pre><h2 id="Simulation-Framework"><a class="docs-heading-anchor" href="#Simulation-Framework">Simulation Framework</a><a id="Simulation-Framework-1"></a><a class="docs-heading-anchor-permalink" href="#Simulation-Framework" title="Permalink"></a></h2><pre><code class="language-julia hljs">function run_layered_simulation(target_type=:bobbing)
+    # Define target trajectories as local functions
+    local t1_pos, t2_pos
+    if target_type == :bobbing
+        omega = 2π * 2 / (40 * h)
+        t1_pos = t -&gt; [0.0, 1.0 + 0.3sin(omega*t), 0.0, 0.0, 0.0, 0.0]
+        t2_pos = t -&gt; [1.5, 2.0 + 0.3sin(omega*t), 0.0, 0.0, 0.0, 0.0]
+    else
+        t1_pos = t -&gt; [0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+        t2_pos = t -&gt; [1.5, 2.0, 0.0, 0.0, 0.0, 0.0]
+    end
+
+    # Simulation parameters
+    T_end = 2.0
+    steps = Int(T_end / h) + 1
+    epsilon = 0.02
+
+    filters = [TikhonovFilter(zeros(D); epsilon) for _ in 1:NA]
+    curr_states = [[-2.0, 0.5, 0.0, 0.0, 0.0, 0.0],
+                   [2.0, 1.0, 0.0, 0.0, 0.0, 0.0]]
+
+    sim_data = zeros(steps, NA, nx)
+    qstar_history = zeros(steps, NA, nx)
+    filtered_ref_history = zeros(steps, NA, nx)
+
+    for t_idx in 0:(steps-1)
+        t = t_idx * h
+        b_t = [t1_pos(t); t2_pos(t)]
+
+        # High-level Coordination: Solve for the harmonic reference q*
+        # We use pinv to handle potential singularities in the coordination sheaf
+        qstar_full = pinv(H) * (-LIB * b_t)
+
+        # Distribute reference to agents
+        qstar = [qstar_full[1:D], qstar_full[D+1:2D]]
+        for i in 1:NA
+            qstar_history[t_idx+1, i, :] = qstar[i]
+
+            # Mid-level Smoothing: Tikhonov filter
+            tikhonov_step!(filters[i], qstar[i], qstar[i], h)
+            filtered_ref_history[t_idx+1, i, :] = filters[i].x
+
+            # Low-level Control: LQR Tracking
+            x = curr_states[i]
+            x_ref = filters[i].x
+            u = -K_lqr * (x - x_ref)
+            curr_states[i] = Ad * x + Bd * u
+        end
+
+        for i in 1:NA
+            sim_data[t_idx+1, i, :] = curr_states[i]
+        end
+    end
+
+    return sim_data, qstar_history, filtered_ref_history, t1_pos, t2_pos
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">run_layered_simulation (generic function with 2 methods)</code></pre><h2 id="Execution-and-Visualization"><a class="docs-heading-anchor" href="#Execution-and-Visualization">Execution and Visualization</a><a id="Execution-and-Visualization-1"></a><a class="docs-heading-anchor-permalink" href="#Execution-and-Visualization" title="Permalink"></a></h2><pre><code class="language-julia hljs">function plot_results(sim_fixed, q_fixed, ref_fixed, t1_fixed, t2_fixed, sim_bob, q_bob, ref_bob, t1_bob, t2_bob, filename)
+    # Create a 2x2 layout: Fixed targets on top, Bobbing targets on bottom
+    p = plot(layout=(2, 2), size=(1200, 800), plot_title=&quot;Layered Control: Scenario 5 Analysis&quot;)
+    t_axis = 0:0.05:2
+
+    # --- Row 1: Fixed Targets (Y and Z) ---
+    # Fixed Y
+    plot!(p[1], t_axis, sim_fixed[:, 1, 1], label=&quot;A1 Actual&quot;, color=:steelblue, lw=2)
+    plot!(p[1], t_axis, sim_fixed[:, 2, 1], label=&quot;A2 Actual&quot;, color=:darkorange, lw=2)
+    plot!(p[1], t_axis, [q_fixed[t, 1, 1] for t in 1:41], label=&quot;A1 q*&quot;, color=:steelblue, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[1], t_axis, [q_fixed[t, 2, 1] for t in 1:41], label=&quot;A2 q*&quot;, color=:darkorange, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[1], t_axis, [ref_fixed[t, 1, 1] for t in 1:41], label=&quot;A1 Ref (Tikh)&quot;, color=:steelblue, ls=:dot, lw=1.5)
+    plot!(p[1], t_axis, [ref_fixed[t, 2, 1] for t in 1:41], label=&quot;A2 Ref (Tikh)&quot;, color=:darkorange, ls=:dot, lw=1.5)
+    plot!(p[1], t_axis, [t1_fixed(t)[1] for t in t_axis], label=&quot;Target 1&quot;, color=:gray, ls=:dot)
+    plot!(p[1], t_axis, [t2_fixed(t)[1] for t in t_axis], label=&quot;Target 2&quot;, color=:black, ls=:dot)
+    title!(p[1], &quot;Fixed: Lateral Position (y)&quot;)
+    xlabel!(p[1], &quot;Time (s)&quot;)
+    ylabel!(p[1], &quot;Position (m)&quot;)
+
+    # Fixed Z
+    plot!(p[2], t_axis, sim_fixed[:, 1, 2], label=&quot;A1 Actual&quot;, color=:steelblue, lw=2)
+    plot!(p[2], t_axis, sim_fixed[:, 2, 2], label=&quot;A2 Actual&quot;, color=:darkorange, lw=2)
+    plot!(p[2], t_axis, [q_fixed[t, 1, 2] for t in 1:41], label=&quot;A1 q*&quot;, color=:steelblue, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[2], t_axis, [q_fixed[t, 2, 2] for t in 1:41], label=&quot;A2 q*&quot;, color=:darkorange, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[2], t_axis, [ref_fixed[t, 1, 2] for t in 1:41], label=&quot;A1 Ref (Tikh)&quot;, color=:steelblue, ls=:dot, lw=1.5)
+    plot!(p[2], t_axis, [ref_fixed[t, 2, 2] for t in 1:41], label=&quot;A2 Ref (Tikh)&quot;, color=:darkorange, ls=:dot, lw=1.5)
+    plot!(p[2], t_axis, [t1_fixed(t)[2] for t in t_axis], label=&quot;Target 1&quot;, color=:gray, ls=:dot)
+    plot!(p[2], t_axis, [t2_fixed(t)[2] for t in t_axis], label=&quot;Target 2&quot;, color=:black, ls=:dot)
+    title!(p[2], &quot;Fixed: Altitude (z)&quot;)
+    xlabel!(p[2], &quot;Time (s)&quot;)
+    ylabel!(p[2], &quot;Altitude (m)&quot;)
+
+    # --- Row 2: Bobbing Targets (Y and Z) ---
+    # Bobbing Y
+    plot!(p[3], t_axis, sim_bob[:, 1, 1], label=&quot;A1 Actual&quot;, color=:steelblue, lw=2)
+    plot!(p[3], t_axis, sim_bob[:, 2, 1], label=&quot;A2 Actual&quot;, color=:darkorange, lw=2)
+    plot!(p[3], t_axis, [q_bob[t, 1, 1] for t in 1:41], label=&quot;A1 q*&quot;, color=:steelblue, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[3], t_axis, [q_bob[t, 2, 1] for t in 1:41], label=&quot;A2 q*&quot;, color=:darkorange, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[3], t_axis, [ref_bob[t, 1, 1] for t in 1:41], label=&quot;A1 Ref (Tikh)&quot;, color=:steelblue, ls=:dot, lw=1.5)
+    plot!(p[3], t_axis, [ref_bob[t, 2, 1] for t in 1:41], label=&quot;A2 Ref (Tikh)&quot;, color=:darkorange, ls=:dot, lw=1.5)
+    plot!(p[3], t_axis, [t1_bob(t)[1] for t in t_axis], label=&quot;Target 1&quot;, color=:gray, ls=:dot)
+    plot!(p[3], t_axis, [t2_bob(t)[1] for t in t_axis], label=&quot;Target 2&quot;, color=:black, ls=:dot)
+    title!(p[3], &quot;Bobbing: Lateral Position (y)&quot;)
+    xlabel!(p[3], &quot;Time (s)&quot;)
+    ylabel!(p[3], &quot;Position (m)&quot;)
+
+    # Bobbing Z
+    plot!(p[4], t_axis, sim_bob[:, 1, 2], label=&quot;A1 Actual&quot;, color=:steelblue, lw=2)
+    plot!(p[4], t_axis, sim_bob[:, 2, 2], label=&quot;A2 Actual&quot;, color=:darkorange, lw=2)
+    plot!(p[4], t_axis, [q_bob[t, 1, 2] for t in 1:41], label=&quot;A1 q*&quot;, color=:steelblue, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[4], t_axis, [q_bob[t, 2, 2] for t in 1:41], label=&quot;A2 q*&quot;, color=:darkorange, alpha=0.5, ls=:dash, marker=:circle, ms=2)
+    plot!(p[4], t_axis, [ref_bob[t, 1, 2] for t in 1:41], label=&quot;A1 Ref (Tikh)&quot;, color=:steelblue, ls=:dot, lw=1.5)
+    plot!(p[4], t_axis, [ref_bob[t, 2, 2] for t in 1:41], label=&quot;A2 Ref (Tikh)&quot;, color=:darkorange, ls=:dot, lw=1.5)
+    plot!(p[4], t_axis, [t1_bob(t)[2] for t in t_axis], label=&quot;Target 1&quot;, color=:gray, ls=:dot)
+    plot!(p[4], t_axis, [t2_bob(t)[2] for t in t_axis], label=&quot;Target 2&quot;, color=:black, ls=:dot)
+    title!(p[4], &quot;Bobbing: Altitude (z)&quot;)
+    xlabel!(p[4], &quot;Time (s)&quot;)
+    ylabel!(p[4], &quot;Altitude (m)&quot;)
+
+    savefig(filename)
+end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">plot_results (generic function with 1 method)</code></pre><p>Run both scenarios</p><pre><code class="language-julia hljs">sim_fixed, q_fixed, ref_fixed, t1_fixed, t2_fixed = run_layered_simulation(:fixed)
+sim_bob, q_bob, ref_bob, t1_bob, t2_bob = run_layered_simulation(:bobbing)
+
+plot_results(sim_fixed, q_fixed, ref_fixed, t1_fixed, t2_fixed, sim_bob, q_bob, ref_bob, t1_bob, t2_bob, &quot;layered_control_combined.png&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">&quot;/home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/build/generated/layered/layered_control_combined.png&quot;</code></pre><p><img src="../layered_control_combined.png" alt="Layered Control Analysis"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../tikhonov_harmonic_tracking/">« Tikhonov-Filtered Harmonic Extension</a><a class="docs-footer-nextpage" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Sunday 2 August 2026 00:09">Sunday 2 August 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
