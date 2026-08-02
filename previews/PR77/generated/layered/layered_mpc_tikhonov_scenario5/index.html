@@ -38,7 +38,7 @@ function solve_dare(A, B, Q, R)
     # Iteratively solve the Discrete Algebraic Riccati Equation (DARE)
     P = Q
     for i in 1:100
-        P_next = A&#39; * P * A - (A&#39; * P * B) * inv(R + B&#39; * P * B) * (B&#39; * P * A) + Q
+        P_next = A&#39; * P * A - (A&#39; * P * B) * ((R + B&#39; * P * B) \ (B&#39; * P * A)) + Q
         if norm(P_next - P) &lt; 1e-6
             break
         end
@@ -104,13 +104,13 @@ LIB = Matrix(LIBraw)</code></pre><pre class="documenter-example-output"><code cl
     qstar_history = zeros(steps, NA, nx)
     filtered_ref_history = zeros(steps, NA, nx)
 
+    H_pinv = pinv(H)  # precompute once per rollout (H is constant)
+
     for t_idx in 0:(steps-1)
         t = t_idx * h
         b_t = [t1_pos(t); t2_pos(t)]
 
-        # High-level Coordination: Solve for the harmonic reference q*
-        # We use pinv to handle potential singularities in the coordination sheaf
-        qstar_full = pinv(H) * (-LIB * b_t)
+        qstar_full = H_pinv * (-LIB * b_t)  # high-level coordination (min-norm if H is singular)
 
         # Distribute reference to agents
         qstar = [qstar_full[1:D], qstar_full[D+1:2D]]
@@ -195,4 +195,4 @@ end</code></pre><pre class="documenter-example-output"><code class="nohighlight 
 end</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">plot_results (generic function with 1 method)</code></pre><p>Run both scenarios</p><pre><code class="language-julia hljs">sim_fixed, q_fixed, ref_fixed, t1_fixed, t2_fixed = run_layered_simulation(:fixed)
 sim_bob, q_bob, ref_bob, t1_bob, t2_bob = run_layered_simulation(:bobbing)
 
-plot_results(sim_fixed, q_fixed, ref_fixed, t1_fixed, t2_fixed, sim_bob, q_bob, ref_bob, t1_bob, t2_bob, &quot;layered_control_combined.png&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">&quot;/home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/build/generated/layered/layered_control_combined.png&quot;</code></pre><p><img src="../layered_control_combined.png" alt="Layered Control Analysis"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../tikhonov_harmonic_tracking/">« Tikhonov-Filtered Harmonic Extension</a><a class="docs-footer-nextpage" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Sunday 2 August 2026 17:32">Sunday 2 August 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+plot_results(sim_fixed, q_fixed, ref_fixed, t1_fixed, t2_fixed, sim_bob, q_bob, ref_bob, t1_bob, t2_bob, &quot;layered_control_combined.png&quot;)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">&quot;/home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/build/generated/layered/layered_control_combined.png&quot;</code></pre><p><img src="../layered_control_combined.png" alt="Layered Control Analysis"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../tikhonov_harmonic_tracking/">« Tikhonov-Filtered Harmonic Extension</a><a class="docs-footer-nextpage" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Sunday 2 August 2026 18:39">Sunday 2 August 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
