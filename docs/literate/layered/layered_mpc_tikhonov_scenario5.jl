@@ -73,7 +73,7 @@ function solve_dare(A, B, Q, R)
     ## Iteratively solve the Discrete Algebraic Riccati Equation (DARE)
     P = Q
     for i in 1:100
-        P_next = A' * P * A - (A' * P * B) * inv(R + B' * P * B) * (B' * P * A) + Q
+        P_next = A' * P * A - (A' * P * B) * ((R + B' * P * B) \ (B' * P * A)) + Q
         if norm(P_next - P) < 1e-6
             break
         end
@@ -148,13 +148,13 @@ function run_layered_simulation(target_type=:bobbing)
     qstar_history = zeros(steps, NA, nx)
     filtered_ref_history = zeros(steps, NA, nx)
 
+    H_pinv = pinv(H)  # precompute once per rollout (H is constant)
+
     for t_idx in 0:(steps-1)
         t = t_idx * h
         b_t = [t1_pos(t); t2_pos(t)]
-        
-        ## High-level Coordination: Solve for the harmonic reference q*
-        ## We use pinv to handle potential singularities in the coordination sheaf
-        qstar_full = pinv(H) * (-LIB * b_t)
+
+        qstar_full = H_pinv * (-LIB * b_t)  # high-level coordination (min-norm if H is singular)
         
         ## Distribute reference to agents
         qstar = [qstar_full[1:D], qstar_full[D+1:2D]]
