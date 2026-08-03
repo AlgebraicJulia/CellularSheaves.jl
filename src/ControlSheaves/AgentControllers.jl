@@ -178,9 +178,66 @@ function step_agent!(w::AgentState, qstar_target::Vector{Float64}, qstar_dot_tar
     end
     
     tikhonov_step!(w.filter, qstar_local, qstar_dot_local, dt)
-    x_ref = w.filter.x
-    
+    x_ref = copy(w.filter.x)
+    if w.filter isa JointTikhonovFilter
+        x_ref[v_idxs] .= w.filter.v[v_idxs]
+    end
+
     u = -w.K_lqr * (w.x - x_ref)
+    w.x .= w.Ad * w.x .+ w.Bd * u
+    
+    return (copy(w.x), copy(x_ref))
+end
+
+"""
+    step_agent!(w::AgentState, qstar_target::Vector{Float64}, qstar_dot_target::Vector{Float64}, qstar_ddot_target::Vector{Float64}, dt::Float64)
+
+Steps agent dynamics using position, velocity, and acceleration references.
+Calculates acceleration-based attitude references (pitch/roll angles) and feedforward thrust,
+enabling exact differential flatness trajectory tracking without lag.
+"""
+function step_agent!(w::AgentState, qstar_target::Vector{Float64}, qstar_dot_target::Vector{Float64}, qstar_ddot_target::Vector{Float64}, dt::Float64)
+    nx = length(w.x)
+    ref_dim = min(nx, length(qstar_target))
+    
+    qstar_local = zeros(nx)
+    qstar_local[1:ref_dim] = qstar_target[1:ref_dim]
+    
+    qstar_dot_local = zeros(nx)
+    v_idxs = velocity_indices(w.dyn)
+    v_dim = min(length(v_idxs), length(qstar_dot_target))
+    for k in 1:v_dim
+        qstar_dot_local[v_idxs[k]] = qstar_dot_target[k]
+    end
+    
+    if w.dyn isa QuadrotorDynamics && length(qstar_ddot_target) >= 3
+        g = w.dyn.g
+        ax, ay = qstar_ddot_target[1], qstar_ddot_target[2]
+        qstar_local[4] = -ay / g
+        qstar_local[5] =  ax / g
+    elseif w.dyn isa PlanarQuadrotorDynamics && length(qstar_ddot_target) >= 2
+        g = w.dyn.g
+        ay = qstar_ddot_target[1]
+        qstar_local[3] = -ay / g
+    end
+
+    tikhonov_step!(w.filter, qstar_local, qstar_dot_local, dt)
+    x_ref = copy(w.filter.x)
+    if w.filter isa JointTikhonovFilter
+        x_ref[v_idxs] .= w.filter.v[v_idxs]
+    end
+    
+    u_fb = -w.K_lqr * (w.x - x_ref)
+    
+    u_ff = zeros(size(w.Bd, 2))
+    if w.dyn isa QuadrotorDynamics && length(qstar_ddot_target) >= 3
+        u_ff[1] = w.dyn.m * qstar_ddot_target[3]
+    elseif w.dyn isa PlanarQuadrotorDynamics && length(qstar_ddot_target) >= 2
+        u_ff[1] = w.dyn.m * qstar_ddot_target[2] / 2.0
+        u_ff[2] = w.dyn.m * qstar_ddot_target[2] / 2.0
+    end
+
+    u = u_fb + u_ff
     w.x .= w.Ad * w.x .+ w.Bd * u
     
     return (copy(w.x), copy(x_ref))

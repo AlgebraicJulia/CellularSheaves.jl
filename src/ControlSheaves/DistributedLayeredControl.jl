@@ -38,6 +38,7 @@ struct LayeredControlProblem
     target_nodes::Vector{Int}
     target_trajectory_func::Any
     target_velocity_func::Any
+    target_acceleration_func::Any
     agent_configs::Vector
     dt::Float64
     steps::Int
@@ -45,18 +46,18 @@ struct LayeredControlProblem
     pos_dim::Int
 end
 
-# Positional constructor: coerces agent_configs, infers pos_dim as D-1 (escort convention)
-function LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring; target_velocity_func=nothing)
+# Positional constructor
+function LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring; target_velocity_func=nothing, target_acceleration_func=nothing)
     D = sheaf.vertex_stalks[1]
-    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, target_velocity_func,
+    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, target_velocity_func, target_acceleration_func,
         collect(agent_configs), dt, steps, r_ring, D - 1)
 end
 
-# Keyword constructor: accepts optional r_ring, target_velocity_func, and explicit pos_dim
-function LayeredControlProblem(; sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring=0.0, target_velocity_func=nothing, pos_dim=nothing)
+# Keyword constructor
+function LayeredControlProblem(; sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring=0.0, target_velocity_func=nothing, target_acceleration_func=nothing, pos_dim=nothing)
     D = sheaf.vertex_stalks[1]
     resolved_pos_dim = isnothing(pos_dim) ? D - 1 : pos_dim
-    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, target_velocity_func,
+    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, target_velocity_func, target_acceleration_func,
         collect(agent_configs), dt, steps, r_ring, resolved_pos_dim)
 end
 
@@ -97,6 +98,16 @@ function _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, qstar_d
 end
 
 """
+    _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, qstar_dot_i::Vector{Float64}, qstar_ddot_i::Vector{Float64}, dt::Float64)
+
+Step agent on worker (joint position, velocity, and acceleration reference).
+"""
+function _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, qstar_dot_i::Vector{Float64}, qstar_ddot_i::Vector{Float64}, dt::Float64)
+    w = LOCAL_AGENTS[agent_id]
+    return step_agent!(w, qstar_i, qstar_dot_i, qstar_ddot_i, dt)
+end
+
+"""
     init_distributed_agents!(pids, agent_configs, dt::Float64, eps::Float64; use_velocity::Bool=false)
 
 Deploys agent states to the specified worker processes.
@@ -115,14 +126,15 @@ end
     run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; mode=:distributed, nx::Int=10)
 
 Runs the layered control simulation defined by `prob`.
-If `prob.target_velocity_func` is supplied, performs a secondary solve for reference velocity `qstar_dot`
-and passes it to feedforward agent state controllers.
+If `prob.target_velocity_func` (and optionally `prob.target_acceleration_func`) are supplied,
+performs secondary/tertiary solves for reference velocity `qstar_dot` and acceleration `qstar_ddot`.
 """
 function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; mode=:distributed, nx::Int=10)
     sheaf = prob.sheaf
     target_nodes = prob.target_nodes
     target_trajectory_func = prob.target_trajectory_func
     target_velocity_func = prob.target_velocity_func
+    target_acceleration_func = prob.target_acceleration_func
     dt = prob.dt
     steps = prob.steps
     
@@ -151,6 +163,7 @@ function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; 
 
     np = length(pids)
     has_velocity = target_velocity_func !== nothing
+    has_accel = target_acceleration_func !== nothing
     
     for t_idx in 1:steps
         t = t_idx * dt
@@ -172,8 +185,7 @@ function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; 
             qstar_history[t_idx, i, :] = qstar[i]
         end
         
-        # 2. Secondary solve for harmonic extension velocity if velocity function provided:
-        # H * qstar_dot = -LIB * b_dot_t
+        # 2. Secondary solve for reference velocity qstar_dot
         qstar_dot = Vector{Vector{Float64}}(undef, NA)
         if has_velocity
             b_dot_t = vcat([target_velocity_func(node, t) for node in target_nodes]...)
@@ -190,12 +202,32 @@ function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; 
                 qstar_dot[i] = qstar_dot_full[(i-1)*D+1:i*D]
             end
         end
+
+        # 3. Tertiary solve for reference acceleration qstar_ddot
+        qstar_ddot = Vector{Vector{Float64}}(undef, NA)
+        if has_accel
+            b_ddot_t = vcat([target_acceleration_func(node, t) for node in target_nodes]...)
+            rhs_ddot = Vector(-LIB * b_ddot_t)
+            
+            if mode == :centralised
+                qstar_ddot_full = H_pinv * rhs_ddot
+            else
+                rhs_ddot_p = Vector(F.P' \ rhs_ddot)
+                y_ddot_sol = distributed_tree_solve(Lfac, rhs_ddot_p, length(partition.chunks); pids = solve_pids)
+                qstar_ddot_full = F.P \ y_ddot_sol
+            end
+            for i in 1:NA
+                qstar_ddot[i] = qstar_ddot_full[(i-1)*D+1:i*D]
+            end
+        end
         
-        # 3. Step agents on workers
+        # 4. Step agents on workers
         step_futures = []
         for i in 1:NA
             pid = pids[(i - 1) % np + 1]
-            if has_velocity
+            if has_accel
+                push!(step_futures, remotecall(_step_agent_on_worker!, pid, i, qstar[i][1:prob.pos_dim], qstar_dot[i][1:prob.pos_dim], qstar_ddot[i][1:prob.pos_dim], dt))
+            elseif has_velocity
                 push!(step_futures, remotecall(_step_agent_on_worker!, pid, i, qstar[i][1:prob.pos_dim], qstar_dot[i][1:prob.pos_dim], dt))
             else
                 push!(step_futures, remotecall(_step_agent_on_worker!, pid, i, qstar[i][1:prob.pos_dim], dt))
