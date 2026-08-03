@@ -177,6 +177,10 @@ all of them.
 
 We are working off the work of researchers such as Hansen, Ghrist, Curry, Riess, Hanks, and Fairbanks, so explicitly cite relevant papers where appropriate and use nomenclature from their papers.
 
+## Git & Development Workflow Safety
+
+- **Atomic Git Commits After Verification**: Commit working changes to git immediately after verifying clean test execution (`test/runtests.jl`) and clean documentation builds (`docs/make.jl`). Keeping commits atomic and frequent ensures a safe checkpoint is always available if quota limits or session interruptions occur.
+- **Preserve User Content & Existing Code**: Never blindly overwrite, truncate, or delete user files, custom literate example scripts, or markdown documentation. Always view and inspect existing content first, preserve the user's comments and structure, and make targeted modifications (`replace_file_content`) rather than blanket file rewrites.
 
 ## Control Sheaves & Trajectory Tracking Conventions
 
