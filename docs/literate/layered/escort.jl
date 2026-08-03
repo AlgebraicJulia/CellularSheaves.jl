@@ -203,38 +203,78 @@ divergence = maximum(abs.(sim_d .- sim_c))
 # Clean up worker processes
 rmprocs(workers_pids)
 
-# ## Trajectory Visualization
+# ## Multi-Projection Trajectory & Attitude Dynamics Visualization
+#
+# To demonstrate the physical quadrotor maneuvers, we plot four complementary projections:
+# 1. **Horizontal Plane (x-y)**: Top-down view of the 12 quadrotors escorting targets T1 and T2.
+# 2. **Lateral Elevation Plane (y-z)**: Side view showing altitude tracking and lateral movement.
+# 3. **Roll Attitude Dynamics ϕ(t)**: Roll angle tilt (in degrees) driving lateral y-acceleration (y_ddot ≈ -g*ϕ).
+# 4. **Pitch Attitude Dynamics θ(t)**: Pitch angle tilt (in degrees) driving forward x-acceleration (x_ddot ≈ g*θ).
 
 orbit_t = range(0, 120 * DT; length = 200)
-lims = (-3.2, 3.2)
+lims_xy = (-3.2, 3.2)
+lims_z = (0.0, 2.5)
 trail = 20
-
-agent_x(sim, i, k) = sim[k, i, 1]
-agent_y(sim, i, k) = sim[k, i, 2]
+ts = (1:120) .* DT
 
 anim = @animate for k in 1:2:120
-    plt = plot(; aspect_ratio = 1, xlims = lims, ylims = lims, legend = :outerright,
-               size = (640, 480), title = @sprintf("12-Agent Escort Tracking  —  t = %.2f s", k * DT))
-    plot!(plt, [target1_pos(t)[1] for t in orbit_t], [target1_pos(t)[2] for t in orbit_t];
-          color = :gray80, linewidth = 1, linestyle = :dot, label = "")
-    plot!(plt, [target2_pos(t)[1] for t in orbit_t], [target2_pos(t)[2] for t in orbit_t];
-          color = :gray80, linewidth = 1, linestyle = :dot, label = "")
+    t_curr = k * DT
     lo = max(1, k - trail)
+    
+    p1 = plot(; aspect_ratio = 1, xlims = lims_xy, ylims = lims_xy,
+              xlabel = "x position (m)", ylabel = "y position (m)",
+              title = "Top-Down View (x-y Plane)", legend = false)
+    plot!(p1, [target1_pos(t)[1] for t in orbit_t], [target1_pos(t)[2] for t in orbit_t];
+          color = :gray80, linewidth = 1, linestyle = :dot)
+    plot!(p1, [target2_pos(t)[1] for t in orbit_t], [target2_pos(t)[2] for t in orbit_t];
+          color = :gray80, linewidth = 1, linestyle = :dot)
     for i in 1:NA
         col = i <= 6 ? RING_A : RING_B
         sty = i <= 6 ? :solid : :dash
-        lab = i == 1 ? "ring A (LQR)" : (i == 7 ? "ring B (LQR)" : "")
-        plot!(plt, [agent_x(sim_d, i, kk) for kk in lo:k], [agent_y(sim_d, i, kk) for kk in lo:k];
+        plot!(p1, sim_d[lo:k, i, 1], sim_d[lo:k, i, 2];
               seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
-              linewidth = 1.4, color = col, linestyle = sty, label = lab)
+              linewidth = 1.4, color = col, linestyle = sty)
     end
-    scatter!(plt, [target1_pos(k * DT)[1]], [target1_pos(k * DT)[2]]; marker = :star5,
-             markersize = 10, color = TARGET_A, label = "T1")
-    scatter!(plt, [target2_pos(k * DT)[1]], [target2_pos(k * DT)[2]]; marker = :star5,
-             markersize = 10, color = TARGET_B, label = "T2")
-    plt
+    scatter!(p1, [target1_pos(t_curr)[1]], [target1_pos(t_curr)[2]]; marker = :star5, markersize = 8, color = TARGET_A)
+    scatter!(p1, [target2_pos(t_curr)[1]], [target2_pos(t_curr)[2]]; marker = :star5, markersize = 8, color = TARGET_B)
+
+    p2 = plot(; aspect_ratio = 1, xlims = lims_xy, ylims = lims_z,
+              xlabel = "y position (m)", ylabel = "altitude z (m)",
+              title = "Side Elevation (y-z Plane)", legend = false)
+    plot!(p2, [target1_pos(t)[2] for t in orbit_t], [target1_pos(t)[3] for t in orbit_t];
+          color = :gray80, linewidth = 1, linestyle = :dot)
+    plot!(p2, [target2_pos(t)[2] for t in orbit_t], [target2_pos(t)[3] for t in orbit_t];
+          color = :gray80, linewidth = 1, linestyle = :dot)
+    for i in 1:NA
+        col = i <= 6 ? RING_A : RING_B
+        sty = i <= 6 ? :solid : :dash
+        plot!(p2, sim_d[lo:k, i, 2], sim_d[lo:k, i, 3];
+              seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
+              linewidth = 1.4, color = col, linestyle = sty)
+    end
+    scatter!(p2, [target1_pos(t_curr)[2]], [target1_pos(t_curr)[3]]; marker = :star5, markersize = 8, color = TARGET_A)
+    scatter!(p2, [target2_pos(t_curr)[2]], [target2_pos(t_curr)[3]]; marker = :star5, markersize = 8, color = TARGET_B)
+
+    p3 = plot(; xlabel = "time (s)", ylabel = "roll angle ϕ (deg)",
+              title = "Roll Tilt Dynamics ϕ(t) [y-accel]", legend = false, xlims = (0, 6.0), ylims = (-10.0, 10.0))
+    for i in 1:NA
+        col = i <= 6 ? RING_A : RING_B
+        sty = i <= 6 ? :solid : :dash
+        plot!(p3, ts[1:k], rad2deg.(sim_d[1:k, i, 4]); linewidth = 1.2, color = col, linestyle = sty)
+    end
+
+    p4 = plot(; xlabel = "time (s)", ylabel = "pitch angle θ (deg)",
+              title = "Pitch Tilt Dynamics θ(t) [x-accel]", legend = false, xlims = (0, 6.0), ylims = (-10.0, 10.0))
+    for i in 1:NA
+        col = i <= 6 ? RING_A : RING_B
+        sty = i <= 6 ? :solid : :dash
+        plot!(p4, ts[1:k], rad2deg.(sim_d[1:k, i, 5]); linewidth = 1.2, color = col, linestyle = sty)
+    end
+
+    plot(p1, p2, p3, p4; layout = (2, 2), size = (900, 700),
+         plot_title = @sprintf("12-Agent Quadrotor Escort Formation Projections (t = %.2f s)", t_curr))
 end
 gif(anim, "layered_escort_tracking.gif"; fps = 15)
 nothing # hide
 
-# ![12-Agent Escort Tracking](layered_escort_tracking.gif)
+# ![12-Agent Escort Tracking Projections](layered_escort_tracking.gif)
