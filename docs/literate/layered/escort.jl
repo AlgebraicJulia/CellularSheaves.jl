@@ -70,9 +70,10 @@ nx = size(Ad, 1)
 nu = size(Bd, 2)
 
 # Compute Optimal LQR Gain via Discrete Algebraic Riccati Equation (DARE)
-Q_diag = [1000.0, 1000.0, 1000.0, 50.0, 50.0, 10.0, 10.0, 10.0, 1.0, 1.0]
+# Tuned for smooth physical quadrotor trajectory tracking with low overshoot
+Q_diag = [150.0, 150.0, 150.0, 50.0, 50.0, 30.0, 30.0, 30.0, 1.0, 1.0]
 Q_lqr = Matrix(Diagonal(Q_diag))
-R_lqr = Matrix(Diagonal([0.001, 0.001, 0.001]))
+R_lqr = Matrix(Diagonal([0.01, 0.01, 0.01]))
 
 function solve_dare(A, B, Q, R)
     P = Q
@@ -152,15 +153,8 @@ function run_escort_simulation(mode=:distributed)
     STEPS = 120
     epsilon = 0.02
 
+    # All agents start at the origin (matching distributed_harmonic_tracking.jl)
     init_states = [zeros(10) for _ in 1:NA]
-    for i in 1:6
-        angle = (i - 1) * 2π / 6
-        init_states[i][1:3] = [2cos(angle), 2sin(angle), 1.5]
-    end
-    for i in 7:12
-        angle = (i - 7) * 2π / 6
-        init_states[i][1:3] = [-2cos(angle), -2sin(angle), 1.5]
-    end
 
     for i in 1:nchunk
         remotecall_fetch(Main.init_worker_agent!, workers_pids[i], init_states[i], K_lqr, Ad, Bd, epsilon)
