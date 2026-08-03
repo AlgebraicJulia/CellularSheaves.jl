@@ -64,7 +64,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
   draft=false,
   format=Documenter.HTML(assets=["assets/benchtables.css"]),
   sitename="CellularSheaves.jl",
@@ -142,6 +142,9 @@ makedocs(
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
       "api/trajectory_sheaves.md",
+      "api/tikhonov.md",
+      "api/agent_controllers.md",
+      "api/distributed_layered_control.md",
       "api/herding_platoon.md",
       "api/multi_agent_tracking.md",
       "api/quadratic_costs.md",
