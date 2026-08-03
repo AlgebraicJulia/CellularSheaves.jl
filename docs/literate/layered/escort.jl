@@ -3,34 +3,16 @@
 # This example demonstrates scaling the layered control architecture to a 6-agent formation 
 # escorting a slow-moving target in 3D space using an **$SE(3)$ Homogeneous Affine Cellular Sheaf**.
 # 
-# ## Non-Trivial Coordination Sheaf & Local Frame Rotations
+# ## High-Level API
 # 
-# Unlike identity sheaves ($I_D$) which decouple into independent scalar graph Laplacians ($L_{\mathcal{G}} \otimes I_D$), 
-# this coordination sheaf operates on **4D homogeneous spatial cochains** $\tilde{\mathbf{x}} = [x, y, z, 1]^\top \in \mathbb{R}^4$. 
-# 
-# Each consensus edge enforces relative frame rotation $R_z(\theta_v) \in SO(3)$ ($\theta_v = \frac{2\pi(v-1)}{6}$) 
-# and radial distance offset $\mathbf{d}_v = R_z(\theta_v) [r, 0, 0]^\top$ ($r = 1.2\,\text{m}$). 
-# By pinning leader Agent 1 to the moving target, consensus propagation across 
-# the sheaf Laplacian produces a **perfect 3D spatial regular hexagonal escort ring** centered on the target.
-# 
-# ## Theoretical Quadrotor Model & Local LQR Control
-# 
-# Low-level tracking is managed by 10D Discrete LQR controllers running on distributed Julia worker processes. 
-# The physical quadrotor dynamics use the standard small-angle 10D linearization around hover 
-# under fixed heading ($\psi = 0$), as formalized in seminal quadrotor control literature:
-# 
-# 1. **Mellinger, D., & Kumar, V. (2011)**. *Minimum snap trajectory generation and control for quadrotors*. *IEEE ICRA*, pp. 2520–2525.
-# 2. **Bouabdallah, S., Noth, A., & Siegwart, R. (2004)**. *PID vs LQ control techniques applied to an indoor micro quadrotor*. *IEEE/RSJ IROS*, Vol. 3, pp. 2451–2456.
-
+# We use the new `Formations` and `DistributedLayeredControl` modules to significantly 
+# simplify the setup of the escort ring and the execution of the distributed local controllers.
 
 using CellularSheaves
-import CellularSheaves.NetworkSheaves.EuclideanSheaves: _harmonic_extension_restricted_laplacian
-using CellularSheaves.ControlSheaves.Tikhonov
-using CellularSheaves.TrajectorySheaves: continuous_to_discrete_zoh
-using CellularSheaves.NetworkSheaves.DistributedSolve
-using CliqueTrees.Multifrontal
+using CellularSheaves.Formations
+using CellularSheaves.AgentControllers
+using CellularSheaves.DistributedLayeredControl
 using LinearAlgebra
-using SparseArrays
 using Distributed
 using Plots
 using Printf
@@ -45,172 +27,59 @@ const TARGET_COLOR = :black
 
 # ## Setup 10D Quadrotor Dynamics & DARE Solver
 
-g = 9.81
-m = 0.5
-Ixx = 0.01
-Iyy = 0.01
-
-# Continuous-time state-space matrices (10D)
-# State x = [x, y, z, phi, theta, x_dot, y_dot, z_dot, phi_dot, theta_dot]
-Ac = zeros(10, 10)
-Ac[1, 6] = 1.0
-Ac[2, 7] = 1.0
-Ac[3, 8] = 1.0
-Ac[4, 9] = 1.0
-Ac[5, 10] = 1.0
-Ac[6, 5] = g
-Ac[7, 4] = -g
-
-Bc = zeros(10, 3)
-Bc[8, 1] = 1.0 / m       # net thrust deviation
-Bc[9, 2] = 1.0 / Ixx     # roll moment
-Bc[10, 3] = 1.0 / Iyy    # pitch moment
-
+dyn = QuadrotorDynamics()
 DT = 0.05
-Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, DT)
-
-nx = size(Ad, 1)
-nu = size(Bd, 2)
+nx = 10
 
 # Compute Optimal LQR Gain via Discrete Algebraic Riccati Equation (DARE)
 Q_diag = [150.0, 150.0, 150.0, 50.0, 50.0, 30.0, 30.0, 30.0, 1.0, 1.0]
 Q_lqr = Matrix(Diagonal(Q_diag))
 R_lqr = Matrix(Diagonal([0.01, 0.01, 0.01]))
 
-function solve_dare(A, B, Q, R)
-    P = Q
-    for i in 1:200
-        P_next = A' * P * A - (A' * P * B) * ((R + B' * P * B) \ (B' * P * A)) + Q
-        if norm(P_next - P) < 1e-6
-            break
-        end
-        P = P_next
-    end
-    return (R + B' * P * B) \ (B' * P * A)
-end
-
-K_lqr = solve_dare(Ad, Bd, Q_lqr, R_lqr)
-
-A_cl = Ad - Bd * K_lqr
-rho = maximum(abs.(eigvals(A_cl)))
-@printf("Closed-loop spectral radius: %.4f\n", rho)
+lqr_controller = LQRController(dyn, DT, Q_lqr, R_lqr)
+K_lqr = lqr_controller.K
 
 # ## SE(3) Homogeneous Coordination Sheaf Construction (D = 4)
 
 # 6 agents in a single escort ring.
-# Stalk dimension D = 4 for 3D spatial position + 1 homogeneous scale [x, y, z, 1].
 const NA = 6
 const NT = 1
 const TV1 = NA + 1
-const D = 4
-const I3 = Matrix{Float64}(I, 3, 3)
-
-sheaf = EuclideanSheaf{Float64}(fill(D, NA + NT))
-
-# SE(3) Rotation Matrix around Z-axis
-Rz(theta) = [cos(theta) -sin(theta) 0.0;
-             sin(theta)  cos(theta) 0.0;
-             0.0         0.0        1.0]
-
 r_ring = 1.2
 
-consensus_edges = [(1,2),(2,3),(3,4),(4,5),(5,6),(6,1)]
-
-for (i, j) in consensus_edges
-    angle_i = (i - 1) * 2π / 6
-    angle_j = (j - 1) * 2π / 6
-    di = Rz(angle_i) * [r_ring, 0.0, 0.0]
-    dj = Rz(angle_j) * [r_ring, 0.0, 0.0]
-    Fi = [I3 -di; 0 0 0 1]
-    Fj = [I3 -dj; 0 0 0 1]
-    add_sheaf_edge!(sheaf, i, j, Fi, Fj)
-end
-
-# Pinning leader Agent 1 to Target 1
-# Consensus edges propagate the translation offsets throughout the network
-d1 = Rz(0.0) * [r_ring, 0.0, 0.0]
-add_sheaf_edge!(sheaf, 1, TV1, [I3 -d1; 0 0 0 1], [I3 zeros(3); 0 0 0 1])
+# Build the escort ring, with Agent 1 pinned as the observer
+sheaf = build_escort_ring(NA, TV1, r_ring; observers=[1])
 
 # Slow-moving target trajectory
-target1_pos(t) = [0.5cos(0.1*t), 0.5sin(0.1*t), 1.5 + 0.1sin(0.2*t), 1.0]
+target1_pos(node, t) = [0.5cos(0.1*t), 0.5sin(0.1*t), 1.5 + 0.1sin(0.2*t), 1.0]
 
-# Boundary conditions and factorisation
-boundary0 = Dict(TV1 => target1_pos(0.0))
-_, _, Hraw, LIBraw = _harmonic_extension_restricted_laplacian(sheaf, boundary0)
-H = Matrix(Hraw)
-LIB = Matrix(LIBraw)
-
-# Precompute chordal factorisation and tree partition across agent processes
-F = cholesky!(ChordalCholesky(sparse(H)), NoPivot())
-Lfac = F.L
-partition = partition_tree(Lfac, NA)
-
-nchunk = length(partition.chunks)
-@printf("Restricted Laplacian H size: %dx%d (rank %d)\n", size(H, 1), size(H, 2), rank(H))
-@printf("Clique-tree nodes: %d supernodes, partitioned into %d chunks\n", length(partition.owner), nchunk)
+# ## Provision Worker Processes
 
 # Provision exactly NA worker processes (one for each agent's flight computer)
 workers_pids = addprocs(NA; exeflags = "--project=$(Base.active_project())")
 
-# ## Load Distributed Agent Component
-#
-# Load the worker-side flight computer implementation (`_escort_agent_worker.jl`)
-# on process 1 and all worker processes into `Main` using `Main.include`.
-
-worker_file = joinpath(pkgdir(CellularSheaves), "docs", "literate", "layered", "_escort_agent_worker.jl")
-
-Main.include(worker_file)
-@everywhere workers_pids Main.include($worker_file)
+# Provide the cellular sheaves environment to all workers
+@everywhere workers_pids begin
+    using CellularSheaves
+end
 
 # ## Simulation Framework
 
-function run_escort_simulation(mode=:distributed)
-    STEPS = 200
-    epsilon = 0.02
-    init_states = [zeros(10) for _ in 1:NA]
+STEPS = 200
+epsilon = 0.02
+# Start agents in a line along the x-axis
+init_states = [[r_ring*i/NA, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] for i in 1:NA]
 
-    for i in 1:NA
-        remotecall_fetch(Main.init_worker_agent!, workers_pids[i], init_states[i], K_lqr, Ad, Bd, epsilon)
-    end
+# Create heterogenous configs (here they are all the same)
+agent_configs = [(init_states[i], dyn, K_lqr) for i in 1:NA]
 
-    sim_data = zeros(STEPS, NA, nx)
-    qstar_history = zeros(STEPS, NA, D)
+# Run distributed simulation
+init_distributed_agents!(workers_pids, agent_configs, DT, epsilon)
+sim_d, q_d = run_layered_simulation(sheaf, workers_pids, [TV1], target1_pos, DT, STEPS; mode=:distributed)
 
-    H_pinv = pinv(H)
-
-    for t_idx in 1:STEPS
-        t = t_idx * DT
-        b_t = target1_pos(t)
-
-        rhs = Vector(-LIB * b_t)
-        if mode == :centralised
-            qstar_full = H_pinv * rhs
-        else
-            rhs_p = Vector(F.P' \ rhs)
-            y_sol = distributed_tree_solve(Lfac, rhs_p, nchunk; pids = workers_pids[1:nchunk])
-            qstar_full = F.P \ y_sol
-        end
-
-        qstar = [qstar_full[(i-1)*D+1:i*D] for i in 1:NA]
-        for i in 1:NA
-            qstar_history[t_idx, i, :] = qstar[i]
-        end
-
-        step_futures = [remotecall(Main.step_worker_agent!, workers_pids[i], qstar[i], DT) for i in 1:NA]
-        step_results = fetch.(step_futures)
-
-        for i in 1:NA
-            x_act, x_ref = step_results[i]
-            sim_data[t_idx, i, :] = x_act
-        end
-    end
-
-    return sim_data, qstar_history
-end
-
-# Run distributed and centralized simulations
-sim_d, q_d = run_escort_simulation(:distributed)
-sim_c, q_c = run_escort_simulation(:centralised)
+# Run centralized simulation
+init_distributed_agents!(workers_pids, agent_configs, DT, epsilon)
+sim_c, q_c = run_layered_simulation(sheaf, workers_pids, [TV1], target1_pos, DT, STEPS; mode=:centralised)
 
 divergence = maximum(abs.(sim_d .- sim_c))
 @printf("Max divergence between centralized and distributed 6-agent simulation: %.3e\n", divergence)
@@ -219,15 +88,7 @@ divergence = maximum(abs.(sim_d .- sim_c))
 rmprocs(workers_pids)
 
 # ## Multi-Projection Trajectory & Attitude Dynamics Visualization
-#
-# To demonstrate the physical quadrotor maneuvers around the moving target, 
-# we plot four complementary projections:
-# 1. **Horizontal World Plane (x-y)**: Top-down view showing the 6 quadrotors forming the regular hexagonal escort ring.
-# 2. **Target-Centered Relative Frame (x_rel - y_rel)**: Relative position of Ring A quadrotors centered on Target 1, demonstrating perfect 1.2 m regular hexagonal ring geometry.
-# 3. **Roll Attitude Dynamics ϕ(t)**: Roll angle tilt (in degrees) driving lateral y-acceleration.
-# 4. **Pitch Attitude Dynamics θ(t)**: Pitch angle tilt (in degrees) driving forward x-acceleration.
 
-STEPS = 200
 lims_xy = (-1.8, 1.8)
 lims_z = (0.0, 1.8)
 lims_rel = (-1.5, 1.5)
@@ -240,8 +101,8 @@ anim = @animate for k in 1:2:STEPS
               xlabel = "x position (m)", ylabel = "y position (m)",
               title = "World Top-Down View (x-y Plane)", legend = false)
     target_orbit_t = range(0, STEPS*DT; length=100) # slow moving target trajectory path
-    plot!(p1, [target1_pos(t)[1] for t in target_orbit_t], [target1_pos(t)[2] for t in target_orbit_t]; color = :gray80, linestyle = :dot, linewidth = 1)
-    scatter!(p1, [target1_pos(t_curr)[1]], [target1_pos(t_curr)[2]]; marker = :star5, markersize = 10, color = TARGET_COLOR)
+    plot!(p1, [target1_pos(TV1, t)[1] for t in target_orbit_t], [target1_pos(TV1, t)[2] for t in target_orbit_t]; color = :gray80, linestyle = :dot, linewidth = 1)
+    scatter!(p1, [target1_pos(TV1, t_curr)[1]], [target1_pos(TV1, t_curr)[2]]; marker = :star5, markersize = 10, color = TARGET_COLOR)
     for i in 1:NA
         plot!(p1, sim_d[1:k, i, 1], sim_d[1:k, i, 2];
               seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
@@ -255,8 +116,8 @@ anim = @animate for k in 1:2:STEPS
     plot!(p2, r_ring .* cos.(circ_ang), r_ring .* sin.(circ_ang); color = :gray80, linestyle = :dash, linewidth = 1)
     scatter!(p2, [0.0], [0.0]; marker = :star5, markersize = 10, color = TARGET_COLOR)
     for i in 1:NA
-        rel_x = sim_d[k, i, 1] - target1_pos(t_curr)[1]
-        rel_y = sim_d[k, i, 2] - target1_pos(t_curr)[2]
+        rel_x = sim_d[k, i, 1] - target1_pos(TV1, t_curr)[1]
+        rel_y = sim_d[k, i, 2] - target1_pos(TV1, t_curr)[2]
         scatter!(p2, [rel_x], [rel_y]; marker = :circle, markersize = 6, color = RING_COLOR)
     end
 

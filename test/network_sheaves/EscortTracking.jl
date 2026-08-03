@@ -1,5 +1,6 @@
 using Test
 using CellularSheaves
+using CellularSheaves.Formations
 import CellularSheaves.NetworkSheaves.EuclideanSheaves: _harmonic_extension_restricted_laplacian
 using CellularSheaves.NetworkSheaves.DistributedSolve
 using CliqueTrees.Multifrontal
@@ -13,33 +14,9 @@ using Distributed
     D = 4
     NA = 6
     NT = 1
-    TV1 = NA + 1
-
-    sheaf = EuclideanSheaf{Float64}(fill(D, NA + NT))
-
-    Rz(theta) = [cos(theta) -sin(theta) 0.0;
-                 sin(theta)  cos(theta) 0.0;
-                 0.0         0.0        1.0]
-
+    TV1 = NA + NT
     r_ring = 1.2
-    I3 = Matrix{Float64}(I, 3, 3)
-
-    consensus_edges = [(1,2),(2,3),(3,4),(4,5),(5,6),(6,1)]
-
-    # Consensus edges using world-space translation offsets
-    for (i, j) in consensus_edges
-        angle_i = (i - 1) * 2π / 6
-        angle_j = (j - 1) * 2π / 6
-        di = Rz(angle_i) * [r_ring, 0.0, 0.0]
-        dj = Rz(angle_j) * [r_ring, 0.0, 0.0]
-        Fi = [I3 -di; 0 0 0 1]
-        Fj = [I3 -dj; 0 0 0 1]
-        add_sheaf_edge!(sheaf, i, j, Fi, Fj)
-    end
-
-    # Pinning Agent 1 to Target 1
-    d1 = Rz(0.0) * [r_ring, 0.0, 0.0]
-    add_sheaf_edge!(sheaf, 1, TV1, [I3 -d1; 0 0 0 1], Matrix{Float64}(I, 4, 4))
+    sheaf = build_escort_ring(NA, TV1, r_ring; observers=[1])
 
     target1_pos = [0.5, 0.2, 1.5, 1.0]
     boundary0 = Dict(TV1 => target1_pos)

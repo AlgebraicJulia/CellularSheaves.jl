@@ -35,4 +35,9 @@ end
   include("network_sheaves/TrackingDSL.jl")
   include("network_sheaves/QuadraticCosts.jl")
   include("network_sheaves/EscortTracking.jl")
+  include("network_sheaves/Formations.jl")
+end
+
+@testset "Control Sheaves" begin
+  include("ControlSheaves/AgentControllers.jl")
 end
