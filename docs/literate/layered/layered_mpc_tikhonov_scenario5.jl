@@ -1,24 +1,24 @@
 # # Layered Control Architecture for Multi-Quadrotor Tracking (Scenario 5)
 # 
 # This example demonstrates a layered control architecture designed for multi-agent target tracking 
-# where high-level coordination is handled by a static cellular sheaf and low-level tracking is 
+# where high-level spatial coordination is handled by a static cellular sheaf and low-level tracking is 
 # managed by independent LQR controllers running on distributed Julia worker processes.
 # 
 # ## Architecture Overview
 # 
 # The control pipeline is structured as follows:
 # 
-# 1. **Coordination Sheaf**: Resolves the conflict between target tracking and agent consensus 
-#    by computing a harmonic extension $\mathbf{q}^*$ that minimizes a global energy functional.
-# 2. **Distributed Tree Solve**: Solves for $\mathbf{q}^*$ across parallel worker processes using 
-#    tree-parallel message passing on the clique tree of the restricted Laplacian.
-# 3. **Tikhonov Filter**: Smooths the resulting harmonic reference on each worker process to ensure physical 
-#    realizability and eliminate instantaneous jumps.
-# 4. **LQR Control**: Drives each agent to the filtered reference on its dedicated worker process using
+# 1. **2D Coordination Sheaf**: Operates on spatial positions ($y, z$), resolving the conflict 
+#    between target tracking and agent consensus by computing a harmonic extension $\mathbf{q}^*$.
+# 2. **Distributed Tree Solve**: Solves for $\mathbf{q}^*$ across parallel worker processes 
+#    using tree-parallel message passing on the clique tree of the restricted Laplacian.
+# 3. **Local Stalk Embedding & Tikhonov Filter**: Each worker embeds its 2D spatial reference into its 
+#    full 6D state space ($[y^*, z^*, 0, 0, 0, 0]^\top$) and smooths it using a Tikhonov reference filter.
+# 4. **LQR Control**: Drives each agent to the filtered reference on its dedicated worker process using 
 #    an optimal state-feedback gain computed via the Discrete Algebraic Riccati Equation (DARE).
 # 
-# This separation of concerns allows the system to handle complex coordination constraints 
-# (like the "mirror $y$-consensus" in Scenario 5) independently of the low-level vehicle dynamics.
+# This separation of concerns ensures that the coordination Laplacian $H$ remains strictly positive-definite 
+# (full rank) and allows high-level spatial coordination to run efficiently across worker processes.
 
 
 using CellularSheaves
@@ -64,8 +64,6 @@ nx = size(Ad, 1)
 nu = size(Bd, 2)
 
 # Compute Optimal LQR Gain (Discrete-time)
-# We use a non-uniform Q matrix to penalize position errors more than velocity errors,
-# reducing overshoot while maintaining a fast response.
 Q_diag = zeros(nx)
 Q_diag[1:2] .= 10000.0
 Q_diag[3] = 50.0
@@ -92,13 +90,14 @@ A_cl = Ad - Bd * K_lqr
 rho = maximum(abs.(eigvals(A_cl)))
 @printf("Closed-loop spectral radius: %.4f\n", rho)
 
-# ## Coordination Sheaf Construction
+# ## 2D Coordination Sheaf Construction
 
 # Scenario 5 Configuration:
 # - Agent 1 tracks Target 1 in z
 # - Agent 2 tracks Target 2 in yz
 # - Agents agree in y (Consensus)
-D = nx
+# We set D = 2 for spatial positions [y, z].
+D = 2
 NA = 2
 NT = 2
 TotalV = NA + NT
@@ -106,9 +105,9 @@ TotalV = NA + NT
 sheaf = EuclideanSheaf{Float64}(fill(D, TotalV))
 
 # Coordinate projection matrices
-R_y  = zeros(1, D); R_y[1] = 1.0
-R_z  = zeros(1, D); R_z[2] = 1.0
-R_yz = zeros(2, D); R_yz[1, 1] = 1.0; R_yz[2, 2] = 1.0
+R_y  = [1.0 0.0]
+R_z  = [0.0 1.0]
+R_yz = Matrix{Float64}(I, 2, 2)
 
 # Setup coordination edges
 add_sheaf_edge!(sheaf, 1, 2, R_y, R_y)
@@ -124,9 +123,8 @@ _, _, Hraw, LIBraw = _harmonic_extension_restricted_laplacian(sheaf, boundary0)
 H = Matrix(Hraw)
 LIB = Matrix(LIBraw)
 
-# Precompute chordal factorisation for tree-parallel solve
-H_reg = sparse(H) + 1e-8 * I
-F = cholesky!(ChordalCholesky(H_reg), NoPivot())
+# Precompute chordal factorisation for tree-parallel solve (H is full rank and strictly positive definite)
+F = cholesky!(ChordalCholesky(sparse(H)), NoPivot())
 Lfac = F.L
 
 # Provision worker processes for distributed parallel simulation
@@ -164,19 +162,19 @@ function run_layered_simulation(target_type=:bobbing, mode=:distributed)
     init_states = [[-2.0, 0.5, 0.0, 0.0, 0.0, 0.0], 
                    [2.0, 1.0, 0.0, 0.0, 0.0, 0.0]]
 
-    for i in 1:NA # Initialize agent flight computer state on each worker process
+    for i in 1:NA # Initialize agent flight computer state on worker process i
         remotecall_fetch(Main.init_worker_agent!, workers_pids[i], init_states[i], K_lqr, Ad, Bd, epsilon)
     end
 
     sim_data = zeros(steps, NA, nx)
-    qstar_history = zeros(steps, NA, nx)
+    qstar_history = zeros(steps, NA, D)
     filtered_ref_history = zeros(steps, NA, nx)
 
     H_pinv = pinv(H)
 
     for t_idx in 0:(steps-1)
         t = t_idx * h
-        b_t = [t1_pos(t); t2_pos(t)]
+        b_t = [t1_pos(t)[1:D]; t2_pos(t)[1:D]]
 
         rhs = Vector(-LIB * b_t)
         if mode == :centralised
@@ -192,7 +190,7 @@ function run_layered_simulation(target_type=:bobbing, mode=:distributed)
             qstar_history[t_idx+1, i, :] = qstar[i]
         end
 
-        step_futures = [remotecall(Main.step_worker_agent!, workers_pids[i], qstar[i], h) for i in 1:NA] # Dispatch LQR tracking step to workers
+        step_futures = [remotecall(Main.step_worker_agent!, workers_pids[i], qstar[i], h) for i in 1:NA] # Dispatch 2D target to workers
         step_results = fetch.(step_futures)
 
         for i in 1:NA

@@ -10,7 +10,7 @@ using LinearAlgebra
     AgentWorkerState
 
 State container held on each agent's dedicated Julia worker process.
-Encapsulates physical state `x`, Tikhonov reference filter, discrete state-space dynamics (Ad, Bd),
+Encapsulates physical state `x` (6D), Tikhonov reference filter (6D), discrete state-space dynamics (Ad, Bd),
 and the discrete LQR feedback matrix `K_lqr`.
 """
 mutable struct AgentWorkerState
@@ -35,17 +35,19 @@ function init_worker_agent!(x0::Vector{Float64}, K::Matrix{Float64}, A::Matrix{F
 end
 
 """
-    step_worker_agent!(qstar_i, dt)
+    step_worker_agent!(qstar_2d_i, dt)
 
 Step the agent's onboard controller and vehicle dynamics for one time step `dt`.
-1. Filters high-level harmonic cochain `qstar_i` through Tikhonov reference filter.
-2. Evaluates Discrete LQR control law `u = -K_lqr * (x - x_ref)`.
-3. Integrates vehicle state `x_{t+1} = Ad * x_t + Bd * u_t`.
+1. Embeds 2D spatial target `qstar_2d_i = [y*, z*]` into 6D reference `[y*, z*, 0, 0, 0, 0]`.
+2. Filters the 6D reference through Tikhonov filter.
+3. Evaluates Discrete LQR control law `u = -K_lqr * (x - x_ref)`.
+4. Integrates vehicle state `x_{t+1} = Ad * x_t + Bd * u_t`.
 Returns `(x_actual, x_ref)`.
 """
-function step_worker_agent!(qstar_i::Vector{Float64}, dt::Float64)
+function step_worker_agent!(qstar_2d_i::Vector{Float64}, dt::Float64)
     w = LOCAL_AGENT[]
-    tikhonov_step!(w.filter, qstar_i, qstar_i, dt)
+    qstar_6d = [qstar_2d_i[1], qstar_2d_i[2], 0.0, 0.0, 0.0, 0.0]
+    tikhonov_step!(w.filter, qstar_6d, qstar_6d, dt)
     x_ref = w.filter.x
     u = -w.K_lqr * (w.x - x_ref)
     w.x .= w.Ad * w.x .+ w.Bd * u
