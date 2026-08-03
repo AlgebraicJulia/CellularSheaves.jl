@@ -1,23 +1,31 @@
-# # Layered Control Architecture for 12-Agent Escort Formation
+# # Layered Control Architecture for 12-Agent Escort Formation ($SE(3)$ Homogeneous Sheaf)
 # 
 # This example demonstrates scaling the layered control architecture to a 12-agent formation 
-# escorting two moving targets in 3D space across two full orbital revolutions.
+# escorting two moving targets in 3D space using an **$SE(3)$ Homogeneous Affine Cellular Sheaf**.
 # 
-# High-level spatial coordination is handled by a static cellular sheaf over 3D spatial positions ($D=3$), 
-# while low-level tracking is managed by 10D Discrete LQR controllers running on distributed Julia worker processes.
+# ## Non-Trivial Coordination Sheaf & Local Frame Rotations
 # 
-# ## Theoretical Foundations & Quadrotor Model
+# Unlike identity sheaves ($I_D$) which decouple into independent scalar graph Laplacians ($L_{\mathcal{G}} \otimes I_D$), 
+# this coordination sheaf operates on **4D homogeneous spatial cochains** $\tilde{\mathbf{x}} = [x, y, z, 1]^\top \in \mathbb{R}^4$. 
 # 
+# Each restriction map is a $4 \times 4$ homogeneous affine transformation matrix in $SE(3)$:
+# 
+# ```math
+# \mathcal{F}_{v \unlhd e} = \begin{bmatrix} R_z(\theta_v) & \mathbf{d}_v \\ \mathbf{0}_{1 \times 3} & 1 \end{bmatrix} \in \mathbb{R}^{4 \times 4}
+# ```
+# 
+# where $R_z(\theta_v) \in SO(3)$ rotates each agent's local frame to its radial position angle $\theta_v = \frac{2\pi(v-1)}{6}$, 
+# and $\mathbf{d}_v = R_z(\theta_v) [r, 0, 0]^\top$ ($r = 1.2\,\text{m}$) imposes a true spatial regular hexagonal formation radius. 
+# The off-diagonal block cross-coupling terms ($\sin\Delta\theta$) prevent Kronecker factorization and enforce non-trivial 3D spatial coordination.
+# 
+# ## Theoretical Quadrotor Model & Local LQR Control
+# 
+# Low-level tracking is managed by 10D Discrete LQR controllers running on distributed Julia worker processes. 
 # The physical quadrotor dynamics use the standard small-angle 10D linearization around hover 
 # under fixed heading ($\psi = 0$), as formalized in seminal quadrotor control literature:
 # 
-# 1. **Mellinger, D., & Kumar, V. (2011)**. *Minimum snap trajectory generation and control for quadrotors*. 
-#    *IEEE ICRA*, pp. 2520–2525.
-# 2. **Bouabdallah, S., Noth, A., & Siegwart, R. (2004)**. *PID vs LQ control techniques applied to an indoor micro quadrotor*. 
-#    *IEEE/RSJ IROS*, Vol. 3, pp. 2451–2456.
-# 
-# Each vehicle's physical state vector is $\mathbf{x} = [x, y, z, \phi, \theta, \dot{x}, \dot{y}, \dot{z}, \dot{\phi}, \dot{\theta}]^\top \in \mathbb{R}^{10}$, 
-# with control input $\mathbf{u} = [\Delta T, \tau_\phi, \tau_\theta]^\top \in \mathbb{R}^3$.
+# 1. **Mellinger, D., & Kumar, V. (2011)**. *Minimum snap trajectory generation and control for quadrotors*. *IEEE ICRA*, pp. 2520–2525.
+# 2. **Bouabdallah, S., Noth, A., & Siegwart, R. (2004)**. *PID vs LQ control techniques applied to an indoor micro quadrotor*. *IEEE/RSJ IROS*, Vol. 3, pp. 2451–2456.
 
 
 using CellularSheaves
@@ -70,7 +78,6 @@ nx = size(Ad, 1)
 nu = size(Bd, 2)
 
 # Compute Optimal LQR Gain via Discrete Algebraic Riccati Equation (DARE)
-# Tuned for smooth physical quadrotor trajectory tracking with low overshoot
 Q_diag = [150.0, 150.0, 150.0, 50.0, 50.0, 30.0, 30.0, 30.0, 1.0, 1.0]
 Q_lqr = Matrix(Diagonal(Q_diag))
 R_lqr = Matrix(Diagonal([0.01, 0.01, 0.01]))
@@ -93,32 +100,53 @@ A_cl = Ad - Bd * K_lqr
 rho = maximum(abs.(eigvals(A_cl)))
 @printf("Closed-loop spectral radius: %.4f\n", rho)
 
-# ## 3D Coordination Sheaf Construction
+# ## SE(3) Homogeneous Coordination Sheaf Construction (D = 4)
 
 # 12 agents in two escort rings of six, joined by a bridge edge (1, 7).
-# Each ring is pinned to its own target moving in 3D space.
+# Stalk dimension D = 4 for 3D spatial position + 1 homogeneous scale [x, y, z, 1].
 const NA, NT = 12, 2
 const TV1, TV2 = NA + 1, NA + 2
-const D = 3
-const I3 = Matrix{Float64}(I, D, D)
+const D = 4
+const I4 = Matrix{Float64}(I, D, D)
+
+sheaf = EuclideanSheaf{Float64}(fill(D, NA + NT))
+
+# SE(3) Homogeneous Affine Transformation Matrix in R^(4x4)
+function SE3(theta, r_offset)
+    R = [cos(theta) -sin(theta) 0.0;
+         sin(theta)  cos(theta) 0.0;
+         0.0         0.0        1.0]
+    d = R * [r_offset, 0.0, 0.0]
+    return [R           d;
+            0.0 0.0 0.0 1.0]
+end
+
+r_ring = 1.2
 
 consensus_edges = [(1,2),(2,3),(3,4),(4,5),(5,6),(6,1),
                    (7,8),(8,9),(9,10),(10,11),(11,12),(12,7),
                    (1,7)]
 
-sheaf = EuclideanSheaf{Float64}(fill(D, NA + NT))
 for (i, j) in consensus_edges
-    add_sheaf_edge!(sheaf, i, j, I3, I3)
-end
-for i in 1:6
-    add_sheaf_edge!(sheaf, i, TV1, I3, I3)
-end
-for i in 7:12
-    add_sheaf_edge!(sheaf, i, TV2, I3, I3)
+    angle_i = i <= 6 ? (i - 1) * 2π / 6 : (i - 7) * 2π / 6
+    angle_j = j <= 6 ? (j - 1) * 2π / 6 : (j - 7) * 2π / 6
+    Ti = SE3(angle_i, r_ring)
+    Tj = SE3(angle_j, r_ring)
+    add_sheaf_edge!(sheaf, i, j, Ti, Tj)
 end
 
-target1_pos(t) = [2cos(0.4t), 2sin(0.4t), 1.5 + 0.3sin(0.8t)]
-target2_pos(t) = [2cos(-0.4t + pi), 2sin(-0.4t + pi), 1.5 + 0.3sin(-0.8t + pi)]
+# Pinning edges to targets (target 1 for Ring A, target 2 for Ring B)
+for i in 1:6
+    angle_i = (i - 1) * 2π / 6
+    add_sheaf_edge!(sheaf, i, TV1, SE3(angle_i, r_ring), I4)
+end
+for i in 7:12
+    angle_i = (i - 7) * 2π / 6
+    add_sheaf_edge!(sheaf, i, TV2, SE3(angle_i, r_ring), I4)
+end
+
+target1_pos(t) = [2cos(0.4t), 2sin(0.4t), 1.5 + 0.3sin(0.8t), 1.0]
+target2_pos(t) = [2cos(-0.4t + pi), 2sin(-0.4t + pi), 1.5 + 0.3sin(-0.8t + pi), 1.0]
 
 # Boundary conditions and factorisation
 boundary0 = Dict(TV1 => target1_pos(0.0), TV2 => target2_pos(0.0))
@@ -132,6 +160,7 @@ Lfac = F.L
 partition = partition_tree(Lfac, NA)
 
 nchunk = length(partition.chunks)
+@printf("Restricted Laplacian H size: %dx%d (rank %d)\n", size(H, 1), size(H, 2), rank(H))
 @printf("Clique-tree nodes: %d supernodes, partitioned into %d chunks\n", length(partition.owner), nchunk)
 
 # Provision worker processes for distributed parallel simulation (1 process per chunk)
@@ -150,7 +179,7 @@ Main.include(worker_file)
 # ## Simulation Framework (2 Full Orbital Revolutions)
 
 function run_escort_simulation(mode=:distributed)
-    STEPS = 630 # 630 steps * 0.05s = 31.5s (~2 full 5π orbital revolutions)
+    STEPS = 630
     epsilon = 0.02
     init_states = [zeros(10) for _ in 1:NA]
 
@@ -207,14 +236,14 @@ rmprocs(workers_pids)
 #
 # To demonstrate the physical quadrotor maneuvers across two full orbital revolutions (31.5 s), 
 # we plot four complementary projections:
-# 1. **Horizontal Plane (x-y)**: Top-down view of the 12 quadrotors escorting targets T1 and T2.
+# 1. **Horizontal Plane (x-y)**: Top-down view of the 12 quadrotors escorting targets T1 and T2 in SE(3) spatial rings.
 # 2. **Lateral Elevation Plane (y-z)**: Side view showing altitude tracking and lateral movement.
 # 3. **Roll Attitude Dynamics ϕ(t)**: Roll angle tilt (in degrees) driving lateral y-acceleration (y_ddot ≈ -g*ϕ).
 # 4. **Pitch Attitude Dynamics θ(t)**: Pitch angle tilt (in degrees) driving forward x-acceleration (x_ddot ≈ g*θ).
 
 STEPS = 630
 orbit_t = range(0, STEPS * DT; length = 300)
-lims_xy = (-3.2, 3.2)
+lims_xy = (-3.5, 3.5)
 lims_z = (0.0, 2.5)
 trail = 40
 ts = (1:STEPS) .* DT
@@ -274,7 +303,7 @@ anim = @animate for k in 1:6:STEPS
     end
 
     plot(p1, p2, p3, p4; layout = (2, 2), size = (900, 700),
-         plot_title = @sprintf("12-Agent Quadrotor Escort Formation (2 Revolutions, t = %.2f s)", t_curr))
+         plot_title = @sprintf("12-Agent SE(3) Escort Formation (2 Revolutions, t = %.2f s)", t_curr))
 end
 gif(anim, "layered_escort_tracking.gif"; fps = 15)
 nothing # hide

@@ -1,4 +1,4 @@
-# # 12-Agent Escort Worker Component
+# # 12-Agent Escort Worker Component (SE(3) Homogeneous Coordination)
 #
 # This file contains the onboard vehicle state and control implementation for each agent's worker process.
 
@@ -36,19 +36,20 @@ function init_worker_agent!(x0::Vector{Float64}, K::Matrix{Float64}, A::Matrix{F
 end
 
 """
-    step_worker_agent!(qstar_3d_i, dt)
+    step_worker_agent!(qstar_4d_i, dt)
 
 Step the agent's onboard controller and vehicle dynamics for one time step `dt`.
-1. Embeds 3D spatial target `qstar_3d_i = [x*, y*, z*]` into 10D reference `[x*, y*, z*, 0, 0, 0, 0, 0, 0, 0]`.
-2. Filters the 10D reference through local Tikhonov filter.
-3. Evaluates 10D Discrete LQR control law `u = -K_lqr * (x - x_ref)`.
-4. Integrates vehicle state `x_{t+1} = Ad * x_t + Bd * u_t`.
+1. Receives 4D SE(3) homogeneous spatial target `qstar_4d_i = [x*, y*, z*, 1.0]`.
+2. Extracts 3D spatial target `[x*, y*, z*]` and embeds into 10D reference `[x*, y*, z*, 0, 0, 0, 0, 0, 0, 0]`.
+3. Filters the 10D reference through local Tikhonov filter.
+4. Evaluates 10D Discrete LQR control law `u = -K_lqr * (x - x_ref)`.
+5. Integrates vehicle state `x_{t+1} = Ad * x_t + Bd * u_t`.
 Returns `(x_actual, x_ref)`.
 """
-function step_worker_agent!(qstar_3d_i::Vector{Float64}, dt::Float64)
+function step_worker_agent!(qstar_4d_i::Vector{Float64}, dt::Float64)
     w = LOCAL_AGENT[]
     qstar_10d = zeros(10)
-    qstar_10d[1:3] = qstar_3d_i
+    qstar_10d[1:3] = qstar_4d_i[1:3]
     tikhonov_step!(w.filter, qstar_10d, qstar_10d, dt)
     x_ref = w.filter.x
     u = -w.K_lqr * (w.x - x_ref)
