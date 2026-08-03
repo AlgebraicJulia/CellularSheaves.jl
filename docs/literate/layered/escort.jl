@@ -234,8 +234,7 @@ anim = @animate for k in 1:2:STEPS
     p1 = plot(; aspect_ratio = 1, xlims = lims_xy, ylims = lims_xy,
               xlabel = "x position (m)", ylabel = "y position (m)",
               title = "World Top-Down View (x-y Plane)", legend = false)
-    # Reference 1.2m circle
-    circ_ang = range(0, 2π; length = 100)
+    circ_ang = range(0, 2π; length = 100) # reference 1.2m circle
     plot!(p1, r_ring .* cos.(circ_ang), r_ring .* sin.(circ_ang); color = :gray80, linestyle = :dash, linewidth = 1)
     scatter!(p1, [0.0], [0.0]; marker = :star5, markersize = 10, color = TARGET_COLOR)
     for i in 1:NA
