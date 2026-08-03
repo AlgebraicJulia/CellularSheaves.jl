@@ -121,24 +121,120 @@ function run_scenario(target_type=:bobbing, mode=:distributed)
     return result
 end
 
+
 # ## Execution and Visualization
 
 # Run distributed simulation scenarios
 res_fixed = run_scenario(:fixed, :distributed)
-res_bob = run_scenario(:bobbing, :distributed)
+res_bob   = run_scenario(:bobbing, :distributed)
 
 # Compare distributed against centralized simulation to verify precision
 res_fixed_c = run_scenario(:fixed, :centralised)
 divergence = maximum(abs.(res_fixed.sim_data .- res_fixed_c.sim_data))
 @printf("Max divergence between centralized and distributed simulation: %.3e\n", divergence)
 
-# We use the reusable `:state_timeseries` primitives from `CellularSheavesPlots`
-p1 = plot(res_fixed, :state_timeseries, state_idx=1, state_name="lateral position (y) - fixed")
-p2 = plot(res_fixed, :state_timeseries, state_idx=2, state_name="altitude (z) - fixed")
-p3 = plot(res_bob, :state_timeseries, state_idx=1, state_name="lateral position (y) - bobbing")
-p4 = plot(res_bob, :state_timeseries, state_idx=2, state_name="altitude (z) - bobbing")
+# ## Multi-panel Visualization
+#
+# For each scenario (fixed / bobbing) we build three panels:
+#   1. y-z position plane with agent trajectories, targets, and harmonic extensions
+#   2. Roll tilt angle θ (state index 3) for both agents vs time
+#   3. Per-agent tracking error:  ||x_i[1:2] - q*_i|| over time
+#
+# The six panels are arranged in a 2×3 grid: rows = scenario, columns = panel type.
 
-plot(p1, p2, p3, p4, layout=(2, 2), size=(1200, 800), plot_title="Layered Control: Scenario 5 Analysis")
-savefig("layered_control_combined.png")
+function build_scenario_panels(res, scenario_label)
+    prob = res.problem
+    sim  = res.sim_data        # [steps, NA, nx]
+    qh   = res.qstar_history   # [steps, NA, D]
+    ts   = (1:prob.steps) .* prob.dt
+    NA   = 2                   # two agents
+    NT   = 2                   # two targets
+    T1, T2 = prob.target_nodes
 
-# ![Layered Control Analysis](layered_control_combined.png)
+    ## ---------- panel 1: y-z position plane ----------
+
+    all_y = vcat(sim[:, :, 1]...)
+    all_z = vcat(sim[:, :, 2]...)
+    t1_y = [prob.target_trajectory_func(T1, t)[1] for t in ts]
+    t1_z = [prob.target_trajectory_func(T1, t)[2] for t in ts]
+    t2_y = [prob.target_trajectory_func(T2, t)[1] for t in ts]
+    t2_z = [prob.target_trajectory_func(T2, t)[2] for t in ts]
+
+    min_y = minimum(vcat(all_y, t1_y, t2_y))
+    max_y = maximum(vcat(all_y, t1_y, t2_y))
+    min_z = minimum(vcat(all_z, t1_z, t2_z))
+    max_z = maximum(vcat(all_z, t1_z, t2_z))
+    cy = (min_y + max_y) / 2;  cz = (min_z + max_z) / 2
+    span = max(max_y - min_y, max_z - min_z) / 2 + 0.4
+
+    pyz = plot(;
+        xlabel = "y position [m]",
+        ylabel = "z position [m]",
+        title  = "y-z Plane [$scenario_label]",
+        aspect_ratio = 1,
+        xlims = (cy - span, cy + span),
+        ylims = (cz - span, cz + span),
+        legend = :topright,
+    )
+    plot!(pyz, t1_y, t1_z; ls=:dot, lw=1, color=:gray60, label="T1 orbit")
+    plot!(pyz, t2_y, t2_z; ls=:dot, lw=1, color=:gray30, label="T2 orbit")
+    scatter!(pyz, [t1_y[end]], [t1_z[end]]; marker=:star5, ms=10, color=:gray60, label="Target 1")
+    scatter!(pyz, [t2_y[end]], [t2_z[end]]; marker=:star5, ms=10, color=:gray30, label="Target 2")
+    for i in 1:NA
+        plot!(pyz, sim[:, i, 1], sim[:, i, 2];
+              lw=1.2, color=:steelblue, alpha=0.7, label=(i==1 ? "Agents" : false))
+        scatter!(pyz, [sim[end, i, 1]], [sim[end, i, 2]];
+                 marker=:circle, ms=7, color=:steelblue, label=false)
+        scatter!(pyz, qh[:, i, 1], qh[:, i, 2];
+                 marker=:square, ms=3, color=:purple, alpha=0.3, label=(i==1 ? "Harmonic ext." : false))
+    end
+
+    ## ---------- panel 2: tilt angle θ vs time ----------
+
+    all_theta = sim[:, :, 3]
+    max_th = maximum(abs.(all_theta))
+    pad_th = max(max_th * 0.2, 0.05)
+
+    pth = plot(;
+        xlabel = "time [s]",
+        ylabel = "tilt angle θ [rad]",
+        title  = "Tilt Angle [$scenario_label]",
+        ylims  = (-max_th - pad_th, max_th + pad_th),
+        xlims  = (0, ts[end]),
+        legend = :topright,
+    )
+    for i in 1:NA
+        plot!(pth, ts, sim[:, i, 3]; lw=1.2, label="Agent $i")
+    end
+
+    ## ---------- panel 3: per-agent tracking error ||pos_i - q*_i|| ----------
+
+    terr = [norm.(eachrow(sim[:, i, 1:2] .- qh[:, i, :])) for i in 1:NA]
+    max_terr = maximum(vcat(terr...))
+
+    pte = plot(;
+        xlabel = "time [s]",
+        ylabel = "position error [m]",
+        title  = "Tracking Error [$scenario_label]",
+        ylims  = (0, max_terr * 1.2 + 0.01),
+        xlims  = (0, ts[end]),
+        legend = :topright,
+    )
+    for i in 1:NA
+        plot!(pte, ts, terr[i]; lw=1.2, label="Agent $i")
+    end
+
+    return pyz, pth, pte
+end
+
+p1, p2, p3 = build_scenario_panels(res_fixed, "fixed targets")
+p4, p5, p6 = build_scenario_panels(res_bob,   "bobbing targets")
+
+fig = plot(p1, p2, p3, p4, p5, p6;
+    layout = (2, 3),
+    size   = (1400, 900),
+    plot_title = "Layered Control Scenario 5"
+)
+savefig(fig, "layered_control_combined.png")
+
+# ![Layered Control Scenario 5](layered_control_combined.png)
