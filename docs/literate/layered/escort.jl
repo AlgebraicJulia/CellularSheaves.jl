@@ -1,7 +1,7 @@
 # # Layered Control Architecture for 12-Agent Escort Formation
 # 
 # This example demonstrates scaling the layered control architecture to a 12-agent formation 
-# escorting two moving targets in 3D space.
+# escorting two moving targets in 3D space across two full orbital revolutions.
 # 
 # High-level spatial coordination is handled by a static cellular sheaf over 3D spatial positions ($D=3$), 
 # while low-level tracking is managed by 10D Discrete LQR controllers running on distributed Julia worker processes.
@@ -147,10 +147,10 @@ worker_file = joinpath(pkgdir(CellularSheaves), "docs", "literate", "layered", "
 Main.include(worker_file)
 @everywhere workers_pids Main.include($worker_file)
 
-# ## Simulation Framework
+# ## Simulation Framework (2 Full Orbital Revolutions)
 
 function run_escort_simulation(mode=:distributed)
-    STEPS = 120
+    STEPS = 630 # 630 steps * 0.05s = 31.5s (~2 full 5π orbital revolutions)
     epsilon = 0.02
     init_states = [zeros(10) for _ in 1:NA]
 
@@ -193,31 +193,33 @@ function run_escort_simulation(mode=:distributed)
     return sim_data, qstar_history
 end
 
-# Run distributed and centralized simulations
+# Run distributed and centralized simulations over 2 full revolutions
 sim_d, q_d = run_escort_simulation(:distributed)
 sim_c, q_c = run_escort_simulation(:centralised)
 
 divergence = maximum(abs.(sim_d .- sim_c))
-@printf("Max divergence between centralized and distributed 12-agent simulation: %.3e\n", divergence)
+@printf("Max divergence between centralized and distributed 12-agent simulation over 2 revolutions: %.3e\n", divergence)
 
 # Clean up worker processes
 rmprocs(workers_pids)
 
 # ## Multi-Projection Trajectory & Attitude Dynamics Visualization
 #
-# To demonstrate the physical quadrotor maneuvers, we plot four complementary projections:
+# To demonstrate the physical quadrotor maneuvers across two full orbital revolutions (31.5 s), 
+# we plot four complementary projections:
 # 1. **Horizontal Plane (x-y)**: Top-down view of the 12 quadrotors escorting targets T1 and T2.
 # 2. **Lateral Elevation Plane (y-z)**: Side view showing altitude tracking and lateral movement.
 # 3. **Roll Attitude Dynamics ϕ(t)**: Roll angle tilt (in degrees) driving lateral y-acceleration (y_ddot ≈ -g*ϕ).
 # 4. **Pitch Attitude Dynamics θ(t)**: Pitch angle tilt (in degrees) driving forward x-acceleration (x_ddot ≈ g*θ).
 
-orbit_t = range(0, 120 * DT; length = 200)
+STEPS = 630
+orbit_t = range(0, STEPS * DT; length = 300)
 lims_xy = (-3.2, 3.2)
 lims_z = (0.0, 2.5)
-trail = 20
-ts = (1:120) .* DT
+trail = 40
+ts = (1:STEPS) .* DT
 
-anim = @animate for k in 1:2:120
+anim = @animate for k in 1:6:STEPS
     t_curr = k * DT
     lo = max(1, k - trail)
     
@@ -256,7 +258,7 @@ anim = @animate for k in 1:2:120
     scatter!(p2, [target2_pos(t_curr)[2]], [target2_pos(t_curr)[3]]; marker = :star5, markersize = 8, color = TARGET_B)
 
     p3 = plot(; xlabel = "time (s)", ylabel = "roll angle ϕ (deg)",
-              title = "Roll Tilt Dynamics ϕ(t) [y-accel]", legend = false, xlims = (0, 6.0), ylims = (-10.0, 10.0))
+              title = "Roll Tilt Dynamics ϕ(t) [y-accel]", legend = false, xlims = (0, 31.5), ylims = (-10.0, 10.0))
     for i in 1:NA
         col = i <= 6 ? RING_A : RING_B
         sty = i <= 6 ? :solid : :dash
@@ -264,7 +266,7 @@ anim = @animate for k in 1:2:120
     end
 
     p4 = plot(; xlabel = "time (s)", ylabel = "pitch angle θ (deg)",
-              title = "Pitch Tilt Dynamics θ(t) [x-accel]", legend = false, xlims = (0, 6.0), ylims = (-10.0, 10.0))
+              title = "Pitch Tilt Dynamics θ(t) [x-accel]", legend = false, xlims = (0, 31.5), ylims = (-10.0, 10.0))
     for i in 1:NA
         col = i <= 6 ? RING_A : RING_B
         sty = i <= 6 ? :solid : :dash
@@ -272,7 +274,7 @@ anim = @animate for k in 1:2:120
     end
 
     plot(p1, p2, p3, p4; layout = (2, 2), size = (900, 700),
-         plot_title = @sprintf("12-Agent Quadrotor Escort Formation Projections (t = %.2f s)", t_curr))
+         plot_title = @sprintf("12-Agent Quadrotor Escort Formation (2 Revolutions, t = %.2f s)", t_curr))
 end
 gif(anim, "layered_escort_tracking.gif"; fps = 15)
 nothing # hide
