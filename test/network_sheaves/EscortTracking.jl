@@ -26,19 +26,22 @@ using Distributed
 
     consensus_edges = [(1,2),(2,3),(3,4),(4,5),(5,6),(6,1)]
 
-    # Consensus edges
+    # Consensus edges using world-space translation offsets
     for (i, j) in consensus_edges
         angle_i = (i - 1) * 2π / 6
         angle_j = (j - 1) * 2π / 6
-        Fi = [Rz(angle_i) zeros(3); 0 0 0 1]
-        Fj = [Rz(angle_j) zeros(3); 0 0 0 1]
+        di = Rz(angle_i) * [r_ring, 0.0, 0.0]
+        dj = Rz(angle_j) * [r_ring, 0.0, 0.0]
+        Fi = [I3 -di; 0 0 0 1]
+        Fj = [I3 -dj; 0 0 0 1]
         add_sheaf_edge!(sheaf, i, j, Fi, Fj)
     end
 
     # Pinning Agent 1 to Target 1
-    add_sheaf_edge!(sheaf, 1, TV1, [Rz(0.0) zeros(3); 0 0 0 1], [I3 -Rz(0.0)*[r_ring, 0, 0]; 0 0 0 1])
+    d1 = Rz(0.0) * [r_ring, 0.0, 0.0]
+    add_sheaf_edge!(sheaf, 1, TV1, [I3 -d1; 0 0 0 1], Matrix{Float64}(I, 4, 4))
 
-    target1_pos = [0.0, 0.0, 1.5, 1.0]
+    target1_pos = [0.5, 0.2, 1.5, 1.0]
     boundary0 = Dict(TV1 => target1_pos)
 
     # 1. Verify restricted Laplacian properties
@@ -63,7 +66,7 @@ using Distributed
         @test dist ≈ 1.2
         
         # Verify angle matches expected hexagonal slot (within tolerance)
-        expected_angle = π - (i - 1) * 2π / 6
+        expected_angle = (i - 1) * 2π / 6
         @test cos(ang) ≈ cos(expected_angle) atol=1e-5
         @test sin(ang) ≈ sin(expected_angle) atol=1e-5
         

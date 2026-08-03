@@ -119,14 +119,17 @@ consensus_edges = [(1,2),(2,3),(3,4),(4,5),(5,6),(6,1)]
 for (i, j) in consensus_edges
     angle_i = (i - 1) * 2π / 6
     angle_j = (j - 1) * 2π / 6
-    Fi = [Rz(angle_i) zeros(3); 0 0 0 1]
-    Fj = [Rz(angle_j) zeros(3); 0 0 0 1]
+    di = Rz(angle_i) * [r_ring, 0.0, 0.0]
+    dj = Rz(angle_j) * [r_ring, 0.0, 0.0]
+    Fi = [I3 -di; 0 0 0 1]
+    Fj = [I3 -dj; 0 0 0 1]
     add_sheaf_edge!(sheaf, i, j, Fi, Fj)
 end
 
 # Pinning leader Agent 1 to Target 1
-# Consensus edges propagate the SE(3) ring geometry throughout the network
-add_sheaf_edge!(sheaf, 1, TV1, [Rz(0.0) zeros(3); 0 0 0 1], [I3 -Rz(0.0)*[r_ring, 0, 0]; 0 0 0 1])
+# Consensus edges propagate the translation offsets throughout the network
+d1 = Rz(0.0) * [r_ring, 0.0, 0.0]
+add_sheaf_edge!(sheaf, 1, TV1, [I3 -d1; 0 0 0 1], [I3 zeros(3); 0 0 0 1])
 
 # Slow-moving target trajectory
 target1_pos(t) = [0.5cos(0.1*t), 0.5sin(0.1*t), 1.5 + 0.1sin(0.2*t), 1.0]
@@ -236,8 +239,7 @@ anim = @animate for k in 1:2:STEPS
     p1 = plot(; aspect_ratio = 1, xlims = lims_xy, ylims = lims_xy,
               xlabel = "x position (m)", ylabel = "y position (m)",
               title = "World Top-Down View (x-y Plane)", legend = false)
-    # Slow moving target trajectory path
-    target_orbit_t = range(0, STEPS*DT; length=100)
+    target_orbit_t = range(0, STEPS*DT; length=100) # slow moving target trajectory path
     plot!(p1, [target1_pos(t)[1] for t in target_orbit_t], [target1_pos(t)[2] for t in target_orbit_t]; color = :gray80, linestyle = :dot, linewidth = 1)
     scatter!(p1, [target1_pos(t_curr)[1]], [target1_pos(t_curr)[2]]; marker = :star5, markersize = 10, color = TARGET_COLOR)
     for i in 1:NA
