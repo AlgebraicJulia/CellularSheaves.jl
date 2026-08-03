@@ -50,8 +50,8 @@ r_ring = 1.2
 # Build the escort ring, with Agent 1 pinned as the observer
 sheaf = build_escort_ring(NA, TV1, r_ring; observers=[1])
 
-# Slow-moving target trajectory
-target1_pos(node, t) = [0.5cos(0.1*t), 0.5sin(0.1*t), 1.5 + 0.1sin(0.2*t), 1.0]
+# Fast-moving target trajectory
+target1_pos(node, t) = [0.5cos(0.5*t), 0.5sin(0.5*t), 1.5 + 0.1sin(1.0*t), 1.0]
 
 # ## Provision Worker Processes
 
@@ -70,8 +70,10 @@ epsilon = 0.02
 # Start agents in a line along the x-axis
 init_states = [[r_ring*i/NA, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] for i in 1:NA]
 
-# Create heterogenous configs (here they are all the same)
-agent_configs = [(init_states[i], dyn, K_lqr) for i in 1:NA]
+# Create heterogeneous agent properties (varying mass and inertia)
+dyns = [QuadrotorDynamics(m=0.5 + 0.05*i, Ixx=0.01 + 0.002*i, Iyy=0.01 + 0.002*i) for i in 1:NA]
+K_lqrs = [LQRController(d, DT, Q_lqr, R_lqr).K for d in dyns]
+agent_configs = [(init_states[i], dyns[i], K_lqrs[i]) for i in 1:NA]
 
 # Run distributed simulation
 init_distributed_agents!(workers_pids, agent_configs, DT, epsilon)
@@ -108,6 +110,13 @@ anim = @animate for k in 1:2:STEPS
               seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
               linewidth = 1.4, color = RING_COLOR)
     end
+    
+    # Draw communication topology (ring)
+    ring_x = [sim_d[k, i, 1] for i in 1:NA]
+    push!(ring_x, sim_d[k, 1, 1])
+    ring_y = [sim_d[k, i, 2] for i in 1:NA]
+    push!(ring_y, sim_d[k, 1, 2])
+    plot!(p1, ring_x, ring_y; color = :gray80, linestyle = :dot, linewidth = 1)
 
     p2 = plot(; aspect_ratio = 1, xlims = lims_rel, ylims = lims_rel,
               xlabel = "rel x to target (m)", ylabel = "rel y to target (m)",
@@ -115,11 +124,21 @@ anim = @animate for k in 1:2:STEPS
     circ_ang = range(0, 2π; length = 100) # reference 1.2m circle
     plot!(p2, r_ring .* cos.(circ_ang), r_ring .* sin.(circ_ang); color = :gray80, linestyle = :dash, linewidth = 1)
     scatter!(p2, [0.0], [0.0]; marker = :star5, markersize = 10, color = TARGET_COLOR)
+    # Historical trajectory in target-centered frame
     for i in 1:NA
-        rel_x = sim_d[k, i, 1] - target1_pos(TV1, t_curr)[1]
-        rel_y = sim_d[k, i, 2] - target1_pos(TV1, t_curr)[2]
-        scatter!(p2, [rel_x], [rel_y]; marker = :circle, markersize = 6, color = RING_COLOR)
+        rel_x_hist = [sim_d[step, i, 1] - target1_pos(TV1, ts[step])[1] for step in 1:k]
+        rel_y_hist = [sim_d[step, i, 2] - target1_pos(TV1, ts[step])[2] for step in 1:k]
+        plot!(p2, rel_x_hist, rel_y_hist; 
+              seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
+              linewidth = 1.4, color = RING_COLOR)
     end
+    
+    # Draw communication topology (ring) in target-centered frame
+    ring_rel_x = [sim_d[k, i, 1] - target1_pos(TV1, t_curr)[1] for i in 1:NA]
+    push!(ring_rel_x, sim_d[k, 1, 1] - target1_pos(TV1, t_curr)[1])
+    ring_rel_y = [sim_d[k, i, 2] - target1_pos(TV1, t_curr)[2] for i in 1:NA]
+    push!(ring_rel_y, sim_d[k, 1, 2] - target1_pos(TV1, t_curr)[2])
+    plot!(p2, ring_rel_x, ring_rel_y; color = :gray80, linestyle = :dot, linewidth = 1)
 
     p3 = plot(; xlabel = "time (s)", ylabel = "roll angle ϕ (deg)",
               title = "Roll Tilt Dynamics ϕ(t)", legend = false, xlims = (0, 10.0), ylims = (-10.0, 10.0))
