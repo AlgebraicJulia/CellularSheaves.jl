@@ -45,7 +45,7 @@ K_lqr = lqr_controller.K
 const NA = 6
 const NT = 1
 const TV1 = NA + 1
-r_ring = 1.2
+r_ring = 0.3
 
 # Build the escort ring, with Agent 1 pinned as the observer
 sheaf = build_escort_ring(NA, TV1, r_ring; observers=[1])
