@@ -1,7 +1,7 @@
-# # Layered Control Architecture for 12-Agent Escort Formation ($SE(3)$ Homogeneous Sheaf)
+# # Layered Control Architecture for 6-Agent Escort Formation ($SE(3)$ Homogeneous Sheaf)
 # 
-# This example demonstrates scaling the layered control architecture to a 12-agent formation 
-# escorting two moving targets in 3D space using an **$SE(3)$ Homogeneous Affine Cellular Sheaf**.
+# This example demonstrates scaling the layered control architecture to a 6-agent formation 
+# escorting a single stationary target in 3D space using an **$SE(3)$ Homogeneous Affine Cellular Sheaf**.
 # 
 # ## Non-Trivial Coordination Sheaf & Local Frame Rotations
 # 
@@ -10,8 +10,8 @@
 # 
 # Each consensus edge enforces relative frame rotation $R_z(\theta_v) \in SO(3)$ ($\theta_v = \frac{2\pi(v-1)}{6}$) 
 # and radial distance offset $\mathbf{d}_v = R_z(\theta_v) [r, 0, 0]^\top$ ($r = 1.2\,\text{m}$). 
-# By pinning leader Agent 1 to Target 1 and leader Agent 7 to Target 2, consensus propagation across 
-# the sheaf Laplacian produces **two perfect 3D spatial regular hexagonal escort rings** centered on the moving targets.
+# By pinning leader Agent 1 to the stationary target, consensus propagation across 
+# the sheaf Laplacian produces a **perfect 3D spatial regular hexagonal escort ring** centered on the target.
 # 
 # ## Theoretical Quadrotor Model & Local LQR Control
 # 
@@ -40,8 +40,8 @@ default(framestyle = :box, grid = true, gridalpha = 0.18, gridstyle = :dot,
     titlefontsize = 10, guidefontsize = 9, legendfontsize = 8, tickfontsize = 8,
     markerstrokewidth = 0, size = (720, 380))
 
-const RING_A, RING_B = :steelblue, :darkorange
-const TARGET_A, TARGET_B = :gray35, :black
+const RING_COLOR = :steelblue
+const TARGET_COLOR = :black
 
 # ## Setup 10D Quadrotor Dynamics & DARE Solver
 
@@ -97,10 +97,11 @@ rho = maximum(abs.(eigvals(A_cl)))
 
 # ## SE(3) Homogeneous Coordination Sheaf Construction (D = 4)
 
-# 12 agents in two escort rings of six, joined by a bridge edge (1, 7).
+# 6 agents in a single escort ring.
 # Stalk dimension D = 4 for 3D spatial position + 1 homogeneous scale [x, y, z, 1].
-const NA, NT = 12, 2
-const TV1, TV2 = NA + 1, NA + 2
+const NA = 6
+const NT = 1
+const TV1 = NA + 1
 const D = 4
 const I3 = Matrix{Float64}(I, 3, 3)
 
@@ -113,37 +114,29 @@ Rz(theta) = [cos(theta) -sin(theta) 0.0;
 
 r_ring = 1.2
 
-consensus_edges = [(1,2),(2,3),(3,4),(4,5),(5,6),(6,1),
-                   (7,8),(8,9),(9,10),(10,11),(11,12),(12,7)]
+consensus_edges = [(1,2),(2,3),(3,4),(4,5),(5,6),(6,1)]
 
 for (i, j) in consensus_edges
-    angle_i = i <= 6 ? (i - 1) * 2π / 6 : (i - 7) * 2π / 6
-    angle_j = j <= 6 ? (j - 1) * 2π / 6 : (j - 7) * 2π / 6
+    angle_i = (i - 1) * 2π / 6
+    angle_j = (j - 1) * 2π / 6
     Fi = [Rz(angle_i) zeros(3); 0 0 0 1]
     Fj = [Rz(angle_j) zeros(3); 0 0 0 1]
     add_sheaf_edge!(sheaf, i, j, Fi, Fj)
 end
 
-# Bridge edge (1, 7) connecting Ring A and Ring B
-F1_bridge = [Rz(0.0) zeros(3); 0 0 0 1]
-F7_bridge = [Rz(π) zeros(3); 0 0 0 1]
-add_sheaf_edge!(sheaf, 1, 7, F1_bridge, F7_bridge)
-
-# Pinning leader Agent 1 to Target 1 and leader Agent 7 to Target 2
+# Pinning leader Agent 1 to Target 1
 # Consensus edges propagate the SE(3) ring geometry throughout the network
 add_sheaf_edge!(sheaf, 1, TV1, [Rz(0.0) zeros(3); 0 0 0 1], [I3 -Rz(0.0)*[r_ring, 0, 0]; 0 0 0 1])
-add_sheaf_edge!(sheaf, 7, TV2, [Rz(π) zeros(3); 0 0 0 1], [I3 -Rz(π)*[r_ring, 0, 0]; 0 0 0 1])
 
-target1_pos(t) = [2cos(0.4t), 2sin(0.4t), 1.5 + 0.3sin(0.8t), 1.0]
-target2_pos(t) = [2cos(-0.4t + pi), 2sin(-0.4t + pi), 1.5 + 0.3sin(-0.8t + pi), 1.0]
+target1_pos = [0.0, 0.0, 1.5, 1.0]
 
 # Boundary conditions and factorisation
-boundary0 = Dict(TV1 => target1_pos(0.0), TV2 => target2_pos(0.0))
+boundary0 = Dict(TV1 => target1_pos)
 _, _, Hraw, LIBraw = _harmonic_extension_restricted_laplacian(sheaf, boundary0)
 H = Matrix(Hraw)
 LIB = Matrix(LIBraw)
 
-# Precompute chordal factorisation and tree partition across 12 agent processes
+# Precompute chordal factorisation and tree partition across agent processes
 F = cholesky!(ChordalCholesky(sparse(H)), NoPivot())
 Lfac = F.L
 partition = partition_tree(Lfac, NA)
@@ -165,10 +158,10 @@ worker_file = joinpath(pkgdir(CellularSheaves), "docs", "literate", "layered", "
 Main.include(worker_file)
 @everywhere workers_pids Main.include($worker_file)
 
-# ## Simulation Framework (2 Full Orbital Revolutions)
+# ## Simulation Framework
 
 function run_escort_simulation(mode=:distributed)
-    STEPS = 630
+    STEPS = 200
     epsilon = 0.02
     init_states = [zeros(10) for _ in 1:NA]
 
@@ -183,7 +176,7 @@ function run_escort_simulation(mode=:distributed)
 
     for t_idx in 1:STEPS
         t = t_idx * DT
-        b_t = [target1_pos(t); target2_pos(t)]
+        b_t = target1_pos
 
         rhs = Vector(-LIB * b_t)
         if mode == :centralised
@@ -211,85 +204,70 @@ function run_escort_simulation(mode=:distributed)
     return sim_data, qstar_history
 end
 
-# Run distributed and centralized simulations over 2 full revolutions
+# Run distributed and centralized simulations
 sim_d, q_d = run_escort_simulation(:distributed)
 sim_c, q_c = run_escort_simulation(:centralised)
 
 divergence = maximum(abs.(sim_d .- sim_c))
-@printf("Max divergence between centralized and distributed 12-agent simulation over 2 revolutions: %.3e\n", divergence)
+@printf("Max divergence between centralized and distributed 6-agent simulation: %.3e\n", divergence)
 
 # Clean up worker processes
 rmprocs(workers_pids)
 
 # ## Multi-Projection Trajectory & Attitude Dynamics Visualization
 #
-# To demonstrate the physical quadrotor maneuvers across two full orbital revolutions (31.5 s), 
+# To demonstrate the physical quadrotor maneuvers around the stationary target, 
 # we plot four complementary projections:
-# 1. **Horizontal World Plane (x-y)**: Top-down view of the 12 quadrotors escorting targets T1 and T2 in SE(3) spatial rings.
-# 2. **Target-Centered Relative Frame (x_rel - y_rel)**: Relative position of Ring A quadrotors centered on Target 1, demonstrating perfect 1.2 m regular hexagonal ring geometry.
-# 3. **Roll Attitude Dynamics ϕ(t)**: Roll angle tilt (in degrees) driving lateral y-acceleration (y_ddot ≈ -g*ϕ).
-# 4. **Pitch Attitude Dynamics θ(t)**: Pitch angle tilt (in degrees) driving forward x-acceleration (x_ddot ≈ g*θ).
+# 1. **Horizontal World Plane (x-y)**: Top-down view showing the 6 quadrotors forming the regular hexagonal escort ring.
+# 2. **Altitude Profile (z vs t)**: Altitude convergence of all agents from the origin to the target z = 1.5 m.
+# 3. **Roll Attitude Dynamics ϕ(t)**: Roll angle tilt (in degrees) driving lateral y-acceleration.
+# 4. **Pitch Attitude Dynamics θ(t)**: Pitch angle tilt (in degrees) driving forward x-acceleration.
 
-STEPS = 630
-orbit_t = range(0, STEPS * DT; length = 300)
-lims_xy = (-3.5, 3.5)
-lims_rel = (-1.8, 1.8)
-trail = 40
+STEPS = 200
+lims_xy = (-1.8, 1.8)
+lims_z = (0.0, 1.8)
 ts = (1:STEPS) .* DT
 
-anim = @animate for k in 1:6:STEPS
+anim = @animate for k in 1:2:STEPS
     t_curr = k * DT
-    lo = max(1, k - trail)
     
     p1 = plot(; aspect_ratio = 1, xlims = lims_xy, ylims = lims_xy,
               xlabel = "x position (m)", ylabel = "y position (m)",
               title = "World Top-Down View (x-y Plane)", legend = false)
-    plot!(p1, [target1_pos(t)[1] for t in orbit_t], [target1_pos(t)[2] for t in orbit_t];
-          color = :gray80, linewidth = 1, linestyle = :dot)
-    plot!(p1, [target2_pos(t)[1] for t in orbit_t], [target2_pos(t)[2] for t in orbit_t];
-          color = :gray80, linewidth = 1, linestyle = :dot)
-    for i in 1:NA
-        col = i <= 6 ? RING_A : RING_B
-        sty = i <= 6 ? :solid : :dash
-        plot!(p1, sim_d[lo:k, i, 1], sim_d[lo:k, i, 2];
-              seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
-              linewidth = 1.4, color = col, linestyle = sty)
-    end
-    scatter!(p1, [target1_pos(t_curr)[1]], [target1_pos(t_curr)[2]]; marker = :star5, markersize = 8, color = TARGET_A)
-    scatter!(p1, [target2_pos(t_curr)[1]], [target2_pos(t_curr)[2]]; marker = :star5, markersize = 8, color = TARGET_B)
-
-    p2 = plot(; aspect_ratio = 1, xlims = lims_rel, ylims = lims_rel,
-              xlabel = "rel x to T1 (m)", ylabel = "rel y to T1 (m)",
-              title = "Target 1-Centered Escort Ring A (1.2m)", legend = false)
+    # Reference 1.2m circle
     circ_ang = range(0, 2π; length = 100)
-    plot!(p2, 1.2 .* cos.(circ_ang), 1.2 .* sin.(circ_ang); color = :gray80, linestyle = :dash, linewidth = 1)
-    scatter!(p2, [0.0], [0.0]; marker = :star5, markersize = 10, color = TARGET_A)
-    for i in 1:6
-        rel_x = sim_d[k, i, 1] - target1_pos(t_curr)[1]
-        rel_y = sim_d[k, i, 2] - target1_pos(t_curr)[2]
-        scatter!(p2, [rel_x], [rel_y]; marker = :circle, markersize = 6, color = RING_A)
+    plot!(p1, r_ring .* cos.(circ_ang), r_ring .* sin.(circ_ang); color = :gray80, linestyle = :dash, linewidth = 1)
+    scatter!(p1, [0.0], [0.0]; marker = :star5, markersize = 10, color = TARGET_COLOR)
+    for i in 1:NA
+        plot!(p1, sim_d[1:k, i, 1], sim_d[1:k, i, 2];
+              seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
+              linewidth = 1.4, color = RING_COLOR)
     end
+
+    p2 = plot(; xlims = (0, 10.0), ylims = lims_z,
+              xlabel = "time (s)", ylabel = "altitude z (m)",
+              title = "Altitude Profile z(t)", legend = false)
+    for i in 1:NA
+        plot!(p2, ts[1:k], sim_d[1:k, i, 3]; linewidth = 1.4, color = RING_COLOR)
+    end
+    plot!(p2, [0, 10.0], [1.5, 1.5]; color = :gray80, linestyle = :dot, linewidth = 1.2)
 
     p3 = plot(; xlabel = "time (s)", ylabel = "roll angle ϕ (deg)",
-              title = "Roll Tilt Dynamics ϕ(t) [y-accel]", legend = false, xlims = (0, 31.5), ylims = (-10.0, 10.0))
+              title = "Roll Tilt Dynamics ϕ(t)", legend = false, xlims = (0, 10.0), ylims = (-10.0, 10.0))
     for i in 1:NA
-        col = i <= 6 ? RING_A : RING_B
-        sty = i <= 6 ? :solid : :dash
-        plot!(p3, ts[1:k], rad2deg.(sim_d[1:k, i, 4]); linewidth = 1.2, color = col, linestyle = sty)
+        plot!(p3, ts[1:k], rad2deg.(sim_d[1:k, i, 4]); linewidth = 1.2, color = RING_COLOR)
     end
 
     p4 = plot(; xlabel = "time (s)", ylabel = "pitch angle θ (deg)",
-              title = "Pitch Tilt Dynamics θ(t) [x-accel]", legend = false, xlims = (0, 31.5), ylims = (-10.0, 10.0))
+              title = "Pitch Tilt Dynamics θ(t)", legend = false, xlims = (0, 10.0), ylims = (-10.0, 10.0))
     for i in 1:NA
-        col = i <= 6 ? RING_A : RING_B
-        sty = i <= 6 ? :solid : :dash
-        plot!(p4, ts[1:k], rad2deg.(sim_d[1:k, i, 5]); linewidth = 1.2, color = col, linestyle = sty)
+        plot!(p4, ts[1:k], rad2deg.(sim_d[1:k, i, 5]); linewidth = 1.2, color = RING_COLOR)
     end
 
     plot(p1, p2, p3, p4; layout = (2, 2), size = (900, 700),
-         plot_title = @sprintf("12-Agent SE(3) Escort Formation (2 Revolutions, t = %.2f s)", t_curr))
+         plot_title = @sprintf("6-Agent SE(3) Stationary Escort Ring (t = %.2f s)", t_curr))
 end
 gif(anim, "layered_escort_tracking.gif"; fps = 15)
 nothing # hide
 
-# ![12-Agent Escort Tracking Projections](layered_escort_tracking.gif)
+# ![6-Agent Escort Tracking Projections](layered_escort_tracking.gif)
