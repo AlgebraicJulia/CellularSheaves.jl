@@ -8,7 +8,9 @@ using ...NetworkSheaves: EuclideanSheaf
 using ...NetworkSheaves.EuclideanSheaves: _harmonic_extension_restricted_laplacian
 using ...NetworkSheaves.DistributedSolve: partition_tree, distributed_tree_solve
 using ..Tikhonov: tikhonov_step!
-using ..AgentControllers: AgentState, AbstractAgentDynamics, QuadrotorDynamics, step_agent!
+using ..AgentControllers: AbstractAgentState, AgentState, FeedforwardAgentState,
+                           AbstractAgentDynamics, QuadrotorDynamics,
+                           AbstractAgentController, FeedforwardLQRController, step_agent!
 
 export init_distributed_agents!, run_layered_simulation, LayeredControlProblem, LayeredSimulationResult, animate_layered_escort, animate_scenario5
 
@@ -17,7 +19,7 @@ function animate_scenario5 end
 
 # Worker-local state storage. 
 # We use a Dict to allow a worker to potentially simulate multiple agents if NA > nworkers().
-const LOCAL_AGENTS = Dict{Int, AgentState}()
+const LOCAL_AGENTS = Dict{Int, AbstractAgentState}()
 
 
 """
@@ -35,6 +37,7 @@ struct LayeredControlProblem
     sheaf::EuclideanSheaf{Float64}
     target_nodes::Vector{Int}
     target_trajectory_func::Any
+    target_velocity_func::Any
     agent_configs::Vector
     dt::Float64
     steps::Int
@@ -43,17 +46,17 @@ struct LayeredControlProblem
 end
 
 # Positional constructor: coerces agent_configs, infers pos_dim as D-1 (escort convention)
-function LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring)
+function LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring; target_velocity_func=nothing)
     D = sheaf.vertex_stalks[1]
-    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func,
+    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, target_velocity_func,
         collect(agent_configs), dt, steps, r_ring, D - 1)
 end
 
-# Keyword constructor: accepts optional r_ring and explicit pos_dim
-function LayeredControlProblem(; sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring=0.0, pos_dim=nothing)
+# Keyword constructor: accepts optional r_ring, target_velocity_func, and explicit pos_dim
+function LayeredControlProblem(; sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring=0.0, target_velocity_func=nothing, pos_dim=nothing)
     D = sheaf.vertex_stalks[1]
     resolved_pos_dim = isnothing(pos_dim) ? D - 1 : pos_dim
-    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func,
+    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, target_velocity_func,
         collect(agent_configs), dt, steps, r_ring, resolved_pos_dim)
 end
 
@@ -64,9 +67,9 @@ struct LayeredSimulationResult
 end
 
 """
-    _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::QuadrotorDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
+    _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
 
-Internal function called on the worker process to initialize the agent state.
+Internal function called on worker to initialize standard feedback agent state.
 """
 function _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
     LOCAL_AGENTS[agent_id] = AgentState(x0, dyn, dt, K_lqr, eps)
@@ -74,28 +77,52 @@ function _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::Abstrac
 end
 
 """
-    _step_agent_on_worker!(agent_id::Int, qstar_4d_i::Vector{Float64}, dt::Float64)
+    _init_feedforward_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, ctrl::FeedforwardLQRController, eps::Float64)
 
-Internal function called on the worker process to step the agent dynamics.
+Internal function called on worker to initialize feedforward agent state.
 """
-function _step_agent_on_worker!(agent_id::Int, qstar_4d_i::Vector{Float64}, dt::Float64)
-    w = LOCAL_AGENTS[agent_id]
-    return step_agent!(w, qstar_4d_i, dt)
+function _init_feedforward_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, ctrl::FeedforwardLQRController, eps::Float64)
+    LOCAL_AGENTS[agent_id] = FeedforwardAgentState(x0, dyn, dt, ctrl, eps)
+    return nothing
 end
 
+"""
+    _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, dt::Float64)
+
+Step standard feedback agent on worker.
+"""
+function _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, dt::Float64)
+    w = LOCAL_AGENTS[agent_id]
+    return step_agent!(w, qstar_i, dt)
+end
+
+"""
+    _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, qstar_dot_i::Vector{Float64}, dt::Float64)
+
+Step feedforward agent on worker.
+"""
+function _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, qstar_dot_i::Vector{Float64}, dt::Float64)
+    w = LOCAL_AGENTS[agent_id]
+    return step_agent!(w, qstar_i, qstar_dot_i, dt)
+end
 
 """
     init_distributed_agents!(pids, agent_configs, dt::Float64, eps::Float64)
 
 Deploys agent states to the specified worker processes. 
-`agent_configs` is a Vector of Tuples `(x0, dyn, K_lqr)`.
-If `length(pids)` < `length(agent_configs)`, agents are distributed across available pids.
+Supports both standard feedback `(x0, dyn, K_lqr)` and feedforward `(x0, dyn, FeedforwardLQRController)` configurations.
 """
-function init_distributed_agents!(pids::Vector{Int}, agent_configs::Vector{<:Tuple{Vector{Float64}, <:AbstractAgentDynamics, Matrix{Float64}}}, dt::Float64, eps::Float64)
+function init_distributed_agents!(pids::Vector{Int}, agent_configs::Vector, dt::Float64, eps::Float64)
     np = length(pids)
-    for (i, (x0, dyn, K_lqr)) in enumerate(agent_configs)
+    for (i, cfg) in enumerate(agent_configs)
         pid = pids[(i - 1) % np + 1]
-        remotecall_fetch(_init_agent_on_worker!, pid, i, x0, dyn, dt, K_lqr, eps)
+        if cfg[3] isa FeedforwardLQRController
+            x0, dyn, ctrl = cfg
+            remotecall_fetch(_init_feedforward_agent_on_worker!, pid, i, x0, dyn, dt, ctrl, eps)
+        else
+            x0, dyn, K_lqr = cfg
+            remotecall_fetch(_init_agent_on_worker!, pid, i, x0, dyn, dt, K_lqr, eps)
+        end
     end
 end
 
@@ -103,12 +130,14 @@ end
     run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; mode=:distributed, nx::Int=10)
 
 Runs the layered control simulation defined by `prob`.
-Returns `LayeredSimulationResult`.
+If `prob.target_velocity_func` is supplied, performs a secondary solve for reference velocity `qstar_dot`
+and passes it to feedforward agent state controllers.
 """
 function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; mode=:distributed, nx::Int=10)
     sheaf = prob.sheaf
     target_nodes = prob.target_nodes
     target_trajectory_func = prob.target_trajectory_func
+    target_velocity_func = prob.target_velocity_func
     dt = prob.dt
     steps = prob.steps
     
@@ -131,17 +160,17 @@ function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; 
     Lfac = F.L
     
     # Partition tree for distributed solve
-    # Use min(NA, length(pids)) to avoid over-partitioning if we have fewer workers
     nchunk = min(NA, length(pids))
     partition = partition_tree(Lfac, nchunk)
     solve_pids = [pids[(i - 1) % length(pids) + 1] for i in 1:length(partition.chunks)]
 
     np = length(pids)
+    has_velocity = target_velocity_func !== nothing
     
     for t_idx in 1:steps
         t = t_idx * dt
         
-        # Build boundary vector
+        # 1. Primary harmonic extension solve: H * qstar = -LIB * b_t
         b_t = vcat([target_trajectory_func(node, t) for node in target_nodes]...)
         rhs = Vector(-LIB * b_t)
         
@@ -158,11 +187,34 @@ function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; 
             qstar_history[t_idx, i, :] = qstar[i]
         end
         
-        # Step agents
+        # 2. Secondary solve for harmonic extension velocity if velocity function provided:
+        # H * qstar_dot = -LIB * b_dot_t
+        qstar_dot = Vector{Vector{Float64}}(undef, NA)
+        if has_velocity
+            b_dot_t = vcat([target_velocity_func(node, t) for node in target_nodes]...)
+            rhs_dot = Vector(-LIB * b_dot_t)
+            
+            if mode == :centralised
+                qstar_dot_full = H_pinv * rhs_dot
+            else
+                rhs_dot_p = Vector(F.P' \ rhs_dot)
+                y_dot_sol = distributed_tree_solve(Lfac, rhs_dot_p, length(partition.chunks); pids = solve_pids)
+                qstar_dot_full = F.P \ y_dot_sol
+            end
+            for i in 1:NA
+                qstar_dot[i] = qstar_dot_full[(i-1)*D+1:i*D]
+            end
+        end
+        
+        # 3. Step agents on workers
         step_futures = []
         for i in 1:NA
             pid = pids[(i - 1) % np + 1]
-            push!(step_futures, remotecall(_step_agent_on_worker!, pid, i, qstar[i][1:prob.pos_dim], dt))
+            if has_velocity
+                push!(step_futures, remotecall(_step_agent_on_worker!, pid, i, qstar[i][1:prob.pos_dim], qstar_dot[i][1:prob.pos_dim], dt))
+            else
+                push!(step_futures, remotecall(_step_agent_on_worker!, pid, i, qstar[i][1:prob.pos_dim], dt))
+            end
         end
         
         step_results = fetch.(step_futures)

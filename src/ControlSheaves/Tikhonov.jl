@@ -11,12 +11,21 @@ module Tikhonov
 
 using LinearAlgebra: Factorization
 
-export TikhonovFilter,
+export AbstractTikhonovFilter,
+       TikhonovFilter,
+       JointTikhonovFilter,
        tikhonov_equilibrium,
        tikhonov_reference_rate,
        tikhonov_feedforward_reference,
        tikhonov_dissipation,
        tikhonov_step!
+
+"""
+    AbstractTikhonovFilter{T, V}
+
+Abstract base type for Tikhonov reference filters.
+"""
+abstract type AbstractTikhonovFilter{T, V <: AbstractVector{T}} end
 
 """
     TikhonovFilter(x0; epsilon) -> TikhonovFilter
@@ -29,7 +38,7 @@ where `qstar(t)` is an already-solved harmonic reference. The normalization is
 the form used by the singular-perturbation model: the boundary-layer rate is
 `1 / epsilon`, independently of the spectrum of the harmonic system.
 """
-mutable struct TikhonovFilter{T, V <: AbstractVector{T}}
+mutable struct TikhonovFilter{T, V <: AbstractVector{T}} <: AbstractTikhonovFilter{T, V}
     x::V
     epsilon::T
 end
@@ -38,6 +47,31 @@ function TikhonovFilter(x0::AbstractVector{T}; epsilon::Real) where {T <: Real}
     epsilon > 0 || throw(ArgumentError("epsilon must be positive"))
     S = promote_type(float(T), typeof(float(epsilon)))
     return TikhonovFilter(Vector{S}(x0), S(epsilon))
+end
+
+"""
+    JointTikhonovFilter(x0, v0; epsilon) -> JointTikhonovFilter
+
+Filters both reference position `qstar` and reference velocity `qstar_dot` simultaneously:
+
+    epsilon * xdot = -x + qstar(t)
+    epsilon * vdot = -v + qstar_dot(t)
+"""
+mutable struct JointTikhonovFilter{T, V <: AbstractVector{T}} <: AbstractTikhonovFilter{T, V}
+    x::V
+    v::V
+    epsilon::T
+end
+
+function JointTikhonovFilter(x0::AbstractVector{T}, v0::AbstractVector{T}; epsilon::Real) where {T <: Real}
+    epsilon > 0 || throw(ArgumentError("epsilon must be positive"))
+    length(x0) == length(v0) || throw(DimensionMismatch("x0 and v0 must have equal length"))
+    S = promote_type(float(T), typeof(float(epsilon)))
+    return JointTikhonovFilter(Vector{S}(x0), Vector{S}(v0), S(epsilon))
+end
+
+function JointTikhonovFilter(x0::AbstractVector{T}; epsilon::Real) where {T <: Real}
+    return JointTikhonovFilter(x0, zeros(T, length(x0)); epsilon = epsilon)
 end
 
 """Return the instantaneous harmonic reference solving `H * qstar = rhs`.
@@ -136,6 +170,33 @@ function tikhonov_step!(
     beta = _foh_ramp_coefficient(z)
     filter.x .= rho .* filter.x .+ alpha .* q0 .+ beta .* (q1 .- q0)
     return filter.x
+end
+
+function tikhonov_step!(
+        filter::JointTikhonovFilter,
+        q0::AbstractVector,
+        q1::AbstractVector,
+        v0::AbstractVector,
+        v1::AbstractVector,
+        dt::Real,
+    )
+    dt > 0 || throw(ArgumentError("dt must be positive"))
+    length(q0) == length(filter.x) || throw(DimensionMismatch("q0 length mismatch"))
+    length(q1) == length(filter.x) || throw(DimensionMismatch("q1 length mismatch"))
+    length(v0) == length(filter.v) || throw(DimensionMismatch("v0 length mismatch"))
+    length(v1) == length(filter.v) || throw(DimensionMismatch("v1 length mismatch"))
+
+    z = dt / filter.epsilon
+    rho = exp(-z)
+    alpha = -expm1(-z)
+    beta = _foh_ramp_coefficient(z)
+    filter.x .= rho .* filter.x .+ alpha .* q0 .+ beta .* (q1 .- q0)
+    filter.v .= rho .* filter.v .+ alpha .* v0 .+ beta .* (v1 .- v0)
+    return (filter.x, filter.v)
+end
+
+function tikhonov_step!(filter::JointTikhonovFilter, qstar_target::AbstractVector, qstar_dot_target::AbstractVector, dt::Real)
+    return tikhonov_step!(filter, qstar_target, qstar_target, qstar_dot_target, qstar_dot_target, dt)
 end
 
 function tikhonov_step!(filter::TikhonovFilter, reference_at, t::Real, dt::Real)

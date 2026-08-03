@@ -2,9 +2,12 @@ module AgentControllers
 
 using LinearAlgebra
 using ...NetworkSheaves.TrajectorySheaves: continuous_to_discrete_zoh
-using ..Tikhonov: TikhonovFilter, tikhonov_step!
+using ..Tikhonov: AbstractTikhonovFilter, TikhonovFilter, JointTikhonovFilter, tikhonov_step!
 
-export AbstractAgentDynamics, QuadrotorDynamics, PlanarQuadrotorDynamics, LQRController, AgentState, solve_dare, step_agent!
+export AbstractAgentDynamics, QuadrotorDynamics, PlanarQuadrotorDynamics,
+       AbstractAgentController, LQRController, FeedforwardLQRController,
+       AbstractAgentState, AgentState, FeedforwardAgentState,
+       solve_dare, step_agent!
 
 abstract type AbstractAgentDynamics end
 
@@ -72,7 +75,6 @@ function discrete_matrices(dyn::AbstractAgentDynamics, dt::Float64)
     continuous_to_discrete_zoh(Ac, Bc, dt)
 end
 
-
 """
     solve_dare(A, B, Q, R)
 
@@ -90,15 +92,12 @@ function solve_dare(A::AbstractMatrix, B::AbstractMatrix, Q::AbstractMatrix, R::
     return (R + B' * P * B) \ (B' * P * A)
 end
 
-struct LQRController
+abstract type AbstractAgentController end
+
+struct LQRController <: AbstractAgentController
     K::Matrix{Float64}
 end
 
-"""
-    LQRController(dyn::QuadrotorDynamics, dt::Float64, Q::AbstractMatrix, R::AbstractMatrix)
-
-Constructs an LQR controller for the given dynamics and LQR cost matrices.
-"""
 function LQRController(dyn::AbstractAgentDynamics, dt::Float64, Q::AbstractMatrix, R::AbstractMatrix)
     Ad, Bd = discrete_matrices(dyn, dt)
     K = solve_dare(Ad, Bd, Q, R)
@@ -106,12 +105,35 @@ function LQRController(dyn::AbstractAgentDynamics, dt::Float64, Q::AbstractMatri
 end
 
 """
-    AgentState
+    FeedforwardLQRController <: AbstractAgentController
 
-Holds the current state vector `x`, a `TikhonovFilter`, and references to the dynamics and controller. 
-This struct is instantiated on the worker processes.
+Holds state feedback gain `K`, continuous system matrix `Ac`, and pseudoinverse `Bc_pinv`
+for calculating feedforward control effort:
+
+    u_ff = B^dagger * (xdot_ref - A_c * x)
 """
-mutable struct AgentState
+struct FeedforwardLQRController <: AbstractAgentController
+    K::Matrix{Float64}
+    Ac::Matrix{Float64}
+    Bc_pinv::Matrix{Float64}
+end
+
+function FeedforwardLQRController(dyn::AbstractAgentDynamics, dt::Float64, Q::AbstractMatrix, R::AbstractMatrix)
+    Ac, Bc = continuous_matrices(dyn)
+    Ad, Bd = discrete_matrices(dyn, dt)
+    K = solve_dare(Ad, Bd, Q, R)
+    Bc_pinv = pinv(Bc)
+    FeedforwardLQRController(K, Ac, Bc_pinv)
+end
+
+abstract type AbstractAgentState end
+
+"""
+    AgentState <: AbstractAgentState
+
+Holds the current state vector `x`, a `TikhonovFilter`, and references to dynamics and controller.
+"""
+mutable struct AgentState <: AbstractAgentState
     x::Vector{Float64}
     filter::TikhonovFilter{Float64, Vector{Float64}}
     K_lqr::Matrix{Float64}
@@ -119,11 +141,6 @@ mutable struct AgentState
     Bd::Matrix{Float64}
 end
 
-"""
-    AgentState(x0::Vector{Float64}, dyn::QuadrotorDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
-
-Initializes the agent's flight computer state.
-"""
 function AgentState(x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
     flt = TikhonovFilter(zeros(length(x0)); epsilon = eps)
     Ad, Bd = discrete_matrices(dyn, dt)
@@ -131,27 +148,95 @@ function AgentState(x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64
 end
 
 """
+    velocity_indices(dyn::QuadrotorDynamics) -> 6:8
+    velocity_indices(dyn::PlanarQuadrotorDynamics) -> 4:5
+
+Returns the velocity state indices in the full state vector for the given agent dynamics.
+"""
+velocity_indices(dyn::QuadrotorDynamics) = 6:8
+velocity_indices(dyn::PlanarQuadrotorDynamics) = 4:5
+
+"""
+    FeedforwardAgentState <: AbstractAgentState
+
+Holds state vector `x`, a `JointTikhonovFilter` for joint reference and velocity filtering,
+and matrices required for feedforward control.
+"""
+mutable struct FeedforwardAgentState <: AbstractAgentState
+    x::Vector{Float64}
+    filter::JointTikhonovFilter{Float64, Vector{Float64}}
+    K_lqr::Matrix{Float64}
+    Ac::Matrix{Float64}
+    Bc_pinv::Matrix{Float64}
+    Ad::Matrix{Float64}
+    Bd::Matrix{Float64}
+    dyn::AbstractAgentDynamics
+end
+
+function FeedforwardAgentState(x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, ctrl::FeedforwardLQRController, eps::Float64)
+    flt = JointTikhonovFilter(zeros(length(x0)); epsilon = eps)
+    Ac, _ = continuous_matrices(dyn)
+    Ad, Bd = discrete_matrices(dyn, dt)
+    FeedforwardAgentState(copy(x0), flt, copy(ctrl.K), copy(Ac), copy(ctrl.Bc_pinv), Ad, Bd, dyn)
+end
+
+function FeedforwardAgentState(x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
+    Ac, Bc = continuous_matrices(dyn)
+    Ad, Bd = discrete_matrices(dyn, dt)
+    flt = JointTikhonovFilter(zeros(length(x0)); epsilon = eps)
+    FeedforwardAgentState(copy(x0), flt, copy(K_lqr), copy(Ac), pinv(Bc), Ad, Bd, dyn)
+end
+
+"""
     step_agent!(w::AgentState, qstar_target::Vector{Float64}, dt::Float64)
 
-Steps the agent dynamics. Extracts the necessary top-level reference signal from `qstar_target` 
-(based on the agent state dimension) and applies the LQR control.
+Steps standard feedback agent dynamics.
 """
 function step_agent!(w::AgentState, qstar_target::Vector{Float64}, dt::Float64)
-    # The reference is dynamically padded/extracted to match the state dimension of this agent
     nx = length(w.x)
     ref_dim = min(nx, length(qstar_target))
     
     qstar_local = zeros(nx)
     qstar_local[1:ref_dim] = qstar_target[1:ref_dim]
     
-    # Run the Tikhonov filter for the reference signal
     tikhonov_step!(w.filter, qstar_local, qstar_local, dt)
     x_ref = w.filter.x
     
-    # Calculate control effort
     u = -w.K_lqr * (w.x - x_ref)
+    w.x .= w.Ad * w.x .+ w.Bd * u
     
-    # Step dynamics
+    return (copy(w.x), copy(x_ref))
+end
+
+"""
+    step_agent!(w::FeedforwardAgentState, qstar_target::Vector{Float64}, qstar_dot_target::Vector{Float64}, dt::Float64)
+
+Steps feedforward-enhanced agent dynamics using feedforward control signal:
+    u = -K*(x - x_ref) + B^dagger * (v_ref - A_c * x)
+"""
+function step_agent!(w::FeedforwardAgentState, qstar_target::Vector{Float64}, qstar_dot_target::Vector{Float64}, dt::Float64)
+    nx = length(w.x)
+    ref_dim = min(nx, length(qstar_target))
+    
+    qstar_local = zeros(nx)
+    qstar_local[1:ref_dim] = qstar_target[1:ref_dim]
+    
+    # Map spatial velocity reference to the agent's velocity state indices
+    qstar_dot_local = zeros(nx)
+    v_idxs = velocity_indices(w.dyn)
+    v_dim = min(length(v_idxs), length(qstar_dot_target))
+    for k in 1:v_dim
+        qstar_dot_local[v_idxs[k]] = qstar_dot_target[k]
+    end
+    
+    tikhonov_step!(w.filter, qstar_local, qstar_dot_local, dt)
+    x_ref = w.filter.x
+    v_ref = w.filter.v
+    
+    u_fb = -w.K_lqr * (w.x - x_ref)
+    u_ff = w.Bc_pinv * (v_ref - w.Ac * w.x)
+    u = u_fb + u_ff
+    
     w.x .= w.Ad * w.x .+ w.Bd * u
     
     return (copy(w.x), copy(x_ref))
