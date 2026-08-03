@@ -152,8 +152,6 @@ Main.include(worker_file)
 function run_escort_simulation(mode=:distributed)
     STEPS = 120
     epsilon = 0.02
-
-    # All agents start at the origin (matching distributed_harmonic_tracking.jl)
     init_states = [zeros(10) for _ in 1:NA]
 
     for i in 1:nchunk
