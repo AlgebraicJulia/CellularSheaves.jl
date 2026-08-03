@@ -8,7 +8,7 @@ using ...NetworkSheaves: EuclideanSheaf
 using ...NetworkSheaves.EuclideanSheaves: _harmonic_extension_restricted_laplacian
 using ...NetworkSheaves.DistributedSolve: partition_tree, distributed_tree_solve
 using ..Tikhonov: tikhonov_step!
-using ..AgentControllers: AgentState, QuadrotorDynamics, step_agent!
+using ..AgentControllers: AgentState, AbstractAgentDynamics, QuadrotorDynamics, step_agent!
 
 export init_distributed_agents!, run_layered_simulation, LayeredControlProblem, LayeredSimulationResult, animate_layered_escort
 
@@ -22,10 +22,20 @@ struct LayeredControlProblem
     sheaf::EuclideanSheaf
     target_nodes::Vector{Int}
     target_trajectory_func::Function
-    agent_configs::Vector{Tuple{Vector{Float64}, QuadrotorDynamics, Matrix{Float64}}}
+    agent_configs::Vector{Tuple{Vector{Float64}, AbstractAgentDynamics, Matrix{Float64}}}
     dt::Float64
     steps::Int
     r_ring::Float64
+end
+
+function LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, agent_configs::Vector{<:Tuple}, dt, steps, r_ring)
+    configs = Tuple{Vector{Float64}, AbstractAgentDynamics, Matrix{Float64}}[c for c in agent_configs]
+    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, configs, dt, steps, r_ring)
+end
+
+# Keyword constructor to allow optional r_ring and arbitrary dynamics
+function LayeredControlProblem(; sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring=0.0)
+    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring)
 end
 
 struct LayeredSimulationResult
@@ -39,7 +49,7 @@ end
 
 Internal function called on the worker process to initialize the agent state.
 """
-function _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::QuadrotorDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
+function _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
     LOCAL_AGENTS[agent_id] = AgentState(x0, dyn, dt, K_lqr, eps)
     return nothing
 end
@@ -62,7 +72,7 @@ Deploys agent states to the specified worker processes.
 `agent_configs` is a Vector of Tuples `(x0, dyn, K_lqr)`.
 If `length(pids)` < `length(agent_configs)`, agents are distributed across available pids.
 """
-function init_distributed_agents!(pids::Vector{Int}, agent_configs::Vector{Tuple{Vector{Float64}, QuadrotorDynamics, Matrix{Float64}}}, dt::Float64, eps::Float64)
+function init_distributed_agents!(pids::Vector{Int}, agent_configs::Vector{<:Tuple{Vector{Float64}, <:AbstractAgentDynamics, Matrix{Float64}}}, dt::Float64, eps::Float64)
     np = length(pids)
     for (i, (x0, dyn, K_lqr)) in enumerate(agent_configs)
         pid = pids[(i - 1) % np + 1]
@@ -105,7 +115,7 @@ function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; 
     # Use min(NA, length(pids)) to avoid over-partitioning if we have fewer workers
     nchunk = min(NA, length(pids))
     partition = partition_tree(Lfac, nchunk)
-    solve_pids = pids[1:length(partition.chunks)]
+    solve_pids = [pids[(i - 1) % length(pids) + 1] for i in 1:length(partition.chunks)]
 
     np = length(pids)
     

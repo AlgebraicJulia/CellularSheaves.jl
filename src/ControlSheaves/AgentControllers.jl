@@ -4,7 +4,7 @@ using LinearAlgebra
 using ...NetworkSheaves.TrajectorySheaves: continuous_to_discrete_zoh
 using ..Tikhonov: TikhonovFilter, tikhonov_step!
 
-export AbstractAgentDynamics, QuadrotorDynamics, LQRController, AgentState, solve_dare, step_agent!
+export AbstractAgentDynamics, QuadrotorDynamics, PlanarQuadrotorDynamics, LQRController, AgentState, solve_dare, step_agent!
 
 abstract type AbstractAgentDynamics end
 
@@ -39,7 +39,35 @@ function continuous_matrices(dyn::QuadrotorDynamics)
     return Ac, Bc
 end
 
-function discrete_matrices(dyn::QuadrotorDynamics, dt::Float64)
+"""
+    PlanarQuadrotorDynamics <: AbstractAgentDynamics
+
+6D Planar Quadrotor dynamics.
+State x = [y, z, theta, y_dot, z_dot, theta_dot]
+"""
+Base.@kwdef struct PlanarQuadrotorDynamics <: AbstractAgentDynamics
+    g::Float64 = 9.81
+    m::Float64 = 0.5
+    I_quad::Float64 = 0.01
+    ell::Float64 = 0.25
+end
+
+function continuous_matrices(dyn::PlanarQuadrotorDynamics)
+    Ac = zeros(6, 6)
+    Ac[1, 4] = 1.0
+    Ac[2, 5] = 1.0
+    Ac[3, 6] = 1.0
+    Ac[4, 3] = -dyn.g
+    
+    Bc = zeros(6, 2)
+    Bc[5, 1] = 1.0 / dyn.m
+    Bc[5, 2] = 1.0 / dyn.m
+    Bc[6, 1] = dyn.ell / (2*dyn.I_quad)
+    Bc[6, 2] = -dyn.ell / (2*dyn.I_quad)
+    return Ac, Bc
+end
+
+function discrete_matrices(dyn::AbstractAgentDynamics, dt::Float64)
     Ac, Bc = continuous_matrices(dyn)
     continuous_to_discrete_zoh(Ac, Bc, dt)
 end
@@ -71,7 +99,7 @@ end
 
 Constructs an LQR controller for the given dynamics and LQR cost matrices.
 """
-function LQRController(dyn::QuadrotorDynamics, dt::Float64, Q::AbstractMatrix, R::AbstractMatrix)
+function LQRController(dyn::AbstractAgentDynamics, dt::Float64, Q::AbstractMatrix, R::AbstractMatrix)
     Ad, Bd = discrete_matrices(dyn, dt)
     K = solve_dare(Ad, Bd, Q, R)
     LQRController(K)
@@ -96,7 +124,7 @@ end
 
 Initializes the agent's flight computer state.
 """
-function AgentState(x0::Vector{Float64}, dyn::QuadrotorDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
+function AgentState(x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
     flt = TikhonovFilter(zeros(length(x0)); epsilon = eps)
     Ad, Bd = discrete_matrices(dyn, dt)
     AgentState(copy(x0), flt, copy(K_lqr), Ad, Bd)
