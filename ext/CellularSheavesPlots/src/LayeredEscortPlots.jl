@@ -339,6 +339,8 @@ function _scenario5_yz_panel(res::LayeredSimulationResult, pre::NamedTuple, k::I
         xlims        = (pre.cy - pre.span_yz, pre.cy + pre.span_yz),
         ylims        = (pre.cz - pre.span_yz, pre.cz + pre.span_yz),
         legend       = :topleft,
+        bottom_margin = 5Plots.mm,
+        left_margin   = 5Plots.mm,
     )
     # Target orbit trails
     plot!(p, pre.t1_y, pre.t1_z; ls=:dot, lw=1, color=:gray60, label=false)
@@ -377,6 +379,8 @@ function _scenario5_tilt_panel(res::LayeredSimulationResult, pre::NamedTuple, k:
         xlims  = (0, ts[end]),
         ylims  = (-pre.max_th - pre.pad_th, pre.max_th + pre.pad_th),
         legend = :topleft,
+        bottom_margin = 5Plots.mm,
+        left_margin   = 5Plots.mm,
     )
     plot!(p, ts[1:k], sim[1:k, 1, 3]; lw=1.2, color=RING_COLOR,    label="Agent 1")
     plot!(p, ts[1:k], sim[1:k, 2, 3]; lw=1.2, color=:darkorange, label="Agent 2")
@@ -395,14 +399,17 @@ function _scenario5_error_panel(res::LayeredSimulationResult, pre::NamedTuple, k
         title  = "Tracking Error [‖pos − q*‖]",
         xlabel = "time [s]",
         ylabel = "position error [m]",
+        yscale = :log10,
         xlims  = (0, ts[end]),
-        ylims  = (0, pre.max_terr * 1.2 + 0.01),
+        ylims  = (1e-4, max(pre.max_terr * 2.0, 1.0)),
         legend = :topleft,
+        bottom_margin = 5Plots.mm,
+        left_margin   = 5Plots.mm,
     )
-    plot!(p, ts[1:k], [norm(sim[step, 1, 1:2] - qh[step, 1, :]) for step in 1:k];
-          lw=1.5, color=RING_COLOR,    label="Agent 1")
-    plot!(p, ts[1:k], [norm(sim[step, 2, 1:2] - qh[step, 2, :]) for step in 1:k];
-          lw=1.5, color=:darkorange, label="Agent 2")
+    err1 = [norm(sim[step, 1, 1:2] - qh[step, 1, :]) for step in 1:k]
+    err2 = [norm(sim[step, 2, 1:2] - qh[step, 2, :]) for step in 1:k]
+    plot!(p, ts[1:k], max.(err1, 1e-6); lw=1.5, color=RING_COLOR,    label="Agent 1")
+    plot!(p, ts[1:k], max.(err2, 1e-6); lw=1.5, color=:darkorange, label="Agent 2")
     return p
 end
 
