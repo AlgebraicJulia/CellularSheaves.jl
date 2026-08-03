@@ -178,9 +178,7 @@ using Random
     end
 
     @testset "distributed_tree_solve: real multi-process run" begin
-        needed = 5 - nworkers()
-        new_pids = needed > 0 ? addprocs(needed; exeflags = "--project=$(Base.active_project())") : Int[]
-        pids = workers()[1:5]
+        pids = addprocs(5; exeflags = ["--project=$(pkgdir(CellularSheaves))"])
         try
             @everywhere pids using CellularSheaves
 

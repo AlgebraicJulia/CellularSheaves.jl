@@ -58,9 +58,7 @@ using Distributed
     nchunk = length(partition.chunks)
 
     # Spawn workers to test distributed solving
-    needed = nchunk - nworkers()
-    new_pids = needed > 0 ? addprocs(needed; exeflags = "--project=$(Base.active_project())") : Int[]
-    pids = workers()[1:nchunk]
+    pids = addprocs(nchunk; exeflags = ["--project=$(pkgdir(CellularSheaves))"])
     try
         @everywhere pids using CellularSheaves
         
