@@ -28,6 +28,11 @@ using Plots
 using Printf
 using Distributed
 
+# A single house style for every figure below — matches the escort.jl style
+default(framestyle = :box, grid = true, gridalpha = 0.18, gridstyle = :dot,
+    titlefontsize = 10, guidefontsize = 9, legendfontsize = 8, tickfontsize = 8,
+    markerstrokewidth = 0, size = (1200, 380))
+
 # ## Setup Dynamics & Constants
 
 h = 0.05

@@ -338,11 +338,12 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
     t_curr              = k * prob.dt
 
     layout     := (1, 3)
-    size       --> (1200, 380)
+    size       --> (1200, 400)
     plot_title := @sprintf("Scenario 5 [%s]  t = %.2f s", label_suffix, t_curr)
-    legend     := :topright
+    link       := :none
 
     # ── Panel 1: y-z position plane ──────────────────────────────────────────
+    # Target 1 orbit
     @series begin
         subplot      := 1
         aspect_ratio := 1
@@ -351,58 +352,62 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
         xlabel       := "y position [m]"
         ylabel       := "z position [m]"
         title        := "Agent Positions [y-z Plane]"
+        legend       := :topright
         linestyle    := :dot
         linewidth    := 1
         color        := :gray60
         label        := false
         t1_y, t1_z
     end
+    # Target 2 orbit
     @series begin
-        subplot      := 1
-        linestyle    := :dot
-        linewidth    := 1
-        color        := :gray30
-        label        := false
+        subplot   := 1
+        linestyle := :dot
+        linewidth := 1
+        color     := :gray30
+        label     := false
         t2_y, t2_z
     end
+    # Current target positions
     @series begin
-        subplot     := 1
-        seriestype  := :scatter
-        marker      := :star5
-        markersize  := 10
-        color       := :gray60
-        label       := "Target 1"
+        subplot    := 1
+        seriestype := :scatter
+        marker     := :star5
+        markersize := 10
+        color      := :gray60
+        label      := "Target 1"
         [prob.target_trajectory_func(T1, t_curr)[1]], [prob.target_trajectory_func(T1, t_curr)[2]]
     end
     @series begin
-        subplot     := 1
-        seriestype  := :scatter
-        marker      := :star5
-        markersize  := 10
-        color       := :gray30
-        label       := "Target 2"
+        subplot    := 1
+        seriestype := :scatter
+        marker     := :star5
+        markersize := 10
+        color      := :gray30
+        label      := "Target 2"
         [prob.target_trajectory_func(T2, t_curr)[1]], [prob.target_trajectory_func(T2, t_curr)[2]]
     end
+    # Agent trails and harmonic extension markers
     for i in 1:NA
         @series begin
-            subplot     := 1
-            seriestype  := :path
-            marker      := :circle
-            markersize  := 3
-            linewidth   := 1.4
-            alpha       := 0.7
-            color       := RING_COLOR
-            label       := (i == 1 ? "Agents" : false)
+            subplot    := 1
+            seriestype := :path
+            marker     := :circle
+            markersize := 3
+            linewidth  := 1.4
+            alpha      := 0.7
+            color      := (i == 1 ? RING_COLOR : :darkorange)
+            label      := "Agent $i"
             sim[1:k, i, 1], sim[1:k, i, 2]
         end
         @series begin
-            subplot     := 1
-            seriestype  := :scatter
-            marker      := :square
-            markersize  := 4
-            color       := :purple
-            alpha       := 0.3
-            label       := (i == 1 ? "Harmonic ext." : false)
+            subplot    := 1
+            seriestype := :scatter
+            marker     := :square
+            markersize := 5
+            color      := :purple
+            alpha      := 0.3
+            label      := (i == 1 ? "Harmonic ext." : false)
             [qh[k, i, 1]], [qh[k, i, 2]]
         end
     end
@@ -412,7 +417,8 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
         subplot   := 2
         xlabel    := "time [s]"
         ylabel    := "tilt angle θ [rad]"
-        title     := "Tilt Angle [θ vs Time]"
+        title     := "Quadrotor Tilt [θ vs Time]"
+        legend    := :topright
         xlims     := (0, ts[end])
         ylims     := (-max_th - pad_th, max_th + pad_th)
         linewidth := 1.2
@@ -433,7 +439,8 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
         subplot   := 3
         xlabel    := "time [s]"
         ylabel    := "position error [m]"
-        title     := "Position Tracking Error [‖pos − q*‖]"
+        title     := "Tracking Error [‖pos − q*‖]"
+        legend    := :topright
         xlims     := (0, ts[end])
         ylims     := (0, max_terr * 1.2 + 0.01)
         linewidth := 1.5
