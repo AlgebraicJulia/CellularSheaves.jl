@@ -1,7 +1,7 @@
 # # Layered Control Architecture for 6-Agent Escort Formation ($SE(3)$ Homogeneous Sheaf)
 # 
 # This example demonstrates scaling the layered control architecture to a 6-agent formation 
-# escorting a single stationary target in 3D space using an **$SE(3)$ Homogeneous Affine Cellular Sheaf**.
+# escorting a slow-moving target in 3D space using an **$SE(3)$ Homogeneous Affine Cellular Sheaf**.
 # 
 # ## Non-Trivial Coordination Sheaf & Local Frame Rotations
 # 
@@ -10,7 +10,7 @@
 # 
 # Each consensus edge enforces relative frame rotation $R_z(\theta_v) \in SO(3)$ ($\theta_v = \frac{2\pi(v-1)}{6}$) 
 # and radial distance offset $\mathbf{d}_v = R_z(\theta_v) [r, 0, 0]^\top$ ($r = 1.2\,\text{m}$). 
-# By pinning leader Agent 1 to the stationary target, consensus propagation across 
+# By pinning leader Agent 1 to the moving target, consensus propagation across 
 # the sheaf Laplacian produces a **perfect 3D spatial regular hexagonal escort ring** centered on the target.
 # 
 # ## Theoretical Quadrotor Model & Local LQR Control
@@ -128,10 +128,11 @@ end
 # Consensus edges propagate the SE(3) ring geometry throughout the network
 add_sheaf_edge!(sheaf, 1, TV1, [Rz(0.0) zeros(3); 0 0 0 1], [I3 -Rz(0.0)*[r_ring, 0, 0]; 0 0 0 1])
 
-target1_pos = [0.0, 0.0, 1.5, 1.0]
+# Slow-moving target trajectory
+target1_pos(t) = [0.5cos(0.1*t), 0.5sin(0.1*t), 1.5 + 0.1sin(0.2*t), 1.0]
 
 # Boundary conditions and factorisation
-boundary0 = Dict(TV1 => target1_pos)
+boundary0 = Dict(TV1 => target1_pos(0.0))
 _, _, Hraw, LIBraw = _harmonic_extension_restricted_laplacian(sheaf, boundary0)
 H = Matrix(Hraw)
 LIB = Matrix(LIBraw)
@@ -145,8 +146,8 @@ nchunk = length(partition.chunks)
 @printf("Restricted Laplacian H size: %dx%d (rank %d)\n", size(H, 1), size(H, 2), rank(H))
 @printf("Clique-tree nodes: %d supernodes, partitioned into %d chunks\n", length(partition.owner), nchunk)
 
-# Provision worker processes for distributed parallel simulation (1 process per chunk)
-workers_pids = addprocs(nchunk; exeflags = "--project=$(Base.active_project())")
+# Provision exactly NA worker processes (one for each agent's flight computer)
+workers_pids = addprocs(NA; exeflags = "--project=$(Base.active_project())")
 
 # ## Load Distributed Agent Component
 #
@@ -165,7 +166,7 @@ function run_escort_simulation(mode=:distributed)
     epsilon = 0.02
     init_states = [zeros(10) for _ in 1:NA]
 
-    for i in 1:nchunk
+    for i in 1:NA
         remotecall_fetch(Main.init_worker_agent!, workers_pids[i], init_states[i], K_lqr, Ad, Bd, epsilon)
     end
 
@@ -176,14 +177,14 @@ function run_escort_simulation(mode=:distributed)
 
     for t_idx in 1:STEPS
         t = t_idx * DT
-        b_t = target1_pos
+        b_t = target1_pos(t)
 
         rhs = Vector(-LIB * b_t)
         if mode == :centralised
             qstar_full = H_pinv * rhs
         else
             rhs_p = Vector(F.P' \ rhs)
-            y_sol = distributed_tree_solve(Lfac, rhs_p, nchunk; pids = workers_pids)
+            y_sol = distributed_tree_solve(Lfac, rhs_p, nchunk; pids = workers_pids[1:nchunk])
             qstar_full = F.P \ y_sol
         end
 
@@ -192,10 +193,10 @@ function run_escort_simulation(mode=:distributed)
             qstar_history[t_idx, i, :] = qstar[i]
         end
 
-        step_futures = [remotecall(Main.step_worker_agent!, workers_pids[i], qstar[i], DT) for i in 1:nchunk]
+        step_futures = [remotecall(Main.step_worker_agent!, workers_pids[i], qstar[i], DT) for i in 1:NA]
         step_results = fetch.(step_futures)
 
-        for i in 1:nchunk
+        for i in 1:NA
             x_act, x_ref = step_results[i]
             sim_data[t_idx, i, :] = x_act
         end
@@ -216,16 +217,17 @@ rmprocs(workers_pids)
 
 # ## Multi-Projection Trajectory & Attitude Dynamics Visualization
 #
-# To demonstrate the physical quadrotor maneuvers around the stationary target, 
+# To demonstrate the physical quadrotor maneuvers around the moving target, 
 # we plot four complementary projections:
 # 1. **Horizontal World Plane (x-y)**: Top-down view showing the 6 quadrotors forming the regular hexagonal escort ring.
-# 2. **Altitude Profile (z vs t)**: Altitude convergence of all agents from the origin to the target z = 1.5 m.
+# 2. **Target-Centered Relative Frame (x_rel - y_rel)**: Relative position of Ring A quadrotors centered on Target 1, demonstrating perfect 1.2 m regular hexagonal ring geometry.
 # 3. **Roll Attitude Dynamics ϕ(t)**: Roll angle tilt (in degrees) driving lateral y-acceleration.
 # 4. **Pitch Attitude Dynamics θ(t)**: Pitch angle tilt (in degrees) driving forward x-acceleration.
 
 STEPS = 200
 lims_xy = (-1.8, 1.8)
 lims_z = (0.0, 1.8)
+lims_rel = (-1.5, 1.5)
 ts = (1:STEPS) .* DT
 
 anim = @animate for k in 1:2:STEPS
@@ -234,22 +236,27 @@ anim = @animate for k in 1:2:STEPS
     p1 = plot(; aspect_ratio = 1, xlims = lims_xy, ylims = lims_xy,
               xlabel = "x position (m)", ylabel = "y position (m)",
               title = "World Top-Down View (x-y Plane)", legend = false)
-    circ_ang = range(0, 2π; length = 100) # reference 1.2m circle
-    plot!(p1, r_ring .* cos.(circ_ang), r_ring .* sin.(circ_ang); color = :gray80, linestyle = :dash, linewidth = 1)
-    scatter!(p1, [0.0], [0.0]; marker = :star5, markersize = 10, color = TARGET_COLOR)
+    # Slow moving target trajectory path
+    target_orbit_t = range(0, STEPS*DT; length=100)
+    plot!(p1, [target1_pos(t)[1] for t in target_orbit_t], [target1_pos(t)[2] for t in target_orbit_t]; color = :gray80, linestyle = :dot, linewidth = 1)
+    scatter!(p1, [target1_pos(t_curr)[1]], [target1_pos(t_curr)[2]]; marker = :star5, markersize = 10, color = TARGET_COLOR)
     for i in 1:NA
         plot!(p1, sim_d[1:k, i, 1], sim_d[1:k, i, 2];
               seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
               linewidth = 1.4, color = RING_COLOR)
     end
 
-    p2 = plot(; xlims = (0, 10.0), ylims = lims_z,
-              xlabel = "time (s)", ylabel = "altitude z (m)",
-              title = "Altitude Profile z(t)", legend = false)
+    p2 = plot(; aspect_ratio = 1, xlims = lims_rel, ylims = lims_rel,
+              xlabel = "rel x to target (m)", ylabel = "rel y to target (m)",
+              title = "Target-Centered Escort Ring (1.2m)", legend = false)
+    circ_ang = range(0, 2π; length = 100) # reference 1.2m circle
+    plot!(p2, r_ring .* cos.(circ_ang), r_ring .* sin.(circ_ang); color = :gray80, linestyle = :dash, linewidth = 1)
+    scatter!(p2, [0.0], [0.0]; marker = :star5, markersize = 10, color = TARGET_COLOR)
     for i in 1:NA
-        plot!(p2, ts[1:k], sim_d[1:k, i, 3]; linewidth = 1.4, color = RING_COLOR)
+        rel_x = sim_d[k, i, 1] - target1_pos(t_curr)[1]
+        rel_y = sim_d[k, i, 2] - target1_pos(t_curr)[2]
+        scatter!(p2, [rel_x], [rel_y]; marker = :circle, markersize = 6, color = RING_COLOR)
     end
-    plot!(p2, [0, 10.0], [1.5, 1.5]; color = :gray80, linestyle = :dot, linewidth = 1.2)
 
     p3 = plot(; xlabel = "time (s)", ylabel = "roll angle ϕ (deg)",
               title = "Roll Tilt Dynamics ϕ(t)", legend = false, xlims = (0, 10.0), ylims = (-10.0, 10.0))
@@ -264,7 +271,7 @@ anim = @animate for k in 1:2:STEPS
     end
 
     plot(p1, p2, p3, p4; layout = (2, 2), size = (900, 700),
-         plot_title = @sprintf("6-Agent SE(3) Stationary Escort Ring (t = %.2f s)", t_curr))
+         plot_title = @sprintf("6-Agent SE(3) Moving Escort Ring (t = %.2f s)", t_curr))
 end
 gif(anim, "layered_escort_tracking.gif"; fps = 15)
 nothing # hide
