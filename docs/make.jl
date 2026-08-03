@@ -66,7 +66,10 @@ end
 makedocs(
   modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
   draft=false,
-  format=Documenter.HTML(assets=["assets/benchtables.css"]),
+  format=Documenter.HTML(
+    assets=["assets/benchtables.css"],
+    size_threshold=nothing
+  ),
   sitename="CellularSheaves.jl",
   doctest=false,
   checkdocs=:none,
