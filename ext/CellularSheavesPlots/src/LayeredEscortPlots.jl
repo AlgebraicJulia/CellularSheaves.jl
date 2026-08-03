@@ -352,7 +352,7 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
         xlabel       := "y position [m]"
         ylabel       := "z position [m]"
         title        := "Agent Positions [y-z Plane]"
-        legend       := :topright
+        legend       := :topleft
         linestyle    := :dot
         linewidth    := 1
         color        := :gray60
@@ -418,7 +418,7 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
         xlabel    := "time [s]"
         ylabel    := "tilt angle θ [rad]"
         title     := "Quadrotor Tilt [θ vs Time]"
-        legend    := :topright
+        legend    := :topleft
         xlims     := (0, ts[end])
         ylims     := (-max_th - pad_th, max_th + pad_th)
         linewidth := 1.2
@@ -440,7 +440,7 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
         xlabel    := "time [s]"
         ylabel    := "position error [m]"
         title     := "Tracking Error [‖pos − q*‖]"
-        legend    := :topright
+        legend    := :topleft
         xlims     := (0, ts[end])
         ylims     := (0, max_terr * 1.2 + 0.01)
         linewidth := 1.5
