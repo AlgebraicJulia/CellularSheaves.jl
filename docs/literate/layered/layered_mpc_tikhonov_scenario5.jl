@@ -114,7 +114,8 @@ function run_scenario(target_type=:bobbing, mode=:distributed)
         target_trajectory_func=target_trajectory_func,
         agent_configs=agent_configs,
         dt=h,
-        steps=steps
+        steps=steps,
+        pos_dim=D  # pass both y and z to the physical controller (no homogeneous coordinate)
     )
 
     result = run_layered_simulation(prob, workers_pids; mode=mode, nx=nx)

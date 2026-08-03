@@ -19,24 +19,42 @@ function animate_scenario5 end
 # We use a Dict to allow a worker to potentially simulate multiple agents if NA > nworkers().
 const LOCAL_AGENTS = Dict{Int, AgentState}()
 
+
+"""
+    LayeredControlProblem
+
+Problem definition for a distributed layered control simulation.
+
+`pos_dim` controls how many leading dimensions of each agent's stalk reference vector
+are passed to the agent's physical controller. For a sheaf using homogeneous/affine stalks
+(e.g. SE(3) with D=4) set `pos_dim = D-1` to drop the homogeneous coordinate. For a pure
+Euclidean sheaf (e.g. D=2 spatial positions) set `pos_dim = D` to pass all coordinates.
+Defaults to `D-1` for backward compatibility with the escort mission.
+"""
 struct LayeredControlProblem
-    sheaf::EuclideanSheaf
+    sheaf::EuclideanSheaf{Float64}
     target_nodes::Vector{Int}
-    target_trajectory_func::Function
-    agent_configs::Vector{Tuple{Vector{Float64}, AbstractAgentDynamics, Matrix{Float64}}}
+    target_trajectory_func::Any
+    agent_configs::Vector
     dt::Float64
     steps::Int
     r_ring::Float64
+    pos_dim::Int
 end
 
-function LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, agent_configs::Vector{<:Tuple}, dt, steps, r_ring)
-    configs = Tuple{Vector{Float64}, AbstractAgentDynamics, Matrix{Float64}}[c for c in agent_configs]
-    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, configs, dt, steps, r_ring)
+# Positional constructor: coerces agent_configs, infers pos_dim as D-1 (escort convention)
+function LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring)
+    D = sheaf.vertex_stalks[1]
+    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func,
+        collect(agent_configs), dt, steps, r_ring, D - 1)
 end
 
-# Keyword constructor to allow optional r_ring and arbitrary dynamics
-function LayeredControlProblem(; sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring=0.0)
-    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring)
+# Keyword constructor: accepts optional r_ring and explicit pos_dim
+function LayeredControlProblem(; sheaf, target_nodes, target_trajectory_func, agent_configs, dt, steps, r_ring=0.0, pos_dim=nothing)
+    D = sheaf.vertex_stalks[1]
+    resolved_pos_dim = isnothing(pos_dim) ? D - 1 : pos_dim
+    return LayeredControlProblem(sheaf, target_nodes, target_trajectory_func,
+        collect(agent_configs), dt, steps, r_ring, resolved_pos_dim)
 end
 
 struct LayeredSimulationResult
@@ -144,7 +162,7 @@ function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; 
         step_futures = []
         for i in 1:NA
             pid = pids[(i - 1) % np + 1]
-            push!(step_futures, remotecall(_step_agent_on_worker!, pid, i, qstar[i][1:D-1], dt))
+            push!(step_futures, remotecall(_step_agent_on_worker!, pid, i, qstar[i][1:prob.pos_dim], dt))
         end
         
         step_results = fetch.(step_futures)

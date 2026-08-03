@@ -350,7 +350,7 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
         ylims        := (cz - span_yz, cz + span_yz)
         xlabel       := "y position [m]"
         ylabel       := "z position [m]"
-        title        := "y-z Plane"
+        title        := "Agent Positions [y-z Plane]"
         linestyle    := :dot
         linewidth    := 1
         color        := :gray60
@@ -412,7 +412,7 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
         subplot   := 2
         xlabel    := "time [s]"
         ylabel    := "tilt angle θ [rad]"
-        title     := "Tilt Angle"
+        title     := "Tilt Angle [θ vs Time]"
         xlims     := (0, ts[end])
         ylims     := (-max_th - pad_th, max_th + pad_th)
         linewidth := 1.2
@@ -433,7 +433,7 @@ Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
         subplot   := 3
         xlabel    := "time [s]"
         ylabel    := "position error [m]"
-        title     := "Tracking Error"
+        title     := "Position Tracking Error [‖pos − q*‖]"
         xlims     := (0, ts[end])
         ylims     := (0, max_terr * 1.2 + 0.01)
         linewidth := 1.5
