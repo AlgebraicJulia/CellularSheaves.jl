@@ -8,9 +8,9 @@ using ...NetworkSheaves: EuclideanSheaf
 using ...NetworkSheaves.EuclideanSheaves: _harmonic_extension_restricted_laplacian
 using ...NetworkSheaves.DistributedSolve: partition_tree, distributed_tree_solve
 using ..Tikhonov: tikhonov_step!
-using ..AgentControllers: AbstractAgentState, AgentState, FeedforwardAgentState,
+using ..AgentControllers: AbstractAgentState, AgentState,
                            AbstractAgentDynamics, QuadrotorDynamics,
-                           AbstractAgentController, FeedforwardLQRController, step_agent!
+                           AbstractAgentController, step_agent!
 
 export init_distributed_agents!, run_layered_simulation, LayeredControlProblem, LayeredSimulationResult, animate_layered_escort, animate_scenario5
 
@@ -67,29 +67,19 @@ struct LayeredSimulationResult
 end
 
 """
-    _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
+    _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64, use_velocity::Bool)
 
-Internal function called on worker to initialize standard feedback agent state.
+Internal function called on worker to initialize agent state.
 """
-function _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
-    LOCAL_AGENTS[agent_id] = AgentState(x0, dyn, dt, K_lqr, eps)
-    return nothing
-end
-
-"""
-    _init_feedforward_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, ctrl::FeedforwardLQRController, eps::Float64)
-
-Internal function called on worker to initialize feedforward agent state.
-"""
-function _init_feedforward_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, ctrl::FeedforwardLQRController, eps::Float64)
-    LOCAL_AGENTS[agent_id] = FeedforwardAgentState(x0, dyn, dt, ctrl, eps)
+function _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::AbstractAgentDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64, use_velocity::Bool=false)
+    LOCAL_AGENTS[agent_id] = AgentState(x0, dyn, dt, K_lqr, eps; use_velocity=use_velocity)
     return nothing
 end
 
 """
     _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, dt::Float64)
 
-Step standard feedback agent on worker.
+Step agent on worker (position-only reference).
 """
 function _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, dt::Float64)
     w = LOCAL_AGENTS[agent_id]
@@ -99,7 +89,7 @@ end
 """
     _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, qstar_dot_i::Vector{Float64}, dt::Float64)
 
-Step feedforward agent on worker.
+Step agent on worker (joint position and velocity reference).
 """
 function _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, qstar_dot_i::Vector{Float64}, dt::Float64)
     w = LOCAL_AGENTS[agent_id]
@@ -107,22 +97,17 @@ function _step_agent_on_worker!(agent_id::Int, qstar_i::Vector{Float64}, qstar_d
 end
 
 """
-    init_distributed_agents!(pids, agent_configs, dt::Float64, eps::Float64)
+    init_distributed_agents!(pids, agent_configs, dt::Float64, eps::Float64; use_velocity::Bool=false)
 
-Deploys agent states to the specified worker processes. 
-Supports both standard feedback `(x0, dyn, K_lqr)` and feedforward `(x0, dyn, FeedforwardLQRController)` configurations.
+Deploys agent states to the specified worker processes.
+`agent_configs` is a Vector of Tuples `(x0, dyn, K_lqr)`.
+If `use_velocity=true`, initializes `JointTikhonovFilter` on workers for tracking reference velocity.
 """
-function init_distributed_agents!(pids::Vector{Int}, agent_configs::Vector, dt::Float64, eps::Float64)
+function init_distributed_agents!(pids::Vector{Int}, agent_configs::Vector, dt::Float64, eps::Float64; use_velocity::Bool=false)
     np = length(pids)
-    for (i, cfg) in enumerate(agent_configs)
+    for (i, (x0, dyn, K_lqr)) in enumerate(agent_configs)
         pid = pids[(i - 1) % np + 1]
-        if cfg[3] isa FeedforwardLQRController
-            x0, dyn, ctrl = cfg
-            remotecall_fetch(_init_feedforward_agent_on_worker!, pid, i, x0, dyn, dt, ctrl, eps)
-        else
-            x0, dyn, K_lqr = cfg
-            remotecall_fetch(_init_agent_on_worker!, pid, i, x0, dyn, dt, K_lqr, eps)
-        end
+        remotecall_fetch(_init_agent_on_worker!, pid, i, x0, dyn, dt, K_lqr, eps, use_velocity)
     end
 end
 
