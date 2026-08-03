@@ -30,12 +30,12 @@ if !no_literate
       f, l = splitext(file)
       if l == ".jl" && !startswith(f, "_")
         src_path = joinpath(root, file)
-        Literate.markdown(src_path, out_dir;
-          config=config, documenter=true, credit=false)
         src_content = read(src_path, String)
-        execute = !contains(src_path, "asynch") && !contains(src_content, "addprocs")
+        is_evaluable = !contains(src_path, "asynch") && !contains(src_content, "addprocs")
+        Literate.markdown(src_path, out_dir;
+          config=config, documenter=is_evaluable, credit=false)
         Literate.notebook(src_path, out_dir;
-          execute=execute, documenter=true, credit=false)
+          execute=is_evaluable, documenter=is_evaluable, credit=false)
       end
     end
   end
