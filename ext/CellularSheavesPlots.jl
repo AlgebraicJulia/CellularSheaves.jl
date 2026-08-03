@@ -44,5 +44,15 @@ function CellularSheaves.ControlSheaves.MultiAgentTracking.animate_tracking_xy(
         ylims=ylims,
     )
 end
+include("CellularSheavesPlots/src/LayeredEscortPlots.jl")
+
+function CellularSheaves.ControlSheaves.DistributedLayeredControl.animate_layered_escort(res::CellularSheaves.ControlSheaves.DistributedLayeredControl.LayeredSimulationResult; fps::Int=15, frame_step::Int=2, filename::AbstractString="layered_escort.gif", kwargs...)
+    steps = res.problem.steps
+    anim = @animate for k in 1:frame_step:steps
+        plot(res, k; kwargs...)
+    end
+    gif(anim, filename; fps=fps)
+    return anim
+end
 
 end # module CellularSheavesPlots

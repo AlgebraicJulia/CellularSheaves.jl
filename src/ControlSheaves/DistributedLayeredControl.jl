@@ -10,11 +10,29 @@ using ...NetworkSheaves.DistributedSolve: partition_tree, distributed_tree_solve
 using ..Tikhonov: tikhonov_step!
 using ..AgentControllers: AgentState, QuadrotorDynamics, step_agent!
 
-export init_distributed_agents!, run_layered_simulation
+export init_distributed_agents!, run_layered_simulation, LayeredControlProblem, LayeredSimulationResult, animate_layered_escort
+
+function animate_layered_escort end
 
 # Worker-local state storage. 
 # We use a Dict to allow a worker to potentially simulate multiple agents if NA > nworkers().
 const LOCAL_AGENTS = Dict{Int, AgentState}()
+
+struct LayeredControlProblem
+    sheaf::EuclideanSheaf
+    target_nodes::Vector{Int}
+    target_trajectory_func::Function
+    agent_configs::Vector{Tuple{Vector{Float64}, QuadrotorDynamics, Matrix{Float64}}}
+    dt::Float64
+    steps::Int
+    r_ring::Float64
+end
+
+struct LayeredSimulationResult
+    problem::LayeredControlProblem
+    sim_data::Array{Float64, 3}
+    qstar_history::Array{Float64, 3}
+end
 
 """
     _init_agent_on_worker!(agent_id::Int, x0::Vector{Float64}, dyn::QuadrotorDynamics, dt::Float64, K_lqr::Matrix{Float64}, eps::Float64)
@@ -53,13 +71,18 @@ function init_distributed_agents!(pids::Vector{Int}, agent_configs::Vector{Tuple
 end
 
 """
-    run_layered_simulation(sheaf::EuclideanSheaf, pids::Vector{Int}, target_nodes::Vector{Int}, target_trajectory_func, dt::Float64, steps::Int; mode=:distributed, nx::Int=10)
+    run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; mode=:distributed, nx::Int=10)
 
-Runs the layered control simulation.
-`target_trajectories` is a function taking `(node_id, t)` and returning the target's 4D homogeneous state at time `t`.
-Returns `(sim_data, qstar_history)`.
+Runs the layered control simulation defined by `prob`.
+Returns `LayeredSimulationResult`.
 """
-function run_layered_simulation(sheaf::EuclideanSheaf, pids::Vector{Int}, target_nodes::Vector{Int}, target_trajectory_func, dt::Float64, steps::Int; mode=:distributed, nx::Int=10)
+function run_layered_simulation(prob::LayeredControlProblem, pids::Vector{Int}; mode=:distributed, nx::Int=10)
+    sheaf = prob.sheaf
+    target_nodes = prob.target_nodes
+    target_trajectory_func = prob.target_trajectory_func
+    dt = prob.dt
+    steps = prob.steps
+    
     NA = length(sheaf.vertex_stalks) - length(target_nodes)
     D = sheaf.vertex_stalks[1]
     
@@ -120,7 +143,7 @@ function run_layered_simulation(sheaf::EuclideanSheaf, pids::Vector{Int}, target
         end
     end
     
-    return sim_data, qstar_history
+    return LayeredSimulationResult(prob, sim_data, qstar_history)
 end
 
 end # module
