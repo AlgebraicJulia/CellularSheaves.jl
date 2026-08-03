@@ -320,141 +320,90 @@ function _scenario5_precompute(res::LayeredSimulationResult)
 end
 
 """
-Recipe for one animation frame of the Scenario 5 two-agent planar tracking simulation.
-Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
+Build the y-z position-plane panel for frame k of a Scenario 5 simulation.
 """
-@recipe function f(res::LayeredSimulationResult, ::Val{:scenario5}, k::Int,
-                   pre::NamedTuple; label_suffix="")
+function _scenario5_yz_panel(res::LayeredSimulationResult, pre::NamedTuple, k::Int)
     prob = res.problem
     sim  = res.sim_data
     qh   = res.qstar_history
+    ts   = pre.ts
+    NA   = pre.NA
+    T1, T2 = pre.T1, pre.T2
+    t_curr = k * prob.dt
 
-    ts, NA, T1, T2      = pre.ts, pre.NA, pre.T1, pre.T2
-    t1_y, t1_z          = pre.t1_y, pre.t1_z
-    t2_y, t2_z          = pre.t2_y, pre.t2_z
-    cy, cz, span_yz     = pre.cy, pre.cz, pre.span_yz
-    max_th, pad_th       = pre.max_th, pre.pad_th
-    max_terr            = pre.max_terr
-    t_curr              = k * prob.dt
-
-    layout     := (1, 3)
-    size       --> (1200, 400)
-    plot_title := @sprintf("Scenario 5 [%s]  t = %.2f s", label_suffix, t_curr)
-    link       := :none
-
-    # ── Panel 1: y-z position plane ──────────────────────────────────────────
-    # Target 1 orbit
-    @series begin
-        subplot      := 1
-        aspect_ratio := 1
-        xlims        := (cy - span_yz, cy + span_yz)
-        ylims        := (cz - span_yz, cz + span_yz)
-        xlabel       := "y position [m]"
-        ylabel       := "z position [m]"
-        title        := "Agent Positions [y-z Plane]"
-        legend       := :topleft
-        linestyle    := :dot
-        linewidth    := 1
-        color        := :gray60
-        label        := false
-        t1_y, t1_z
-    end
-    # Target 2 orbit
-    @series begin
-        subplot   := 1
-        linestyle := :dot
-        linewidth := 1
-        color     := :gray30
-        label     := false
-        t2_y, t2_z
-    end
+    p = plot(;
+        title        = "Agent Positions [y-z Plane]",
+        xlabel       = "y position [m]",
+        ylabel       = "z position [m]",
+        aspect_ratio = 1,
+        xlims        = (pre.cy - pre.span_yz, pre.cy + pre.span_yz),
+        ylims        = (pre.cz - pre.span_yz, pre.cz + pre.span_yz),
+        legend       = :topleft,
+    )
+    # Target orbit trails
+    plot!(p, pre.t1_y, pre.t1_z; ls=:dot, lw=1, color=:gray60, label=false)
+    plot!(p, pre.t2_y, pre.t2_z; ls=:dot, lw=1, color=:gray30, label=false)
     # Current target positions
-    @series begin
-        subplot    := 1
-        seriestype := :scatter
-        marker     := :star5
-        markersize := 10
-        color      := :gray60
-        label      := "Target 1"
-        [prob.target_trajectory_func(T1, t_curr)[1]], [prob.target_trajectory_func(T1, t_curr)[2]]
-    end
-    @series begin
-        subplot    := 1
-        seriestype := :scatter
-        marker     := :star5
-        markersize := 10
-        color      := :gray30
-        label      := "Target 2"
-        [prob.target_trajectory_func(T2, t_curr)[1]], [prob.target_trajectory_func(T2, t_curr)[2]]
-    end
-    # Agent trails and harmonic extension markers
+    scatter!(p, [prob.target_trajectory_func(T1, t_curr)[1]],
+                [prob.target_trajectory_func(T1, t_curr)[2]];
+             marker=:star5, ms=10, color=:gray60, label="Target 1")
+    scatter!(p, [prob.target_trajectory_func(T2, t_curr)[1]],
+                [prob.target_trajectory_func(T2, t_curr)[2]];
+             marker=:star5, ms=10, color=:gray30, label="Target 2")
+    # Agent trails and harmonic extension squares
     for i in 1:NA
-        @series begin
-            subplot    := 1
-            seriestype := :path
-            marker     := :circle
-            markersize := 3
-            linewidth  := 1.4
-            alpha      := 0.7
-            color      := (i == 1 ? RING_COLOR : :darkorange)
-            label      := "Agent $i"
-            sim[1:k, i, 1], sim[1:k, i, 2]
-        end
-        @series begin
-            subplot    := 1
-            seriestype := :scatter
-            marker     := :square
-            markersize := 5
-            color      := :purple
-            alpha      := 0.3
-            label      := (i == 1 ? "Harmonic ext." : false)
-            [qh[k, i, 1]], [qh[k, i, 2]]
-        end
+        c = i == 1 ? RING_COLOR : :darkorange
+        plot!(p, sim[1:k, i, 1], sim[1:k, i, 2];
+              seriestype=:path, marker=:circle, ms=3, lw=1.4, alpha=0.7,
+              color=c, label="Agent $i")
+        scatter!(p, [qh[k, i, 1]], [qh[k, i, 2]];
+                 marker=:square, ms=5, color=:purple, alpha=0.3,
+                 label=(i == 1 ? "Harmonic ext." : false))
     end
+    return p
+end
 
-    # ── Panel 2: tilt angle θ vs time ────────────────────────────────────────
-    @series begin
-        subplot   := 2
-        xlabel    := "time [s]"
-        ylabel    := "tilt angle θ [rad]"
-        title     := "Quadrotor Tilt [θ vs Time]"
-        legend    := :topleft
-        xlims     := (0, ts[end])
-        ylims     := (-max_th - pad_th, max_th + pad_th)
-        linewidth := 1.2
-        color     := RING_COLOR
-        label     := "Agent 1"
-        ts[1:k], sim[1:k, 1, 3]
-    end
-    @series begin
-        subplot   := 2
-        linewidth := 1.2
-        color     := :darkorange
-        label     := "Agent 2"
-        ts[1:k], sim[1:k, 2, 3]
-    end
+"""
+Build the tilt-angle panel for frame k of a Scenario 5 simulation.
+"""
+function _scenario5_tilt_panel(res::LayeredSimulationResult, pre::NamedTuple, k::Int)
+    sim = res.sim_data
+    ts  = pre.ts
 
-    # ── Panel 3: per-agent tracking error ‖pos_i − q*_i‖ ────────────────────
-    @series begin
-        subplot   := 3
-        xlabel    := "time [s]"
-        ylabel    := "position error [m]"
-        title     := "Tracking Error [‖pos − q*‖]"
-        legend    := :topleft
-        xlims     := (0, ts[end])
-        ylims     := (0, max_terr * 1.2 + 0.01)
-        linewidth := 1.5
-        color     := RING_COLOR
-        label     := "Agent 1"
-        ts[1:k], [norm(sim[step, 1, 1:2] - qh[step, 1, :]) for step in 1:k]
-    end
-    @series begin
-        subplot   := 3
-        linewidth := 1.5
-        color     := :darkorange
-        label     := "Agent 2"
-        ts[1:k], [norm(sim[step, 2, 1:2] - qh[step, 2, :]) for step in 1:k]
-    end
+    p = plot(;
+        title  = "Quadrotor Tilt [θ vs Time]",
+        xlabel = "time [s]",
+        ylabel = "tilt angle θ [rad]",
+        xlims  = (0, ts[end]),
+        ylims  = (-pre.max_th - pre.pad_th, pre.max_th + pre.pad_th),
+        legend = :topleft,
+    )
+    plot!(p, ts[1:k], sim[1:k, 1, 3]; lw=1.2, color=RING_COLOR,    label="Agent 1")
+    plot!(p, ts[1:k], sim[1:k, 2, 3]; lw=1.2, color=:darkorange, label="Agent 2")
+    return p
+end
+
+"""
+Build the tracking-error panel for frame k of a Scenario 5 simulation.
+"""
+function _scenario5_error_panel(res::LayeredSimulationResult, pre::NamedTuple, k::Int)
+    sim = res.sim_data
+    qh  = res.qstar_history
+    ts  = pre.ts
+
+    p = plot(;
+        title  = "Tracking Error [‖pos − q*‖]",
+        xlabel = "time [s]",
+        ylabel = "position error [m]",
+        xlims  = (0, ts[end]),
+        ylims  = (0, pre.max_terr * 1.2 + 0.01),
+        legend = :topleft,
+    )
+    plot!(p, ts[1:k], [norm(sim[step, 1, 1:2] - qh[step, 1, :]) for step in 1:k];
+          lw=1.5, color=RING_COLOR,    label="Agent 1")
+    plot!(p, ts[1:k], [norm(sim[step, 2, 1:2] - qh[step, 2, :]) for step in 1:k];
+          lw=1.5, color=:darkorange, label="Agent 2")
+    return p
 end
 
 # ==========================
