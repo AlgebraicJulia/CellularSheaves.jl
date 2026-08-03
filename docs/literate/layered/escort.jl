@@ -111,7 +111,7 @@ anim = @animate for k in 1:2:STEPS
               linewidth = 1.4, color = RING_COLOR)
     end
     
-    # Draw communication topology (ring)
+    ## Draw communication topology (ring)
     ring_x = [sim_d[k, i, 1] for i in 1:NA]
     push!(ring_x, sim_d[k, 1, 1])
     ring_y = [sim_d[k, i, 2] for i in 1:NA]
@@ -124,7 +124,7 @@ anim = @animate for k in 1:2:STEPS
     circ_ang = range(0, 2π; length = 100) # reference 1.2m circle
     plot!(p2, r_ring .* cos.(circ_ang), r_ring .* sin.(circ_ang); color = :gray80, linestyle = :dash, linewidth = 1)
     scatter!(p2, [0.0], [0.0]; marker = :star5, markersize = 10, color = TARGET_COLOR)
-    # Historical trajectory in target-centered frame
+    ## Historical trajectory in target-centered frame
     for i in 1:NA
         rel_x_hist = [sim_d[step, i, 1] - target1_pos(TV1, ts[step])[1] for step in 1:k]
         rel_y_hist = [sim_d[step, i, 2] - target1_pos(TV1, ts[step])[2] for step in 1:k]
@@ -133,7 +133,7 @@ anim = @animate for k in 1:2:STEPS
               linewidth = 1.4, color = RING_COLOR)
     end
     
-    # Draw communication topology (ring) in target-centered frame
+    ## Draw communication topology (ring) in target-centered frame
     ring_rel_x = [sim_d[k, i, 1] - target1_pos(TV1, t_curr)[1] for i in 1:NA]
     push!(ring_rel_x, sim_d[k, 1, 1] - target1_pos(TV1, t_curr)[1])
     ring_rel_y = [sim_d[k, i, 2] - target1_pos(TV1, t_curr)[2] for i in 1:NA]
