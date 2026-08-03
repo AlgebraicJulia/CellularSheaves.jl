@@ -238,7 +238,7 @@ anim = @animate for k in 1:2:120
     end
     scatter!(plt, [target1_pos(k * DT)[1]], [target1_pos(k * DT)[2]]; marker = :star5,
              markersize = 10, color = TARGET_A, label = "T1")
-    scatter!(plt, [target2_pos(k * DT)[2]], [target2_pos(k * DT)[2]]; marker = :star5,
+    scatter!(plt, [target2_pos(k * DT)[1]], [target2_pos(k * DT)[2]]; marker = :star5,
              markersize = 10, color = TARGET_B, label = "T2")
     plt
 end
