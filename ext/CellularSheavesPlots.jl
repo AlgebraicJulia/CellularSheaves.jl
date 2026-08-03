@@ -47,7 +47,7 @@ function CellularSheaves.ControlSheaves.MultiAgentTracking.animate_tracking_xy(
 end
 include("CellularSheavesPlots/src/LayeredEscortPlots.jl")
 
-function CellularSheaves.ControlSheaves.DistributedLayeredControl.animate_layered_escort(res::CellularSheaves.ControlSheaves.DistributedLayeredControl.LayeredSimulationResult; fps::Int=15, frame_step::Int=2, filename::AbstractString="layered_escort.gif", kwargs...)
+function CellularSheaves.ControlSheaves.DistributedLayeredControl.animate_layered_escort(res::CellularSheaves.ControlSheaves.DistributedLayeredControl.LayeredSimulationResult; fps::Int=10, frame_step::Int=4, filename::AbstractString="layered_escort.gif", kwargs...)
     steps = res.problem.steps
     anim = @animate for k in 1:frame_step:steps
         plot(res, k; kwargs...)
@@ -58,8 +58,8 @@ end
 
 function CellularSheaves.ControlSheaves.DistributedLayeredControl.animate_scenario5(
     res::CellularSheaves.ControlSheaves.DistributedLayeredControl.LayeredSimulationResult;
-    fps::Int=15,
-    frame_step::Int=2,
+    fps::Int=10,
+    frame_step::Int=4,
     filename::AbstractString="scenario5.gif",
     label_suffix::String="",
     kwargs...

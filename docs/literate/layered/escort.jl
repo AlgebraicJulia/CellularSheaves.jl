@@ -98,7 +98,7 @@ rmprocs(workers_pids)
 # The `animate_layered_escort` function abstracts away the complex multi-panel visualization.
 # (Note: this relies on the `CellularSheavesPlots` package extension)
 
-animate_layered_escort(sim_d_res; frame_step = 2, filename = "layered_escort_tracking.gif", fps = 15)
+animate_layered_escort(sim_d_res; frame_step = 4, filename = "layered_escort_tracking.gif", fps = 10)
 nothing # hide
 
 # ![6-Agent Escort Tracking Projections](layered_escort_tracking.gif)

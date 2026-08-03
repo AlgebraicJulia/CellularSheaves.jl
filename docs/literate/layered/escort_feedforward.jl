@@ -146,7 +146,7 @@ rmprocs(workers_pids)
 # ## Visualizations
 
 # ### 1. Joint Position, Velocity & Acceleration Tracking Escort Animation
-animate_layered_escort(sim_accel_res; frame_step = 2, filename = "layered_escort_feedforward.gif", fps = 15)
+animate_layered_escort(sim_accel_res; frame_step = 4, filename = "layered_escort_feedforward.gif", fps = 10)
 nothing # hide
 
 # ![Differential Flatness Escort Tracking](layered_escort_feedforward.gif)
