@@ -93,6 +93,7 @@ makedocs(
         "generated/layered/distributed_harmonic_tracking.md",
         "generated/layered/tikhonov_harmonic_tracking.md",
         "generated/layered/layered_mpc_tikhonov_scenario5.md",
+        "generated/layered/escort.md",
         ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
