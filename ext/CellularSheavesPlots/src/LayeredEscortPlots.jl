@@ -274,6 +274,182 @@ const TARGET_COLOR = :black
     end
 end
 
+
+# ==========================
+# Scenario 5 frame recipe  (2-agent planar tracking)
+# ==========================
+
+"""
+Helper: precompute full-trajectory bounding box and static limits for scenario5 panels.
+Returns NamedTuple with all precomputed extents.
+"""
+function _scenario5_precompute(res::LayeredSimulationResult)
+    prob = res.problem
+    sim  = res.sim_data
+    qh   = res.qstar_history
+    ts   = (1:prob.steps) .* prob.dt
+    NA   = size(sim, 2)
+    T1, T2 = prob.target_nodes[1], prob.target_nodes[2]
+
+    t1_y = [prob.target_trajectory_func(T1, t)[1] for t in ts]
+    t1_z = [prob.target_trajectory_func(T1, t)[2] for t in ts]
+    t2_y = [prob.target_trajectory_func(T2, t)[1] for t in ts]
+    t2_z = [prob.target_trajectory_func(T2, t)[2] for t in ts]
+
+    all_y  = vcat(sim[:, :, 1]..., t1_y, t2_y)
+    all_z  = vcat(sim[:, :, 2]..., t1_z, t2_z)
+    min_y, max_y = minimum(all_y), maximum(all_y)
+    min_z, max_z = minimum(all_z), maximum(all_z)
+    cy  = (min_y + max_y) / 2;  cz = (min_z + max_z) / 2
+    span_yz = max(max_y - min_y, max_z - min_z) / 2 + 0.4
+
+    all_theta = sim[:, :, 3]
+    max_th    = maximum(abs.(all_theta))
+    pad_th    = max(max_th * 0.2, 0.05)
+
+    terr_all  = vcat([[norm(sim[step, i, 1:2] - qh[step, i, :]) for step in 1:prob.steps] for i in 1:NA]...)
+    max_terr  = maximum(terr_all)
+
+    return (
+        ts=ts, NA=NA, T1=T1, T2=T2,
+        t1_y=t1_y, t1_z=t1_z, t2_y=t2_y, t2_z=t2_z,
+        cy=cy, cz=cz, span_yz=span_yz,
+        max_th=max_th, pad_th=pad_th,
+        max_terr=max_terr,
+    )
+end
+
+"""
+Recipe for one animation frame of the Scenario 5 two-agent planar tracking simulation.
+Produces a 1×3 layout: y-z plane | tilt angle vs time | tracking error vs time.
+"""
+@recipe function f(res::LayeredSimulationResult, ::Val{:scenario5}, k::Int,
+                   pre::NamedTuple; label_suffix="")
+    prob = res.problem
+    sim  = res.sim_data
+    qh   = res.qstar_history
+
+    ts, NA, T1, T2      = pre.ts, pre.NA, pre.T1, pre.T2
+    t1_y, t1_z          = pre.t1_y, pre.t1_z
+    t2_y, t2_z          = pre.t2_y, pre.t2_z
+    cy, cz, span_yz     = pre.cy, pre.cz, pre.span_yz
+    max_th, pad_th       = pre.max_th, pre.pad_th
+    max_terr            = pre.max_terr
+    t_curr              = k * prob.dt
+
+    layout     := (1, 3)
+    size       --> (1200, 380)
+    plot_title := @sprintf("Scenario 5 [%s]  t = %.2f s", label_suffix, t_curr)
+    legend     := :topright
+
+    # ── Panel 1: y-z position plane ──────────────────────────────────────────
+    @series begin
+        subplot      := 1
+        aspect_ratio := 1
+        xlims        := (cy - span_yz, cy + span_yz)
+        ylims        := (cz - span_yz, cz + span_yz)
+        xlabel       := "y position [m]"
+        ylabel       := "z position [m]"
+        title        := "y-z Plane"
+        linestyle    := :dot
+        linewidth    := 1
+        color        := :gray60
+        label        := false
+        t1_y, t1_z
+    end
+    @series begin
+        subplot      := 1
+        linestyle    := :dot
+        linewidth    := 1
+        color        := :gray30
+        label        := false
+        t2_y, t2_z
+    end
+    @series begin
+        subplot     := 1
+        seriestype  := :scatter
+        marker      := :star5
+        markersize  := 10
+        color       := :gray60
+        label       := "Target 1"
+        [prob.target_trajectory_func(T1, t_curr)[1]], [prob.target_trajectory_func(T1, t_curr)[2]]
+    end
+    @series begin
+        subplot     := 1
+        seriestype  := :scatter
+        marker      := :star5
+        markersize  := 10
+        color       := :gray30
+        label       := "Target 2"
+        [prob.target_trajectory_func(T2, t_curr)[1]], [prob.target_trajectory_func(T2, t_curr)[2]]
+    end
+    for i in 1:NA
+        @series begin
+            subplot     := 1
+            seriestype  := :path
+            marker      := :circle
+            markersize  := 3
+            linewidth   := 1.4
+            alpha       := 0.7
+            color       := RING_COLOR
+            label       := (i == 1 ? "Agents" : false)
+            sim[1:k, i, 1], sim[1:k, i, 2]
+        end
+        @series begin
+            subplot     := 1
+            seriestype  := :scatter
+            marker      := :square
+            markersize  := 4
+            color       := :purple
+            alpha       := 0.3
+            label       := (i == 1 ? "Harmonic ext." : false)
+            [qh[k, i, 1]], [qh[k, i, 2]]
+        end
+    end
+
+    # ── Panel 2: tilt angle θ vs time ────────────────────────────────────────
+    @series begin
+        subplot   := 2
+        xlabel    := "time [s]"
+        ylabel    := "tilt angle θ [rad]"
+        title     := "Tilt Angle"
+        xlims     := (0, ts[end])
+        ylims     := (-max_th - pad_th, max_th + pad_th)
+        linewidth := 1.2
+        color     := RING_COLOR
+        label     := "Agent 1"
+        ts[1:k], sim[1:k, 1, 3]
+    end
+    @series begin
+        subplot   := 2
+        linewidth := 1.2
+        color     := :darkorange
+        label     := "Agent 2"
+        ts[1:k], sim[1:k, 2, 3]
+    end
+
+    # ── Panel 3: per-agent tracking error ‖pos_i − q*_i‖ ────────────────────
+    @series begin
+        subplot   := 3
+        xlabel    := "time [s]"
+        ylabel    := "position error [m]"
+        title     := "Tracking Error"
+        xlims     := (0, ts[end])
+        ylims     := (0, max_terr * 1.2 + 0.01)
+        linewidth := 1.5
+        color     := RING_COLOR
+        label     := "Agent 1"
+        ts[1:k], [norm(sim[step, 1, 1:2] - qh[step, 1, :]) for step in 1:k]
+    end
+    @series begin
+        subplot   := 3
+        linewidth := 1.5
+        color     := :darkorange
+        label     := "Agent 2"
+        ts[1:k], [norm(sim[step, 2, 1:2] - qh[step, 2, :]) for step in 1:k]
+    end
+end
+
 # ==========================
 # Main layout recipe (for escort mission)
 # ==========================

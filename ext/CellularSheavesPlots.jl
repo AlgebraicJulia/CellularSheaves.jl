@@ -55,4 +55,21 @@ function CellularSheaves.ControlSheaves.DistributedLayeredControl.animate_layere
     return anim
 end
 
+function CellularSheaves.ControlSheaves.DistributedLayeredControl.animate_scenario5(
+    res::CellularSheaves.ControlSheaves.DistributedLayeredControl.LayeredSimulationResult;
+    fps::Int=15,
+    frame_step::Int=2,
+    filename::AbstractString="scenario5.gif",
+    label_suffix::String="",
+    kwargs...
+)
+    pre = LayeredEscortPlots._scenario5_precompute(res)
+    steps = res.problem.steps
+    anim = @animate for k in 1:frame_step:steps
+        plot(res, Val(:scenario5), k, pre; label_suffix=label_suffix, kwargs...)
+    end
+    gif(anim, filename; fps=fps)
+    return anim
+end
+
 end # module CellularSheavesPlots

@@ -10,9 +10,10 @@ using ...NetworkSheaves.DistributedSolve: partition_tree, distributed_tree_solve
 using ..Tikhonov: tikhonov_step!
 using ..AgentControllers: AgentState, AbstractAgentDynamics, QuadrotorDynamics, step_agent!
 
-export init_distributed_agents!, run_layered_simulation, LayeredControlProblem, LayeredSimulationResult, animate_layered_escort
+export init_distributed_agents!, run_layered_simulation, LayeredControlProblem, LayeredSimulationResult, animate_layered_escort, animate_scenario5
 
 function animate_layered_escort end
+function animate_scenario5 end
 
 # Worker-local state storage. 
 # We use a Dict to allow a worker to potentially simulate multiple agents if NA > nworkers().
