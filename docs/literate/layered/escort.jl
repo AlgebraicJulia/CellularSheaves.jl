@@ -107,19 +107,14 @@ rho = maximum(abs.(eigvals(A_cl)))
 const NA, NT = 12, 2
 const TV1, TV2 = NA + 1, NA + 2
 const D = 4
-const I4 = Matrix{Float64}(I, D, D)
+const I3 = Matrix{Float64}(I, 3, 3)
 
 sheaf = EuclideanSheaf{Float64}(fill(D, NA + NT))
 
-# SE(3) Homogeneous Affine Transformation Matrix in R^(4x4)
-function SE3(theta, r_offset)
-    R = [cos(theta) -sin(theta) 0.0;
-         sin(theta)  cos(theta) 0.0;
-         0.0         0.0        1.0]
-    d = R * [r_offset, 0.0, 0.0]
-    return [R           d;
-            0.0 0.0 0.0 1.0]
-end
+# SE(3) Rotation Matrix around Z-axis
+Rz(theta) = [cos(theta) -sin(theta) 0.0;
+             sin(theta)  cos(theta) 0.0;
+             0.0         0.0        1.0]
 
 r_ring = 1.2
 
@@ -130,19 +125,24 @@ consensus_edges = [(1,2),(2,3),(3,4),(4,5),(5,6),(6,1),
 for (i, j) in consensus_edges
     angle_i = i <= 6 ? (i - 1) * 2π / 6 : (i - 7) * 2π / 6
     angle_j = j <= 6 ? (j - 1) * 2π / 6 : (j - 7) * 2π / 6
-    Ti = SE3(angle_i, r_ring)
-    Tj = SE3(angle_j, r_ring)
-    add_sheaf_edge!(sheaf, i, j, Ti, Tj)
+    Fi = [Rz(angle_i) zeros(3); 0 0 0 1]
+    Fj = [Rz(angle_j) zeros(3); 0 0 0 1]
+    add_sheaf_edge!(sheaf, i, j, Fi, Fj)
 end
 
-# Pinning edges to targets (target 1 for Ring A, target 2 for Ring B)
+# Pinning edges to targets (TV1 for Ring A, TV2 for Ring B)
+# Target pinning incorporates radial displacement offset r_ring in local vehicle frame
 for i in 1:6
     angle_i = (i - 1) * 2π / 6
-    add_sheaf_edge!(sheaf, i, TV1, SE3(angle_i, r_ring), I4)
+    Fi = [Rz(angle_i) zeros(3); 0 0 0 1]
+    F_t1 = [I3 -Rz(angle_i)*[r_ring, 0, 0]; 0 0 0 1]
+    add_sheaf_edge!(sheaf, i, TV1, Fi, F_t1)
 end
 for i in 7:12
     angle_i = (i - 7) * 2π / 6
-    add_sheaf_edge!(sheaf, i, TV2, SE3(angle_i, r_ring), I4)
+    Fi = [Rz(angle_i) zeros(3); 0 0 0 1]
+    F_t2 = [I3 -Rz(angle_i)*[r_ring, 0, 0]; 0 0 0 1]
+    add_sheaf_edge!(sheaf, i, TV2, Fi, F_t2)
 end
 
 target1_pos(t) = [2cos(0.4t), 2sin(0.4t), 1.5 + 0.3sin(0.8t), 1.0]
