@@ -13,6 +13,7 @@ using CellularSheaves.Formations
 using CellularSheaves.AgentControllers
 using CellularSheaves.DistributedLayeredControl
 using LinearAlgebra
+using Statistics
 using Distributed
 using Plots
 using Printf
@@ -32,9 +33,9 @@ DT = 0.05
 nx = 10
 
 # Compute Optimal LQR Gain via Discrete Algebraic Riccati Equation (DARE)
-Q_diag = [150.0, 150.0, 150.0, 50.0, 50.0, 30.0, 30.0, 30.0, 1.0, 1.0]
+Q_diag = [500.0, 500.0, 500.0, 150.0, 150.0, 100.0, 100.0, 100.0, 5.0, 5.0]
 Q_lqr = Matrix(Diagonal(Q_diag))
-R_lqr = Matrix(Diagonal([0.01, 0.01, 0.01]))
+R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
 
 lqr_controller = LQRController(dyn, DT, Q_lqr, R_lqr)
 K_lqr = lqr_controller.K
@@ -91,10 +92,40 @@ rmprocs(workers_pids)
 
 # ## Multi-Projection Trajectory & Attitude Dynamics Visualization
 
-lims_xy = (-1.8, 1.8)
-lims_z = (0.0, 1.8)
-lims_rel = (-1.5, 1.5)
 ts = (1:STEPS) .* DT
+
+# Dynamic axis limits
+all_xs = vcat([sim_d[:, i, 1] for i in 1:NA]...)
+all_ys = vcat([sim_d[:, i, 2] for i in 1:NA]...)
+target_xs = [target1_pos(TV1, t)[1] for t in ts]
+target_ys = [target1_pos(TV1, t)[2] for t in ts]
+min_xy = minimum(vcat(all_xs, all_ys, target_xs, target_ys))
+max_xy = maximum(vcat(all_xs, all_ys, target_xs, target_ys))
+pad_xy = (max_xy - min_xy) * 0.15 + 0.2
+lims_xy = (min_xy - pad_xy, max_xy + pad_xy)
+lims_rel = (-r_ring*1.8, r_ring*1.8)
+
+max_roll = maximum(abs.(rad2deg.(sim_d[:, :, 4])))
+max_pitch = maximum(abs.(rad2deg.(sim_d[:, :, 5])))
+lims_roll = (-max_roll*1.2 - 1.0, max_roll*1.2 + 1.0)
+lims_pitch = (-max_pitch*1.2 - 1.0, max_pitch*1.2 + 1.0)
+
+# Calculate tracking and formation deviations over time
+formation_dev = zeros(STEPS)
+tracking_dev = zeros(STEPS)
+for step in 1:STEPS
+    c = [mean(sim_d[step, :, 1]), mean(sim_d[step, :, 2])]
+    t = target1_pos(TV1, ts[step])[1:2]
+    tracking_dev[step] = norm(c - t)
+    
+    dev = 0.0
+    for i in 1:NA
+        dev += abs(norm([sim_d[step, i, 1], sim_d[step, i, 2]] - c) - r_ring)
+        next_i = (i % NA) + 1
+        dev += abs(norm([sim_d[step, i, 1], sim_d[step, i, 2]] - [sim_d[step, next_i, 1], sim_d[step, next_i, 2]]) - r_ring)
+    end
+    formation_dev[step] = dev / (2*NA)
+end
 
 anim = @animate for k in 1:2:STEPS
     t_curr = k * DT
@@ -102,13 +133,20 @@ anim = @animate for k in 1:2:STEPS
     p1 = plot(; aspect_ratio = 1, xlims = lims_xy, ylims = lims_xy,
               xlabel = "x position (m)", ylabel = "y position (m)",
               title = "World Top-Down View (x-y Plane)", legend = false)
-    target_orbit_t = range(0, STEPS*DT; length=100) # slow moving target trajectory path
+    target_orbit_t = range(0, STEPS*DT; length=100) # target trajectory path
     plot!(p1, [target1_pos(TV1, t)[1] for t in target_orbit_t], [target1_pos(TV1, t)[2] for t in target_orbit_t]; color = :gray80, linestyle = :dot, linewidth = 1)
     scatter!(p1, [target1_pos(TV1, t_curr)[1]], [target1_pos(TV1, t_curr)[2]]; marker = :star5, markersize = 10, color = TARGET_COLOR)
+    
+    ## Draw centroid virtual agent
+    c_curr_x = mean(sim_d[k, :, 1])
+    c_curr_y = mean(sim_d[k, :, 2])
+    scatter!(p1, [c_curr_x], [c_curr_y]; marker = :square, markersize = 5, color = :red)
     for i in 1:NA
         plot!(p1, sim_d[1:k, i, 1], sim_d[1:k, i, 2];
               seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
               linewidth = 1.4, color = RING_COLOR)
+        ## Harmonic extension reference for this agent
+        scatter!(p1, [q_d[k, i, 1]], [q_d[k, i, 2]]; marker = :square, markersize = 4, color = :purple, alpha = 0.3)
     end
     
     ## Draw communication topology (ring)
@@ -131,6 +169,11 @@ anim = @animate for k in 1:2:STEPS
         plot!(p2, rel_x_hist, rel_y_hist; 
               seriestype = :path, marker = :circle, markersize = 3, alpha = 0.6,
               linewidth = 1.4, color = RING_COLOR)
+              
+        # Harmonic extension reference in relative coordinates
+        ref_rel_x = q_d[k, i, 1] - target1_pos(TV1, t_curr)[1]
+        ref_rel_y = q_d[k, i, 2] - target1_pos(TV1, t_curr)[2]
+        scatter!(p2, [ref_rel_x], [ref_rel_y]; marker = :square, markersize = 4, color = :purple, alpha = 0.3)
     end
     
     ## Draw communication topology (ring) in target-centered frame
@@ -141,18 +184,26 @@ anim = @animate for k in 1:2:STEPS
     plot!(p2, ring_rel_x, ring_rel_y; color = :gray80, linestyle = :dot, linewidth = 1)
 
     p3 = plot(; xlabel = "time (s)", ylabel = "roll angle ϕ (deg)",
-              title = "Roll Tilt Dynamics ϕ(t)", legend = false, xlims = (0, 10.0), ylims = (-10.0, 10.0))
+              title = "Roll Tilt Dynamics ϕ(t)", legend = false, xlims = (0, ts[end]), ylims = lims_roll)
     for i in 1:NA
         plot!(p3, ts[1:k], rad2deg.(sim_d[1:k, i, 4]); linewidth = 1.2, color = RING_COLOR)
     end
 
     p4 = plot(; xlabel = "time (s)", ylabel = "pitch angle θ (deg)",
-              title = "Pitch Tilt Dynamics θ(t)", legend = false, xlims = (0, 10.0), ylims = (-10.0, 10.0))
+              title = "Pitch Tilt Dynamics θ(t)", legend = false, xlims = (0, ts[end]), ylims = lims_pitch)
     for i in 1:NA
         plot!(p4, ts[1:k], rad2deg.(sim_d[1:k, i, 5]); linewidth = 1.2, color = RING_COLOR)
     end
 
-    plot(p1, p2, p3, p4; layout = (2, 2), size = (900, 700),
+    p5 = plot(; xlabel = "time (s)", ylabel = "error (m)",
+              title = "Formation Shape Error", legend = false, xlims = (0, ts[end]), ylims = (0, maximum(formation_dev)*1.2 + 0.01))
+    plot!(p5, ts[1:k], formation_dev[1:k]; linewidth = 1.5, color = :purple)
+
+    p6 = plot(; xlabel = "time (s)", ylabel = "error (m)",
+              title = "Target Tracking Error", legend = false, xlims = (0, ts[end]), ylims = (0, maximum(tracking_dev)*1.2 + 0.01))
+    plot!(p6, ts[1:k], tracking_dev[1:k]; linewidth = 1.5, color = :orange)
+
+    plot(p1, p2, p3, p4, p5, p6; layout = (2, 3), size = (1200, 700),
          plot_title = @sprintf("6-Agent SE(3) Moving Escort Ring (t = %.2f s)", t_curr))
 end
 gif(anim, "layered_escort_tracking.gif"; fps = 15)
