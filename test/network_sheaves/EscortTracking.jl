@@ -57,20 +57,20 @@ using Distributed
     partition = partition_tree(Lfac, 3)
     nchunk = length(partition.chunks)
 
-    # Spawn workers to test distributed solving
-    pids = addprocs(nchunk; exeflags = ["--project=$(pkgdir(CellularSheaves))"])
-    try
-        @everywhere pids using CellularSheaves
-        
-        rhs = Vector(-LIB * target1_pos)
-        rhs_p = Vector(F.P' \ rhs)
-        
-        y_sol = distributed_tree_solve(Lfac, rhs_p, nchunk; pids = pids)
-        qstar_distributed = F.P \ y_sol
-
-        @test qstar_full ≈ qstar_distributed atol=1e-12
-    finally
-        rmprocs(pids)
+    # Spawn or reuse workers to test distributed solving
+    needed = nchunk - (nworkers() - 1)
+    if needed > 0
+        addprocs(needed; exeflags = ["--project=$(pkgdir(CellularSheaves))"])
     end
+    pids = workers()[1:nchunk]
+    @everywhere pids using CellularSheaves
+    
+    rhs = Vector(-LIB * target1_pos)
+    rhs_p = Vector(F.P' \ rhs)
+    
+    y_sol = distributed_tree_solve(Lfac, rhs_p, nchunk; pids = pids)
+    qstar_distributed = F.P \ y_sol
+
+    @test qstar_full ≈ qstar_distributed atol=1e-12
 
 end
