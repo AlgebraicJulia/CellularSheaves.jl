@@ -214,6 +214,5 @@ using Random
             # simultaneous cross-process channels at once, not just one
             check_distributed(random_connected_graph(16, 42), 3)
             check_distributed(Graphs.grid([4, 5]), 3)
-        end
     end
 end
