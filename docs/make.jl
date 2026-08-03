@@ -34,7 +34,7 @@ if !no_literate
         Literate.markdown(src_path, out_dir;
           execute=execute, config=config, documenter=false, credit=false)
         Literate.notebook(src_path, out_dir;
-          execute=execute, documenter=false, credit=false)
+          execute=false, documenter=false, credit=false)
       end
     end
   end
