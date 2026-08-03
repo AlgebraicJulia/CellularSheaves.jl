@@ -241,7 +241,6 @@ anim = @animate for k in 1:6:STEPS
     t_curr = k * DT
     lo = max(1, k - trail)
     
-    # 1. World Top-Down View
     p1 = plot(; aspect_ratio = 1, xlims = lims_xy, ylims = lims_xy,
               xlabel = "x position (m)", ylabel = "y position (m)",
               title = "World Top-Down View (x-y Plane)", legend = false)
@@ -259,11 +258,9 @@ anim = @animate for k in 1:6:STEPS
     scatter!(p1, [target1_pos(t_curr)[1]], [target1_pos(t_curr)[2]]; marker = :star5, markersize = 8, color = TARGET_A)
     scatter!(p1, [target2_pos(t_curr)[1]], [target2_pos(t_curr)[2]]; marker = :star5, markersize = 8, color = TARGET_B)
 
-    # 2. Target 1-Centered Relative Escort Ring Frame
     p2 = plot(; aspect_ratio = 1, xlims = lims_rel, ylims = lims_rel,
               xlabel = "rel x to T1 (m)", ylabel = "rel y to T1 (m)",
               title = "Target 1-Centered Escort Ring A (1.2m)", legend = false)
-    # Draw reference 1.2m circle
     circ_ang = range(0, 2π; length = 100)
     plot!(p2, 1.2 .* cos.(circ_ang), 1.2 .* sin.(circ_ang); color = :gray80, linestyle = :dash, linewidth = 1)
     scatter!(p2, [0.0], [0.0]; marker = :star5, markersize = 10, color = TARGET_A)
@@ -273,7 +270,6 @@ anim = @animate for k in 1:6:STEPS
         scatter!(p2, [rel_x], [rel_y]; marker = :circle, markersize = 6, color = RING_A)
     end
 
-    # 3. Roll Tilt Dynamics
     p3 = plot(; xlabel = "time (s)", ylabel = "roll angle ϕ (deg)",
               title = "Roll Tilt Dynamics ϕ(t) [y-accel]", legend = false, xlims = (0, 31.5), ylims = (-10.0, 10.0))
     for i in 1:NA
@@ -282,7 +278,6 @@ anim = @animate for k in 1:6:STEPS
         plot!(p3, ts[1:k], rad2deg.(sim_d[1:k, i, 4]); linewidth = 1.2, color = col, linestyle = sty)
     end
 
-    # 4. Pitch Tilt Dynamics
     p4 = plot(; xlabel = "time (s)", ylabel = "pitch angle θ (deg)",
               title = "Pitch Tilt Dynamics θ(t) [x-accel]", legend = false, xlims = (0, 31.5), ylims = (-10.0, 10.0))
     for i in 1:NA
