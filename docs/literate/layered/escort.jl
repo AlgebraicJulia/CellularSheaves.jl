@@ -152,7 +152,6 @@ function run_escort_simulation(mode=:distributed)
     STEPS = 120
     epsilon = 0.02
 
-    # Initialize 10D states for 12 agents around their initial positions
     init_states = [zeros(10) for _ in 1:NA]
     for i in 1:6
         angle = (i - 1) * 2π / 6
@@ -163,7 +162,7 @@ function run_escort_simulation(mode=:distributed)
         init_states[i][1:3] = [-2cos(angle), -2sin(angle), 1.5]
     end
 
-    for i in 1:nchunk # Initialize agent flight computer state on worker process i
+    for i in 1:nchunk
         remotecall_fetch(Main.init_worker_agent!, workers_pids[i], init_states[i], K_lqr, Ad, Bd, epsilon)
     end
 
@@ -190,7 +189,7 @@ function run_escort_simulation(mode=:distributed)
             qstar_history[t_idx, i, :] = qstar[i]
         end
 
-        step_futures = [remotecall(Main.step_worker_agent!, workers_pids[i], qstar[i], DT) for i in 1:nchunk] # Dispatch 3D target to workers
+        step_futures = [remotecall(Main.step_worker_agent!, workers_pids[i], qstar[i], DT) for i in 1:nchunk]
         step_results = fetch.(step_futures)
 
         for i in 1:nchunk
