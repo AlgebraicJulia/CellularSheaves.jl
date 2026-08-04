@@ -19,12 +19,14 @@ struct UzawaSolver{UPLO, T, I <: Integer} <: KKTSolver{T}
     facwrk::FactorizationWorkspace{T, I}
     divwrk::DivisionWorkspace{T, I}
     itrwrk::CraigWorkspace{T}
-    r::Vector{T}
-    α::Scalar{T}
-    sd::Vector{T}   # refinement scratch: dual residual (n)
-    sp::Vector{T}   # refinement scratch: primal residual (m)
-    dp::Vector{T}   # refinement scratch: primal correction (n)
-    dy::Vector{T}   # refinement scratch: dual correction (m)
+    r::FVector{T}
+    α::FScalar{T}
+    sd::FVector{T}   # refinement scratch: dual residual (n)
+    sp::FVector{T}   # refinement scratch: primal residual (m)
+    dp::FVector{T}   # refinement scratch: primal correction (n)
+    dy::FVector{T}   # refinement scratch: dual correction (m)
+    xc::FVector{T}   # craig correction scratch: δx (n)
+    yc::FVector{T}   # craig correction scratch: δy (m)
 end
 
 function UzawaSolver(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I}) where {UPLO, T, I <: Integer}
@@ -32,9 +34,12 @@ function UzawaSolver(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix
     facwrk = FactorizationWorkspace(F)
     divwrk = DivisionWorkspace(F, 1)
     itrwrk = CraigWorkspace{T}(m, n)
-    r = zeros(T, m)
-    α = ones(T)
-    return UzawaSolver(F, L, facwrk, divwrk, itrwrk, r, α, zeros(T, n), zeros(T, m), zeros(T, n), zeros(T, m))
+    r = FVector{T}(undef, m)
+    α = FScalar{T}(undef)
+    α[] = one(T)
+    return UzawaSolver(F, L, facwrk, divwrk, itrwrk, r, α,
+                       FVector{T}(undef, n), FVector{T}(undef, m), FVector{T}(undef, n), FVector{T}(undef, m),
+                       FVector{T}(undef, n), FVector{T}(undef, m))
 end
 
 function makekkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAULT_ELIMINATION_ALGORITHM) where {T, I}
@@ -125,7 +130,7 @@ function solvekkt!(
     #
     # base solve
     #
-    nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.F, A, B,
+    nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.xc, wrk.yc, wrk.F, A, B,
                              f, rp, wrk.α[], atol, y0)
     #
     # iterative refinement of the 2-row residual
@@ -174,7 +179,7 @@ function solvekkt!(
         #   [ A -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
+        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.xc, wrk.yc, wrk.F, A, B,
                           sd, sp, wrk.α[], atol; θ = T(INTERIOR_THETA))
         nrefine += n
         npass += 1
@@ -198,6 +203,8 @@ function solveuzw!(
         x::AbstractVector{T},
         y::AbstractVector{T},
         r::AbstractVector{T},
+        xc::AbstractVector{T},
+        yc::AbstractVector{T},
         F::ChordalTriangular{:N, UPLO, T},
         A::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -256,14 +263,14 @@ function solveuzw!(
     # only (rtol = 0): base solves (θ = 0) drive to exactly atol; interior inexact-Uzawa passes (θ > 0)
     # stop at max(atol, θ·nr0), each reducing its own entry residual by ~1/θ and no further. max(atol, 0)
     # = atol, so the one formula covers both.
-    nc, _ = craig!(itrwrk, B, F, divwrk, r; btol = zero(T), atol = max(atol, θ * nr0), rtol = zero(T))
+    nc, _ = craig!(itrwrk, B, F, divwrk, xc, yc, r; btol = zero(T), atol = max(atol, θ * nr0), rtol = zero(T))
     niter += nc
     #
     # update x:
     #
     #   x = x + δx
     #
-    axpy!(one(T), itrwrk.x, x)
+    axpy!(one(T), xc, x)
     #
     # recover y:
     #
@@ -271,7 +278,7 @@ function solveuzw!(
     #
     copyto!(r, g)
     mul!(r, B, x, -one(T), one(T))
-    copyto!(y, itrwrk.y)
+    copyto!(y, yc)
     axpy!(one(T), r, y)
     lmul!(α, y)
 

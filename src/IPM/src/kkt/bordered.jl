@@ -5,14 +5,17 @@
 # solvekkt! does the bordered base solve (newton!) + the 3-row refinement (refinehsd!).
 struct BorderedSolver{T, W <: KKTSolver{T}} <: KKTSolver{T}
     inner::W          # the 2-row solver (factor + base solve primitive)
-    Δp2::Vector{T}    # cached Woodbury column, primal part (n)
-    Δy2::Vector{T}    # cached Woodbury column, dual part (m)
-    aτ::Vector{T}     # cached border row c - 2Qp/τ (n)
-    QΔp2::Vector{T}   # capacitance scratch (n)
-    S::Scalar{T}      # cached capacitance scalar
+    Δp2::FVector{T}    # cached Woodbury column, primal part (n)
+    Δy2::FVector{T}    # cached Woodbury column, dual part (m)
+    aτ::FVector{T}     # cached border row c - 2Qp/τ (n)
+    QΔp2::FVector{T}   # capacitance scratch (n)
+    S::FScalar{T}      # cached capacitance scalar
 end
 
 function BorderedSolver(inner::W, B::BlockSparseMatrix{T, I}) where {T, I, W <: KKTSolver{T}}
     m, n = size(B)
-    return BorderedSolver(inner, zeros(T, n), zeros(T, m), zeros(T, n), zeros(T, n), ones(T))
+    S = FScalar{T}(undef)
+    S[] = one(T)
+    return BorderedSolver(inner, FVector{T}(undef, n), FVector{T}(undef, m),
+                          FVector{T}(undef, n), FVector{T}(undef, n), S)
 end
