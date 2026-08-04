@@ -211,46 +211,79 @@ end
 #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
 #   [ B   0  ] [ Δy2 ] = [ g ]
 #
-function woodbury!(s::HSDSolver{T}; force_tol::T, floor_tol::T, y0 = nothing) where {T}
-    return woodbury!(
-        s.wrk, s.kkt, s.settings, s.H, s.B, s.c, s.g, s.nc[], s.ng[];
-        force_tol, floor_tol, y0,
-    )
+# BorderedSolver do-once: factor F (inner, combined H), solve & cache the Woodbury column
+# w₂ = KKT⁻¹[c; g] to atol, and compute & cache the capacitance scalar S and border row aτ. Returns
+# (ok, ρ, (wbase, wrefn, wpass, wstat, wfres, wpres, wdres)) — the border solve's counts for the history.
+function initkkt!(
+        bw::BorderedSolver{T},
+        H::BlockSparseMatrix{T},
+        Hc::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        c::AbstractVector{T},
+        g::AbstractVector{T},
+        Q::BlockSparseMatrix{T};
+        α::T,
+        rgmin::T,
+        p::AbstractVector{T},
+        τ::T,
+        κ::T,
+        Qp::AbstractVector{T},
+        y0,
+        nc::T,
+        ng::T,
+        force_tol::T,
+        floor_tol::T,
+        stall::T,
+        itmax::Int,
+    ) where {T}
+    ok, ρ = initkkt!(bw.inner, H; α, rgmin)
+    ok || return ok, ρ, (0, 0, 0, REFINE_ITMAX, T(NaN), T(NaN), T(NaN))
+    #
+    # solve & cache the Woodbury column   [ H -Bᵀ; B 0 ] [Δp2; Δy2] = [c; g]   to atol
+    #
+    wtuple = solvekkt!(bw.inner, bw.Δp2, bw.Δy2, H, B, c, g, nc, ng, y0;
+                       force_tol, floor_tol, stall, itmax)
+    #
+    # cache the capacitance scalar S and border row aτ = c - 2Qp/τ (stable split form)
+    #
+    bw.S[] = capacitance!(bw.QΔp2, bw.aτ, τ, κ, bw.Δp2, c, Qp, p, Hc, Q)
+    return ok, ρ, wtuple
 end
 
-function woodbury!(
-        w::HSDWorkspace{T},
-        kkt::KKTWorkspace{T},
-        set::HSDSettings{T},
+# BorderedSolver solve: the bordered guarantee — newton! (2-row base + Schur lift, reusing the cached
+# Woodbury column and capacitance) then refinehsd! (3-row iterative refinement). Refinement scratch is
+# the inner solver's. Returns (nbase, nrefine, npass, status, fres, entry_pres, entry_dres, Δτ).
+function solvekkt!(
+        bw::BorderedSolver{T},
+        Δp::AbstractVector{T},
+        Δy::AbstractVector{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         c::AbstractVector{T},
         g::AbstractVector{T},
+        Qp::AbstractVector{T},
+        p::AbstractVector{T},
+        τ::T,
+        κ::T,
+        f::AbstractVector{T},
+        rp::AbstractVector{T},
+        fτ::T,
         nc::T,
-        ng::T;
+        ng::T,
+        y0 = nothing;
         force_tol::T,
         floor_tol::T,
-        y0 = nothing,
+        stall::T,
+        itmax::Int,
     ) where {T}
     atol = max(force_tol, floor_tol)
-    #
-    # solve for the Woodbury auxiliary directions
-    #
-    #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
-    #   [ B   0  ] [ Δy2 ] = [ g ]
-    #
-    wbase, wfres = solve_kkt!(kkt, w.Δp2, w.Δy2, H, B, c, g, y0; atol)
-    #
-    # use iterative refinement to improve tha
-    # accuracy of the solutions Δp2, Δy2
-    #
-    wpass, wrefn, wstat, wpres, wdres = refinekkt!(
-        w.Δp2, w.Δy2, kkt, H, B,
-        c, g, w.sy, w.sp, w.dp, w.dy, nc, ng;
-        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
+    nbase, Δτ, fres = newton!(Δp, Δy, bw.inner, H, B, g, f, rp, fτ, bw.Δp2, bw.Δy2, bw.aτ, bw.S[], y0; atol)
+    npass, nrefine, status, Δτ, pres1, dres1 = refinehsd!(
+        Δp, Δy, Δτ, bw.inner, H, B, c, g, Qp, p, bw.aτ, τ, κ, rp, f, fτ, bw.Δp2, bw.Δy2, bw.S[],
+        bw.inner.sp, bw.inner.sd, bw.inner.dp, bw.inner.dy, nc, ng;
+        itmax, force_tol, floor_tol, stall,
     )
-
-    return wbase, wrefn, wpass, wstat, wfres, wpres, wdres
+    return nbase, nrefine, npass, status, fres, pres1, dres1, Δτ
 end
 
 function capacitance!(
@@ -288,11 +321,6 @@ function capacitance!(
     return S
 end
 
-function capacitance!(s::HSDSolver)
-    w = s.wrk
-    return capacitance!(w.QΔp2, w.aτ, s.τ[], s.κ[], w.Δp2, s.c, w.Qp, s.p, s.Hc, s.Q)
-end
-
 ############################################################################################
 # refinehsd! — Govaerts–Pryce BE+1 refinement on the 3-row bordered system
 ############################################################################################
@@ -301,7 +329,7 @@ function refinehsd!(
     Δp::AbstractVector{T},
     Δy::AbstractVector{T},
     Δτ::T,
-    wrk::KKTWorkspace{T},
+    wrk::UzawaSolver{UPLO, T},
     H::BlockSparseMatrix{T},
     B::BlockSparseMatrix{T},
     c::AbstractVector{T},
@@ -327,7 +355,7 @@ function refinehsd!(
     force_tol::T,
     floor_tol::T,
     stall::T,
-) where {T}
+) where {UPLO, T}
     niter = 0
     npass = 0
     status = REFINE_ITMAX
@@ -392,7 +420,7 @@ function refinehsd!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        n, _ = solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
+        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, H, B, sd, sp, wrk.α[], max(force_tol, floor_tol))
         niter += n
         npass += 1
         #
@@ -434,7 +462,7 @@ end
 function newton!(
         Δp::AbstractVector{T},
         Δy::AbstractVector{T},
-        wrk::KKTWorkspace{T},
+        wrk::UzawaSolver{UPLO, T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         g::AbstractVector{T},
@@ -447,14 +475,14 @@ function newton!(
         S::T,
         y0 = nothing;
         atol::T = T(0.1),
-    ) where {T}
+    ) where {UPLO, T}
     #
-    # solve for Δp and Δy:
+    # base solve for Δp and Δy (the 2-row primitive; the 3-row refinement is refinehsd!):
     #
     #   [ H -Bᵀ ] [ Δp ] = [ f  ]
     #   [ B  0  ] [ Δy ]   [ rp ]
     #
-    niter, nr0 = solve_kkt!(wrk, Δp, Δy, H, B, f, rp, y0; atol)
+    niter, nr0 = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.F, H, B, f, rp, wrk.α[], atol, y0)
     #
     # apply the Schur lift:
     #
@@ -488,17 +516,17 @@ end
 #
 #   Δκa = -κ (1 + Δτa/τ)
 #
-function solvepredictor!(s::HSDSolver{T}, gap::T, aτ::AbstractVector{T}, S::T; force_tol::T, floor_tol::T) where {T}
+function solvepredictor!(s::HSDSolver{T}, gap::T; force_tol::T, floor_tol::T) where {T}
     return solvepredictor!(
         s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.p, s.d,
-        s.τ[], s.κ[], s.nc[], s.ng[], gap, aτ, S;
+        s.τ[], s.κ[], s.nc[], s.ng[], gap;
         force_tol, floor_tol,
     )
 end
 
 function solvepredictor!(
         w::HSDWorkspace{T},
-        kkt::KKTWorkspace{T},
+        kkt::BorderedSolver{T},
         set::HSDSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -511,39 +539,22 @@ function solvepredictor!(
         κ::T,
         nc::T,
         ng::T,
-        gap::T,
-        aτ::AbstractVector{T},
-        S::T;
+        gap::T;
         force_tol::T,
         floor_tol::T,
     ) where {T}
-    atol = max(force_tol, floor_tol)
-
     axpby!(-1,  d, 0, w.f)
     axpby!( 1, w.rd, 1, w.f)
     #
-    # solve for the directions Δpa, Δya, and Δτa
+    # solve for the directions Δpa, Δya, and Δτa (bordered base + 3-row refinement)
     #
     #   [  H          -Bᵀ             -c ] [ Δpa ]   [ rd - d ]
     #   [  B           0              -g ] [ Δya ] = [ rp     ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
-    pbase, Δτa, pfres = newton!(
-        w.Δpa, w.Δya,
-        kkt, H, B, g,
-        w.f, w.rp, gap, w.Δp2, w.Δy2, aτ, S;
-        atol
-    )
-    #
-    # use iterative refinement to improve
-    # the solutions Δpa, Δya, and Δτa
-    #
-    ppass, prefn, pstat, Δτa, ppres, pdres = refinehsd!(
-        w.Δpa, w.Δya, Δτa,
-        kkt, H, B, c, g, w.Qp, p, aτ,
-        τ, κ, w.rp, w.f, gap, w.Δp2, w.Δy2, S,
-        w.sy, w.sp, w.dp, w.dy, nc, ng;
-        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall
+    pbase, prefn, ppass, pstat, pfres, ppres, pdres, Δτa = solvekkt!(
+        kkt, w.Δpa, w.Δya, H, B, c, g, w.Qp, p, τ, κ, w.f, w.rp, gap, nc, ng;
+        force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δda:
@@ -574,18 +585,18 @@ end
 #
 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
 #
-function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T, aτ::AbstractVector{T}, S::T; force_tol::T, floor_tol::T) where {T}
+function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T; force_tol::T, floor_tol::T) where {T}
     return solvecorrector!(
         s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.K, s.p, s.d,
         s.caches, s.conewrk, s.ν, s.τ[], s.κ[], s.nc[], s.ng[],
-        μ, gap, Δτa, Δκa, aτ, S;
+        μ, gap, Δτa, Δκa;
         force_tol, floor_tol,
     )
 end
 
 function solvecorrector!(
         w::HSDWorkspace{T},
-        kkt::KKTWorkspace{T},
+        kkt::BorderedSolver{T},
         set::HSDSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -605,13 +616,10 @@ function solvecorrector!(
         μ::T,
         gap::T,
         Δτa::T,
-        Δκa::T,
-        aτ::AbstractVector{T},
-        S::T;
+        Δκa::T;
         force_tol::T,
         floor_tol::T,
     ) where {T}
-    atol = max(force_tol, floor_tol)
     #
     # compute the largest step length αa ∈ (0, 1]
     # such that the perturbed iterates
@@ -678,7 +686,7 @@ function solvecorrector!(
 
     axpy!(1, w.rd, w.f)
 
-    axpy!(-Δτa, w.Δy2, w.Δya)
+    axpy!(-Δτa, kkt.Δy2, w.Δya)
     #
     # solve for the directions Δp, Δy, and Δτ
     #
@@ -686,22 +694,9 @@ function solvecorrector!(
     #   [ B            0                -g ] [ Δy ] = [ rp                          ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
-    cbase, Δτ, cfres = newton!(
-        w.Δp, w.Δy,
-        kkt, H, B, g,
-        w.f, w.rp, fτ, w.Δp2, w.Δy2, aτ, S, w.Δya;
-        atol
-    )
-    #
-    # use iterative refinement to improve
-    # the solutions Δp, Δy, and Δτ
-    #
-    cpass, crefn, cstat, Δτ, cpres, cdres = refinehsd!(
-        w.Δp, w.Δy, Δτ,
-        kkt, H, B, c, g, w.Qp, p, aτ,
-        τ, κ, w.rp, w.f, fτ, w.Δp2, w.Δy2, S,
-        w.sy, w.sp, w.dp, w.dy, nc, ng;
-        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall
+    cbase, crefn, cpass, cstat, cfres, cpres, cdres, Δτ = solvekkt!(
+        kkt, w.Δp, w.Δy, H, B, c, g, w.Qp, p, τ, κ, w.f, w.rp, fτ, nc, ng, w.Δya;
+        force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δd:
@@ -770,7 +765,8 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::HSDSettings{T}) wher
         g = prob.g
     end
 
-    R, P, B, kkt = make_kkt(B; elim=settings.elim)
+    R, P, B, kkt = makekkt(B; elim=settings.elim)
+    kkt = BorderedSolver(kkt, B)   # HSD solves the 3-row bordered system
 
     c = P * c
     Q = halfselectvtxs(halfselectvtxs(Q, R.perm), R.perm)
@@ -927,8 +923,23 @@ function nearstatus(s::HSDSolver, status::IPMStatus)
 end
 
 ############################################################################################
-# step!
+# initkkt! (HSD) / step!
 ############################################################################################
+
+# HSD bordered do-once: factor F and solve/cache the Woodbury column + capacitance. The border w₂ solve
+# needs the refinement tolerances, so step! computes them before calling this. Updates the running ρ-floor
+# and the warm start s.Δy0. Returns (ok, ρ, wtuple) where wtuple carries the border solve's counts.
+function initkkt!(s::HSDSolver{T}; force_tol::T, floor_tol::T) where {T}
+    w = s.wrk; set = s.settings
+    flag, ρ, wtuple = initkkt!(
+        s.kkt, s.H, s.Hc, s.B, s.c, s.g, s.Q;
+        α=s.α[], rgmin=s.ρ[], p=s.p, τ=s.τ[], κ=s.κ[], Qp=w.Qp, y0=s.Δy0,
+        nc=s.nc[], ng=s.ng[], force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
+    )
+    s.ρ[] = max(s.ρ[], ρ)
+    flag && copyto!(s.Δy0, s.kkt.Δy2)   # warm start for next iteration's w₂ solve
+    return flag, ρ, wtuple
+end
 
 function step!(s::HSDSolver{T}) where {T}
     status = CONTINUE
@@ -1009,8 +1020,22 @@ function step!(s::HSDSolver{T}) where {T}
             # choose augmentation parameter α
             #
             setaug!(s, T(CTRL_CAP_HSD))
-
-            initok, ρ = @timeit s.timers "initkkt" initkkt!(s)
+            #
+            # compute the KKT-solve tolerances (the border w₂ solve inside initkkt! needs them)
+            #
+            #   force: min(θ μ/μ₁, ceil)
+            #   floor: 100ϵ (1 + max(‖rp‖, ‖rd‖))
+            #
+            μ1 = isempty(s.hist.μ) ? μ : first(s.hist.μ)
+            force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
+            floor_tol = 100eps(T) * (1 + max(norm(w.rp, Inf), norm(w.rd, Inf)))
+            #
+            # factor F and solve/cache the Woodbury column w₂ + capacitance (the bordered do-once)
+            #
+            #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
+            #   [ B   0  ] [ Δy2 ] = [ g ] ,   S = Δp2ᵀ W Δp2 + (Δp2 - p/τ)ᵀ Q (Δp2 - p/τ) + κ/τ
+            #
+            initok, ρ, wtuple = @timeit s.timers "initkkt" initkkt!(s; force_tol, floor_tol)
             if !initok
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
@@ -1018,34 +1043,7 @@ function step!(s::HSDSolver{T}) where {T}
 
                 status = nearstatus(s, NUMERICAL_FAILURE)
             else
-                #
-                # compute tolerances for predictor and corrector solves
-                #
-                #   force: min(θ μ/μ₁, ceil)
-                #   floor: 100ϵ (1 + max(‖rp‖, ‖rd‖))
-                #
-                if isempty(s.hist.μ)
-                    μ1 = μ
-                else
-                    μ1 = first(s.hist.μ)
-                end
-
-                force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
-                floor_tol = 100eps(T) * (1 + max(norm(w.rp, Inf), norm(w.rd, Inf)))
-                #
-                # solve for the Woodbury auxiliary directions
-                #
-                #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
-                #   [ B   0  ] [ Δy2 ] = [ g ]
-                #
-                wbase, wrefn, wpass, wstat, wfres, wpres, wdres = @timeit s.timers "woodbury" woodbury!(s; force_tol, floor_tol, y0 = s.Δy0)
-                copyto!(s.Δy0, w.Δy2)
-                #
-                # compute the Woodbury capacitance scalar
-                #
-                #   S = Δp2ᵀ W Δp2 + (Δp2 - p/τ)ᵀ Q (Δp2 - p/τ) + κ/τ
-                #
-                S = capacitance!(s)
+                wbase, wrefn, wpass, wstat, wfres, wpres, wdres = wtuple
                 #
                 # solve for the Mehrota predictor direction
                 #
@@ -1053,11 +1051,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δya ] = [ rp     ]
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
                 #
-                # and recover
-                #
-                #   Δκa = (-τκ - κ Δτa) / τ
-                #
-                pbase, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s, gap, w.aτ, S; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s, gap; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -1071,11 +1065,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δy ] = [ rp                          ]
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
                 #
-                # where rd* is the corrected dual residual, and recover
-                #
-                #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
-                #
-                cbase, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa, w.aτ, S; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; force_tol, floor_tol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone

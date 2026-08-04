@@ -53,30 +53,6 @@ function result(s::IPMSolver{T}, status::IPMStatus) where {T}
 end
 
 ############################################################################################
-# mulkkt!
-############################################################################################
-
-#
-# compute the matrix-vector product
-#
-#   [ u ] = [ A  -Bᵀ ] [ x ]
-#   [ v ]   [ B   0  ] [ y ]
-#
-function mulkkt!(
-        u::AbstractVector{T},
-        v::AbstractVector{T},
-        A::AbstractMatrix{T},
-        B::BlockSparseMatrix{T},
-        x::AbstractVector{T},
-        y::AbstractVector{T},
-    ) where {T}
-    mul!(u, Symmetric(A, :L), x)
-    mul!(u, B', y, -one(T), one(T))
-    mul!(v, B, x)
-    return
-end
-
-############################################################################################
 # residuals!
 ############################################################################################
 
@@ -102,94 +78,6 @@ function residuals!(s::IPMSolver{T}) where {T}
 end
 
 ############################################################################################
-# refinekkt! — solver-owned refinement loop for the 2-row system
-############################################################################################
-
-function refinekkt!(
-    Δp::AbstractVector{T},
-    Δy::AbstractVector{T},
-    wrk::KKTWorkspace{T},
-    H::BlockSparseMatrix{T},
-    B::BlockSparseMatrix{T},
-    f::AbstractVector{T},
-    rp::AbstractVector{T},
-    sp::AbstractVector{T},  # scratch for primal residual
-    sd::AbstractVector{T},  # scratch for dual residual
-    dp::AbstractVector{T},
-    dy::AbstractVector{T},
-    nc::T,
-    ng::T;
-    itmax::Int,
-    force_tol::T,
-    floor_tol::T,
-    stall::T,
-) where {T}
-    niter = 0
-    npass = 0
-    status = REFINE_ITMAX
-    prv = typemax(T)
-    pres1 = T(NaN)
-    dres1 = T(NaN)
-
-    for i in 1:itmax
-        #
-        # compute the residuals
-        #
-        #   [ sd ] = [ f  ] - [ H -Bᵀ ] [ Δp ]
-        #   [ sp ]   [ rp ]   [ B  0  ] [ Δy ]
-        #
-        mulkkt!(sd, sp, H, B, Δp, Δy)
-        axpby!(one(T), f,  -one(T), sd)
-        axpby!(one(T), rp, -one(T), sp)
-
-        dres = norm(sd, Inf) / (one(T) + nc)
-        pres = norm(sp, Inf) / (one(T) + ng)
-        res = max(dres, pres)
-
-        if isone(i)
-            pres1 = pres
-            dres1 = dres
-        end
-
-        if res ≤ force_tol
-            status = REACHED_FORCE
-            break
-        end
-
-        if res ≤ floor_tol
-            status = REACHED_FLOOR
-            break
-        end
-
-        if res > stall * prv
-            status = REFINE_STALLED
-            break
-        end
-
-        prv = res
-        #
-        # solve for dp and dy:
-        #
-        #   [ H -Bᵀ ] [ dp ] = [ sd ]
-        #   [ B  0  ] [ dy ]   [ sp ]
-        #
-        n, _ = solve_kkt!(wrk, dp, dy, H, B, sd, sp; atol=max(force_tol, floor_tol))
-        niter += n
-        npass += 1
-        #
-        # update Δp and Δy:
-        #
-        #   Δp ← Δp + dp
-        #   Δy ← Δy + dy
-        #
-        axpy!(one(T), dp, Δp)
-        axpy!(one(T), dy, Δy)
-    end
-
-    return npass, niter, status, pres1, dres1
-end
-
-############################################################################################
 # solvepredictor! / solvecorrector!
 ############################################################################################
 
@@ -208,7 +96,7 @@ end
 
 function solvepredictor!(
         w::IPMWorkspace{T},
-        kkt::KKTWorkspace{T},
+        kkt::KKTSolver{T},
         set::IPMSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -219,24 +107,17 @@ function solvepredictor!(
         force_tol::T,
         floor_tol::T,
     ) where {T}
-    atol = max(force_tol, floor_tol)
-
     axpby!(-1, d, 0, w.f)
     axpby!(1, w.rd, 1, w.f)
     #
-    # solve for the directions Δpa and Δya
+    # solve for the directions Δpa and Δya to force_tol (base + internal refinement)
     #
     #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
-    pbase, pfres = solve_kkt!(kkt, w.Δpa, w.Δya, H, B, w.f, w.rp; atol)
-    #
-    # refine Δpa, Δya to force_tol
-    #
-    ppass, prefn, pstat, ppres, pdres = refinekkt!(
-        w.Δpa, w.Δya, kkt, H, B,
-        w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
-        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
+    pbase, prefn, ppass, pstat, pfres, ppres, pdres = solvekkt!(
+        kkt, w.Δpa, w.Δya, H, B, w.f, w.rp, nc, ng;
+        force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δda:
@@ -268,7 +149,7 @@ end
 
 function solvecorrector!(
         w::IPMWorkspace{T},
-        kkt::KKTWorkspace{T},
+        kkt::KKTSolver{T},
         set::IPMSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -285,7 +166,6 @@ function solvecorrector!(
         force_tol::T,
         floor_tol::T,
     ) where {T}
-    atol = max(force_tol, floor_tol)
     #
     # compute the largest step length τa ∈ (0, 1]
     # such that the perturbed iterates
@@ -340,15 +220,9 @@ function solvecorrector!(
     #   [ H  -Bᵀ ] [ Δp ]   [ rd* ]
     #   [ B   0  ] [ Δy ] = [ rp  ]
     #
-    cbase, cfres = solve_kkt!(kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya; atol)
-    #
-    # use iterative refinement to improve
-    # the solutions Δp and Δy
-    #
-    cpass, crefn, cstat, cpres, cdres = refinekkt!(
-        w.Δp, w.Δy, kkt, H, B,
-        w.f, w.rp, w.sy, w.sp, w.dp, w.dy, nc, ng;
-        itmax=set.refine_itmax, force_tol, floor_tol, stall=set.refine_stall,
+    cbase, crefn, cpass, cstat, cfres, cpres, cdres = solvekkt!(
+        kkt, w.Δp, w.Δy, H, B, w.f, w.rp, nc, ng, w.Δya;
+        force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δd:
@@ -416,7 +290,7 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::IPMSettings{T}) wher
         g = prob.g
     end
 
-    R, P, B, kkt = make_kkt(B; elim=settings.elim)
+    R, P, B, kkt = makekkt(B; elim=settings.elim)
 
     c = P * c
     Q = halfselectvtxs(halfselectvtxs(Q, R.perm), R.perm)

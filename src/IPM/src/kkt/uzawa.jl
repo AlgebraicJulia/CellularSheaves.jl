@@ -6,9 +6,9 @@
 # unset — the hang guard belongs to the library that owns the iteration, at its termination bound.
 #
 # A different KKT backend is a different workspace type behind the same α/atol argument interface —
-# there is no settings-level polymorphism (the KKTWorkspace abstract type is the only extension point).
+# there is no settings-level polymorphism (the KKTSolver abstract type is the only extension point).
 
-struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
+struct UzawaSolver{UPLO, T, I <: Integer} <: KKTSolver{T}
     F::FChordalTriangular{:N, UPLO, T, I}
     L::BlockSparseMatrix{T, I}
     facwrk::FactorizationWorkspace{T, I}
@@ -16,31 +16,35 @@ struct UzawaWorkspace{UPLO, T, I <: Integer} <: KKTWorkspace{T}
     itrwrk::CraigWorkspace{T, T, Vector{T}}
     r::Vector{T}
     α::Scalar{T}
+    sd::Vector{T}   # refinement scratch: dual residual (n)
+    sp::Vector{T}   # refinement scratch: primal residual (m)
+    dp::Vector{T}   # refinement scratch: primal correction (n)
+    dy::Vector{T}   # refinement scratch: dual correction (m)
 end
 
-function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I}) where {UPLO, T, I <: Integer}
+function UzawaSolver(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I}) where {UPLO, T, I <: Integer}
     m, n = size(B)
     facwrk = FactorizationWorkspace(F)
     divwrk = DivisionWorkspace(F, 1)
     itrwrk = CraigWorkspace(m, n, Vector{T})
     r = zeros(T, m)
     α = ones(T)
-    return UzawaWorkspace(F, L, facwrk, divwrk, itrwrk, r, α)
+    return UzawaSolver(F, L, facwrk, divwrk, itrwrk, r, α, zeros(T, n), zeros(T, m), zeros(T, n), zeros(T, m))
 end
 
-function make_kkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAULT_ELIMINATION_ALGORITHM) where {T, I}
+function makekkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAULT_ELIMINATION_ALGORITHM) where {T, I}
     weights, graph = weightedgraph(B)
     R, P, S = symbolic(weights, graph; alg=elim)
     B = selectvtxs(B, R.perm)
     F = FChordalTriangular{:N, :L, T, I}(S)
     L = B' * B
-    wrk = UzawaWorkspace(F, L, B)
+    wrk = UzawaSolver(F, L, B)
     return R, P, B, wrk
 end
 
 # build & factor F = (1/α)·A + BᵀB (BᵀB precomputed as wrk.L), with the ρ-shift ladder on failure.
 # `rgmin` is the floor the ladder starts from (the running s.ρ[]).
-function initkkt!(wrk::UzawaWorkspace{UPLO, T}, A::BlockSparseMatrix; α::T, rgmin::T) where {UPLO, T}
+function initkkt!(wrk::UzawaSolver{UPLO, T}, A::BlockSparseMatrix; α::T, rgmin::T) where {UPLO, T}
     wrk.α[] = α
     return init_uzw!(wrk.facwrk, wrk.F, wrk.L, A, α, rgmin)
 end
@@ -92,20 +96,89 @@ function init_uzw!(
     return false, ρ
 end
 
-# base KKT solve to `atol`; returns the base CRAIG iteration count (Krylov's dimension-based cap on hang).
-function solve_kkt!(
-    wrk::UzawaWorkspace{UPLO, T},
-    x::AbstractVector{T},
-    y::AbstractVector{T},
+# Solve the 2-row KKT system to atol = max(force_tol, floor_tol): a base solve plus the solver-owned
+# iterative-refinement loop, returning a typed exit (Govaerts–Pryce BE+1). This is the guarantee — the
+# residual is driven to atol or the exit says why not (floor / stalled / itmax). Refinement scratch is
+# workspace-resident. Returns (nbase, nrefine, npass, status, fres, entry_pres, entry_dres).
+function solvekkt!(
+    wrk::UzawaSolver{UPLO, T},
+    Δp::AbstractVector{T},
+    Δy::AbstractVector{T},
     A::BlockSparseMatrix{T},
     B::BlockSparseMatrix{T},
     f::AbstractVector{T},
-    g::AbstractVector{T},
+    rp::AbstractVector{T},
+    nc::T,
+    ng::T,
     y0 = nothing;
-    atol::T,
+    force_tol::T,
+    floor_tol::T,
+    stall::T,
+    itmax::Int,
 ) where {UPLO, T}
-    return solve_uzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, A, B,
-                      f, g, wrk.α[], atol, y0)
+    atol = max(force_tol, floor_tol)
+    #
+    # base solve
+    #
+    nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.F, A, B,
+                             f, rp, wrk.α[], atol, y0)
+    #
+    # iterative refinement of the 2-row residual
+    #
+    sd = wrk.sd; sp = wrk.sp; dp = wrk.dp; dy = wrk.dy
+    nrefine = 0
+    npass = 0
+    status = REFINE_ITMAX
+    prv = typemax(T)
+    pres1 = T(NaN)
+    dres1 = T(NaN)
+
+    for i in 1:itmax
+        #
+        #   [ sd ] = [ f  ] - [ A -Bᵀ ] [ Δp ]
+        #   [ sp ]   [ rp ]   [ B  0  ] [ Δy ]
+        #
+        mulkkt!(sd, sp, A, B, Δp, Δy)
+        axpby!(one(T), f,  -one(T), sd)
+        axpby!(one(T), rp, -one(T), sp)
+
+        dres = norm(sd, Inf) / (one(T) + nc)
+        pres = norm(sp, Inf) / (one(T) + ng)
+        res = max(dres, pres)
+
+        if isone(i)
+            pres1 = pres
+            dres1 = dres
+        end
+
+        if res ≤ force_tol
+            status = REACHED_FORCE
+            break
+        end
+        if res ≤ floor_tol
+            status = REACHED_FLOOR
+            break
+        end
+        if res > stall * prv
+            status = REFINE_STALLED
+            break
+        end
+
+        prv = res
+        #
+        #   [ A -Bᵀ ] [ dp ] = [ sd ]
+        #   [ B  0  ] [ dy ]   [ sp ]
+        #
+        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
+                          sd, sp, wrk.α[], atol)
+        nrefine += n
+        npass += 1
+
+        axpy!(one(T), dp, Δp)
+        axpy!(one(T), dy, Δy)
+    end
+
+    return nbase, nrefine, npass, status, fres, pres1, dres1
 end
 
 #
@@ -114,7 +187,7 @@ end
 #   [ A -Bᵀ ] [ x ] = [ f ]
 #   [ B  0  ] [ y ]   [ g ]
 #
-function solve_uzw!(
+function solveuzw!(
         divwrk::DivisionWorkspace{T},
         itrwrk::CraigWorkspace{T},
         x::AbstractVector{T},
