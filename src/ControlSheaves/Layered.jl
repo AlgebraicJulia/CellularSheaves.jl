@@ -61,16 +61,10 @@ struct IndividualizedDynamics <: AbstractDynamicsSpec
     configs::Vector{Tuple{AbstractAgentDynamics, Matrix{Float64}}}
 end
 
-# Helper to get dynamics and K_lqr for agent i (belonging to team_idx)
-function get_agent_dynamics_config(spec::AbstractDynamicsSpec, agent_idx::Int, team_idx::Int)
-    if spec isa HomogeneousDynamics
-        return spec.dyn, spec.K_lqr
-    elseif spec isa TeamHomogeneousDynamics
-        return spec.team_dyns[team_idx]
-    elseif spec isa IndividualizedDynamics
-        return spec.configs[agent_idx]
-    end
-end
+# Helper to get dynamics and K_lqr for agent i (belonging to team_idx) via multiple dispatch
+get_agent_dynamics_config(spec::HomogeneousDynamics, agent_idx::Int, team_idx::Int) = (spec.dyn, spec.K_lqr)
+get_agent_dynamics_config(spec::TeamHomogeneousDynamics, agent_idx::Int, team_idx::Int) = spec.team_dyns[team_idx]
+get_agent_dynamics_config(spec::IndividualizedDynamics, agent_idx::Int, team_idx::Int) = spec.configs[agent_idx]
 
 # ---------------------------------------------------------------------------
 # Topology Specification Types
@@ -155,6 +149,7 @@ struct LayeredFiberBases
     hom::GraphHomomorphism
     fiber_bases::Vector{Matrix{Float64}}
     target_subbases::Dict{Int, Matrix{Float64}} # maps ring_idx => target sub-basis matrix
+    target_subbases_inv::Dict{Int, Matrix{Float64}} # pre-computed pseudoinverses for O(1) projection
 end
 
 """
@@ -165,6 +160,7 @@ Construct structured fiber bases and extract target sub-basis matrices for world
 function build_layered_fiber_bases(hom::GraphHomomorphism, F::EuclideanSheaf, spec::LayeredEscortSpec)
     bases = all_fiber_bases(hom, F)
     target_subbases = Dict{Int, Matrix{Float64}}()
+    target_subbases_inv = Dict{Int, Matrix{Float64}}()
 
     for r_idx in 1:spec.n_rings
         tv = r_idx
@@ -181,10 +177,12 @@ function build_layered_fiber_bases(hom::GraphHomomorphism, F::EuclideanSheaf, sp
         end
         
         d_target = vertex_stalks(F)[t_node]
-        target_subbases[r_idx] = bases[tv][row_offset+1 : row_offset+d_target, :]
+        B_sub = bases[tv][row_offset+1 : row_offset+d_target, :]
+        target_subbases[r_idx] = B_sub
+        target_subbases_inv[r_idx] = pinv(B_sub)
     end
 
-    return LayeredFiberBases(hom, bases, target_subbases)
+    return LayeredFiberBases(hom, bases, target_subbases, target_subbases_inv)
 end
 
 """
@@ -193,8 +191,7 @@ end
 Convert a world target vector `p_world` into the `PfF` stalk basis coordinates for ring `ring_idx`.
 """
 function world_to_pf_stalk(bases::LayeredFiberBases, ring_idx::Int, p_world::Vector{Float64})
-    B_target = bases.target_subbases[ring_idx]
-    return B_target \ p_world
+    return bases.target_subbases_inv[ring_idx] * p_world
 end
 
 # ---------------------------------------------------------------------------
@@ -288,7 +285,7 @@ function solve_high_level_harmonic(PfF, bases::LayeredFiberBases, target_positio
     _, _, H_mat, B_mat = _harmonic_extension_restricted_laplacian(PfF, boundary)
     
     p_boundary = vcat([boundary[r_idx] for r_idx in 1:length(target_positions)]...)
-    q_interior = vec(H_mat \ (-Matrix(B_mat) * p_boundary))
+    q_interior = vec(H_mat \ (-B_mat * p_boundary))
 
     n_pf_verts = nv(PfF.underlying_graph) > 0 ? nv(PfF.underlying_graph) : length(boundary) + length(q_interior) ÷ vertex_stalks(PfF)[end]
     q_H = Vector{Vector{Float64}}(undef, n_pf_verts)
@@ -340,7 +337,7 @@ function solve_mid_level_harmonic(q_H::Vector{Vector{Float64}}, bases::LayeredFi
 end
 
 """
-    solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, target_positions::Vector{Vector{Float64}}, D::Int=4) -> Matrix{Float64}
+    solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, target_positions::Vector{Vector{Float64}}, D::Int=F.vertex_stalks[1]) -> Matrix{Float64}
 
 Solve harmonic extension directly on `F` given pinned target nodes and positions.
 """
@@ -349,7 +346,7 @@ function solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, tar
     _, _, H_mat, B_mat = _harmonic_extension_restricted_laplacian(F, boundary)
     
     p_boundary = vcat(target_positions...)
-    q_interior = H_mat \ (-Matrix(B_mat) * p_boundary)
+    q_interior = H_mat \ (-B_mat * p_boundary)
 
     n_total = length(F.vertex_stalks)
     n_targets = length(target_nodes)
@@ -383,10 +380,36 @@ struct LayeredEscortProblem
     bases::LayeredFiberBases
     dynamics_spec::AbstractDynamicsSpec
     target_trajectories::Vector{Any} # functions t -> [x,y,z,1.0]
-    target_velocities::Vector{Any}   # functions t -> [vx,vy,vz,0.0]
-    target_accelerations::Vector{Any}# functions t -> [ax,ay,az,0.0]
+    target_velocities::Union{Nothing, Vector{Any}}   # functions t -> [vx,vy,vz,0.0]
+    target_accelerations::Union{Nothing, Vector{Any}}# functions t -> [ax,ay,az,0.0]
     dt::Float64
     steps::Int
+end
+
+"""
+    LayeredEscortProblem(spec, dynamics_spec, target_trajectories; dt=0.05, steps=200, target_velocities=nothing, target_accelerations=nothing)
+
+High-level constructor that automatically builds `F`, `f`, `PfF`, and structured fiber bases from `spec`.
+"""
+function LayeredEscortProblem(
+    spec::LayeredEscortSpec,
+    dynamics_spec::AbstractDynamicsSpec,
+    target_trajectories::Vector;
+    target_velocities=nothing,
+    target_accelerations=nothing,
+    dt::Float64=0.05,
+    steps::Int=200
+)
+    sheaf = build_layered_escort_sheaf(spec)
+    hom = build_layered_homomorphism(spec)
+    pf_sheaf = pushforward_sheaf(hom, sheaf)
+    bases = build_layered_fiber_bases(hom, sheaf, spec)
+
+    return LayeredEscortProblem(
+        spec, sheaf, hom, pf_sheaf, bases,
+        dynamics_spec, target_trajectories, target_velocities, target_accelerations,
+        dt, steps
+    )
 end
 
 struct LayeredEscortResult
