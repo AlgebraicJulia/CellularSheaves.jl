@@ -1,17 +1,12 @@
 # # Multilayer Hierarchical Control for Team-of-Teams Escort Formation
 
-# This example implements a three-layer control architecture using **sheaf pushforwards** to coordinate a "team of teams." 
-
+# This example implements a multi-ring formation coordination architecture using cellular sheaves.
+#
 # ## Scenario
 # We have 15 quadrotor agents organized into three rings:
 # - **Ring 1 (6 agents):** Escorting Target 1.
 # - **Ring 2 (6 agents):** Escorting Target 2.
-# - **Ring 3 (3 agents):** Providing communication support, tracking the midpoint of the two escort rings.
-
-# ## Hierarchical Architecture
-# 1. **High-Level Planner (Pushforward Sheaf $f_\star F$):** Operates on a coarse graph $H$ (3 nodes: T1, T2, Support). It computes the optimal "center" positions for the three rings.
-# 2. **Mid-Level Planner (Sheaf $F$):** Operates on the full agent graph $G$. It takes the ring centers from the high-level and computes the specific agent offsets via harmonic extension.
-# 3. **Low-Level Controller (LQR + Feedforward):** Executes the 3-stage (Pos, Vel, Accel) tracking for each agent.
+# - **Ring 3 (3 agents):** Providing communication support, tracking the midpoint between Ring 1 and Ring 2.
 
 using CellularSheaves
 using CellularSheaves.Formations
@@ -19,303 +14,326 @@ using CellularSheaves.AgentControllers
 using CellularSheaves.DistributedLayeredControl
 using CellularSheaves.Pushforwards
 using CellularSheaves.GraphHomomorphisms
+import CellularSheaves.NetworkSheaves.EuclideanSheaves: _harmonic_extension_restricted_laplacian
 using LinearAlgebra
 using Statistics
-using Distributed
 using Plots
 using Printf
 using Graphs
 
 # --- Setup ---
-default(framestyle = :box, grid = true, gridalpha = 0.18, gridstyle = :dot,
-    titlefontsize = 10, guidefontsize = 9, legendfontsize = 8, tickfontsize = 8,
-    markerstrokewidth = 0, size = (800, 400))
+default(framestyle=:box, grid=true, gridalpha=0.18, gridstyle=:dot,
+    titlefontsize=10, guidefontsize=9, legendfontsize=8, tickfontsize=8,
+    markerstrokewidth=0, size=(800, 400))
 
-const RING_COLOR = :steelblue
-const TARGET_COLOR = :black
-
-# LQR Costs
-Q_diag_std = [500.0, 500.0, 500.0, 150.0, 150.0, 100.0, 100.0, 100.0, 5.0, 5.0]
-Q_std = Matrix(Diagonal(Q_diag_std))
-R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
-
-# --- 1. Define the Mid-Level Sheaf F over Graph G ---
-# Agents: 1-6 (Ring 1), 7-12 (Ring 2), 13-15 (Ring 3)
-# Targets: 16 (T1), 17 (T2), 18 (S)
+# --- Sheaf Topology ---
 const NA1 = 6
 const NA2 = 6
 const NA3 = 3
-const NT = 3
+const NA = NA1 + NA2 + NA3
 const T1_NODE = 16
 const T2_NODE = 17
-const TS_NODE = 18
+const TOTAL_NODES = 17
 const r_ring = 0.3
 
 function build_multilayer_sheaf(na1, na2, na3, r1, r2, r3)
-    ## Total nodes: (na1+1) + (na2+1) + (na3+1) = 15 + 3 = 18
-    ## Ring 1: 1..na1 agents, node na1+1 is T1
-    ## Ring 2: na1+2..na1+na2+1 agents, node na1+na2+2 is T2
-    ## Ring 3: na1+na2+3..na1+na2+na3+2 agents, node na1+na2+na3+3 is S
-    F = EuclideanSheaf{Float64}(fill(4, 18))
-    
-    function add_ring!(sheaf, agent_range, target_node, radius)
-        n = length(agent_range)
-        for i in 1:n
-            u = agent_range[i]
-            v = agent_range[i % n + 1]
-            angle_u = (i - 1) * 2π / n
-            angle_v = (i % n) * 2π / n
-            du = [cos(angle_u), sin(angle_u), 0.0] * radius
-            dv = [cos(angle_v), sin(angle_v), 0.0] * radius
-            add_sheaf_edge!(sheaf, u, v, se3_translation_matrix(du), se3_translation_matrix(dv))
-        end
-        u_first = agent_range[1]
-        d_first = [cos(0), sin(0), 0.0] * radius
-        add_sheaf_edge!(sheaf, u_first, target_node, se3_translation_matrix(d_first), Matrix{Float64}(I, 4, 4))
+    F = EuclideanSheaf{Float64}(fill(4, TOTAL_NODES))
+
+    # Ring 1 (agents 1..6) around Target 1 (node 16)
+    ring1 = build_escort_ring(na1, na1 + 1, r1; observers=[1])
+    for e in edges(ring1.underlying_graph)
+        u_local, v_local = src(e), dst(e)
+        u = u_local == na1 + 1 ? T1_NODE : u_local
+        v = v_local == na1 + 1 ? T1_NODE : v_local
+        add_sheaf_edge!(F, u, v, get_restriction_map(ring1, u_local, v_local), get_restriction_map(ring1, v_local, u_local))
     end
 
-    add_ring!(F, 1:na1, na1 + 1, r1)
-    add_ring!(F, na1 + 2 : na1 + na2 + 1, na1 + na2 + 2, r2)
-    add_ring!(F, na1 + na2 + 3 : na1 + na2 + na3 + 2, na1 + na2 + na3 + 3, r3)
-    
-    # Add coordination edges between observer agents to create cross-edges in the pushforward
-    # Observer 1 (Node 1) <-> Observer 3 (Node na1 + na2 + 3)
-    # Observer 2 (Node na1 + 2) <-> Observer 3 (Node na1 + na2 + 3)
-    obs1 = 1
-    obs2 = na1 + 2
-    obs3 = na1 + na2 + 3
-    
-    add_sheaf_edge!(F, obs1, obs3, Matrix{Float64}(I, 4, 4), Matrix{Float64}(I, 4, 4))
-    add_sheaf_edge!(F, obs2, obs3, Matrix{Float64}(I, 4, 4), Matrix{Float64}(I, 4, 4))
-    
+    # Ring 2 (agents 7..12) around Target 2 (node 17)
+    ring2 = build_escort_ring(na2, na2 + 1, r2; observers=[1])
+    for e in edges(ring2.underlying_graph)
+        u_local, v_local = src(e), dst(e)
+        u = u_local == na2 + 1 ? T2_NODE : u_local + na1
+        v = v_local == na2 + 1 ? T2_NODE : v_local + na1
+        add_sheaf_edge!(F, u, v, get_restriction_map(ring2, u_local, v_local), get_restriction_map(ring2, v_local, u_local))
+    end
+
+    # Ring 3 (agents 13..15): Consensus edges with identity restriction maps
+    # Under the pushforward sheaf f_★F, Fiber 3 coarsens these 3 agents into a 4D consensus stalk.
+    # Lifting via T⁺ (pinv(T)) projects references back into the 0-cochain subspace where all 3 agents
+    # remain in exact consensus at the midpoint.
+    r3_agents = (na1 + na2 + 1):(na1 + na2 + na3)
+    for i in 1:na3
+        u = r3_agents[i]
+        v = r3_agents[i % na3 + 1]
+        add_sheaf_edge!(F, u, v, Matrix{Float64}(I, 4, 4), Matrix{Float64}(I, 4, 4))
+    end
+
+    # Support tracking edges: Ring 3 agents observe Target 1 and Target 2 directly
+    add_sheaf_edge!(F, 13, T1_NODE, Matrix{Float64}(I, 4, 4), Matrix{Float64}(I, 4, 4))
+    add_sheaf_edge!(F, 14, T2_NODE, Matrix{Float64}(I, 4, 4), Matrix{Float64}(I, 4, 4))
+
     return F
 end
 
 F = build_multilayer_sheaf(NA1, NA2, NA3, r_ring, r_ring * 1.2, r_ring * 0.8)
 
-# --- 2. Define the High-Level Graph H and Homomorphism f ---
-# H has 3 nodes: T1, T2, S
-# f maps agents and targets to their respective ring centers
+# Target trajectories
+target1_pos(t) = [1.0 + 0.05cos(0.5 * t), 0.05sin(0.5 * t), 1.5 + 0.01sin(1.0 * t), 1.0]
+target2_pos(t) = [-1.0 - 0.05cos(0.5 * t), -0.05sin(0.5 * t), 1.5 + 0.01cos(1.0 * t), 1.0]
+
+# --- 2. Define High-Level Graph H & Graph Homomorphism f ---
+# Coarse graph H has 3 nodes: Ring 1 (1), Ring 2 (2), Support Ring 3 (3)
 function build_homomorphism(na1, na2, na3)
-    ## vertex_map: 
-    ## Ring 1 (agents + T1) -> 1
-    ## Ring 2 (agents + T2) -> 2
-    ## Ring 3 (agents + S)   -> 3
-    v_map = vcat(fill(1, na1 + 1), fill(2, na2 + 1), fill(3, na3 + 1))
-    
-    # The GraphHomomorphism constructor takes the vertex map and the number of target nodes.
-    # We don't need to pass the SimpleGraph object itself.
+    v_map = zeros(Int, TOTAL_NODES)
+    v_map[1:na1] .= 1
+    v_map[T1_NODE] = 1
+    v_map[(na1+1):(na1+na2)] .= 2
+    v_map[T2_NODE] = 2
+    v_map[(na1+na2+1):(na1+na2+na3)] .= 3
+
     return GraphHomomorphism(v_map, 3)
 end
 
 f = build_homomorphism(NA1, NA2, NA3)
 
-# --- 3. Construct and Validate the Pushforward Sheaf ---
-# The pushforward sheaf f_*F represents the "coarse-grained" coordination 
-# of the three rings.
+# --- 3. Construct Pushforward Sheaf PfF and Fiber Bases ---
 PfF = pushforward_sheaf(f, F)
+fiber_bases = all_fiber_bases(f, F)
 
-println("Pushforward Sheaf Stalk Dimensions: ", vertex_stalks(PfF))
-# We expect the stalk dimension at each node in H to be the dimension of 
-# the global sections of the fiber. For an escort ring, this is 4 (SE(3) translation).
+# --- 4. 3-Layer Hierarchical Solvers ---
+# Target 1 is at node 16 (Fiber 1, local rows 25:28 in fiber_bases[1])
+# Target 2 is at node 17 (Fiber 2, local rows 25:28 in fiber_bases[2])
+B1_T1 = fiber_bases[1][25:28, :]
+B2_T2 = fiber_bases[2][25:28, :]
 
-# Inspect restriction maps in PfF to verify the "midpoint" geometry
-# The edges in H are (1,3) and (2,3).
-for e in edges(underlying_graph(PfF))
-    u, v = src(e), dst(e)
-    rm_u = get_restriction_map(PfF, u, v)
-    rm_v = get_restriction_map(PfF, v, u)
-    println("Edge ($u, $v) restriction map size: $(size(rm_u))")
+function solve_high_level_harmonic(PfF, p1, p2, B1_T1, B2_T2)
+    # 1. Convert world target vectors p1, p2 into PfF stalk basis coordinates
+    q_pf_1 = B1_T1 \ p1
+    q_pf_2 = B2_T2 \ p2
+
+    # 2. Solve harmonic extension on coarse pushforward sheaf PfF
+    boundary = Dict(1 => q_pf_1, 2 => q_pf_2)
+    _, _, H_mat, B_mat = _harmonic_extension_restricted_laplacian(PfF, boundary)
+    q_pf_3 = vec(H_mat \ (-Matrix(B_mat) * [q_pf_1; q_pf_2]))
+    
+    return [q_pf_1, q_pf_2, q_pf_3]
 end
 
-# Validation: Check that the global sections of the pushforward sheaf 
-# represent the 3 ring centers. We expect the global section space to be 
-# spanned by 3 vectors (each 4D) that are collinear in the sense that 
-# they represent the same translation in the world frame.
-B_pf = nullspace_ldlt(coboundary_map(PfF)' * coboundary_map(PfF))
-println("Pushforward global section basis size: $(size(B_pf))")
+function solve_mid_level_harmonic(q_H, fiber_bases)
+    # Lift high-level stalk coordinates back to world coordinates using fiber_bases
+    q_G_1 = fiber_bases[1] * q_H[1]  # Fiber 1 (Agents 1..6 + T1)
+    q_G_2 = fiber_bases[2] * q_H[2]  # Fiber 2 (Agents 7..12 + T2)
+    q_G_3 = fiber_bases[3] * q_H[3]  # Fiber 3 (Agents 13..15)
 
-# The columns of B_pf are the basis for the global sections of PfF.
-# We verify that the dimensions match our expectation (3 rings * 4D = 12D total space, 
-# but the global sections should any vector. This is the identity sheaf on 3 vertex path.).
-@assert size(B_pf, 2) == 4 "Expected 4-dimensional global section space for SE(3) translation"
-
-# --- 4. High-Level Planner on H ---
-# The high-level planner computes the optimal positions for the 3 ring centers
-# given the trajectories of the 2 primary targets.
-
-# Target trajectories for T1 and T2
-# p1, p2 are 4D (x, y, z, 1)
-target1_pos(t) = [0.5cos(0.5*t), 0.5sin(0.5*t), 1.5 + 0.1sin(1.0*t), 1.0]
-target2_pos(t) = [-0.5cos(0.5*t), -0.5sin(0.5*t), 1.5 + 0.1cos(1.0*t), 1.0]
-
-target1_vel(t) = [-0.25sin(0.5*t), 0.25cos(0.5*t), 0.1cos(1.0*t), 0.0]
-target2_vel(t) = [0.25sin(0.5*t), -0.25cos(0.5*t), -0.1sin(1.0*t), 0.0]
-
-target1_accel(t) = [-0.125cos(0.5*t), -0.125sin(0.5*t), -0.1sin(1.0*t), 0.0]
-target2_accel(t) = [-0.125cos(0.5*t), -0.125sin(0.5*t), 0.1sin(1.0*t), 0.0]
-
-# The high-level harmonic extension solver
-function solve_high_level_harmonic(PfF, p_targets, target_nodes)
-    # p_targets is a vector of 4D target positions
-    # target_nodes are the nodes in H that are pinned to these targets
+    # Extract 4D SE(3) positions for agents 1..15
+    q_agents = zeros(15, 4)
+    q_agents[1:6, :] .= reshape(q_G_1[1:24], 4, 6)'
+    q_agents[7:12, :] .= reshape(q_G_2[1:24], 4, 6)'
+    q_agents[13:15, :] .= reshape(q_G_3[1:12], 4, 3)'
     
-    # Construct the restricted Laplacian H_mat and the coupling L_AB
-    # For the high-level sheaf PfF, we treat target_nodes as the boundary
-    # and the other nodes (like the support node) as the interior.
-    
-    # In our case, T1 and T2 are targets, S is interior.
-    # We solve for the section q_H that minimizes the energy.
-    
-    # For simplicity in this example, we'll use the standard harmonic extension:
-    # q_H = (L_AA)⁻¹ (-L_AB * p)
-    # But since PfF is small, we can just solve the full system.
-    
-    # We'll use the logic from LayeredControlProblem:
-    # The target values are pinned.
-    
-    # For the high-level, we can just use the average for the support node
-    # but let's implement the actual solve to be consistent.
-    
-    # This is a placeholder for the actual harmonic solve on PfF
-    # In a real implementation, this would call the Laplacian solver.
-    # For now, we'll return the targets and the midpoint.
-    
-    # p_targets: [p1, p2]
-    p1 = p_targets[1]
-    p2 = p_targets[2]
-    ps = 0.5 * (p1 + p2)
-    
-    return [p1, p2, ps] # Section of PfF (3 nodes * 4D)
+    return q_agents
 end
 
-# --- 5. Mid-Level Planner on G ---
-# The mid-level planner takes the high-level section and lifts it back to G.
-
-function solve_mid_level_harmonic(q_H, T)
-    # q_H is the section of PfF (the ring centers)
-    # T is the pushforward transfer map
-    
-    # Flatten q_H from Vector{Vector{Float64}} to a single Vector{Float64}
-    # q_H is [p1, p2, ps] where each is 4D -> total 12D
-    q_H_flat = vcat(q_H...)
-    
-    # We lift q_H back to a section of F using the pseudoinverse of T
-    # q_G_ref = T⁺ * q_H
-    # Convert T to dense matrix because pinv does not support SparseMatrixCSC
-    q_G_ref = pinv(Matrix(T)) * q_H_flat
-    
-    # Now we solve the harmonic extension on G using q_G_ref as the target
-    # For this example, we'll treat q_G_ref as the desired reference.
-    return q_G_ref
-end
-
-# Test the high-level flow for t=0
-p_targets_0 = [target1_pos(0), target2_pos(0)]
-q_H_0 = solve_high_level_harmonic(PfF, p_targets_0, [1, 2])
-println("High-level ring centers at t=0: \n", q_H_0)
-
-T = pushforward_transfer_map(f, F)
-q_G_0 = solve_mid_level_harmonic(q_H_0, T)
-println("Mid-level agent references at t=0 (first 5): \n", q_G_0[1:5])
-
-# --- 6. Full Hierarchical Simulation Loop ---
-
-# Simulation Parameters
+# --- Simulation Parameters ---
+DT = 0.05
 STEPS = 200
 T_END = STEPS * DT
 time_grid = 0:DT:T_END
 
-# Initialize Agents
-# 15 agents total. We'll use the same dynamics as the escort example.
-dyns = [QuadrotorDynamics(m=0.5 + 0.01*i, Ixx=0.01, Iyy=0.01) for i in 1:15]
+dyns = [QuadrotorDynamics(m=0.5 + 0.01 * i, Ixx=0.01, Iyy=0.01) for i in 1:15]
 init_states = [[0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] for i in 1:15]
 
-# LQR Controllers
-lqr_configs = [(init_states[i], dyns[i], LQRController(dyns[i], DT, Q_std, R_lqr).K) for i in 1:15]
+sim_data_direct = []
+qstar_history_direct = []
+target_history_direct = []
 
-# Data storage
-sim_data = []
-qstar_history = []
-target_history = []
-
-# Simulation Loop
-current_states = copy(init_states)
+current_states_direct = copy(init_states)
 for step in 1:STEPS
     t = time_grid[step]
+    p1 = target1_pos(t)
+    p2 = target2_pos(t)
     
-    # 1. High-Level Planner: Compute Ring Centers
-    p_targets = [target1_pos(t), target2_pos(t)]
-    q_H = solve_high_level_harmonic(PfF, p_targets, [1, 2])
-    push!(target_history, q_H)
+    # 1. High-Level Planner: Solve harmonic extension on pushforward sheaf PfF
+    q_H = solve_high_level_harmonic(PfF, p1, p2, B1_T1, B2_T2)
     
-    # 2. Mid-Level Planner: Lift to Agents and Solve Harmonic Extension
-    # Lift high-level section to mid-level reference
-    q_G_ref = solve_mid_level_harmonic(q_H, T)
-    
-    # Solve for the actual harmonic reference q*
-    # The pseudoinverse of T already provides the minimum-norm lift, 
-    # which is the "harmonic" lift in the absence of additional constraints.
-    q_star = q_G_ref 
-    qstar_agents = reshape(q_star[1:15*4], 15, 4)
-    push!(qstar_history, qstar_agents)
-    
-    # 3. Low-Level Controller: LQR + Feedforward
+    # World reference targets for visualization (T1, T2, and Support center)
+    p3_center = fiber_bases[3][1:4, :] * q_H[3]
+    push!(target_history_direct, [p1, p2, p3_center])
+
+    # 2. Mid-Level Planner: Lift high-level section to mid-level agent references q*
+    qstar_agents = solve_mid_level_harmonic(q_H, fiber_bases)
+    push!(qstar_history_direct, qstar_agents)
+
     step_states = []
     for i in 1:15
-        # Extract 3D position from 4D SE(3) state
-        x_actual = current_states[i][1:3]
+        x_actual = current_states_direct[i][1:3]
         x_ref = qstar_agents[i, 1:3]
-        
-        # Simple LQR feedback for this demonstration
+
         error = x_actual - x_ref
-        # LQR state vector: [pos_err; vel_err; ...]. 
-        # For this demo, we use position error and zero for other states.
-        u = -lqr_configs[i][3] * [error; zeros(7)] 
-        
-        # Update state using dynamics (using DT instead of hardcoded 0.1)
-        current_states[i][1:3] += (x_ref - x_actual) * DT 
-        push!(step_states, copy(current_states[i]))
+        current_states_direct[i][1:3] .-= 0.3 * error * DT
+        push!(step_states, copy(current_states_direct[i]))
     end
-    push!(sim_data, step_states)
+    push!(sim_data_direct, step_states)
 end
 
-# --- 7. Error Metrics and Validation ---
+# --- Error Metrics ---
+formation_errors_direct = zeros(STEPS, 3)
+tracking_centroid_errors_direct = zeros(STEPS, 3)
+teams = [1:6, 7:12, 13:15]
+team_colors = [:steelblue :darkorange :darkseagreen]
+expected_radii = [r_ring, r_ring * 1.2, r_ring * 0.8]
 
-# 1. Tracking Error: ||x_i - q*_i||
-tracking_errors = zeros(STEPS, 15)
 for step in 1:STEPS
+    for t_idx in 1:3
+        team = teams[t_idx]
+        r_exp = expected_radii[t_idx]
+
+        # Centroid of the team
+        centroid = zeros(3)
+        for i in team
+            centroid .+= sim_data_direct[step][i][1:3]
+        end
+        centroid ./= length(team)
+
+        # Formation error: Mean absolute deviation of agent distances from centroid relative to expected ring radius
+        radii_devs = [abs(norm(sim_data_direct[step][i][1:3] - centroid) - r_exp) for i in team]
+        formation_errors_direct[step, t_idx] = mean(radii_devs)
+
+        # Tracking error: Centroid error relative to target
+        target = target_history_direct[step][t_idx][1:3]
+        tracking_centroid_errors_direct[step, t_idx] = norm(centroid - target)
+    end
+end
+
+# --- Fixed Axis Limits Pre-computation ---
+all_xs = vcat([[sim_data_direct[s][i][1] for i in 1:15] for s in 1:STEPS]...)
+all_ys = vcat([[sim_data_direct[s][i][2] for i in 1:15] for s in 1:STEPS]...)
+all_q_xs = vcat([qstar_history_direct[s][:, 1] for s in 1:STEPS]...)
+all_q_ys = vcat([qstar_history_direct[s][:, 2] for s in 1:STEPS]...)
+all_t1_xs = [target_history_direct[s][1][1] for s in 1:STEPS]
+all_t1_ys = [target_history_direct[s][1][2] for s in 1:STEPS]
+all_t2_xs = [target_history_direct[s][2][1] for s in 1:STEPS]
+all_t2_ys = [target_history_direct[s][2][2] for s in 1:STEPS]
+
+p1_min_x, p1_max_x = minimum(vcat(all_xs, all_q_xs, all_t1_xs, all_t2_xs)) - 0.5, maximum(vcat(all_xs, all_q_xs, all_t1_xs, all_t2_xs)) + 0.5
+p1_min_y, p1_max_y = minimum(vcat(all_ys, all_q_ys, all_t1_ys, all_t2_ys)) - 0.5, maximum(vcat(all_ys, all_q_ys, all_t1_ys, all_t2_ys)) + 0.5
+p1_xlims = (p1_min_x, p1_max_x)
+p1_ylims = (p1_min_y, p1_max_y)
+
+rel_lims = []
+for (t_idx, team) in enumerate(teams)
+    rel_xs_all = vcat([[sim_data_direct[s][i][1] - target_history_direct[s][t_idx][1] for i in team] for s in 1:STEPS]...)
+    rel_ys_all = vcat([[sim_data_direct[s][i][2] - target_history_direct[s][t_idx][2] for i in team] for s in 1:STEPS]...)
+    rel_q_xs_all = vcat([[qstar_history_direct[s][i, 1] - target_history_direct[s][t_idx][1] for i in team] for s in 1:STEPS]...)
+    rel_q_ys_all = vcat([[qstar_history_direct[s][i, 2] - target_history_direct[s][t_idx][2] for i in team] for s in 1:STEPS]...)
+
+    rx_min, rx_max = minimum(vcat(rel_xs_all, rel_q_xs_all, [0.0])) - 0.2, maximum(vcat(rel_xs_all, rel_q_xs_all, [0.0])) + 0.2
+    ry_min, ry_max = minimum(vcat(rel_ys_all, rel_q_ys_all, [0.0])) - 0.2, maximum(vcat(rel_ys_all, rel_q_ys_all, [0.0])) + 0.2
+    r_max = max(abs(rx_min), abs(rx_max), abs(ry_min), abs(ry_max))
+    push!(rel_lims, (-r_max, r_max))
+end
+
+safe_form_err_full = max.(formation_errors_direct, 1e-6)
+safe_track_err_full = max.(tracking_centroid_errors_direct, 1e-6)
+p5_ylims = (10^floor(log10(minimum(safe_form_err_full))), 10^ceil(log10(maximum(safe_form_err_full))))
+p6_ylims = (10^floor(log10(minimum(safe_track_err_full))), 10^ceil(log10(maximum(safe_track_err_full))))
+
+# --- 6-Panel Visualization ---
+proj2d(v) = v[1:2]
+
+function make_comprehensive_frame(step)
+    t = time_grid[step]
+    states = sim_data_direct[step]
+    qstar = qstar_history_direct[step]
+    qH = target_history_direct[step]
+
+    # Panel 1: Top-Down View with fixed limits
+    p1 = plot(aspect_ratio=:equal, title="Multilayer Escort Top-Down View (t=$(round(t, digits=2))s)",
+        xlabel="x [m]", ylabel="y [m]", legend=false, xlims=p1_xlims, ylims=p1_ylims)
+
+    # Communication edges
+    for edge in edges(F.underlying_graph)
+        u, v = edge.src, edge.dst
+        if u <= 15 && v <= 15
+            x_u, x_v = proj2d(states[u]), proj2d(states[v])
+            plot!(p1, [x_u[1], x_v[1]], [x_u[2], x_v[2]], color=:black, alpha=0.4, lw=1.5)
+        end
+    end
+
+    # Targets 1 and 2
+    scatter!(p1, [qH[1][1]], [qH[1][2]], marker=:star, color=:black, markersize=6)
+    scatter!(p1, [qH[2][1]], [qH[2][2]], marker=:star, color=:black, markersize=6)
+
+    # Harmonic extension positions
     for i in 1:15
-        tracking_errors[step, i] = norm(sim_data[step][i][1:3] - qstar_history[step][i, 1:3])
+        q_s = proj2d(qstar[i, :])
+        scatter!(p1, [q_s[1]], [q_s[2]], marker=:square, color=:purple, alpha=0.3, markersize=4)
     end
+
+    # Agents
+    for (t_idx, team) in enumerate(teams)
+        xs = [proj2d(states[i])[1] for i in team]
+        ys = [proj2d(states[i])[2] for i in team]
+        scatter!(p1, xs, ys, color=team_colors[t_idx], label="Team $(t_idx)", markersize=5)
+    end
+
+    # Relative Views with fixed limits
+    p_rel = []
+    for (t_idx, team) in enumerate(teams)
+        target_pos = proj2d(qH[t_idx])
+        p_target_view = plot(aspect_ratio=:equal, title="Team $(t_idx) Relative View",
+            xlabel="rel x [m]", ylabel="rel y [m]", legend=false,
+            xlims=rel_lims[t_idx], ylims=rel_lims[t_idx])
+        scatter!(p_target_view, [0], [0], marker=:star, color=:black, markersize=6)
+
+        rel_xs = [proj2d(states[i])[1] - target_pos[1] for i in team]
+        rel_ys = [proj2d(states[i])[2] - target_pos[2] for i in team]
+        scatter!(p_target_view, rel_xs, rel_ys, color=team_colors[t_idx], markersize=5)
+
+        rel_q_xs = [proj2d(qstar[i, :])[1] - target_pos[1] for i in team]
+        rel_q_ys = [proj2d(qstar[i, :])[2] - target_pos[2] for i in team]
+        scatter!(p_target_view, rel_q_xs, rel_q_ys, marker=:square, color=:purple, alpha=0.3, markersize=4)
+
+        # Communication edges
+        for edge in edges(F.underlying_graph)
+            u, v = edge.src, edge.dst
+            if u in team && v in team
+                x_u, x_v = proj2d(states[u]), proj2d(states[v])
+                plot!(p_target_view,
+                    [x_u[1] - target_pos[1], x_v[1] - target_pos[1]],
+                    [x_u[2] - target_pos[2], x_v[2] - target_pos[2]],
+                    color=:black, alpha=0.4, lw=1.5)
+            end
+        end
+
+        push!(p_rel, p_target_view)
+    end
+
+    safe_form_err = max.(formation_errors_direct[1:step, :], 1e-6)
+    safe_track_err = max.(tracking_centroid_errors_direct[1:step, :], 1e-6)
+
+    ## Panel 5: Formation Error with fixed limits & xlims
+    p5 = plot(time_grid[1:step], safe_form_err, yscale=:log10,
+        title="Formation Shape Error", xlabel="Time [s]", ylabel="Error [m]",
+        color=team_colors, lw=3, xlims=(0, time_grid[end]), ylims=p5_ylims,
+        label=["Team 1" "Team 2" "Team 3"])
+
+    ## Panel 6: Tracking Error with fixed limits & xlims
+    p6 = plot(time_grid[1:step], safe_track_err, yscale=:log10,
+        title="Target Tracking Error", xlabel="Time [s]", ylabel="Centroid Error [m]",
+        color=team_colors, lw=3, xlims=(0, time_grid[end]), ylims=p6_ylims,
+        label=["Team 1" "Team 2" "Team 3"])
+
+    return plot(p1, p_rel[1], p_rel[2], p_rel[3], p5, p6, layout=(3, 2), size=(1200, 1500))
 end
-mean_tracking_error = mean(tracking_errors, dims=2)[:]
 
-# 2. Formation Error: Variance of distances between agents in the same ring
-formation_errors = zeros(STEPS, 3)
-for step in 1:STEPS
-    # Ring 1
-    dists1 = [norm(sim_data[step][i][1:3] - sim_data[step][1][1:3]) for i in 2:6]
-    formation_errors[step, 1] = std(dists1)
-    # Ring 2
-    dists2 = [norm(sim_data[step][i][1:3] - sim_data[step][7][1:3]) for i in 8:12]
-    formation_errors[step, 2] = std(dists2)
-    # Ring 3
-    dists3 = [norm(sim_data[step][i][1:3] - sim_data[step][13][1:3]) for i in 14:15]
-    formation_errors[step, 3] = std(dists3)
+p = make_comprehensive_frame(STEPS)
+savefig(p, "multilayer_comprehensive_snapshot.png")
+
+anim = @animate for step in 1:4:STEPS
+    make_comprehensive_frame(step)
 end
+gif(anim, "multilayer_comprehensive_animation.gif"; fps=10)
 
-# Plotting
-p1 = plot(time_grid[1:STEPS], mean_tracking_error, title="Mean Tracking Error", xlabel="Time [s]", ylabel="Error [m]", color=:blue)
-p2 = plot(time_grid[1:STEPS], formation_errors[:, 1], label="Ring 1", color=:blue)
-plot!(p2, time_grid[1:STEPS], formation_errors[:, 2], label="Ring 2", color=:red)
-plot!(p2, time_grid[1:STEPS], formation_errors[:, 3], label="Ring 3", color=:green)
-title!(p2, "Formation Stability (Dist StdDev)")
-xlabel!(p2, "Time [s]")
-ylabel!(p2, "StdDev [m]")
-
-plot(p1, p2, layout=(2,1), size=(800, 800))
-savefig("multilayer_control_metrics.png")
-
-println("Simulation complete. Mean tracking error: ", mean(mean_tracking_error))
+println("Multilayer Escort simulation complete.")
 
