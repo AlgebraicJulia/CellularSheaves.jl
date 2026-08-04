@@ -53,10 +53,10 @@ end
 # `rgmin` is the floor the ladder starts from (the running s.ρ[]).
 function initkkt!(wrk::UzawaSolver{UPLO, T}, A::BlockSparseMatrix; α::T, rgmin::T) where {UPLO, T}
     wrk.α[] = α
-    return init_uzw!(wrk.facwrk, wrk.F, wrk.L, A, α, rgmin)
+    return inituzw!(wrk.facwrk, wrk.F, wrk.L, A, α, rgmin)
 end
 
-function init_uzw!(
+function inituzw!(
         facwrk::FactorizationWorkspace{T},
         F::ChordalTriangular{:N, UPLO, T},
         L::BlockSparseMatrix{T},
@@ -123,7 +123,13 @@ function solvekkt!(
     stall::T,
     itmax::Int,
 ) where {UPLO, T}
-    atol = max(force_tol, floor_tol)
+    #
+    # craig's exit residual is the next refinement pass's primal residual sp (rp − B(Δp+dp) = sp − B·dp),
+    # and the loop's convergence test is pres = ‖sp‖₂/(1+ng) ≤ max(force_tol, floor_tol). Clearing the
+    # denominator, craig's target is that tolerance times (1+ng) — no over-solving to a bare tolerance.
+    # Only ng appears: craig owns the primal row; the dual row is craig-independent.
+    #
+    atol = max(force_tol, floor_tol) * (one(T) + ng)
     #
     # base solve
     #
@@ -149,8 +155,8 @@ function solvekkt!(
         axpby!(one(T), f,  -one(T), sd)
         axpby!(one(T), rp, -one(T), sp)
 
-        dres = norm(sd, Inf) / (one(T) + nc)
-        pres = norm(sp, Inf) / (one(T) + ng)
+        dres = norm(sd) / (one(T) + nc)
+        pres = norm(sp) / (one(T) + ng)
         res = max(dres, pres)
 
         if isone(i)
@@ -259,7 +265,7 @@ function solveuzw!(
     #   x ← x +   δx
     #   r ← r - B δx
     #
-    nc, _ = craig!(itrwrk, B, F, divwrk, x, y, r; btol = zero(T), atol = max(atol, θ * nr0), rtol = zero(T))
+    nc, _ = craig!(itrwrk, B, F, divwrk, x, y, r; atol = max(atol, θ * nr0))
     niter += nc
     #
     # recover y:

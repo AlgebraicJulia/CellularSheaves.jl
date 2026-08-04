@@ -387,9 +387,9 @@ function refinehsd!(
         #
         sτ += (2dot(Qp, Δp) - Δτ * pQpτκ) / τ
 
-        pres = norm(sp, Inf) / (1 + ng)
-        dres = norm(sd, Inf) / (1 + nc)
-        τres = abs(sτ) / (1 + nc + ng)
+        pres = norm(sp) / (one(T) + ng)
+        dres = norm(sd) / (one(T) + nc)
+        τres = abs(sτ) / (one(T) + nc + ng)
 
         if isone(i)
             pres1 = pres
