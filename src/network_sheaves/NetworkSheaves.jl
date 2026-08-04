@@ -15,6 +15,7 @@ include("Pushforwards.jl")
 include("Pushouts.jl")
 include("TrajectorySheaf.jl")
 include("asynch/AsynchSheaves.jl")
+include("Formations.jl")
 
 @reexport using ..BlockSparseArrays
 @reexport using .SheafInterface
@@ -29,6 +30,7 @@ include("asynch/AsynchSheaves.jl")
 @reexport using .Pushouts
 @reexport using .TrajectorySheaves
 @reexport using .AsynchSheaves
+@reexport using .Formations
 export nullspace_trajectory_family
 
 end

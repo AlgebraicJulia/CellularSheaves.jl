@@ -34,4 +34,11 @@ end
   include("network_sheaves/per_agent_and_target_dynamics.jl")
   include("network_sheaves/TrackingDSL.jl")
   include("network_sheaves/QuadraticCosts.jl")
+  include("network_sheaves/EscortTracking.jl")
+  include("network_sheaves/Formations.jl")
+  include("network_sheaves/test_feedforward_control.jl")
+end
+
+@testset "Control Sheaves" begin
+  include("ControlSheaves/AgentControllers.jl")
 end

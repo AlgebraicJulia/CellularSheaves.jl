@@ -30,11 +30,11 @@ if !no_literate
       f, l = splitext(file)
       if l == ".jl" && !startswith(f, "_")
         src_path = joinpath(root, file)
-        Literate.markdown(src_path, out_dir;
-          config=config, documenter=true, credit=false)
         execute = !contains(src_path, "asynch")
+        Literate.markdown(src_path, out_dir;
+          execute=execute, config=config, documenter=false, credit=false)
         Literate.notebook(src_path, out_dir;
-          execute=execute, documenter=true, credit=false)
+          execute=false, documenter=false, credit=false)
       end
     end
   end
@@ -64,9 +64,12 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
   draft=false,
-  format=Documenter.HTML(assets=["assets/benchtables.css"]),
+  format=Documenter.HTML(
+    assets=["assets/benchtables.css"],
+    size_threshold=nothing
+  ),
   sitename="CellularSheaves.jl",
   doctest=false,
   checkdocs=:none,
@@ -88,10 +91,13 @@ makedocs(
         "generated/control/controlled_mass_spring_damper_chain.md",
         "control/single_integrator_target_tracking.md",
         "generated/control/multi_quadrotor_target_tracking.md",
-        "generated/control/mpc_target_tracking.md",
-        "generated/control/distributed_harmonic_tracking.md",
-        "generated/control/tikhonov_harmonic_tracking.md"
-
+        "generated/control/mpc_target_tracking.md"],
+      "Layered Control Architecture Examples" => Any[
+        "generated/layered/distributed_harmonic_tracking.md",
+        "generated/layered/tikhonov_harmonic_tracking.md",
+        "generated/layered/layered_mpc_tikhonov_scenario5.md",
+        "generated/layered/escort.md",
+        "generated/layered/escort_feedforward.md",
         ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
@@ -140,6 +146,9 @@ makedocs(
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
       "api/trajectory_sheaves.md",
+      "api/tikhonov.md",
+      "api/agent_controllers.md",
+      "api/distributed_layered_control.md",
       "api/herding_platoon.md",
       "api/multi_agent_tracking.md",
       "api/quadratic_costs.md",

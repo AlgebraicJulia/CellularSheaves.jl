@@ -90,11 +90,4 @@ homogeneous part of the derivative; include the
 
 ## API reference
 
-```@docs
-CellularSheaves.ControlSheaves.Tikhonov.TikhonovFilter
-CellularSheaves.ControlSheaves.Tikhonov.tikhonov_equilibrium
-CellularSheaves.ControlSheaves.Tikhonov.tikhonov_reference_rate
-CellularSheaves.ControlSheaves.Tikhonov.tikhonov_feedforward_reference
-CellularSheaves.ControlSheaves.Tikhonov.tikhonov_dissipation
-CellularSheaves.ControlSheaves.Tikhonov.tikhonov_step!
-```
+Full docstrings are in the [Tikhonov](@ref) API reference.

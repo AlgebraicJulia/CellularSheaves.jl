@@ -177,6 +177,21 @@ all of them.
 
 We are working off the work of researchers such as Hansen, Ghrist, Curry, Riess, Hanks, and Fairbanks, so explicitly cite relevant papers where appropriate and use nomenclature from their papers.
 
+## Git & Development Workflow Safety
+
+- **Atomic Git Commits After Verification**: Commit working changes to git immediately after verifying clean test execution (`test/runtests.jl`) and clean documentation builds (`docs/make.jl`). Keeping commits atomic and frequent ensures a safe checkpoint is always available if quota limits or session interruptions occur.
+- **Preserve User Content & Existing Code**: Never blindly overwrite, truncate, or delete user files, custom literate example scripts, or markdown documentation. Always view and inspect existing content first, preserve the user's comments and structure, and make targeted modifications (`replace_file_content`) rather than blanket file rewrites.
+
+## Control Sheaves & Trajectory Tracking Conventions
+
+- **Reference State Assembly**: When using `JointTikhonovFilter` for joint position and velocity tracking, $x_{\text{ref}}$ MUST be assembled from both `filter.x` (position target) and `filter.v` (velocity target mapped to velocity state indices `x_ref[v_idxs] = filter.v[v_idxs]`). Leaving velocity components as zero causes LQR velocity feedback to damp movement and increase tracking lag.
+- **Hierarchical Reference Solves**:
+  - **1-Stage (Position $q^*$)**: Solves $H q^* = -L_{IB} p(t)$. Standard LQR feedback.
+  - **2-Stage (Velocity $\dot{q}^*$)**: Solves $H \dot{q}^* = -L_{IB} \dot{p}(t)$. Eliminates 1st-order formation tracking lag (~30× error reduction).
+  - **3-Stage (Acceleration $\ddot{q}^*$)**: Solves $H \ddot{q}^* = -L_{IB} \ddot{p}(t)$. Pre-computes attitude tilt ($\theta_{\text{ref}} = \ddot{x}^*/g, \phi_{\text{ref}} = -\ddot{y}^*/g$) and thrust boost ($u_{1,\text{ff}} = m \ddot{z}^*$), eliminating 2nd-order centripetal lag (~sub-millimeter precision).
+- **Practical Sensor Limitations & Derivative Orders**:
+  - Finite-differencing noisy sensor data amplifies noise at $O(1 / \Delta t^{2n})$. High-order finite differences ($n \ge 3$, Jerk/Snap) cause motor chatter and instability on real sensor streams.
+  - For real hardware and sensor streams, cap reference derivatives at 1st/2nd order (Position, Velocity, Acceleration) filtered via low-pass Tikhonov observers ($\epsilon \approx 0.02 - 0.05\text{ s}$). Higher-order Jerk/Snap feedforward should be restricted to closed-form analytical trajectories or smooth offline splines.
 
 ## What to Avoid
 
@@ -191,8 +206,7 @@ We are working off the work of researchers such as Hansen, Ghrist, Curry, Riess,
 - **Do not leave the Out of Scope section empty.** Bounding the work is as important
   as specifying it.
 - **Do not put line comments inside of function definitions in literate examples.**
-  This breaks the literate pipeline. These comments should be above the function definition
-  or be expressed as end of line comments.
+  This breaks the literate pipeline. Use `##` for comments inside compound blocks or put comments above the function definition.
 - **Do not use Java style getters and setters.** Prefer idiomatic julia names that do
   not contain the substrings get or set.
 - **Do not import modules inside of function definitions** Import and export expressions should only appear towards the top of a file.

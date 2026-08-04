@@ -42,3 +42,10 @@ skills-lock.json
 # Benchmarking
 bench/results.json
 bench/results/
+
+# Generated figure and animation build artifacts
+/*.png
+/*.gif
+docs/*.png
+docs/*.gif
+

@@ -39,4 +39,12 @@ export MultiAgentTracking
 import .TrackingDSL
 export TrackingDSL
 
+include("AgentControllers.jl")
+import .AgentControllers
+export AgentControllers
+
+include("DistributedLayeredControl.jl")
+import .DistributedLayeredControl
+export DistributedLayeredControl
+
 end # module ControlSheaves

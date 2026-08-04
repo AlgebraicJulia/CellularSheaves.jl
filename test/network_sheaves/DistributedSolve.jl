@@ -178,9 +178,12 @@ using Random
     end
 
     @testset "distributed_tree_solve: real multi-process run" begin
-        pids = addprocs(5; exeflags = "--project=$(Base.active_project())")
-        try
-            @everywhere pids using CellularSheaves
+        needed = 5 - (nworkers() - 1)
+        if needed > 0
+            addprocs(needed; exeflags = ["--project=$(pkgdir(CellularSheaves))"])
+        end
+        pids = workers()[1:5]
+        @everywhere pids using CellularSheaves
 
             function check_distributed(g, target_workers)
                 M = spd_sheaf_laplacian(g)
@@ -211,8 +214,5 @@ using Random
             # simultaneous cross-process channels at once, not just one
             check_distributed(random_connected_graph(16, 42), 3)
             check_distributed(Graphs.grid([4, 5]), 3)
-        finally
-            rmprocs(pids)
-        end
     end
 end

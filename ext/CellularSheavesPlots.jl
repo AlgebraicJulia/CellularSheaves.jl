@@ -4,6 +4,7 @@ using CellularSheaves
 using CellularSheaves.AsynchSheaves
 using CellularSheaves.ControlSheaves.MultiAgentTracking: ScenarioResult
 using Plots
+using Printf
 
 include("CellularSheavesPlots/src/Utils.jl")
 include("CellularSheavesPlots/src/Style.jl")
@@ -43,6 +44,41 @@ function CellularSheaves.ControlSheaves.MultiAgentTracking.animate_tracking_xy(
         xlims=xlims,
         ylims=ylims,
     )
+end
+include("CellularSheavesPlots/src/LayeredEscortPlots.jl")
+
+function CellularSheaves.ControlSheaves.DistributedLayeredControl.animate_layered_escort(res::CellularSheaves.ControlSheaves.DistributedLayeredControl.LayeredSimulationResult; fps::Int=10, frame_step::Int=4, filename::AbstractString="layered_escort.gif", kwargs...)
+    steps = res.problem.steps
+    anim = @animate for k in 1:frame_step:steps
+        plot(res, k; kwargs...)
+    end
+    gif(anim, filename; fps=fps)
+    return anim
+end
+
+function CellularSheaves.ControlSheaves.DistributedLayeredControl.animate_scenario5(
+    res::CellularSheaves.ControlSheaves.DistributedLayeredControl.LayeredSimulationResult;
+    fps::Int=10,
+    frame_step::Int=4,
+    filename::AbstractString="scenario5.gif",
+    label_suffix::String="",
+    kwargs...
+)
+    pre   = LayeredEscortPlots._scenario5_precompute(res)
+    steps = res.problem.steps
+    anim  = @animate for k in 1:frame_step:steps
+        t_curr = k * res.problem.dt
+        p1 = LayeredEscortPlots._scenario5_yz_panel(res, pre, k)
+        p2 = LayeredEscortPlots._scenario5_tilt_panel(res, pre, k)
+        p3 = LayeredEscortPlots._scenario5_error_panel(res, pre, k)
+        plot(p1, p2, p3;
+            layout     = (1, 3),
+            size       = (1200, 420),
+            plot_title = @sprintf("Scenario 5 [%s]  t = %.2f s", label_suffix, t_curr),
+            kwargs...)
+    end
+    gif(anim, filename; fps=fps)
+    return anim
 end
 
 end # module CellularSheavesPlots
