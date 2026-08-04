@@ -47,11 +47,22 @@ Q_diag[5:6] .= 10.0
 Q_lqr = Matrix{Float64}(Diagonal(Q_diag))
 R_lqr = Matrix{Float64}(I, nu, nu) * 0.0001
 
+"""
+    solve_dare(A, B, Q, R)
+
+Iterative discrete-time Riccati solver used in this literate example.
+"""
 function solve_dare(A, B, Q, R)
-    # Simple iterative solve for the Discrete Algebraic Riccati Equation (DARE)
-    # P_{k+1} = A' P_k A - (A' P_k B)(R + B' P_k B)^-1 (B' P_k A) + Q
     P = Q
-    for i in 1:100
+    for _ in 1:100
+        P_next = A' * P * A - (A' * P * B) * inv(R + B' * P * B) * (B' * P * A) + Q
+        if norm(P_next - P) < 1e-6
+            break
+        end
+        P = P_next
+    end
+    return (R + B' * P * B) \ (B' * P * A)
+end
         P_next = A' * P * A - (A' * P * B) * inv(R + B' * P * B) * (B' * P * A) + Q
         if norm(P_next - P) < 1e-6
             break

@@ -477,13 +477,12 @@ Compute static axis limits for 6-panel escort animation.
 """
 function compute_escort_6panel_limits(sim_data, qstar_history, target_history, time_grid, r1, r2, r3)
     STEPS = min(length(sim_data), length(time_grid), length(qstar_history), length(target_history))
+    @assert STEPS > 0 "compute_escort_6panel_limits requires non-empty simulation data."
+    @assert length(sim_data[1]) >= 15 "compute_escort_6panel_limits expects at least 15 agents (6+6+3)."
+    @assert length(target_history[1]) >= 3 "compute_escort_6panel_limits expects at least 3 target centers."
     
     all_x = Float64[]
     all_y = Float64[]
-    for step in 1:STEPS
-        for i in 1:15
-            push!(all_x, sim_data[step][i][1])
-            push!(all_y, sim_data[step][i][2])
         end
         push!(all_x, target_history[step][1][1])
         push!(all_y, target_history[step][1][2])
