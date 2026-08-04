@@ -2,6 +2,7 @@ module Formations
 
 using LinearAlgebra
 using ..EuclideanSheaves: EuclideanSheaf, add_sheaf_edge!
+using ArgCheck: @argcheck
 
 export se3_translation_matrix, se3_rotation_matrix, se3_affine_matrix, build_escort_ring, build_escort_clique
 
@@ -60,16 +61,17 @@ function se3_affine_matrix(d::AbstractVector; θx::Real=0.0, θy::Real=0.0, θz:
 end
 
 """
-    build_escort_ring(n_agents::Int, target_node::Int, radius::Float64; observers=1:n_agents)
+    build_escort_ring(n_agents::Int, target_node::Int, radius::Float64; observers=1:n_agents, D::Int=4)
 
-Constructs and returns a `EuclideanSheaf` (with D=4 stalk dimension) for an `n_agents` escort ring around `target_node`.
+Constructs and returns a `EuclideanSheaf` (with stalk dimension `D`, default 4) for an `n_agents` escort ring around `target_node`.
 The consensus edges form a topological cycle graph (ring) with the appropriate SE(3) translation offsets. 
 The target pinning edges are added for the agents specified in `observers`.
 """
-function build_escort_ring(n_agents::Int, target_node::Int, radius::Float64; observers=1:n_agents)
+function build_escort_ring(n_agents::Int, target_node::Int, radius::Float64; observers=1:n_agents, D::Int=4)
+    @argcheck D==4 "Escort Rings only supported in SE(3) which is 4D"
     total_nodes = max(n_agents, target_node)
-    sheaf = EuclideanSheaf{Float64}(fill(4, total_nodes))
-    
+    sheaf = EuclideanSheaf{Float64}(fill(D, total_nodes))
+
     # Create the ring consensus edges
     for i in 1:n_agents
         j = i % n_agents + 1
@@ -92,7 +94,7 @@ function build_escort_ring(n_agents::Int, target_node::Int, radius::Float64; obs
         di = [cos(angle_i), sin(angle_i), 0.0] * radius
         
         Fi = se3_translation_matrix(di)
-        F_target = [1.0 0.0 0.0 0.0; 0.0 1.0 0.0 0.0; 0.0 0.0 1.0 0.0; 0.0 0.0 0.0 1.0] # Identity
+        F_target = Matrix{Float64}(I, D, D)
         
         add_sheaf_edge!(sheaf, i, target_node, Fi, F_target)
     end
