@@ -60,7 +60,7 @@ using Distributed
     # Spawn or reuse workers to test distributed solving
     needed = nchunk - (nworkers() - 1)
     if needed > 0
-        addprocs(needed; exeflags = ["--project=$(pkgdir(CellularSheaves))"])
+        addprocs(needed; exeflags = ["--project=$(Base.active_project())"])
     end
     pids = workers()[1:nchunk]
     @everywhere pids using CellularSheaves
