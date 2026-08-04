@@ -168,10 +168,12 @@ function solvekkt!(
             status = REACHED_FORCE
             break
         end
+
         if res ≤ floor_tol
             status = REACHED_FLOOR
             break
         end
+
         if res > stall * prv
             status = REFINE_STALLED
             break

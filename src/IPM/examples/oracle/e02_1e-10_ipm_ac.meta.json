@@ -1,1 +1,0 @@
-{"problem":"e02","solver":"ipm","tol":"1e-10","git":"50af7427","m":101,"n":360,"normB":20.199009876724155,"resolved_rgmin":4.529709940470638e-14,"feas_tol":1.0e-10,"gap_tol":1.0e-10,"refine_itmax":10,"refine_stall":0.5,"final_status":"CONTINUE","niter":8,"nrows":296}

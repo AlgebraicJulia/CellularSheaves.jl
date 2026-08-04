@@ -453,7 +453,8 @@ function step!(s::IPMSolver{T}) where {T}
                 end
 
                 force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
-                floor_tol = 100eps(T) * (1 + max(norm(w.rp, Inf), norm(w.rd, Inf)))
+                floor_tol = 100eps(T) * (1 + max(norm(w.rp) / (1 + s.ng[]),
+                                                 norm(w.rd) / (1 + s.nc[])))
                 #
                 # solve for the Mehrotra predictor direction
                 #
