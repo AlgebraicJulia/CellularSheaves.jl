@@ -943,6 +943,7 @@ function step!(s::HSDSolver{T}) where {T}
     cfres = cpres = cdres = T(NaN)
     wfres = wpres = wdres = T(NaN)
     αmin = αmax = T(NaN)
+    ρ = zero(T)      # ρ-shift actually applied this step (0 = none / no factorization); recorded below
 
     w = s.wrk
     τ = s.τ[]
@@ -1009,7 +1010,8 @@ function step!(s::HSDSolver{T}) where {T}
             #
             setaug!(s, T(CTRL_CAP_HSD))
 
-            if !@timeit s.timers "initkkt" initkkt!(s)
+            initok, ρ = @timeit s.timers "initkkt" initkkt!(s)
+            if !initok
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
                 end
@@ -1151,7 +1153,7 @@ function step!(s::HSDSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ=s.ρ[], τ=s.τ[], κ=s.κ[],
+    push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ, τ=s.τ[], κ=s.κ[],
         pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat,
         pfres, ppres, pdres, cfres, cpres, cdres, wfres, wpres, wdres, αmin, αmax))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)

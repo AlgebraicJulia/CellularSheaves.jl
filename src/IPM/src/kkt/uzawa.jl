@@ -43,9 +43,9 @@ function make_kkt(B::BlockSparseMatrix{T, I}; elim::EliminationAlgorithm = DEFAU
 end
 
 # build & factor F = (1/α)·A + BᵀB (BᵀB precomputed as wrk.L), with the ρ-shift ladder on failure.
-function initkkt!(wrk::UzawaWorkspace{UPLO, T}, A::BlockSparseMatrix; α::T) where {UPLO, T}
+function initkkt!(wrk::UzawaWorkspace{UPLO, T}, A::BlockSparseMatrix; α::T, rgmin::T) where {UPLO, T}
     wrk.α[] = α
-    return init_uzw!(wrk.facwrk, wrk.F, wrk.L, A, α, wrk.rgmin, wrk.rgmax)
+    return init_uzw!(wrk.facwrk, wrk.F, wrk.L, A, α, rgmin, wrk.rgmax)
 end
 
 function init_uzw!(
@@ -60,7 +60,6 @@ function init_uzw!(
     @assert size(F, 1) == size(L, 1) == size(A, 1)
 
     β = inv(α)
-    ρ = rgmin
     #
     # assemble and factor the augmented matrix
     #
@@ -70,16 +69,22 @@ function init_uzw!(
     axpy!(β, A, F)
     info = cholesky!(facwrk, F; check=false)
     #
-    # on failure, add a diagonal shift ρ I and retry:
+    # unshifted factorization succeeded — no shift applied, so the APPLIED shift is 0. Returning the
+    # actual applied shift (not the floor `rgmin`) is what the history records; the caller keeps the
+    # monotonic floor separately via s.ρ[] = max(s.ρ[], applied). The ladder below starts from the
+    # floor `rgmin` (= s.ρ[]), so it never restarts below a shift a previous solve already needed.
+    #
+    iszero(info) && return true, zero(T)
+    #
+    # on failure, add a diagonal shift ρ I and retry, climbing the ρ-ladder:
     #
     #   F ← β A + Bᵀ B + ρ I
     #
-    if !iszero(info)
-        copyto!(F, L)
-        axpy!(β, A, F)
-        axpy!(ρ, I, F)
-        info = cholesky!(facwrk, F; check=false)
-    end
+    ρ = rgmin
+    copyto!(F, L)
+    axpy!(β, A, F)
+    axpy!(ρ, I, F)
+    info = cholesky!(facwrk, F; check=false)
 
     while !iszero(info) && 8ρ ≤ rgmax
         ρ *= 8

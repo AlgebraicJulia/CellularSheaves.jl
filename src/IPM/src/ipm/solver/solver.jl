@@ -64,8 +64,13 @@ function atfloor(s::AbstractSolver)
 end
 
 function initkkt!(s::AbstractSolver{T}) where {T}
-    flag, s.ρ[] = initkkt!(s.kkt, s.H; α=s.α[])
-    return flag
+    # s.ρ[] is the running ρ-shift floor (state): it feeds in as the ladder's starting rung and rises
+    # monotonically so a later solve never re-climbs from below a shift an earlier one already needed.
+    # `ρ` is the shift ACTUALLY applied this solve (0 if the unshifted factorization succeeded) — that
+    # is the diagnostic value the caller records in the history, distinct from the floor.
+    flag, ρ = initkkt!(s.kkt, s.H; α=s.α[], rgmin=s.ρ[])
+    s.ρ[] = max(s.ρ[], ρ)
+    return flag, ρ
 end
 
 function scale!(

@@ -502,6 +502,7 @@ function step!(s::IPMSolver{T}) where {T}
     pfres = ppres = pdres = T(NaN)
     cfres = cpres = cdres = T(NaN)
     αmin = αmax = T(NaN)
+    ρ = zero(T)      # ρ-shift actually applied this step (0 = none / no factorization); recorded below
 
     w = s.wrk
     #
@@ -557,7 +558,8 @@ function step!(s::IPMSolver{T}) where {T}
             #
             setaug!(s, T(CTRL_CAP_IPM))
 
-            if !@timeit s.timers "initkkt" initkkt!(s)
+            initok, ρ = @timeit s.timers "initkkt" initkkt!(s)
+            if !initok
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
                 end
@@ -662,7 +664,7 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ=s.ρ[], pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat,
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat,
         pfres, ppres, pdres, cfres, cpres, cdres, αmin, αmax))
     if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
         if s.settings.verbose > 1
