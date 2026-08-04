@@ -14,17 +14,20 @@
 # port is validated by convergence and CRAIG iteration count, not by diff.
 #
 # The workspace form deconstructs its scratch and forwards to the array form; the solution x (n) and y (m)
-# are passed in, not owned (as in solveuzw!). g (m) is in/out: the right-hand side on entry, and on exit
+# are passed in, not owned (as in solveuzw!): x is accumulated onto (craig adds Σ ξ v — pass the base
+# solution to get base + δx), y is overwritten with the min-norm δy. g (m) is in/out: the RHS on entry, on exit
 # the residual g − B x = −β ξ u — which CRAIG forms internally (‖g − B x‖ = β·|ξ| is its stopping norm),
 # so returning it is one length-m scale, not a matvec. The caller uses it to recover y without re-forming
 # B x. btol is the backward-error stop (bkwerr ≤ btol); we pass 0 because the pricing model uses an
 # absolute residual tolerance (atol). The knob costs one comparison per iteration (bkwerr is computed
 # anyway for the machine-precision stop), so it is kept.
 
-# Why the CRAIG iteration halted. CRAIG_SOLVED covers both a met residual/backward-error tolerance and
-# the zero-residual start; the rest are the diagnostic exits (inconsistent right-hand side, operator too
-# ill-conditioned, dimension-based iteration cap hit).
+# CRAIG_CONTINUE is the in-progress sentinel — the iteration runs `while status == CRAIG_CONTINUE` and
+# writes a terminal status the moment a stop fires. The terminals: CRAIG_SOLVED covers both a met
+# residual/backward-error tolerance and the zero-residual start; the rest are the diagnostic exits
+# (inconsistent right-hand side, operator too ill-conditioned, dimension-based iteration cap hit).
 @enum CraigStatus begin
+    CRAIG_CONTINUE
     CRAIG_SOLVED
     CRAIG_INCONSISTENT
     CRAIG_ILL_CONDITIONED
@@ -33,27 +36,22 @@ end
 
 struct CraigWorkspace{T}
     Nv::FVector{T}     # Golub–Kahan v-side, before preconditioning (n)
-    Btu::FVector{T}    # Bᵀ u (n)  [u ≡ g, the in/out buffer]
     v::FVector{T}      # (F Fᵀ)⁻¹ N v (n)
     w::FVector{T}      # y-recurrence direction (m)
-    Bv::FVector{T}     # B v (m)
 end
 
 function CraigWorkspace{T}(m::Integer, n::Integer) where {T}
-    return CraigWorkspace{T}(FVector{T}(undef, n), FVector{T}(undef, n), FVector{T}(undef, n),
-                             FVector{T}(undef, m), FVector{T}(undef, m))
+    return CraigWorkspace{T}(FVector{T}(undef, n), FVector{T}(undef, n), FVector{T}(undef, m))
 end
 
 function craig!(wrk::CraigWorkspace{T}, B, F, divwrk, x, y, g; kwargs...) where {T}
-    return craig!(wrk.Nv, wrk.Btu, wrk.v, wrk.w, wrk.Bv, B, F, divwrk, x, y, g; kwargs...)
+    return craig!(wrk.Nv, wrk.v, wrk.w, B, F, divwrk, x, y, g; kwargs...)
 end
 
 function craig!(
         Nv::AbstractVector{T},
-        Btu::AbstractVector{T},
         v::AbstractVector{T},
         w::AbstractVector{T},
-        Bv::AbstractVector{T},
         B::AbstractMatrix{T},
         F::AbstractMatrix{T},
         divwrk,
@@ -69,7 +67,8 @@ function craig!(
     m, n = size(B)
     Bᵀ = B'
 
-    fill!(x, zero(T))
+    # x is accumulated onto, not zeroed: craig adds its correction Σ ξ v, so the caller passes the base
+    # solution and receives base + δx. y is a fresh output (the min-norm δy).
     fill!(y, zero(T))
     #
     # g carries the Golub–Kahan u-side in place (u ≡ M u ≡ g, M = I): the RHS on entry, the u-recurrence
@@ -77,9 +76,11 @@ function craig!(
     #
     β₁ = norm(g)
     nr = β₁
+
     if iszero(β₁)
         return 0, CRAIG_SOLVED
     end
+
     β₁² = β₁^2
     β = β₁
     θ = β₁
@@ -95,6 +96,7 @@ function craig!(
     nx² = zero(T); nx = zero(T)
 
     iter = 0
+
     if iszero(itmax)
         itmax = m + n
     end
@@ -102,32 +104,35 @@ function craig!(
     εc = atol + rtol * nr             # consistent-system residual tolerance
     bkwerr = one(T)                   # backward error ‖r‖ / √(‖b‖² + ‖B‖²‖x‖²)
 
-    solved = (one(T) + bkwerr ≤ one(T)) | (bkwerr ≤ btol) | (nr ≤ εc) |
-             (nr ≤ btol + atol * nB * nx / β₁)
-    illcond = false
-    inconsistent = false
+    # a zero-residual / already-within-tolerance start converges before the first iteration
+    if (one(T) + bkwerr ≤ one(T)) || (bkwerr ≤ btol) || (nr ≤ εc) || (nr ≤ btol + atol * nB * nx / β₁)
+        status = CRAIG_SOLVED
+    else
+        status = CRAIG_CONTINUE
+    end
 
-    while !(solved || inconsistent || illcond || iter ≥ itmax)
+    while status == CRAIG_CONTINUE
         #
         # αₖ₊₁ N vₖ₊₁ = Bᵀ uₖ − βₖ N vₖ,   then precondition  v ← (F Fᵀ)⁻¹ N v
         #
-        mul!(Btu, Bᵀ, g)
-        axpby!(one(T), Btu, -β, Nv)
+        mul!(Nv, Bᵀ, g, one(T), -β)   # Nv ← Bᵀ g − β Nv
         copyto!(v, Nv)
         ldiv!(divwrk, F, v)
         ldiv!(divwrk, F', v)
-        α = sqrt(dot(v, Nv))          # (F Fᵀ)⁻¹-elliptic norm
+        α² = dot(v, Nv)               # (F Fᵀ)⁻¹-elliptic norm, squared
+        α = sqrt(α²)
+
         if iszero(α)
-            inconsistent = true
+            status = CRAIG_INCONSISTENT
         else
             rdiv!(v, α)
             rdiv!(Nv, α)
-            nB² += α * α
+            nB² += α²
             #
             # advance the solution recurrences for x and y
             #
             ρ = α
-            ξ = -θ / ρ * ξ
+            ξ *= -θ / ρ
             axpy!(ξ, v, x)                     # x ← x + ξ v
             axpby!(one(T), g, -θ / ρprv, w)    # w ← u − (θ/ρprv) w
             axpy!(ξ / ρ, w, y)                 # y ← y + (ξ/ρ) w
@@ -135,13 +140,17 @@ function craig!(
             #
             # βₖ₊₁ M uₖ₊₁ = B vₖ − αₖ M uₖ
             #
-            mul!(Bv, B, v)
-            axpby!(one(T), Bv, -α, g)          # u ← B v − α u
-            β = norm(g)
-            !iszero(β) && rdiv!(g, β)
+            mul!(g, B, v, one(T), -α)          # u ← B v − α u  (u ≡ g)
+            β² = dot(g, g)
+            β = sqrt(β²)
+
+            if !iszero(β)
+                rdiv!(g, β)
+            end
+
             θ = β
 
-            nB² += β * β
+            nB² += β²
             nB = sqrt(nB²)
             condB = nB * sqrt(nD²)
             nx² += ξ * ξ
@@ -152,9 +161,13 @@ function craig!(
             bkwerr = nr / sqrt(β₁² + nB² * nx²)
             ρprv = ρ
 
-            solved = (one(T) + bkwerr ≤ one(T)) | (bkwerr ≤ btol) | (nr ≤ εc) |
-                     (nr ≤ btol + atol * nB * nx / β₁)
-            illcond = (one(T) + inv(condB) ≤ one(T)) | (inv(condB) ≤ ctol)
+            if (one(T) + inv(condB) ≤ one(T)) || (inv(condB) ≤ ctol)
+                status = CRAIG_ILL_CONDITIONED
+            elseif (one(T) + bkwerr ≤ one(T)) || (bkwerr ≤ btol) || (nr ≤ εc) || (nr ≤ btol + atol * nB * nx / β₁)
+                status = CRAIG_SOLVED
+            elseif iter ≥ itmax
+                status = CRAIG_ITMAX
+            end
         end
     end
 
@@ -165,14 +178,5 @@ function craig!(
     #
     rmul!(g, -β * ξ)
 
-    if inconsistent
-        status = CRAIG_INCONSISTENT
-    elseif illcond
-        status = CRAIG_ILL_CONDITIONED
-    elseif solved
-        status = CRAIG_SOLVED
-    else
-        status = CRAIG_ITMAX
-    end
     return iter, status
 end

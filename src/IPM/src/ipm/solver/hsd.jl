@@ -420,7 +420,7 @@ function refinehsd!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.xc, wrk.yc, wrk.F, H, B, sd, sp, wrk.α[], max(force_tol, floor_tol); θ = T(INTERIOR_THETA))
+        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, H, B, sd, sp, wrk.α[], max(force_tol, floor_tol); θ = T(INTERIOR_THETA))
         niter += n
         npass += 1
         #
@@ -482,7 +482,7 @@ function newton!(
     #   [ H -Bᵀ ] [ Δp ] = [ f  ]
     #   [ B  0  ] [ Δy ]   [ rp ]
     #
-    niter, nr0 = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.xc, wrk.yc, wrk.F, H, B, f, rp, wrk.α[], atol, y0)
+    niter, nr0 = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.F, H, B, f, rp, wrk.α[], atol, y0)
     #
     # apply the Schur lift:
     #
