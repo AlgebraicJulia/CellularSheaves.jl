@@ -58,30 +58,42 @@ R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
 
 K_test = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10*Q_lqr, R_lqr)
 
-# Target trajectories
+# Target position, velocity, and acceleration trajectories
 target1_pos(t) = [1.0 + 0.5 * cos(0.5 * t), 0.5 * sin(0.5 * t), 1.5 + 0.01 * sin(1.0 * t), 1.0]
 target2_pos(t) = [-1.0 - 0.5 * cos(0.5 * t), -0.5 * sin(0.5 * t), 1.5 + 0.01 * cos(1.0 * t), 1.0]
 
+target1_vel(t) = [-0.25 * sin(0.5 * t), 0.25 * cos(0.5 * t), 0.01 * cos(1.0 * t), 0.0]
+target2_vel(t) = [0.25 * sin(0.5 * t), -0.25 * cos(0.5 * t), -0.01 * sin(1.0 * t), 0.0]
+
+target1_acc(t) = [-0.125 * cos(0.5 * t), -0.125 * sin(0.5 * t), -0.01 * sin(1.0 * t), 0.0]
+target2_acc(t) = [0.125 * cos(0.5 * t), 0.125 * sin(0.5 * t), -0.01 * cos(1.0 * t), 0.0]
+
 target_trajs = [target1_pos, target2_pos]
+target_vels  = [target1_vel, target2_vel]
+target_accels = [target1_acc, target2_acc]
 
 prob_pf = LayeredEscortProblem(
     spec, F, f, PfF, bases,
     HomogeneousDynamics(dyn_test, K_test),
-    target_trajs, target_trajs, target_trajs,
+    target_trajs, target_vels, target_accels,
     DT, STEPS
 )
 
 # --- 1. Simulation 1: 3-Layer Pushforward Architecture (f_★F) ---
-res_pf = run_layered_escort_simulation(prob_pf)
+res_pf = run_layered_escort_simulation(prob_pf; use_feedforward=true)
 
 # --- 2. Simulation 2: Direct 2-Layer Solve on Sheaf F ---
-sim_data_dir = []
-qstar_history_dir = []
-target_history_dir = []
+sim_data_dir = Vector{Vector{Vector{Float64}}}()
+qstar_history_dir = Vector{Matrix{Float64}}()
+target_history_dir = Vector{Vector{Vector{Float64}}}()
 
 time_grid = 0:DT:(STEPS*DT)
-init_states_dir = [[0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] for _ in 1:spec.n_agents]
-current_states_dir = copy(init_states_dir)
+
+## Initialize agent states for direct simulation using AgentState and JointTikhonovFilter
+agent_states_dir = [AgentState(zeros(10), dyn_test, DT, K_test, 0.02; use_velocity=true) for _ in 1:spec.n_agents]
+for state in agent_states_dir
+    state.x[3] = 1.5
+end
 
 for step in 1:STEPS
     t = time_grid[step]
@@ -90,18 +102,21 @@ for step in 1:STEPS
     p3_center = (p1 + p2) ./ 2.0
     push!(target_history_dir, [p1, p2, p3_center])
 
-    ## Direct Harmonic Solve on F
+    ## Direct Harmonic Solves on F for position, velocity, and acceleration
     qstar_agents = solve_direct_harmonic(F, spec.target_nodes, [p1, p2])
+    qstar_dot_agents = solve_direct_harmonic(F, spec.target_nodes, [target1_vel(t), target2_vel(t)])
+    qstar_ddot_agents = solve_direct_harmonic(F, spec.target_nodes, [target1_acc(t), target2_acc(t)])
     push!(qstar_history_dir, qstar_agents)
 
-    ## Agent Dynamics Integration
-    step_states = []
+    ## Agent Dynamics Integration with Feedforward Velocity & Acceleration Support
+    step_states = Vector{Vector{Float64}}()
     for i in 1:spec.n_agents
-        x_actual = current_states_dir[i][1:3]
-        x_ref = qstar_agents[i, 1:3]
-        error = x_actual - x_ref
-        current_states_dir[i][1:3] .-= 0.3 * error * DT
-        push!(step_states, copy(current_states_dir[i]))
+        q_ref_i = qstar_agents[i, 1:3]
+        q_dot_i = qstar_dot_agents[i, 1:3]
+        q_ddot_i = qstar_ddot_agents[i, 1:3]
+        
+        step_agent!(agent_states_dir[i], q_ref_i, q_dot_i, q_ddot_i, DT)
+        push!(step_states, copy(agent_states_dir[i].x))
     end
     push!(sim_data_dir, step_states)
 end
