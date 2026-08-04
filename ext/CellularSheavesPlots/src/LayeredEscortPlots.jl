@@ -575,23 +575,23 @@ function plot_comprehensive_escort_frame(sim_data, qstar_history, target_history
     scatter!(p1_plot, r3_x, r3_y, color=:forestgreen, label="Ring 3 Agents")
     plot!(p1_plot, [r3_x; r3_x[1]], [r3_y; r3_y[1]], color=:forestgreen, linestyle=:dash, label="")
 
-    c1 = [sum(r1_x)/6, sum(r1_y)/6]
+    # Ring 1 Target-Relative
     p2_plot = plot(title="Ring 1 Target-Relative", aspect_ratio=1, xlims=limits.rel_lims1[1], ylims=limits.rel_lims1[2], xlabel="Δx (m)", ylabel="Δy (m)")
     scatter!(p2_plot, [0], [0], marker=:star5, markersize=8, color=:black, label="")
     θ = range(0, 2π, length=100)
     plot!(p2_plot, r1*cos.(θ), r1*sin.(θ), color=:gray, linestyle=:dot, label="")
-    scatter!(p2_plot, r1_x .- c1[1], r1_y .- c1[2], color=:steelblue, label="")
+    scatter!(p2_plot, r1_x .- p1[1], r1_y .- p1[2], color=:steelblue, label="")
 
-    c2 = [sum(r2_x)/6, sum(r2_y)/6]
+    # Ring 2 Target-Relative
     p3_plot = plot(title="Ring 2 Target-Relative", aspect_ratio=1, xlims=limits.rel_lims2[1], ylims=limits.rel_lims2[2], xlabel="Δx (m)", ylabel="Δy (m)")
     scatter!(p3_plot, [0], [0], marker=:star5, markersize=8, color=:black, label="")
     plot!(p3_plot, r2*cos.(θ), r2*sin.(θ), color=:gray, linestyle=:dot, label="")
-    scatter!(p3_plot, r2_x .- c2[1], r2_y .- c2[2], color=:crimson, label="")
+    scatter!(p3_plot, r2_x .- p2[1], r2_y .- p2[2], color=:crimson, label="")
 
-    c3 = [sum(r3_x)/3, sum(r3_y)/3]
+    # Ring 3 Target-Relative
     p4_plot = plot(title="Ring 3 Target-Relative", aspect_ratio=1, xlims=limits.rel_lims3[1], ylims=limits.rel_lims3[2], xlabel="Δx (m)", ylabel="Δy (m)")
     scatter!(p4_plot, [0], [0], marker=:star5, markersize=8, color=:black, label="")
-    scatter!(p4_plot, r3_x .- c3[1], r3_y .- c3[2], color=:forestgreen, label="")
+    scatter!(p4_plot, r3_x .- p3[1], r3_y .- p3[2], color=:forestgreen, label="")
 
     p5_plot = plot(title="Formation Radius Error", xlabel="time (s)", ylabel="error (m)", xlims=(0, time_grid[end]), ylims=(0, limits.form_err_max))
     plot!(p5_plot, time_grid[1:step_idx], limits.form_err1[1:step_idx], color=:steelblue, label="Ring 1 Error", linewidth=2)
