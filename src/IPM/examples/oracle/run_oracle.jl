@@ -47,8 +47,8 @@ jval(v) = "\"$(string(v))\""
 
 for solv in solvs
     settings = solv == "ipm" ?
-        IPMSettings{Float64}(; feas_tol=tol, gap_tol=tol, itmax=300) :
-        HSDSettings{Float64}(; feas_tol=tol, gap_tol=tol, itmax=300)
+        IPMSettings{Float64}(; feas_tol=tol, gap_tol=tol, itmax=300, fix_alpha=true) :
+        HSDSettings{Float64}(; feas_tol=tol, gap_tol=tol, itmax=300, fix_alpha=true)
     s0 = init(prob, settings)
     final, records = solve_logged(s0, grid)
 

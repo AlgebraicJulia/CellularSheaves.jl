@@ -16,6 +16,7 @@
     rgmax::T = 1e-6
     aaug::T = zero(T)   # absolute augmentation (raw-α override: set raug=0, aaug=α_raw)
     raug::T = 1e7       # relative augmentation, in initial-problem units (the anchored knob)
+    fix_alpha::Bool = false   # ORACLE ONLY: setaug! becomes a no-op so a caller-injected α survives step!
     elim::E = DEFAULT_ELIMINATION_ALGORITHM   # KKT elimination ordering (construction-time)
     # HSD-specific
     illposed_tol::T = 1e-10

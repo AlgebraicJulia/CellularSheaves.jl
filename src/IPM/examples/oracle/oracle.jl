@@ -18,9 +18,14 @@
 # (pfres=‖r0‖ primal base residual → ℓ_p=α‖r0‖; pdres≈s0 dual → ℓ_d=s0/α), ρ, μ, tolerances, ‖B‖.
 # No spectral harvest, no per-pass trace — those are added only if/when the policy needs them (W3).
 
-using LinearAlgebra: norm
+using LinearAlgebra: norm, Symmetric
 using Printf: @sprintf
-using CellularSheaves.IPM: step!, mu, CONTINUE, REACHED_FORCE, REACHED_FLOOR
+using CellularSheaves.IPM: step!, mu, CONTINUE, REACHED_FORCE, REACHED_FLOOR,
+    getaug, CTRL_CAP_IPM, CTRL_CAP_HSD, IPMSolver, HSDSolver
+
+# The controller cap the live setaug! would use, per solver kind.
+_ctrl_cap(::IPMSolver) = CTRL_CAP_IPM
+_ctrl_cap(::HSDSolver) = CTRL_CAP_HSD
 
 const DEFAULT_ALPHA_GRID = [round(10.0^e, sigdigits=4) for e in 0.0:0.5:18.0]   # half-decades 1e0..1e18 (37 pts)
 
@@ -38,7 +43,7 @@ function _oracle_craig(row)
     return c
 end
 
-function _oracle_record(i, α, sc, st)
+function _oracle_record(i, α, sc, st, αctrl)
     row = sc.hist[end]
     μ   = row.μ
     μ1  = first(sc.hist.μ)
@@ -47,7 +52,7 @@ function _oracle_record(i, α, sc, st)
     ftol  = min(sc.settings.forcing_frac * μ / μ1, sc.settings.forcing_ceil)
     fltol = 100 * eps(T) * (one(T) + max(norm(sc.wrk.rp, Inf), norm(sc.wrk.rd, Inf)))
     hasw  = hasproperty(row, :wstat)
-    return (iter = i, alpha = α, state = _oracle_state(row), ncraig = _oracle_craig(row),
+    return (iter = i, alpha = α, alpha_ctrl = αctrl, state = _oracle_state(row), ncraig = _oracle_craig(row),
             ipm_status = st, mu = μ, mu_next = mu(sc), rho = row.ρ,
             force_tol = ftol, floor_tol = fltol, normB = norm(sc.B),
             step = row.step, ipm_pres = row.pres, ipm_dres = row.dres,
@@ -92,11 +97,18 @@ function solve_logged(s0, grid = DEFAULT_ALPHA_GRID; itmax::Integer = s0.setting
         bestscore = (typemax(Int), typemax(Int))
         beststatus = CONTINUE
         bestidx = 0
+        # α the live controller (setaug!) would have picked at THIS iterate — the oracle disables the
+        # controller (fix_alpha) so the swept α survives, but we still record its choice to judge it.
+        # iter≥2: exact — getaug reads only the previous step's recorded α/αmin/αmax. iter 1: raug
+        # formula, filled below from a stepped candidate's scaled H (scaling is α-independent).
+        T = eltype(s.wrk.rp)
+        αctrl = isempty(s.hist) ? T(NaN) : getaug(s.hist, _ctrl_cap(s))
         for α in gs
             sc = deepcopy(s)
             sc.α[] = α
             st = step!(sc)
-            push!(iter_recs, _oracle_record(i, α, sc, st))
+            isnan(αctrl) && (αctrl = s.settings.aaug + s.settings.raug * norm(Symmetric(sc.H, :L)) / s.nB[]^2)
+            push!(iter_recs, _oracle_record(i, α, sc, st, αctrl))
             score = (iter_recs[end].state, iter_recs[end].ncraig)
             if score < bestscore                   # strict: first (lowest) α at the best score wins
                 bestscore = score

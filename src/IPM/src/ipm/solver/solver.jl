@@ -25,6 +25,7 @@ function augmax(α::T, pdres::T, tol::T, state::Bool, pbase::Int, gap::T) where 
 end
 
 function setaug!(s::AbstractSolver{T}, cap::T) where {T}
+    s.settings.fix_alpha && return   # ORACLE ONLY: leave the caller-injected α in place
     if isempty(s.hist)
         s.α[] = s.settings.aaug + s.settings.raug * norm(Symmetric(s.H, :L)) / s.nB[]^2
     else
