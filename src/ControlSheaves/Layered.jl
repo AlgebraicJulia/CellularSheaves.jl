@@ -344,7 +344,7 @@ end
 
 Solve harmonic extension directly on `F` given pinned target nodes and positions.
 """
-function solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, target_positions::Vector{Vector{Float64}}, D::Int=4)
+function solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, target_positions::Vector{Vector{Float64}}, D::Int=F.vertex_stalks[1])
     boundary = Dict(target_nodes[i] => target_positions[i] for i in 1:length(target_nodes))
     _, _, H_mat, B_mat = _harmonic_extension_restricted_laplacian(F, boundary)
     

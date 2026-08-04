@@ -483,6 +483,10 @@ function compute_escort_6panel_limits(sim_data, qstar_history, target_history, t
     
     all_x = Float64[]
     all_y = Float64[]
+    for step in 1:STEPS
+        for i in 1:length(sim_data[step])
+            push!(all_x, sim_data[step][i][1])
+            push!(all_y, sim_data[step][i][2])
         end
         push!(all_x, target_history[step][1][1])
         push!(all_y, target_history[step][1][2])
