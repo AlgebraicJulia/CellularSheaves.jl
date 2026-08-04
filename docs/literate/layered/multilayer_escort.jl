@@ -79,47 +79,54 @@ prob_pf = LayeredEscortProblem(
     DT, STEPS
 )
 
-# --- 1. Simulation 1: 3-Layer Pushforward Architecture (f_★F) ---
-res_pf = run_layered_escort_simulation(prob_pf; use_feedforward=true)
+#  ## Simulation 1: 3-Layer Pushforward Architecture (f_★F) ---
+@time res_pf = run_layered_escort_simulation(prob_pf; use_feedforward=true)
+@time res_pf = run_layered_escort_simulation(prob_pf; use_feedforward=true)
 
-# --- 2. Simulation 2: Direct 2-Layer Solve on Sheaf F ---
-sim_data_dir = Vector{Vector{Vector{Float64}}}()
-qstar_history_dir = Vector{Matrix{Float64}}()
-target_history_dir = Vector{Vector{Vector{Float64}}}()
+# ## Simulation 2: Direct 2-Layer Solve on Sheaf F ---
 
-time_grid = 0:DT:(STEPS*DT)
+function direct_simulation()
+    sim_data_dir = Vector{Vector{Vector{Float64}}}()
+    qstar_history_dir = Vector{Matrix{Float64}}()
+    target_history_dir = Vector{Vector{Vector{Float64}}}()
 
-## Initialize agent states for direct simulation using AgentState and JointTikhonovFilter
-agent_states_dir = [AgentState(zeros(10), dyn_test, DT, K_test, 0.02; use_velocity=true) for _ in 1:spec.n_agents]
-for state in agent_states_dir
-    state.x[3] = 1.5
-end
-
-for step in 1:STEPS
-    t = time_grid[step]
-    p1 = target1_pos(t)
-    p2 = target2_pos(t)
-    p3_center = (p1 + p2) ./ 2.0
-    push!(target_history_dir, [p1, p2, p3_center])
-
-    ## Direct Harmonic Solves on F for position, velocity, and acceleration
-    qstar_agents = solve_direct_harmonic(F, spec.target_nodes, [p1, p2])
-    qstar_dot_agents = solve_direct_harmonic(F, spec.target_nodes, [target1_vel(t), target2_vel(t)])
-    qstar_ddot_agents = solve_direct_harmonic(F, spec.target_nodes, [target1_acc(t), target2_acc(t)])
-    push!(qstar_history_dir, qstar_agents)
-
-    ## Agent Dynamics Integration with Feedforward Velocity & Acceleration Support
-    step_states = Vector{Vector{Float64}}()
-    for i in 1:spec.n_agents
-        q_ref_i = qstar_agents[i, 1:3]
-        q_dot_i = qstar_dot_agents[i, 1:3]
-        q_ddot_i = qstar_ddot_agents[i, 1:3]
-        
-        step_agent!(agent_states_dir[i], q_ref_i, q_dot_i, q_ddot_i, DT)
-        push!(step_states, copy(agent_states_dir[i].x))
+    time_grid = 0:DT:(STEPS*DT)
+    ## Initialize agent states for direct simulation using AgentState and JointTikhonovFilter
+    agent_states_dir = [AgentState(zeros(10), dyn_test, DT, K_test, 0.02; use_velocity=true) for _ in 1:spec.n_agents]
+    for state in agent_states_dir
+        state.x[3] = 1.5
     end
-    push!(sim_data_dir, step_states)
+
+    for step in 1:STEPS
+        t = time_grid[step]
+        p1 = target1_pos(t)
+        p2 = target2_pos(t)
+        p3_center = (p1 + p2) ./ 2.0
+        push!(target_history_dir, [p1, p2, p3_center])
+
+        ## Direct Harmonic Solves on F for position, velocity, and acceleration
+        qstar_agents = solve_direct_harmonic(F, spec.target_nodes, [p1, p2])
+        qstar_dot_agents = solve_direct_harmonic(F, spec.target_nodes, [target1_vel(t), target2_vel(t)])
+        qstar_ddot_agents = solve_direct_harmonic(F, spec.target_nodes, [target1_acc(t), target2_acc(t)])
+        push!(qstar_history_dir, qstar_agents)
+
+        ## Agent Dynamics Integration with Feedforward Velocity & Acceleration Support
+        step_states = Vector{Vector{Float64}}()
+        for i in 1:spec.n_agents
+            q_ref_i = qstar_agents[i, 1:3]
+            q_dot_i = qstar_dot_agents[i, 1:3]
+            q_ddot_i = qstar_ddot_agents[i, 1:3]
+            
+            step_agent!(agent_states_dir[i], q_ref_i, q_dot_i, q_ddot_i, DT)
+            push!(step_states, copy(agent_states_dir[i].x))
+        end
+        push!(sim_data_dir, step_states)
+    end
+    return (sim_data_dir, qstar_history_dir, target_history_dir, time_grid)
 end
+
+@time direct_simulation()
+@time sim_data_dir, qstar_history_dir, target_history_dir, time_grid = direct_simulation()
 
 # --- 3. Render Animations & Visualizations ---
 r1, r2, r3 = r_ring, r_ring * 1.2, r_ring * 0.8
