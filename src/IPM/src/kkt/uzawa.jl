@@ -203,8 +203,8 @@ function solveuzw!(
         x::AbstractVector{T},
         y::AbstractVector{T},
         r::AbstractVector{T},
-        xc::AbstractVector{T},
-        yc::AbstractVector{T},
+        δx::AbstractVector{T},
+        δy::AbstractVector{T},
         F::ChordalTriangular{:N, UPLO, T},
         A::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -220,6 +220,8 @@ function solveuzw!(
     @assert length(x) == n
     @assert length(y) == m
     @assert length(r) == m
+    @assert length(δx) == n
+    @assert length(δy) == m
     @assert length(f) == n
     @assert length(g) == m
     @assert size(F, 1) == n
@@ -259,27 +261,22 @@ function solveuzw!(
     #   [ β A + Bᵀ B  -Bᵀ ] [ δx ] = [ 0 ]
     #   [ B            0  ] [ δy ]   [ r ]
     #
-    # craig applies the preconditioner (F Fᵀ)⁻¹ = (β A + BᵀB)⁻¹ inline via F + divwrk. Absolute stop
-    # only (rtol = 0): base solves (θ = 0) drive to exactly atol; interior inexact-Uzawa passes (θ > 0)
-    # stop at max(atol, θ·nr0), each reducing its own entry residual by ~1/θ and no further. max(atol, 0)
-    # = atol, so the one formula covers both.
-    nc, _ = craig!(itrwrk, B, F, divwrk, xc, yc, r; btol = zero(T), atol = max(atol, θ * nr0), rtol = zero(T))
+    nc, _ = craig!(itrwrk, B, F, divwrk, δx, δy, r; btol = zero(T), atol = max(atol, θ * nr0), rtol = zero(T))
     niter += nc
     #
     # update x:
     #
     #   x = x + δx
     #
-    axpy!(one(T), xc, x)
+    axpy!(one(T), δx, x)
     #
     # recover y:
     #
-    #   y = y₀ + 1/β (δy + (g - B x))
+    #   y = y₀ + 1/β (δy + g - B x)
     #
-    copyto!(r, g)
-    mul!(r, B, x, -one(T), one(T))
-    copyto!(y, yc)
-    axpy!(one(T), r, y)
+    copyto!(y, δy)
+    axpy!(one(T), g, y)
+    mul!(y, B, x, -one(T), one(T))
     lmul!(α, y)
 
     if !isnothing(y0)
