@@ -51,10 +51,15 @@ STEPS = 200
 # Setup LQR gain for tests
 dyn_test = QuadrotorDynamics()
 Ad, Bd = CellularSheaves.AgentControllers.discrete_matrices(dyn_test, DT)
-K_test = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, Matrix{Float64}(I, 10, 10), Matrix{Float64}(I, 3, 3))
+# Standard LQR Cost Matrices (moderate velocity gain)
+Q_diag = [500.0, 500.0, 500.0, 150.0, 150.0, 100.0, 100.0, 100.0, 5.0, 5.0]
+Q_lqr = Matrix(Diagonal(Q_diag))
+R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
+
+K_test = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10*Q_lqr, R_lqr)
 
 # Target trajectories
-target1_pos(t) = [1.0 + 0.5 * cos(0.5 * t), 0.05 * sin(0.5 * t), 1.5 + 0.01 * sin(1.0 * t), 1.0]
+target1_pos(t) = [1.0 + 0.5 * cos(0.5 * t), 0.5 * sin(0.5 * t), 1.5 + 0.01 * sin(1.0 * t), 1.0]
 target2_pos(t) = [-1.0 - 0.5 * cos(0.5 * t), -0.5 * sin(0.5 * t), 1.5 + 0.01 * cos(1.0 * t), 1.0]
 
 target_trajs = [target1_pos, target2_pos]
