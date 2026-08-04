@@ -48,15 +48,20 @@ bases = build_layered_fiber_bases(f, F, spec)
 DT = 0.05
 STEPS = 200
 
+# Setup LQR gain for tests
+dyn_test = QuadrotorDynamics()
+Ad, Bd = CellularSheaves.AgentControllers.discrete_matrices(dyn_test, DT)
+K_test = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, Matrix{Float64}(I, 10, 10), Matrix{Float64}(I, 3, 3))
+
 # Target trajectories
-target1_pos(t) = [1.0 + 0.05 * cos(0.5 * t), 0.05 * sin(0.5 * t), 1.5 + 0.01 * sin(1.0 * t), 1.0]
-target2_pos(t) = [-1.0 - 0.05 * cos(0.5 * t), -0.05 * sin(0.5 * t), 1.5 + 0.01 * cos(1.0 * t), 1.0]
+target1_pos(t) = [1.0 + 0.5 * cos(0.5 * t), 0.05 * sin(0.5 * t), 1.5 + 0.01 * sin(1.0 * t), 1.0]
+target2_pos(t) = [-1.0 - 0.5 * cos(0.5 * t), -0.5 * sin(0.5 * t), 1.5 + 0.01 * cos(1.0 * t), 1.0]
 
 target_trajs = [target1_pos, target2_pos]
 
 prob_pf = LayeredEscortProblem(
     spec, F, f, PfF, bases,
-    HomogeneousDynamics(QuadrotorDynamics()),
+    HomogeneousDynamics(dyn_test, K_test),
     target_trajs, target_trajs, target_trajs,
     DT, STEPS
 )
