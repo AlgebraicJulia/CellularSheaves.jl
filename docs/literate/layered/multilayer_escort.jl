@@ -106,3 +106,9 @@ animate_comprehensive_escort(res_pf.sim_data, res_pf.qstar_history, res_pf.targe
 animate_comprehensive_escort(sim_data_dir, qstar_history_dir, target_history_dir, time_grid, r1, r2, r3, "direct_sheaf_comprehensive_animation.gif"; frame_step=4, fps=10, title_prefix="Direct 2-Layer Solve (F)")
 
 println("Multilayer Escort simulation with generic architecture complete.")
+
+# ## Visual Comparison Animations
+#
+# ![3-Layer Pushforward Architecture Animation](multilayer_comprehensive_animation.gif)
+#
+# ![Direct 2-Layer Solve Animation](direct_sheaf_comprehensive_animation.gif)
