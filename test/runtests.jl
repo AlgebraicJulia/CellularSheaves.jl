@@ -38,6 +38,7 @@ end
   include("network_sheaves/Formations.jl")
   include("network_sheaves/test_feedforward_control.jl")
   include("network_sheaves/TransferMapLift.jl")
+  include("network_sheaves/LayeredEscort.jl")
 end
 
 @testset "Control Sheaves" begin
