@@ -4,7 +4,7 @@ using LinearAlgebra
 using LinearAlgebra: chkstride1, BlasFloat, BlasInt, LowerTriangular, Adjoint
 using Random: Xoshiro
 using Printf: @sprintf, @printf
-using LinearAlgebra.BLAS: @blasfunc, libblastrampoline, nrm2
+using LinearAlgebra.BLAS: @blasfunc, libblastrampoline
 using LinearAlgebra.LAPACK: chklapackerror
 using Base: require_one_based_indexing, ReshapedArray, @propagate_inbounds, promote_eltype, oneto
 using FixedSizeArrays: FixedSizeArrayDefault

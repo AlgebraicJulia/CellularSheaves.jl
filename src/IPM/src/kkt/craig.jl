@@ -8,13 +8,14 @@
 # warm start / timing / logging / callbacks. We own it so a later pass can harvest the bidiagonal
 # coefficients αₖ, βₖ (the pricing-model Ritz / spectral readings) without an external internal API.
 #
-# The Krylov @k* BLAS wrappers are replaced by their standard-library equivalents, bit-identical for
-# Vector{Float64}: kaxpy!→axpy!, kaxpby!→axpby!, kdot→dot, kscal!→rmul!, kdiv!(x,s)→rmul!(x, inv(s))
-# (scale by the reciprocal, NOT ./=), kmul!→mul!, kfill!→fill!, kcopy!→copyto!. NOTE knorm→BLAS.nrm2,
-# NOT LinearAlgebra.norm: `norm2(::Vector{BlasFloat})` is `length(x) < NRM2_CUTOFF (=32) ? generic_norm2 :
-# BLAS.nrm2` (stdlib dense.jl), and the two differ by 1 ULP below the cutoff. craig's u/w live in the DUAL
-# space (row dim of B, e.g. m=21 < 32 for e04), so `norm` would take the generic branch; that 1-ULP gap
-# then amplifies through the Golub–Kahan cancellation. Krylov uses knorm = raw nrm2, so we must too.
+# The Krylov @k* BLAS wrappers become their idiomatic standard-library equivalents: kaxpy!→axpy!,
+# kaxpby!→axpby!, kdot→dot, kscal!→rmul!, kdiv!(x,s)→rdiv!(x,s), kmul!→mul!, kfill!→fill!,
+# kcopy!→copyto!, knorm→norm. Two of these are NOT bit-identical to Krylov: `norm` of a short BlasFloat
+# vector (length < NRM2_CUTOFF = 32, as craig's dual-space u/w often are — row dim of B, e.g. m=21 for
+# e04) takes the generic_norm2 branch, which differs from Krylov's raw BLAS.nrm2 by 1 ULP; and rdiv!(x,s)
+# divides where kdiv! multiplies by the reciprocal. Either gap perturbs the Golub–Kahan recurrence in the
+# last bits, but CRAIG still converges to the same atol — so this port is validated by convergence and
+# solver iteration cost, not by byte-identity. (The byte-identical intermediate used nrm2 + rmul!(inv).)
 #
 # btol is the backward-error stopping tolerance (bkwerr ≤ btol); we pass 0 — the pricing model uses an
 # ABSOLUTE residual tolerance (atol), so the backward-error stop is disabled. The knob is kept because it
@@ -60,7 +61,7 @@ function craig!(wrk::CraigWorkspace{T}, A, F, divwrk, b;
     fill!(y, zero(T))
 
     copyto!(u, b)                    # u ← b   (u ≡ Mu, M = I)
-    β₁ = nrm2(u)                     # BLAS nrm2 (not norm): they differ by 1 ULP for small vectors
+    β₁ = norm(u)
     rNorm = β₁
     if β₁ == 0
         wrk.niter = 0
@@ -72,7 +73,7 @@ function craig!(wrk::CraigWorkspace{T}, A, F, divwrk, b;
     ξ  = -one(T)
     ρ_prev = one(T)
 
-    rmul!(u, inv(β₁))                # u ← u / β₁
+    rdiv!(u, β₁)                     # u ← u / β₁
     fill!(Nv, zero(T))
     fill!(w,  zero(T))
 
@@ -106,8 +107,8 @@ function craig!(wrk::CraigWorkspace{T}, A, F, divwrk, b;
             inconsistent = true
             continue
         end
-        rmul!(v,  inv(α))
-        rmul!(Nv, inv(α))
+        rdiv!(v,  α)
+        rdiv!(Nv, α)
         Anorm² += α * α
 
         ρ = α
@@ -115,13 +116,13 @@ function craig!(wrk::CraigWorkspace{T}, A, F, divwrk, b;
         axpy!(ξ, v, x)                       # x ← x + ξ v
         axpby!(one(T), u, -θ / ρ_prev, w)    # w ← u − (θ/ρ_prev) w
         axpy!(ξ / ρ, w, y)                   # y ← y + (ξ/ρ) w
-        Dnorm² += nrm2(w)
+        Dnorm² += norm(w)
 
         # 2.  βₖ₊₁ M uₖ₊₁ = A vₖ − αₖ M uₖ
         mul!(Av, A, v)
         axpby!(one(T), Av, -α, u)            # u ← A v − α u
-        β = nrm2(u)
-        β ≠ 0 && rmul!(u, inv(β))
+        β = norm(u)
+        β ≠ 0 && rdiv!(u, β)
         θ = β
 
         Anorm² += β * β

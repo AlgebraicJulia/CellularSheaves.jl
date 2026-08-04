@@ -252,14 +252,11 @@ function solveuzw!(
     #   [ β A + Bᵀ B  -Bᵀ ] [ δx ] = [ 0 ]
     #   [ B            0  ] [ δy ]   [ r ]
     #
-    # craig applies the preconditioner (F Fᵀ)⁻¹ = (β A + BᵀB)⁻¹ inline via F + divwrk.
-    if iszero(θ)
-        nc, _ = craig!(itrwrk, B, F, divwrk, r; btol = zero(T), atol)
-    else
-        # interior inexact-Uzawa discipline: stop when ‖g − Bx‖ ≤ max(atol, θ·nr0), the exact-max form
-        # (rtol = 0) — each interior pass reduces its own entry residual by ~1/θ and no further.
-        nc, _ = craig!(itrwrk, B, F, divwrk, r; btol = zero(T), atol = max(atol, θ * nr0), rtol = zero(T))
-    end
+    # craig applies the preconditioner (F Fᵀ)⁻¹ = (β A + BᵀB)⁻¹ inline via F + divwrk. Absolute stop
+    # only (rtol = 0): base solves (θ = 0) drive to exactly atol; interior inexact-Uzawa passes (θ > 0)
+    # stop at max(atol, θ·nr0), each reducing its own entry residual by ~1/θ and no further. max(atol, 0)
+    # = atol, so the one formula covers both.
+    nc, _ = craig!(itrwrk, B, F, divwrk, r; btol = zero(T), atol = max(atol, θ * nr0), rtol = zero(T))
     niter += nc
     #
     # update x:
