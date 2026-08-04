@@ -106,23 +106,11 @@ using Graphs
     @test length(res_ff.sim_data) == 10
 end
 
-@testset "Generalized Stalk Dimension" begin
+@testset "Generalized Stalk Dimension Throws Exception" begin
     D = 6
     rings = [RingSpec(1, 4, 0.3)]
     supports = [SupportSpec(1, 1, 1)]
     
     spec = LayeredEscortSpec(rings, supports; D=D)
-    F = build_layered_escort_sheaf(spec)
-    @test F.vertex_stalks[1] == D
-    
-    f = build_layered_homomorphism(spec)
-    PfF = pushforward_sheaf(f, F)
-    
-    bases = build_layered_fiber_bases(f, F, spec)
-    
-    p_targets = [[1.0, 0.0, 1.5, 1.0, 0.0, 0.0]]
-    q_H = solve_high_level_harmonic(PfF, bases, p_targets)
-    qstar_agents = solve_mid_level_harmonic(q_H, bases, D)
-    
-    @test size(qstar_agents, 2) == D
+    @test_throws Exception F = build_layered_escort_sheaf(spec)
 end

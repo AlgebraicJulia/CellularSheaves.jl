@@ -58,11 +58,21 @@ using Distributed
     nchunk = length(partition.chunks)
 
     # Spawn or reuse workers to test distributed solving
-    needed = nchunk - (nworkers() - 1)
-    if needed > 0
-        addprocs(needed; exeflags = ["--project=$(Base.active_project())"])
+    active = Int[]
+    for p in workers()
+        try
+            remotecall_fetch(myid, p)
+            push!(active, p)
+        catch
+            try rmprocs(p; waitfor=1.0) catch; end
+        end
     end
-    pids = workers()[1:nchunk]
+    needed = nchunk - length(active)
+    if needed > 0
+        added = addprocs(needed; exeflags = ["--project=$(Base.active_project())"])
+        append!(active, added)
+    end
+    pids = active[1:nchunk]
     @everywhere pids using CellularSheaves
     
     rhs = Vector(-LIB * target1_pos)
