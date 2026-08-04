@@ -18,7 +18,7 @@ struct UzawaSolver{UPLO, T, I <: Integer} <: KKTSolver{T}
     L::BlockSparseMatrix{T, I}
     facwrk::FactorizationWorkspace{T, I}
     divwrk::DivisionWorkspace{T, I}
-    itrwrk::CraigWorkspace{T, T, Vector{T}}
+    itrwrk::CraigWorkspace{T}
     r::Vector{T}
     α::Scalar{T}
     sd::Vector{T}   # refinement scratch: dual residual (n)
@@ -31,7 +31,7 @@ function UzawaSolver(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix
     m, n = size(B)
     facwrk = FactorizationWorkspace(F)
     divwrk = DivisionWorkspace(F, 1)
-    itrwrk = CraigWorkspace(m, n, Vector{T})
+    itrwrk = CraigWorkspace{T}(m, n)
     r = zeros(T, m)
     α = ones(T)
     return UzawaSolver(F, L, facwrk, divwrk, itrwrk, r, α, zeros(T, n), zeros(T, m), zeros(T, n), zeros(T, m))
@@ -252,26 +252,15 @@ function solveuzw!(
     #   [ β A + Bᵀ B  -Bᵀ ] [ δx ] = [ 0 ]
     #   [ B            0  ] [ δy ]   [ r ]
     #
-    function prec!(u, v)
-        #
-        # solve for u:
-        #
-        #   (β A + Bᵀ B) u = v
-        #
-        copyto!(u, v)
-        ldiv!(divwrk, F,  u)
-        ldiv!(divwrk, F', u)
-    end
-
-    N = LinearOperator(T, n, n, true, true, prec!)
+    # craig applies the preconditioner (F Fᵀ)⁻¹ = (β A + BᵀB)⁻¹ inline via F + divwrk.
     if iszero(θ)
-        craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol)
+        nc, _ = craig!(itrwrk, B, F, divwrk, r; btol = zero(T), atol)
     else
         # interior inexact-Uzawa discipline: stop when ‖g − Bx‖ ≤ max(atol, θ·nr0), the exact-max form
         # (rtol = 0) — each interior pass reduces its own entry residual by ~1/θ and no further.
-        craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol = max(atol, θ * nr0), rtol = zero(T))
+        nc, _ = craig!(itrwrk, B, F, divwrk, r; btol = zero(T), atol = max(atol, θ * nr0), rtol = zero(T))
     end
-    niter += itrwrk.stats.niter
+    niter += nc
     #
     # update x:
     #

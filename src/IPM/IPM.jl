@@ -4,7 +4,7 @@ using LinearAlgebra
 using LinearAlgebra: chkstride1, BlasFloat, BlasInt, LowerTriangular, Adjoint
 using Random: Xoshiro
 using Printf: @sprintf, @printf
-using LinearAlgebra.BLAS: @blasfunc, libblastrampoline
+using LinearAlgebra.BLAS: @blasfunc, libblastrampoline, nrm2
 using LinearAlgebra.LAPACK: chklapackerror
 using Base: require_one_based_indexing, ReshapedArray, @propagate_inbounds, promote_eltype, oneto
 using FixedSizeArrays: FixedSizeArrayDefault
@@ -24,8 +24,6 @@ const FMatrixView{T} = ReshapedArray{T, 2, FVectorView{T}, Tuple{}}
 using CliqueTrees: BipartiteGraph, linegraph, EliminationAlgorithm, DEFAULT_ELIMINATION_ALGORITHM
 using CliqueTrees.Multifrontal: cholesky!, ChordalTriangular, FChordalTriangular, triangular, fronts, diagblock, offdblock,
                                  DivisionWorkspace, FactorizationWorkspace, symbolic, FPermutation
-using Krylov: craig!, CraigWorkspace
-using LinearOperators: LinearOperator
 using ..BlockSparseArrays: BlockSparseMatrix, block, colrange, rowrange, srcrange, nvtxs, vtxs, ncols, nrows, nouts, outs, nbnzs, narcs, blocksparse, selectvtxs, halfselectvtxs, rows, cols
 using CommonSolve: init, solve!, solve
 using Core.Compiler: tmerge
