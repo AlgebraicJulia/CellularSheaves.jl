@@ -261,6 +261,10 @@ function solveuzw!(
     #   [ β A + Bᵀ B  -Bᵀ ] [ δx ] = [ 0 ]
     #   [ B            0  ] [ δy ]   [ r ]
     #
+    # and update
+    #
+    #   r ← r - B δx
+    # 
     nc, _ = craig!(itrwrk, B, F, divwrk, δx, δy, r; btol = zero(T), atol = max(atol, θ * nr0), rtol = zero(T))
     niter += nc
     #
@@ -272,11 +276,10 @@ function solveuzw!(
     #
     # recover y:
     #
-    #   y = y₀ + 1/β (δy + g - B x)
+    #   y = y₀ + 1/β (δy + r)
     #
     copyto!(y, δy)
-    axpy!(one(T), g, y)
-    mul!(y, B, x, -one(T), one(T))
+    axpy!(one(T), r, y)
     lmul!(α, y)
 
     if !isnothing(y0)
