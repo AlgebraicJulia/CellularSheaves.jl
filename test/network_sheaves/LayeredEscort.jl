@@ -72,11 +72,27 @@ using Graphs
         t -> [-1.0 - 0.05*cos(t), -0.05*sin(t), 1.5, 1.0],
         t -> [0.0, 1.0 + 0.05*sin(t), 1.5, 1.0]
     ]
+    v_trajs = [
+        t -> [-0.05*sin(t), 0.05*cos(t), 0.0, 0.0],
+        t -> [0.05*sin(t), -0.05*cos(t), 0.0, 0.0],
+        t -> [0.0, 0.05*cos(t), 0.0, 0.0]
+    ]
+    a_trajs = [
+        t -> [-0.05*cos(t), -0.05*sin(t), 0.0, 0.0],
+        t -> [-0.05*cos(t), 0.05*sin(t), 0.0, 0.0],
+        t -> [0.0, -0.05*sin(t), 0.0, 0.0]
+    ]
+
+    # Test standard simulation
+    # Setup LQR gain for test
+    dyn_test = QuadrotorDynamics()
+    Ad, Bd = CellularSheaves.AgentControllers.discrete_matrices(dyn_test, 0.05)
+    K_test = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, Matrix{Float64}(I, 10, 10), Matrix{Float64}(I, 3, 3))
 
     prob = LayeredEscortProblem(
         spec, F, f, PfF, bases,
-        HomogeneousDynamics(QuadrotorDynamics()),
-        target_trajs, target_trajs, target_trajs,
+        HomogeneousDynamics(dyn_test, K_test),
+        target_trajs, v_trajs, a_trajs,
         0.05, 10
     )
 
@@ -84,4 +100,29 @@ using Graphs
     @test length(res.sim_data) == 10
     @test length(res.qstar_history) == 10
     @test length(res.target_history) == 10
+
+    # Test feedforward simulation
+    res_ff = run_layered_escort_simulation(prob; use_feedforward=true)
+    @test length(res_ff.sim_data) == 10
+end
+
+@testset "Generalized Stalk Dimension" begin
+    D = 6
+    rings = [RingSpec(1, 4, 0.3)]
+    supports = [SupportSpec(1, 1, 1)]
+    
+    spec = LayeredEscortSpec(rings, supports; D=D)
+    F = build_layered_escort_sheaf(spec)
+    @test F.vertex_stalks[1] == D
+    
+    f = build_layered_homomorphism(spec)
+    PfF = pushforward_sheaf(f, F)
+    
+    bases = build_layered_fiber_bases(f, F, spec)
+    
+    p_targets = [[1.0, 0.0, 1.5, 1.0, 0.0, 0.0]]
+    q_H = solve_high_level_harmonic(PfF, bases, p_targets)
+    qstar_agents = solve_mid_level_harmonic(q_H, bases, D)
+    
+    @test size(qstar_agents, 2) == D
 end

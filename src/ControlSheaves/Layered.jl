@@ -26,6 +26,53 @@ using ..AgentControllers: AbstractAgentDynamics, QuadrotorDynamics, AgentState, 
 function animate_comprehensive_escort end
 
 # ---------------------------------------------------------------------------
+# Dynamics Specification Types (Memory-Efficient Shared Dynamics)
+# ---------------------------------------------------------------------------
+
+abstract type AbstractDynamicsSpec end
+
+"""
+    HomogeneousDynamics(dyn::AbstractAgentDynamics, K_lqr::Matrix{Float64}=zeros(0,0))
+
+Single dynamics model and controller shared by all agents in the system.
+"""
+struct HomogeneousDynamics <: AbstractDynamicsSpec
+    dyn::AbstractAgentDynamics
+    K_lqr::Matrix{Float64}
+end
+
+HomogeneousDynamics(dyn::AbstractAgentDynamics) = HomogeneousDynamics(dyn, zeros(0, 0))
+
+"""
+    TeamHomogeneousDynamics(team_dyns::Dict{Int, Tuple{AbstractAgentDynamics, Matrix{Float64}}})
+
+Dynamics models and controllers shared per team/ring.
+"""
+struct TeamHomogeneousDynamics <: AbstractDynamicsSpec
+    team_dyns::Dict{Int, Tuple{AbstractAgentDynamics, Matrix{Float64}}}
+end
+
+"""
+    IndividualizedDynamics(dyns::Vector{Tuple{AbstractAgentDynamics, Matrix{Float64}}})
+
+Distinct dynamics models and controllers for each individual agent.
+"""
+struct IndividualizedDynamics <: AbstractDynamicsSpec
+    configs::Vector{Tuple{AbstractAgentDynamics, Matrix{Float64}}}
+end
+
+# Helper to get dynamics and K_lqr for agent i (belonging to team_idx)
+function get_agent_dynamics_config(spec::AbstractDynamicsSpec, agent_idx::Int, team_idx::Int)
+    if spec isa HomogeneousDynamics
+        return spec.dyn, spec.K_lqr
+    elseif spec isa TeamHomogeneousDynamics
+        return spec.team_dyns[team_idx]
+    elseif spec isa IndividualizedDynamics
+        return spec.configs[agent_idx]
+    end
+end
+
+# ---------------------------------------------------------------------------
 # Topology Specification Types
 # ---------------------------------------------------------------------------
 
@@ -52,13 +99,14 @@ struct SupportSpec
 end
 
 """
-    LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec})
+    LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec}; D::Int=4)
 
 Full multi-team topology specification for arbitrary escort rings and support edge pools.
 """
 struct LayeredEscortSpec
     rings::Vector{RingSpec}
     supports::Vector{SupportSpec}
+    D::Int # stalk dimension (default 4 for SE(3) homogeneous coordinates)
     n_rings::Int
     n_supports::Int
     n_targets::Int
@@ -69,7 +117,7 @@ struct LayeredEscortSpec
     target_nodes::Vector{Int}
 end
 
-function LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec})
+function LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec}; D::Int=4)
     n_rings = length(rings)
     n_supports = length(supports)
     n_targets = n_rings
@@ -91,7 +139,7 @@ function LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec
     target_nodes = [curr_node + i - 1 for i in 1:n_targets]
     total_nodes = n_agents + n_targets
 
-    return LayeredEscortSpec(rings, supports, n_rings, n_supports, n_targets, n_agents, total_nodes, ring_ranges, support_ranges, target_nodes)
+    return LayeredEscortSpec(rings, supports, D, n_rings, n_supports, n_targets, n_agents, total_nodes, ring_ranges, support_ranges, target_nodes)
 end
 
 # ---------------------------------------------------------------------------
@@ -142,44 +190,11 @@ end
 """
     world_to_pf_stalk(bases::LayeredFiberBases, ring_idx::Int, p_world::Vector{Float64}) -> Vector{Float64}
 
-Convert a 4D world target vector `p_world` into the `PfF` stalk basis coordinates for ring `ring_idx`.
+Convert a world target vector `p_world` into the `PfF` stalk basis coordinates for ring `ring_idx`.
 """
 function world_to_pf_stalk(bases::LayeredFiberBases, ring_idx::Int, p_world::Vector{Float64})
     B_target = bases.target_subbases[ring_idx]
     return B_target \ p_world
-end
-
-# ---------------------------------------------------------------------------
-# Dynamics Specification Types (Memory-Efficient Shared Dynamics)
-# ---------------------------------------------------------------------------
-
-abstract type AbstractDynamicsSpec end
-
-"""
-    HomogeneousDynamics(dyn::AbstractAgentDynamics)
-
-Single dynamics model shared by all agents in the system (allocates 1 dynamics object).
-"""
-struct HomogeneousDynamics <: AbstractDynamicsSpec
-    dyn::AbstractAgentDynamics
-end
-
-"""
-    TeamHomogeneousDynamics(team_dyns::Dict{Int, AbstractAgentDynamics})
-
-Dynamics models shared per team/ring.
-"""
-struct TeamHomogeneousDynamics <: AbstractDynamicsSpec
-    team_dyns::Dict{Int, AbstractAgentDynamics}
-end
-
-"""
-    IndividualizedDynamics(dyns::Vector{<:AbstractAgentDynamics})
-
-Distinct dynamics models for each individual agent.
-"""
-struct IndividualizedDynamics <: AbstractDynamicsSpec
-    dyns::Vector{AbstractAgentDynamics}
 end
 
 # ---------------------------------------------------------------------------
@@ -192,7 +207,8 @@ end
 Construct the full cellular sheaf `F` for an arbitrary layered escort specification.
 """
 function build_layered_escort_sheaf(spec::LayeredEscortSpec)
-    F = EuclideanSheaf{Float64}(fill(4, spec.total_nodes))
+    D = spec.D
+    F = EuclideanSheaf{Float64}(fill(D, spec.total_nodes))
 
     # 1. Escort Rings
     for (r_idx, r) in enumerate(spec.rings)
@@ -212,20 +228,21 @@ function build_layered_escort_sheaf(spec::LayeredEscortSpec)
     # 2. Support Pools
     for (s_idx, s) in enumerate(spec.supports)
         s_range = spec.support_node_ranges[s_idx]
-        
+        I_D = Matrix{Float64}(I, D, D)
+
         # Support consensus ring / chain
         for i in 1:s.n_agents
             u = s_range[i]
             v = s_range[i % s.n_agents + 1]
-            add_sheaf_edge!(F, u, v, Matrix{Float64}(I, 4, 4), Matrix{Float64}(I, 4, 4))
+            add_sheaf_edge!(F, u, v, I_D, I_D)
         end
 
         # Direct tracking edges to target u and target v
         if s.n_agents >= 1
-            add_sheaf_edge!(F, s_range[1], spec.target_nodes[s.u_ring], Matrix{Float64}(I, 4, 4), Matrix{Float64}(I, 4, 4))
+            add_sheaf_edge!(F, s_range[1], spec.target_nodes[s.u_ring], I_D, I_D)
         end
         if s.n_agents >= 2
-            add_sheaf_edge!(F, s_range[2], spec.target_nodes[s.v_ring], Matrix{Float64}(I, 4, 4), Matrix{Float64}(I, 4, 4))
+            add_sheaf_edge!(F, s_range[2], spec.target_nodes[s.v_ring], I_D, I_D)
         end
     end
 
@@ -270,11 +287,12 @@ function solve_high_level_harmonic(PfF, bases::LayeredFiberBases, target_positio
 
     _, _, H_mat, B_mat = _harmonic_extension_restricted_laplacian(PfF, boundary)
     
-    # Assembly RHS for boundary nodes
     p_boundary = vcat([boundary[r_idx] for r_idx in 1:length(target_positions)]...)
     q_interior = vec(H_mat \ (-Matrix(B_mat) * p_boundary))
 
-    q_H = Vector{Vector{Float64}}(undef, PfF.underlying_graph.ne > 0 ? nv(PfF.underlying_graph) : length(boundary) + length(q_interior)/4)
+    n_pf_verts = nv(PfF.underlying_graph) > 0 ? nv(PfF.underlying_graph) : length(boundary) + length(q_interior) ÷ vertex_stalks(PfF)[end]
+    q_H = Vector{Vector{Float64}}(undef, n_pf_verts)
+    
     for (r_idx, p) in enumerate(target_positions)
         q_H[r_idx] = boundary[r_idx]
     end
@@ -282,7 +300,8 @@ function solve_high_level_harmonic(PfF, bases::LayeredFiberBases, target_positio
     int_idx = 1
     for v in 1:length(q_H)
         if !haskey(boundary, v)
-            q_H[v] = q_interior[(int_idx-1)*4 + 1 : int_idx*4]
+            d_v = vertex_stalks(PfF)[v]
+            q_H[v] = q_interior[(int_idx-1)*d_v + 1 : int_idx*d_v]
             int_idx += 1
         end
     end
@@ -291,30 +310,28 @@ function solve_high_level_harmonic(PfF, bases::LayeredFiberBases, target_positio
 end
 
 """
-    solve_mid_level_harmonic(q_H::Vector{Vector{Float64}}, bases::LayeredFiberBases) -> Matrix{Float64}
+    solve_mid_level_harmonic(q_H::Vector{Vector{Float64}}, bases::LayeredFiberBases, D::Int=4) -> Matrix{Float64}
 
-Lift coarse pushforward section `q_H` to 4D agent reference states on `G`.
+Lift coarse pushforward section `q_H` to D-dimensional agent reference states on `G`.
 """
-function solve_mid_level_harmonic(q_H::Vector{Vector{Float64}}, bases::LayeredFiberBases)
+function solve_mid_level_harmonic(q_H::Vector{Vector{Float64}}, bases::LayeredFiberBases, D::Int=4)
     n_pf_nodes = length(q_H)
     q_G_components = [bases.fiber_bases[v] * q_H[v] for v in 1:n_pf_nodes]
 
-    # Find total agents from fiber bases
-    n_agents = sum(size(bases.fiber_bases[v], 1) ÷ 4 for v in 1:n_pf_nodes) - length(bases.target_subbases)
-    q_agents = zeros(n_agents, 4)
+    n_agents = sum(size(bases.fiber_bases[v], 1) ÷ D for v in 1:n_pf_nodes) - length(bases.target_subbases)
+    q_agents = zeros(n_agents, D)
 
     curr_agent = 1
     for v in 1:n_pf_nodes
         B = bases.fiber_bases[v]
         q_fib = q_G_components[v]
-        n_fib_nodes = size(B, 1) ÷ 4
+        n_fib_nodes = size(B, 1) ÷ D
         
-        # If this fiber has a target, the last node is the target node
         has_target = haskey(bases.target_subbases, v)
         n_fib_agents = has_target ? n_fib_nodes - 1 : n_fib_nodes
 
         for i in 1:n_fib_agents
-            q_agents[curr_agent, :] .= q_fib[(i-1)*4 + 1 : i*4]
+            q_agents[curr_agent, :] .= q_fib[(i-1)*D + 1 : i*D]
             curr_agent += 1
         end
     end
@@ -323,11 +340,11 @@ function solve_mid_level_harmonic(q_H::Vector{Vector{Float64}}, bases::LayeredFi
 end
 
 """
-    solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, target_positions::Vector{Vector{Float64}}) -> Matrix{Float64}
+    solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, target_positions::Vector{Vector{Float64}}, D::Int=4) -> Matrix{Float64}
 
 Solve harmonic extension directly on `F` given pinned target nodes and positions.
 """
-function solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, target_positions::Vector{Vector{Float64}})
+function solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, target_positions::Vector{Vector{Float64}}, D::Int=4)
     boundary = Dict(target_nodes[i] => target_positions[i] for i in 1:length(target_nodes))
     _, _, H_mat, B_mat = _harmonic_extension_restricted_laplacian(F, boundary)
     
@@ -338,7 +355,7 @@ function solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, tar
     n_targets = length(target_nodes)
     n_agents = n_total - n_targets
 
-    q_full = zeros(n_total, 4)
+    q_full = zeros(n_total, D)
     
     int_idx = 1
     for v in 1:n_total
@@ -346,7 +363,7 @@ function solve_direct_harmonic(F::EuclideanSheaf, target_nodes::Vector{Int}, tar
             t_idx = findfirst(==(v), target_nodes)
             q_full[v, :] .= target_positions[t_idx]
         else
-            q_full[v, :] .= q_interior[(int_idx-1)*4 + 1 : int_idx*4]
+            q_full[v, :] .= q_interior[(int_idx-1)*D + 1 : int_idx*D]
             int_idx += 1
         end
     end
@@ -382,18 +399,39 @@ end
 """
     run_layered_escort_simulation(prob::LayeredEscortProblem; use_feedforward::Bool=false) -> LayeredEscortResult
 
-Run complete multi-agent layered escort simulation.
+Run complete multi-agent layered escort simulation using closed-loop agent dynamics and optional feedforward tracking.
 """
 function run_layered_escort_simulation(prob::LayeredEscortProblem; use_feedforward::Bool=false)
     spec = prob.spec
     bases = prob.bases
     STEPS = prob.steps
     DT = prob.dt
+    D = spec.D
     time_grid = 0:DT:(STEPS*DT)
 
-    # Initialize agent states
-    init_states = [[0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] for _ in 1:spec.n_agents]
-    current_states = copy(init_states)
+    # Initialize agent states with dynamic configurations
+    agent_states = Vector{AgentState}()
+    for i in 1:spec.n_agents
+        # Find team index
+        team_idx = 1
+        for (r_idx, r_range) in enumerate(spec.ring_node_ranges)
+            if i in r_range
+                team_idx = r_idx
+                break
+            end
+        end
+        for (s_idx, s_range) in enumerate(spec.support_node_ranges)
+            if i in s_range
+                team_idx = spec.n_rings + s_idx
+                break
+            end
+        end
+
+        dyn, K_lqr = get_agent_dynamics_config(prob.dynamics_spec, i, team_idx)
+        x0 = zeros(10) # 10D quadrotor state [x,y,z, vx,vy,vz, roll,pitch, yaw, ...]
+        x0[3] = 1.5
+        push!(agent_states, AgentState(x0, dyn, DT, K_lqr, 0.02; use_velocity=use_feedforward))
+    end
 
     sim_data = Vector{Vector{Vector{Float64}}}()
     qstar_history = Vector{Matrix{Float64}}()
@@ -408,32 +446,53 @@ function run_layered_escort_simulation(prob::LayeredEscortProblem; use_feedforwa
         # 2. High-level harmonic extension
         q_H = solve_high_level_harmonic(prob.pf_sheaf, bases, p_targets)
         
-        # Extract target world positions for visualization
+        # Target world positions for visualization
         target_world_centers = Vector{Vector{Float64}}()
         for r_idx in 1:spec.n_rings
             push!(target_world_centers, p_targets[r_idx])
         end
         for s_idx in 1:spec.n_supports
             pf_v = spec.n_rings + s_idx
-            center = bases.fiber_bases[pf_v][1:4, :] * q_H[pf_v]
+            center = bases.fiber_bases[pf_v][1:D, :] * q_H[pf_v]
             push!(target_world_centers, center)
         end
         push!(target_history, target_world_centers)
 
         # 3. Mid-level reference lifting q*
-        qstar_agents = solve_mid_level_harmonic(q_H, bases)
+        qstar_agents = solve_mid_level_harmonic(q_H, bases, D)
         push!(qstar_history, qstar_agents)
 
-        # 4. Integrate Agent Dynamics
+        # Optional Feedforward Velocity and Acceleration Lifting
+        qstar_dot_agents = nothing
+        qstar_ddot_agents = nothing
+        if use_feedforward && !isnothing(prob.target_velocities)
+            v_targets = [v_traj(t) for v_traj in prob.target_velocities]
+            v_H = solve_high_level_harmonic(prob.pf_sheaf, bases, v_targets)
+            qstar_dot_agents = solve_mid_level_harmonic(v_H, bases, D)
+        end
+        if use_feedforward && !isnothing(prob.target_accelerations)
+            a_targets = [a_traj(t) for a_traj in prob.target_accelerations]
+            a_H = solve_high_level_harmonic(prob.pf_sheaf, bases, a_targets)
+            qstar_ddot_agents = solve_mid_level_harmonic(a_H, bases, D)
+        end
+
+        # 4. Step Agent Dynamics with Feedforward Support
         step_states = Vector{Vector{Float64}}()
         for i in 1:spec.n_agents
-            x_actual = current_states[i][1:3]
-            x_ref = qstar_agents[i, 1:3]
+            q_ref_i = qstar_agents[i, 1:min(D, 3)]
             
-            # Simple dynamics integration step (or quadrotor dynamics)
-            error = x_actual - x_ref
-            current_states[i][1:3] .-= 0.3 * error * DT
-            push!(step_states, copy(current_states[i]))
+            if use_feedforward && !isnothing(qstar_dot_agents) && !isnothing(qstar_ddot_agents)
+                q_dot_i = qstar_dot_agents[i, 1:min(D, 3)]
+                q_ddot_i = qstar_ddot_agents[i, 1:min(D, 3)]
+                step_agent!(agent_states[i], q_ref_i, q_dot_i, q_ddot_i, DT)
+            elseif use_feedforward && !isnothing(qstar_dot_agents)
+                q_dot_i = qstar_dot_agents[i, 1:min(D, 3)]
+                step_agent!(agent_states[i], q_ref_i, q_dot_i, DT)
+            else
+                step_agent!(agent_states[i], q_ref_i, DT)
+            end
+            
+            push!(step_states, copy(agent_states[i].x))
         end
         push!(sim_data, step_states)
     end
