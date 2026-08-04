@@ -16,7 +16,7 @@
 # The workspace form deconstructs its scratch and forwards to the array form; the solution x (n) and y (m)
 # are passed in, not owned (as in solveuzw!): x is accumulated onto (craig adds Σ ξ v — pass the base
 # solution to get base + δx), y is overwritten with the min-norm δy. g (m) is in/out: the RHS on entry, on exit
-# the residual g − B x = −β ξ u — which CRAIG forms internally (‖g − B x‖ = β·|ξ| is its stopping norm),
+# the residual g − B x = −ng·ξ·u — which CRAIG forms internally (‖g − B x‖ = ng·|ξ| is its stopping norm),
 # so returning it is one length-m scale, not a matvec. The caller uses it to recover y without re-forming
 # B x. btol is the backward-error stop (bkwerr ≤ btol); we pass 0 because the pricing model uses an
 # absolute residual tolerance (atol). The knob costs one comparison per iteration (bkwerr is computed
@@ -35,7 +35,7 @@
 end
 
 struct CraigWorkspace{T}
-    Nv::FVector{T}     # Golub–Kahan v-side, before preconditioning (n)
+    Av::FVector{T}     # Golub–Kahan v-side, before preconditioning (n)
     v::FVector{T}      # (F Fᵀ)⁻¹ N v (n)
     w::FVector{T}      # y-recurrence direction (m)
 end
@@ -45,11 +45,11 @@ function CraigWorkspace{T}(m::Integer, n::Integer) where {T}
 end
 
 function craig!(wrk::CraigWorkspace{T}, B, F, divwrk, x, y, g; kwargs...) where {T}
-    return craig!(wrk.Nv, wrk.v, wrk.w, B, F, divwrk, x, y, g; kwargs...)
+    return craig!(wrk.Av, wrk.v, wrk.w, B, F, divwrk, x, y, g; kwargs...)
 end
 
 function craig!(
-        Nv::AbstractVector{T},
+        Av::AbstractVector{T},
         v::AbstractVector{T},
         w::AbstractVector{T},
         B::AbstractMatrix{T},
@@ -74,26 +74,27 @@ function craig!(
     # g carries the Golub–Kahan u-side in place (u ≡ M u ≡ g, M = I): the RHS on entry, the u-recurrence
     # through the loop, the residual on exit. g ← g / ‖g‖; x = 0 is a zero-residual solution when g = 0.
     #
-    β₁ = norm(g)
-    nr = β₁
+    ng0 = norm(g)
+    nr = ng0
 
-    if iszero(β₁)
+    if iszero(ng0)
         return 0, CRAIG_SOLVED
     end
 
-    β₁² = β₁^2
-    β = β₁
-    θ = β₁
+    ng0² = ng0^2
+    ng = ng0
+    θ = ng0
     ξ = -one(T)
     ρprv = one(T)
 
-    rdiv!(g, β₁)
-    fill!(Nv, zero(T))
+    rdiv!(g, ng0)
+    fill!(Av, zero(T))
     fill!(w, zero(T))
 
     nB² = zero(T); nB = zero(T)
-    nD² = zero(T); condB = zero(T)
+    nD² = zero(T); nD = zero(T)
     nx² = zero(T); nx = zero(T)
+    κB = zero(T)
 
     iter = 0
 
@@ -105,7 +106,7 @@ function craig!(
     bkwerr = one(T)                   # backward error ‖r‖ / √(‖b‖² + ‖B‖²‖x‖²)
 
     # a zero-residual / already-within-tolerance start converges before the first iteration
-    if (one(T) + bkwerr ≤ one(T)) || (bkwerr ≤ btol) || (nr ≤ εc) || (nr ≤ btol + atol * nB * nx / β₁)
+    if (one(T) + bkwerr ≤ one(T)) || (bkwerr ≤ btol) || (nr ≤ εc) || (nr ≤ btol + atol * nB * nx / ng0)
         status = CRAIG_SOLVED
     else
         status = CRAIG_CONTINUE
@@ -115,55 +116,54 @@ function craig!(
         #
         # αₖ₊₁ N vₖ₊₁ = Bᵀ uₖ − βₖ N vₖ,   then precondition  v ← (F Fᵀ)⁻¹ N v
         #
-        mul!(Nv, Bᵀ, g, one(T), -β)   # Nv ← Bᵀ g − β Nv
-        copyto!(v, Nv)
+        mul!(Av, Bᵀ, g, one(T), -ng)  # Av ← Bᵀ g − ng·Av
+        copyto!(v, Av)
         ldiv!(divwrk, F, v)
         ldiv!(divwrk, F', v)
-        α² = dot(v, Nv)               # (F Fᵀ)⁻¹-elliptic norm, squared
-        α = sqrt(α²)
+        nv² = dot(v, Av); nv = sqrt(nv²)  # (F Fᵀ)⁻¹-elliptic norm of the v-side
 
-        if iszero(α)
+        if iszero(nv)
             status = CRAIG_INCONSISTENT
         else
-            rdiv!(v, α)
-            rdiv!(Nv, α)
-            nB² += α²
+            rdiv!(v, nv)
+            rdiv!(Av, nv)
             #
             # advance the solution recurrences for x and y
             #
-            ρ = α
+            ρ = nv
             ξ *= -θ / ρ
+
             axpy!(ξ, v, x)                     # x ← x + ξ v
             axpby!(one(T), g, -θ / ρprv, w)    # w ← u − (θ/ρprv) w
             axpy!(ξ / ρ, w, y)                 # y ← y + (ξ/ρ) w
-            nD² += norm(w)
             #
             # βₖ₊₁ M uₖ₊₁ = B vₖ − αₖ M uₖ
             #
-            mul!(g, B, v, one(T), -α)          # u ← B v − α u  (u ≡ g)
-            β² = dot(g, g)
-            β = sqrt(β²)
+            mul!(g, B, v, one(T), -nv)         # u ← B v − nv·u  (u ≡ g)
 
-            if !iszero(β)
-                rdiv!(g, β)
+            ng² = dot(g, g); ng = sqrt(ng²)
+
+            if !iszero(ng)
+                rdiv!(g, ng)
             end
 
-            θ = β
+            θ = ng
 
-            nB² += β²
-            nB = sqrt(nB²)
-            condB = nB * sqrt(nD²)
-            nx² += ξ * ξ
-            nx = sqrt(nx²)
-            nr = β * abs(ξ)                    # r = −β ξ u
+            nB² += nv² + ng²; nB = sqrt(nB²)
+            nD² += norm(w);   nD = sqrt(nD²)
+            nx² += ξ * ξ;     nx = sqrt(nx²)
+
+            κB = nB * nD
+            nr = ng * abs(ξ)                   # r = −ng ξ u
+
             iter += 1
 
-            bkwerr = nr / sqrt(β₁² + nB² * nx²)
+            bkwerr = nr / sqrt(ng0² + nB² * nx²)
             ρprv = ρ
 
-            if (one(T) + inv(condB) ≤ one(T)) || (inv(condB) ≤ ctol)
+            if (one(T) + inv(κB) ≤ one(T)) || (inv(κB) ≤ ctol)
                 status = CRAIG_ILL_CONDITIONED
-            elseif (one(T) + bkwerr ≤ one(T)) || (bkwerr ≤ btol) || (nr ≤ εc) || (nr ≤ btol + atol * nB * nx / β₁)
+            elseif (one(T) + bkwerr ≤ one(T)) || (bkwerr ≤ btol) || (nr ≤ εc) || (nr ≤ btol + atol * nB * nx / ng0)
                 status = CRAIG_SOLVED
             elseif iter ≥ itmax
                 status = CRAIG_ITMAX
@@ -172,11 +172,11 @@ function craig!(
     end
 
     #
-    # g holds the final u; the residual g − B x = −β ξ u, so scaling in place turns g into the residual
-    # it must return. Exact at 0 iterations too (β = β₁, ξ = −1, g = g₀/β₁ ⟹ −β ξ g = g₀); the g = 0
+    # g holds the final u; the residual g − B x = −ng·ξ·u, so scaling in place turns g into the residual
+    # it must return. Exact at 0 iterations too (ng = ng0, ξ = −1, g = g₀/ng0 ⟹ −ng·ξ·g = g₀); the g = 0
     # early return already left g = 0.
     #
-    rmul!(g, -β * ξ)
+    rmul!(g, -ng * ξ)
 
     return iter, status
 end
