@@ -8,6 +8,11 @@
 # A different KKT backend is a different workspace type behind the same α/atol argument interface —
 # there is no settings-level polymorphism (the KKTSolver abstract type is the only extension point).
 
+# Inexact-Uzawa interior discipline: an interior refinement pass drives its CRAIG correction only to
+# θ·(its entry residual), not to atol — each pass cuts the residual ~10× and the outer refinement loop
+# converges it. Base solves and the final exit run exact (θ = 0). See pricing_augmentation §1.
+const INTERIOR_THETA = 0.1
+
 struct UzawaSolver{UPLO, T, I <: Integer} <: KKTSolver{T}
     F::FChordalTriangular{:N, UPLO, T, I}
     L::BlockSparseMatrix{T, I}
@@ -170,7 +175,7 @@ function solvekkt!(
         #   [ B  0  ] [ dy ]   [ sp ]
         #
         n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
-                          sd, sp, wrk.α[], atol)
+                          sd, sp, wrk.α[], atol; θ = T(INTERIOR_THETA))
         nrefine += n
         npass += 1
 
@@ -200,7 +205,8 @@ function solveuzw!(
         g::AbstractVector{T},
         α::T,
         atol::T,
-        y0 = nothing,
+        y0 = nothing;
+        θ::T = zero(T),
     ) where {UPLO, T}
     m, n = size(B)
 
@@ -258,7 +264,13 @@ function solveuzw!(
     end
 
     N = LinearOperator(T, n, n, true, true, prec!)
-    craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol)
+    if iszero(θ)
+        craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol)
+    else
+        # interior inexact-Uzawa discipline: stop when ‖g − Bx‖ ≤ max(atol, θ·nr0), the exact-max form
+        # (rtol = 0) — each interior pass reduces its own entry residual by ~1/θ and no further.
+        craig!(itrwrk, B, r; ldiv = false, btol = zero(T), N, atol = max(atol, θ * nr0), rtol = zero(T))
+    end
     niter += itrwrk.stats.niter
     #
     # update x:

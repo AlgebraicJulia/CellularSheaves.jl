@@ -420,7 +420,7 @@ function refinehsd!(
         #   [ H -Bᵀ ] [ dp ] = [ sd ]
         #   [ B  0  ] [ dy ]   [ sp ]
         #
-        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, H, B, sd, sp, wrk.α[], max(force_tol, floor_tol))
+        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, H, B, sd, sp, wrk.α[], max(force_tol, floor_tol); θ = T(INTERIOR_THETA))
         niter += n
         npass += 1
         #
