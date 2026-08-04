@@ -216,7 +216,7 @@ function build_layered_escort_sheaf(spec::LayeredEscortSpec)
         t_node = spec.target_nodes[r_idx]
         target_local_idx = r.n_agents + 1
         
-        ring = build_escort_ring(r.n_agents, target_local_idx, r.radius; observers=[1])
+        ring = build_escort_ring(r.n_agents, target_local_idx, r.radius; observers=[1], D=D)
         for e in edges(ring.underlying_graph)
             u_loc, v_loc = src(e), dst(e)
             u = u_loc == target_local_idx ? t_node : r_range[u_loc]
