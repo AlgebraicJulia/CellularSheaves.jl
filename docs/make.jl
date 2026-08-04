@@ -103,7 +103,7 @@ makedocs(
       "Layered Control Architecture Examples" => Any[
         "generated/layered/distributed_harmonic_tracking.md",
         "generated/layered/tikhonov_harmonic_tracking.md",
-        "generated/layered/scenario5.md",
+        "generated/layered/layered_scenario5.md",
         "generated/layered/escort.md",
         "generated/layered/escort_feedforward.md",
         "generated/layered/diffusion_vs_direct.md",
