@@ -47,4 +47,8 @@ include("DistributedLayeredControl.jl")
 import .DistributedLayeredControl
 export DistributedLayeredControl
 
+include("Layered.jl")
+import .Layered
+export Layered
+
 end # module ControlSheaves
