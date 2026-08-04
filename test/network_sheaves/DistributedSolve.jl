@@ -178,11 +178,21 @@ using Random
     end
 
     @testset "distributed_tree_solve: real multi-process run" begin
-        needed = 5 - (nworkers() - 1)
-        if needed > 0
-            addprocs(needed; exeflags = ["--project=$(Base.active_project())"])
+        active = Int[]
+        for p in workers()
+            try
+                remotecall_fetch(myid, p)
+                push!(active, p)
+            catch
+                try rmprocs(p; waitfor=1.0) catch; end
+            end
         end
-        pids = workers()[1:5]
+        needed = 5 - length(active)
+        if needed > 0
+            added = addprocs(needed; exeflags = ["--project=$(Base.active_project())"])
+            append!(active, added)
+        end
+        pids = active[1:5]
         @everywhere pids using CellularSheaves
 
         function check_distributed(g, target_workers)
