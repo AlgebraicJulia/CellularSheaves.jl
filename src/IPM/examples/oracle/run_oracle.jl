@@ -45,6 +45,9 @@ gitshort = try readchomp(`git -C $EX rev-parse --short HEAD`) catch; "unknown" e
 jval(v::Real) = isfinite(v) ? string(v) : "null"
 jval(v) = "\"$(string(v))\""
 
+# filename tag so A/B runs (e.g. against a different code rev) can coexist in the same dir.
+tag = get(ENV, "ORACLE_TAG", "")
+
 for solv in solvs
     settings = solv == "ipm" ?
         IPMSettings{Float64}(; feas_tol=tol, gap_tol=tol, itmax=300, fix_alpha=true) :
@@ -55,14 +58,14 @@ for solv in solvs
     niter = isempty(records) ? 0 : maximum(r.iter for r in records)
     chosenrows = filter(r -> r.chosen, records)
     final_status = isempty(chosenrows) ? "NONE" : string(last(chosenrows).ipm_status)
-    base = "$(key)_$(ARGS[2])_$(solv)"
+    base = "$(key)_$(ARGS[2])_$(solv)$(tag)"
     write_oracle_csv(joinpath(OUT, "$base.csv"), records)
 
     setget(k) = hasproperty(settings, k) ? getproperty(settings, k) : nothing
     meta = [
         "problem"=>key, "solver"=>solv, "tol"=>ARGS[2], "git"=>gitshort,
         "m"=>size(s0.B, 1), "n"=>size(s0.B, 2), "normB"=>norm(s0.B),
-        "rgmin"=>setget(:rgmin), "rgmax"=>setget(:rgmax),
+        "resolved_rgmin"=>s0.ρ[],
         "feas_tol"=>setget(:feas_tol), "gap_tol"=>setget(:gap_tol),
         "refine_itmax"=>setget(:refine_itmax), "refine_stall"=>setget(:refine_stall),
         "final_status"=>final_status, "niter"=>niter, "nrows"=>length(records),

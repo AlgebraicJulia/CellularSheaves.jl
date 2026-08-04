@@ -1,1 +1,1 @@
-{"problem":"e04","solver":"ipm","tol":"1e-10","git":"e9770df4","m":21,"n":840,"normB":21.912906393652946,"rgmin":1.0e-9,"rgmax":1.0e-6,"feas_tol":1.0e-10,"gap_tol":1.0e-10,"refine_itmax":10,"refine_stall":0.5,"final_status":"CONTINUE","niter":11,"nrows":407}
+{"problem":"e04","solver":"ipm","tol":"1e-10","git":"b9d1fa2b","m":21,"n":840,"normB":21.912906393652946,"resolved_rgmin":5.331018588983174e-14,"feas_tol":1.0e-10,"gap_tol":1.0e-10,"refine_itmax":10,"refine_stall":0.5,"final_status":"CONTINUE","niter":11,"nrows":407}

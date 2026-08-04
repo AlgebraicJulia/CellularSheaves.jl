@@ -770,7 +770,7 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::HSDSettings{T}) wher
         g = prob.g
     end
 
-    R, P, B, kkt = make_kkt(B; elim=settings.elim, rgmin=settings.rgmin, rgmax=settings.rgmax)
+    R, P, B, kkt = make_kkt(B; elim=settings.elim)
 
     c = P * c
     Q = halfselectvtxs(halfselectvtxs(Q, R.perm), R.perm)
@@ -797,7 +797,7 @@ function CommonSolve.init(prob::IPMProblem{T, I}, settings::HSDSettings{T}) wher
     nB = FScalar{T}(undef)
     α = FScalar{T}(undef)
 
-    ρ[] = settings.rgmin
+    ρ[] = resolve_rgmin(B)
     nc[] = norm(c)
     ng[] = norm(g)
     nB[] = norm(B)
@@ -1221,7 +1221,7 @@ function reinit!(solver::HSDSolver{T}, prob::IPMProblem{T}; frac::Real=0.1) wher
         initcache!(cache(solver.caches, v, solver.K[v]))
     end
 
-    solver.ρ[] = solver.settings.rgmin
+    solver.ρ[] = resolve_rgmin(solver.B)
 
     return solver
 end

@@ -12,8 +12,6 @@
     refine_stall::T = 0.5
     floor_patience::Int = 3
     scale_itmax::Int = 10
-    rgmin::T = 1e-9
-    rgmax::T = 1e-6
     aaug::T = zero(T)   # absolute augmentation (raw-α override: set raug=0, aaug=α_raw)
     raug::T = 1e7       # relative augmentation, in initial-problem units (the anchored knob)
     fix_alpha::Bool = false   # ORACLE ONLY: setaug! becomes a no-op so a caller-injected α survives step!
@@ -38,7 +36,6 @@ function showsettings(io::IO, set::HSDSettings; indent::Integer=0)
     @printf(io, "%sforcing_ceil: %8.2e\n", pad, set.forcing_ceil)
     @printf(io, "%srefine_itmax: %8d  refine_stall: %8.2e\n", pad, set.refine_itmax, set.refine_stall)
     @printf(io, "%sscale_itmax:  %8d\n", pad, set.scale_itmax)
-    @printf(io, "%srgmin:        %8.2e  rgmax:        %8.2e\n", pad, set.rgmin, set.rgmax)
     @printf(io, "%sillposed_tol: %8.2e  infeas_abs:   %8.2e\n", pad, set.illposed_tol, set.infeas_abs)
     @printf(io, "%sinfeas_rel:   %8.2e\n", pad, set.infeas_rel)
     @printf(io, "%saaug:         %8.2e  raug:         %8.2e\n", pad, set.aaug, set.raug)

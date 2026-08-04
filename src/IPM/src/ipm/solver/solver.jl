@@ -4,6 +4,11 @@ include("ipm.jl")
 include("hsd.jl")
 include("utils.jl")
 
+# The ρ-shift floor: u·σ²max(B), the size of the perturbation the shift corrects, with σ²max bounded
+# above by the Frobenius norm ‖B‖² (the augmentation's nB) and u = eps/2 the unit roundoff. It scales
+# with the problem; per rgmin_note the old fixed 1e-9 overshot it by a problem-dependent 6-8 orders.
+resolve_rgmin(B) = eps(eltype(B)) / 2 * norm(B)^2
+
 function augmin(α::T, pfres::T, tol::T, state::Bool, pbase::Int, npass::Int, bdg::T) where {T}
     αmin = T(NaN)
 
