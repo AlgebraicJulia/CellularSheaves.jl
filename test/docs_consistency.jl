@@ -12,7 +12,12 @@ using Test
             end
         end
     end
-    for mod in autodoc_mods
-        @test occursin(mod, make_src)
+    makedocs_mods = Set{String}()
+    for m in eachmatch(r"modules\s*=\s*\[([^\]]+)\]"s, make_src)
+        for mod in split(m.captures[1], ",")
+            push!(makedocs_mods, strip(mod))
+        end
     end
+    missing = setdiff(autodoc_mods, makedocs_mods)
+    @test isempty(missing)
 end
