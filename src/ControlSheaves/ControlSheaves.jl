@@ -51,4 +51,8 @@ include("Layered.jl")
 import .Layered
 export Layered
 
+include("NestedSystems.jl")
+import .NestedSystems
+export NestedSystems
+
 end # module ControlSheaves
