@@ -2,7 +2,7 @@ using Test
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
 using CellularSheaves.ControlSheaves.AgentControllers
-using CellularSheaves.ControlSheaves.Layered: HomogeneousDynamics, get_agent_dynamics_config
+using CellularSheaves.ControlSheaves.Layered
 using LinearAlgebra
 using Graphs
 
@@ -267,12 +267,11 @@ end
     @test_throws Exception resolve_dynamics(spec, ctx)
 end
 
-@testset "root-only binding matches HomogeneousDynamics semantics" begin
+@testset "root-only binding applies uniformly (flat trichotomy retired, Issue 013)" begin
     spec = two_level_spec()
     dyn = QuadrotorDynamics()
     r = resolve_dynamics(spec, SystemBinding(dynamics=dyn))
-    old = HomogeneousDynamics(dyn)
-    @test all(i -> r[i].dynamics === get_agent_dynamics_config(old, i, 1)[1], eachindex(r))
+    @test all(a -> a.dynamics === dyn, r)
 end
 
 @testset "resolved order matches the tower's agent ordering" begin

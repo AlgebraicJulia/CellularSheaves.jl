@@ -2,6 +2,7 @@ using Test
 using CellularSheaves
 using CellularSheaves.AgentControllers
 using CellularSheaves.ControlSheaves.Layered
+using CellularSheaves.ControlSheaves.NestedSystems
 using LinearAlgebra
 using Graphs
 
@@ -99,7 +100,7 @@ using Graphs
 
     prob = LayeredEscortProblem(
         spec, F, f, PfF, bases,
-        HomogeneousDynamics(dyn_test, K_test),
+        SystemBinding(dynamics=dyn_test, K_lqr=K_test),
         target_trajs, v_trajs, a_trajs,
         0.05, 10, nothing
     )
@@ -129,7 +130,7 @@ using Graphs
     end
     prob_custom = LayeredEscortProblem(
         spec, F, f, PfF, bases,
-        HomogeneousDynamics(dyn_test, K_test),
+        SystemBinding(dynamics=dyn_test, K_lqr=K_test),
         target_trajs, nothing, nothing,
         0.05, 3, custom_positions
     )
@@ -175,7 +176,7 @@ end
 
     prob = LayeredEscortProblem(
         spec, F, f, PfF, bases,
-        HomogeneousDynamics(dyn_p, K_p),
+        SystemBinding(dynamics=dyn_p, K_lqr=K_p),
         target_trajs, nothing, nothing,
         0.05, 5, nothing
     )
@@ -222,4 +223,72 @@ end
     @test !isnothing(CellularSheaves.get_restriction_map(F_custom, s_range_c[2], spec_custom.target_nodes[2]))
     @test_throws Exception CellularSheaves.get_restriction_map(F_custom, s_range_c[1], spec_custom.target_nodes[2])
     @test_throws Exception CellularSheaves.get_restriction_map(F_custom, s_range_c[2], spec_custom.target_nodes[1])
+end
+
+@testset "Issue 013 — dynamics binding replaces the flat trichotomy" begin
+    spec = LayeredEscortSpec([RingSpec(1, 6, 0.3), RingSpec(2, 4, 0.25)], [SupportSpec(1, 2, 3)])
+    dyn = QuadrotorDynamics()
+    dyn_planar = PlanarQuadrotorDynamics()
+
+    @testset "flat adapter: root binding applies to every agent" begin
+        r = resolve_dynamics(spec, SystemBinding(dynamics=dyn))
+        @test length(r) == spec.n_agents
+        @test all(x -> x.dynamics isa QuadrotorDynamics, r)
+    end
+
+    @testset "flat adapter: per-ring override beats the root default" begin
+        ctx = SystemBinding(dynamics=dyn,
+                            children=Dict(:ring2 => SystemBinding(dynamics=dyn_planar)))
+        r = resolve_dynamics(spec, ctx)
+        @test all(x -> x.dynamics isa QuadrotorDynamics, r[spec.ring_node_ranges[1]])
+        @test all(x -> x.dynamics isa PlanarQuadrotorDynamics, r[spec.ring_node_ranges[2]])
+    end
+
+    @testset "flat adapter: support pods are addressable" begin
+        ctx = SystemBinding(dynamics=dyn,
+                            children=Dict(:support1 => SystemBinding(dynamics=dyn_planar)))
+        r = resolve_dynamics(spec, ctx)
+        @test all(x -> x.dynamics isa PlanarQuadrotorDynamics, r[spec.support_node_ranges[1]])
+    end
+
+    @testset "typo'd child name is rejected" begin
+        ctx = SystemBinding(dynamics=dyn, children=Dict(:ring99 => SystemBinding()))
+        @test_throws Exception resolve_dynamics(spec, ctx)
+    end
+
+    @testset "simulation is unchanged by the port" begin
+        Ad, Bd = CellularSheaves.AgentControllers.discrete_matrices(dyn, 0.05)
+        K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, Matrix{Float64}(I, 10, 10), Matrix{Float64}(I, 3, 3))
+        target_trajs = [t -> [1.0, 0.0, 1.5, 1.0], t -> [-1.0, 0.0, 1.5, 1.0]]
+        prob = LayeredEscortProblem(spec, SystemBinding(dynamics=dyn, K_lqr=K), target_trajs;
+                                    dt=0.05, steps=10)
+        res = run_layered_escort_simulation(prob)
+        @test length(res.sim_data) == 10
+        @test res.sim_data[1][1][1] ≈ 0.0 atol=0.05   # airstrip default preserved (agent 1)
+    end
+
+    @testset "AgentBinding.initial_position beats the initial_positions fallback" begin
+        Ad, Bd = CellularSheaves.AgentControllers.discrete_matrices(dyn, 0.05)
+        K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, Matrix{Float64}(I, 10, 10), Matrix{Float64}(I, 3, 3))
+        target_trajs = [t -> [1.0, 0.0, 1.5, 1.0], t -> [-1.0, 0.0, 1.5, 1.0]]
+        ctx = SystemBinding(dynamics=dyn, K_lqr=K,
+                            children=Dict(:ring1 => SystemBinding(
+                                agents=Dict(1 => AgentBinding(initial_position=[7.0, 7.0, 7.0])))))
+        prob = LayeredEscortProblem(spec, ctx, target_trajs;
+                                    dt=0.05, steps=3,
+                                    initial_positions=fill([0.0, 0.0, 1.5], spec.n_agents))
+        res = run_layered_escort_simulation(prob)
+        @test res.sim_data[1][1][1:3] ≈ [7.0, 7.0, 7.0] atol=0.05
+        # Agent 2 has no per-agent override, so the problem's own `initial_positions` wins
+        # over the airstrip default.
+        @test res.sim_data[1][2][1:3] ≈ [0.0, 0.0, 1.5] atol=0.05
+    end
+
+    @testset "removed names are gone" begin
+        @test !isdefined(CellularSheaves.ControlSheaves.Layered, :HomogeneousDynamics)
+        @test !isdefined(CellularSheaves.ControlSheaves.Layered, :TeamHomogeneousDynamics)
+        @test !isdefined(CellularSheaves.ControlSheaves.Layered, :IndividualizedDynamics)
+        @test !isdefined(CellularSheaves.ControlSheaves.Layered, :AbstractDynamicsSpec)
+        @test !isdefined(CellularSheaves.ControlSheaves.Layered, :get_agent_dynamics_config)
+    end
 end

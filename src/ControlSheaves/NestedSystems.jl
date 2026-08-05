@@ -38,8 +38,7 @@ using ...NetworkSheaves.EuclideanSheaves: add_sheaf_edge!, harmonic_extension
 using ...NetworkSheaves.Formations: build_escort_topology
 using ...NetworkSheaves.GraphHomomorphisms: GraphHomomorphism, fiber_vertices
 using ...NetworkSheaves.Pushforwards: pushforward_sheaf, all_fiber_bases
-using ..AgentControllers: AbstractAgentDynamics
-using ..Layered: _default_initial_position
+using ..AgentControllers: AbstractAgentDynamics, _default_initial_position
 
 export AbstractSystemNode, LeafTeam, RefinedSystem, TargetSpec, Observation, NestedSystemSpec,
        SheafTower, build_sheaf_tower, n_agents,
