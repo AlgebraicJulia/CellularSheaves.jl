@@ -51,12 +51,8 @@ include("Layered.jl")
 import .Layered
 export Layered
 
-include("CoordinationBenchmarks.jl")
-import .CoordinationBenchmarks
-export CoordinationBenchmarks
-
-include("CoordinationProfiling.jl")
-import .CoordinationProfiling
-export CoordinationProfiling
+include("NestedSystems.jl")
+import .NestedSystems
+export NestedSystems
 
 end # module ControlSheaves
