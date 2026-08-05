@@ -47,4 +47,12 @@ include("DistributedLayeredControl.jl")
 import .DistributedLayeredControl
 export DistributedLayeredControl
 
+include("CoordinationBenchmarks.jl")
+import .CoordinationBenchmarks
+export CoordinationBenchmarks
+
+include("CoordinationProfiling.jl")
+import .CoordinationProfiling
+export CoordinationProfiling
+
 end # module ControlSheaves
