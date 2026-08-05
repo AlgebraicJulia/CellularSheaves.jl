@@ -76,7 +76,7 @@ prob_pf = LayeredEscortProblem(
     spec, F, f, PfF, bases,
     HomogeneousDynamics(dyn_test, K_test),
     target_trajs, target_vels, target_accels,
-    DT, STEPS
+    DT, STEPS, nothing
 )
 
 #  ## Simulation 1: 3-Layer Pushforward Architecture (f_★F) ---

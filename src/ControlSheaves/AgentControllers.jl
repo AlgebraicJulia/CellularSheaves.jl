@@ -1,13 +1,15 @@
 module AgentControllers
 
 using LinearAlgebra
+using ArgCheck
 using ...NetworkSheaves.TrajectorySheaves: continuous_to_discrete_zoh
 using ..Tikhonov: AbstractTikhonovFilter, TikhonovFilter, JointTikhonovFilter, tikhonov_step!
 
 export AbstractAgentDynamics, QuadrotorDynamics, PlanarQuadrotorDynamics,
        AbstractAgentController, LQRController,
        AbstractAgentState, AgentState,
-       solve_dare, step_agent!
+       solve_dare, step_agent!,
+       position_indices, velocity_indices, state_dim, initial_state
 
 abstract type AbstractAgentDynamics end
 
@@ -83,6 +85,73 @@ Returns the velocity state indices in the full state vector for the given agent 
 """
 velocity_indices(dyn::QuadrotorDynamics) = 6:8
 velocity_indices(dyn::PlanarQuadrotorDynamics) = 4:5
+
+"""
+    position_indices(dyn::QuadrotorDynamics) -> 1:3
+    position_indices(dyn::PlanarQuadrotorDynamics) -> 1:2
+
+Returns the position state indices in the full state vector for the given agent dynamics.
+"""
+position_indices(dyn::QuadrotorDynamics) = 1:3
+position_indices(dyn::PlanarQuadrotorDynamics) = 1:2
+
+"""
+    state_dim(dyn::QuadrotorDynamics) -> 10
+    state_dim(dyn::PlanarQuadrotorDynamics) -> 6
+
+Returns the full state vector dimension for the given agent dynamics.
+"""
+state_dim(dyn::QuadrotorDynamics) = 10
+state_dim(dyn::PlanarQuadrotorDynamics) = 6
+
+"""
+    initial_state(dyn::AbstractAgentDynamics, position::AbstractVector)
+    initial_state(dyn::AbstractAgentDynamics, position::AbstractVector, velocity::AbstractVector)
+    initial_state(dyn::AbstractAgentDynamics, position::AbstractVector, velocity::AbstractVector, acceleration::AbstractVector)
+
+Constructs a full state vector for dynamics model `dyn` starting at world `position`
+(length `position_indices(dyn)`), with `velocity` (length `velocity_indices(dyn)`,
+defaults to rest) and `acceleration` (defaults to steady/zero). When `acceleration` is
+supplied, the initial attitude is trimmed using the same flat-output feedforward formula
+used by `step_agent!`, so agents seeded with the trajectory's initial acceleration start
+already banked into the turn instead of level.
+"""
+function initial_state(dyn::AbstractAgentDynamics, position::AbstractVector)
+    initial_state(dyn, position, zeros(length(velocity_indices(dyn))))
+end
+
+function initial_state(dyn::AbstractAgentDynamics, position::AbstractVector, velocity::AbstractVector)
+    initial_state(dyn, position, velocity, zeros(length(position)))
+end
+
+function initial_state(dyn::QuadrotorDynamics, position::AbstractVector, velocity::AbstractVector, acceleration::AbstractVector)
+    @argcheck length(position) == length(position_indices(dyn))
+    @argcheck length(velocity) == length(velocity_indices(dyn))
+    x = zeros(state_dim(dyn))
+    x[position_indices(dyn)] .= position
+    x[velocity_indices(dyn)] .= velocity
+    if length(acceleration) >= 2
+        g = dyn.g
+        ax, ay = acceleration[1], acceleration[2]
+        x[4] = -ay / g
+        x[5] =  ax / g
+    end
+    return x
+end
+
+function initial_state(dyn::PlanarQuadrotorDynamics, position::AbstractVector, velocity::AbstractVector, acceleration::AbstractVector)
+    @argcheck length(position) == length(position_indices(dyn))
+    @argcheck length(velocity) == length(velocity_indices(dyn))
+    x = zeros(state_dim(dyn))
+    x[position_indices(dyn)] .= position
+    x[velocity_indices(dyn)] .= velocity
+    if length(acceleration) >= 1
+        g = dyn.g
+        ay = acceleration[1]
+        x[3] = -ay / g
+    end
+    return x
+end
 
 """
     solve_dare(A, B, Q, R)
