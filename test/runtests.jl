@@ -43,4 +43,5 @@ end
 
 @testset "Control Sheaves" begin
   include("ControlSheaves/AgentControllers.jl")
+  include("ControlSheaves/NestedSystems.jl")
 end
