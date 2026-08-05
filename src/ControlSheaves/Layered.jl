@@ -21,7 +21,8 @@ using ...NetworkSheaves.EuclideanSheaves: add_sheaf_edge!, _harmonic_extension_r
 using ...NetworkSheaves.Formations: build_escort_ring, se3_translation_matrix
 using ...NetworkSheaves.GraphHomomorphisms: GraphHomomorphism, fiber_vertices
 using ...NetworkSheaves.Pushforwards: pushforward_sheaf, all_fiber_bases
-using ..AgentControllers: AbstractAgentDynamics, QuadrotorDynamics, AgentState, step_agent!
+using ..AgentControllers: AbstractAgentDynamics, QuadrotorDynamics, AgentState, step_agent!,
+                           position_indices, initial_state
 
 function animate_comprehensive_escort end
 
@@ -71,36 +72,56 @@ get_agent_dynamics_config(spec::IndividualizedDynamics, agent_idx::Int, team_idx
 # ---------------------------------------------------------------------------
 
 """
-    RingSpec(target_id::Int, n_agents::Int, radius::Float64)
+    RingSpec(target_id::Int, n_agents::Int, radius::Float64; observers::Vector{Int}=[1])
 
-Specification for an escort ring around a target vertex.
+Specification for an escort ring around a target vertex. `observers` names which ring
+agents (by local index `1:n_agents`) are directly pinned to the target; any subset of
+ring agents may observe the target, defaulting to just the first agent.
 """
 struct RingSpec
     target_id::Int
     n_agents::Int
     radius::Float64
+    observers::Vector{Int}
 end
 
-"""
-    SupportSpec(u_ring::Int, v_ring::Int, n_agents::Int)
+RingSpec(target_id::Int, n_agents::Int, radius::Float64; observers=[1]) =
+    RingSpec(target_id, n_agents, radius, collect(observers))
 
-Specification for a support pool of agents bridging Escort Ring `u_ring` and Escort Ring `v_ring`.
+"""
+    SupportSpec(src_ring::Int, tgt_ring::Int, n_agents::Int; src_observers::Vector{Int}=[1], tgt_observers::Vector{Int}=[1])
+
+Specification for a support pool of agents bridging Escort Ring `src_ring` and Escort Ring `tgt_ring`.
+`src_observers`/`tgt_observers` name which support-pool agents (by local index `1:n_agents`)
+are directly pinned to the `src_ring`/`tgt_ring` target respectively. Defaults to the first
+agent in the pool observing both targets.
 """
 struct SupportSpec
-    u_ring::Int
-    v_ring::Int
+    src_ring::Int
+    tgt_ring::Int
     n_agents::Int
+    src_observers::Vector{Int}
+    tgt_observers::Vector{Int}
 end
 
+SupportSpec(src_ring::Int, tgt_ring::Int, n_agents::Int; src_observers=[1], tgt_observers=[1]) =
+    SupportSpec(src_ring, tgt_ring, n_agents, collect(src_observers), collect(tgt_observers))
+
 """
-    LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec}; D::Int=4)
+    LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec}; D::Int=4, affine::Bool=true)
 
 Full multi-team topology specification for arbitrary escort rings and support edge pools.
+
+`D` is the stalk dimension (default 4). When `affine=true` (default), stalks carry `D-1`
+homogeneous-affine translation coordinates plus one homogeneous row (e.g. `D=4` for SE(3)
+3D translation, `D=3` for planar 2D translation). When `affine=false`, stalks are `D` plain
+Euclidean coordinates with no translation offsets representable (ring/support radii must be 0).
 """
 struct LayeredEscortSpec
     rings::Vector{RingSpec}
     supports::Vector{SupportSpec}
     D::Int # stalk dimension (default 4 for SE(3) homogeneous coordinates)
+    affine::Bool # whether stalks carry a homogeneous affine coordinate
     n_rings::Int
     n_supports::Int
     n_targets::Int
@@ -111,7 +132,7 @@ struct LayeredEscortSpec
     target_nodes::Vector{Int}
 end
 
-function LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec}; D::Int=4)
+function LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec}; D::Int=4, affine::Bool=true)
     n_rings = length(rings)
     n_supports = length(supports)
     n_targets = n_rings
@@ -133,7 +154,7 @@ function LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec
     target_nodes = [curr_node + i - 1 for i in 1:n_targets]
     total_nodes = n_agents + n_targets
 
-    return LayeredEscortSpec(rings, supports, D, n_rings, n_supports, n_targets, n_agents, total_nodes, ring_ranges, support_ranges, target_nodes)
+    return LayeredEscortSpec(rings, supports, D, affine, n_rings, n_supports, n_targets, n_agents, total_nodes, ring_ranges, support_ranges, target_nodes)
 end
 
 # ---------------------------------------------------------------------------
@@ -213,7 +234,7 @@ function build_layered_escort_sheaf(spec::LayeredEscortSpec)
         t_node = spec.target_nodes[r_idx]
         target_local_idx = r.n_agents + 1
         
-        ring = build_escort_ring(r.n_agents, target_local_idx, r.radius; observers=[1], D=D)
+        ring = build_escort_ring(r.n_agents, target_local_idx, r.radius; observers=r.observers, D=D, affine=spec.affine)
         for e in edges(ring.underlying_graph)
             u_loc, v_loc = src(e), dst(e)
             u = u_loc == target_local_idx ? t_node : r_range[u_loc]
@@ -228,18 +249,22 @@ function build_layered_escort_sheaf(spec::LayeredEscortSpec)
         I_D = Matrix{Float64}(I, D, D)
 
         # Support consensus ring / chain
-        for i in 1:s.n_agents
-            u = s_range[i]
-            v = s_range[i % s.n_agents + 1]
-            add_sheaf_edge!(F, u, v, I_D, I_D)
+        if s.n_agents > 1
+            for i in 1:s.n_agents
+                u = s_range[i]
+                v = s_range[i % s.n_agents + 1]
+                add_sheaf_edge!(F, u, v, I_D, I_D)
+            end
         end
 
-        # Direct tracking edges to target u and target v
-        if s.n_agents >= 1
-            add_sheaf_edge!(F, s_range[1], spec.target_nodes[s.u_ring], I_D, I_D)
+        # Direct tracking edges to the src_ring and tgt_ring targets
+        @argcheck all(1 .<= o .<= s.n_agents for o in s.src_observers) "src_observers must be within 1:n_agents"
+        @argcheck all(1 .<= o .<= s.n_agents for o in s.tgt_observers) "tgt_observers must be within 1:n_agents"
+        for i in s.src_observers
+            add_sheaf_edge!(F, s_range[i], spec.target_nodes[s.src_ring], I_D, I_D)
         end
-        if s.n_agents >= 2
-            add_sheaf_edge!(F, s_range[2], spec.target_nodes[s.v_ring], I_D, I_D)
+        for i in s.tgt_observers
+            add_sheaf_edge!(F, s_range[i], spec.target_nodes[s.tgt_ring], I_D, I_D)
         end
     end
 
@@ -384,12 +409,20 @@ struct LayeredEscortProblem
     target_accelerations::Union{Nothing, Vector{Any}}# functions t -> [ax,ay,az,0.0]
     dt::Float64
     steps::Int
+    initial_positions::Union{Nothing, Vector{Vector{Float64}}} # world position per agent at t=0
 end
 
 """
-    LayeredEscortProblem(spec, dynamics_spec, target_trajectories; dt=0.05, steps=200, target_velocities=nothing, target_accelerations=nothing)
+    LayeredEscortProblem(spec, dynamics_spec, target_trajectories; dt=0.05, steps=200, target_velocities=nothing, target_accelerations=nothing, initial_positions=nothing)
 
 High-level constructor that automatically builds `F`, `f`, `PfF`, and structured fiber bases from `spec`.
+
+`initial_positions`, if given, is a `Vector` with one world position per agent (length
+`spec.n_agents`, each of dynamics-appropriate length — see `position_indices`) used to seed
+the simulation. If omitted, agents default to a simple "airstrip" starting layout — lined up
+along the first position coordinate with fixed spacing, at a common hover altitude (the last
+position coordinate) — deliberately distinct from the target formation, so the control law's
+convergence into formation is visible in the simulation rather than starting there already.
 """
 function LayeredEscortProblem(
     spec::LayeredEscortSpec,
@@ -398,7 +431,8 @@ function LayeredEscortProblem(
     target_velocities=nothing,
     target_accelerations=nothing,
     dt::Float64=0.05,
-    steps::Int=200
+    steps::Int=200,
+    initial_positions=nothing
 )
     sheaf = build_layered_escort_sheaf(spec)
     hom = build_layered_homomorphism(spec)
@@ -408,7 +442,7 @@ function LayeredEscortProblem(
     return LayeredEscortProblem(
         spec, sheaf, hom, pf_sheaf, bases,
         dynamics_spec, target_trajectories, target_velocities, target_accelerations,
-        dt, steps
+        dt, steps, initial_positions
     )
 end
 
@@ -417,6 +451,21 @@ struct LayeredEscortResult
     sim_data::Vector{Vector{Vector{Float64}}}
     qstar_history::Vector{Matrix{Float64}}
     target_history::Vector{Vector{Vector{Float64}}}
+end
+
+"""
+    _default_initial_position(dyn::AbstractAgentDynamics, i::Int) -> Vector{Float64}
+
+Default "airstrip" starting position for agent `i` when `LayeredEscortProblem.initial_positions`
+is not supplied: agents are lined up along the first position coordinate at a fixed spacing,
+at a common hover altitude (the last position coordinate). This is deliberately distinct from
+the target formation so that convergence into formation is visible in the simulation.
+"""
+function _default_initial_position(dyn::AbstractAgentDynamics, i::Int)
+    pos = zeros(length(position_indices(dyn)))
+    pos[1] = (i - 1) * 0.5   # spacing between agents along the line
+    pos[end] = 1.5           # common hover altitude
+    return pos
 end
 
 """
@@ -451,8 +500,8 @@ function run_layered_escort_simulation(prob::LayeredEscortProblem; use_feedforwa
         end
 
         dyn, K_lqr = get_agent_dynamics_config(prob.dynamics_spec, i, team_idx)
-        x0 = zeros(10) # 10D quadrotor state [x,y,z, vx,vy,vz, roll,pitch, yaw, ...]
-        x0[3] = 1.5
+        pos0 = isnothing(prob.initial_positions) ? _default_initial_position(dyn, i) : prob.initial_positions[i]
+        x0 = initial_state(dyn, pos0)
         push!(agent_states, AgentState(x0, dyn, DT, K_lqr, 0.02; use_velocity=use_feedforward))
     end
 
@@ -502,19 +551,20 @@ function run_layered_escort_simulation(prob::LayeredEscortProblem; use_feedforwa
         # 4. Step Agent Dynamics with Feedforward Support
         step_states = Vector{Vector{Float64}}()
         for i in 1:spec.n_agents
-            q_ref_i = qstar_agents[i, 1:min(D, 3)]
-            
+            pos_dim_i = length(position_indices(agent_states[i].dyn))
+            q_ref_i = qstar_agents[i, 1:pos_dim_i]
+
             if use_feedforward && !isnothing(qstar_dot_agents) && !isnothing(qstar_ddot_agents)
-                q_dot_i = qstar_dot_agents[i, 1:min(D, 3)]
-                q_ddot_i = qstar_ddot_agents[i, 1:min(D, 3)]
+                q_dot_i = qstar_dot_agents[i, 1:pos_dim_i]
+                q_ddot_i = qstar_ddot_agents[i, 1:pos_dim_i]
                 step_agent!(agent_states[i], q_ref_i, q_dot_i, q_ddot_i, DT)
             elseif use_feedforward && !isnothing(qstar_dot_agents)
-                q_dot_i = qstar_dot_agents[i, 1:min(D, 3)]
+                q_dot_i = qstar_dot_agents[i, 1:pos_dim_i]
                 step_agent!(agent_states[i], q_ref_i, q_dot_i, DT)
             else
                 step_agent!(agent_states[i], q_ref_i, DT)
             end
-            
+
             push!(step_states, copy(agent_states[i].x))
         end
         push!(sim_data, step_states)
