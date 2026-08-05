@@ -452,19 +452,21 @@ function step!(s::IPMSolver{T}) where {T}
                     μ1 = first(s.hist.μ)
                 end
 
-                if s.settings.vartol
-                    # vartol (Zanetti–Gondzio §5): a relative target τ·R0 instead of the absolute
-                    # μ-schedule, so force_tol ∝ μ² (quadratic forcing) vs the current ∝ μ. Per-instance:
-                    # τ is passed to solvekkt! as a NEGATIVE force_tol (sentinel); the backend decodes it
-                    # and sets force_tol = τ·R0 from each solve's OWN rhs, so the predictor and corrector
-                    # get different R0. tol0 = 1e-3, tolmax = 0.01·feas_tol.
-                    τv = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0))
-                    force_tol = -τv
-                else
-                    force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
-                end
+                # forcing term η (vartol / EW Choice 2). Relative forcing passes η to the backend as a
+                # NEGATIVE force_tol (sentinel); the backend decodes it and sets force_tol = η·R0 from each
+                # solve's own rhs (per-instance R0). mode 0 = absolute μ-schedule (positive force_tol).
                 floor_tol = 100eps(T) * (1 + max(norm(w.rp) / (1 + s.ng[]),
                                                  norm(w.rd) / (1 + s.nc[])))
+                mode = s.settings.forcing == 0 && s.settings.vartol ? 1 : s.settings.forcing
+                if mode == 0
+                    force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
+                elseif mode == 2
+                    force_tol = s.settings.delta * pres   # gnorm: ‖g−BΔp‖ ≤ δ‖g‖ (g = rp, so δ·pres)
+                elseif mode == 4
+                    force_tol = s.settings.abstol   # fixtol: fixed (reachable) target every iteration
+                else                        # vartol: relative target η·R0, passed as the −η sentinel
+                    force_tol = -max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0))
+                end
                 #
                 # solve for the Mehrotra predictor direction
                 #

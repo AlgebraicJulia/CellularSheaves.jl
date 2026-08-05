@@ -728,16 +728,21 @@ function step!(s::HSDSolver{T}) where {T}
             #   floor: 100ϵ (1 + max(‖rp‖₂/(1+ng), ‖rd‖₂/(1+nc)))  — same scaled-2-norm units as res
             #
             μ1 = isempty(s.hist.μ) ? μ : first(s.hist.μ)
-            if s.settings.vartol
-                # vartol (Zanetti–Gondzio §5): relative target τ·R0, R0 ≈ max(pres, dres) ∝ μ, so
-                # force_tol ∝ μ² (quadratic forcing) vs the current ∝ μ. See the IPM step! for notes.
-                τv = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0))
-                force_tol = τv * max(pres, dres)
-            else
-                force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
-            end
+            # forcing term η (vartol / EW Choice 2). HSD uses the positive shared-R0 proxy force_tol =
+            # η·max(pres,dres) — the bordered backend has no sentinel decode, so per-instance R0 (the −η
+            # sentinel) is IPM-only for now. mode 0 = absolute μ-schedule.
             floor_tol = 100eps(T) * (1 + max(norm(w.rp) / (1 + s.ng[]),
                                              norm(w.rd) / (1 + s.nc[])))
+            mode = s.settings.forcing == 0 && s.settings.vartol ? 1 : s.settings.forcing
+            if mode == 0
+                force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
+            elseif mode == 2
+                force_tol = s.settings.delta * pres   # gnorm: ‖g−BΔp‖ ≤ δ‖g‖ (g = rp, so δ·pres)
+            elseif mode == 4
+                force_tol = s.settings.abstol   # fixtol: fixed (reachable) target every iteration
+            else                        # vartol: relative target η·R0 (HSD shared-R0 proxy, positive)
+                force_tol = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0)) * max(pres, dres)
+            end
             #
             # factor F and solve/cache the Woodbury column w₂ + capacitance (the bordered do-once)
             #
