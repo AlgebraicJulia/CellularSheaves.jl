@@ -41,7 +41,91 @@ using ...NetworkSheaves.Pushforwards: pushforward_sheaf, all_fiber_bases
 
 export AbstractSystemNode, LeafTeam, RefinedSystem, TargetSpec, Observation, NestedSystemSpec,
        SheafTower, build_sheaf_tower,
-       solve_hierarchical, solve_direct, sheaf_energy, approximation_gap
+       solve_hierarchical, solve_direct, sheaf_energy, approximation_gap,
+       RestrictionSpec, ProjectMember, Centroid, RawRestriction, project, centroid,
+       materialize_restriction, SystemEdge
+
+# ---------------------------------------------------------------------------
+# Restriction-map declarations (Issue 011)
+# ---------------------------------------------------------------------------
+
+"""
+    RestrictionSpec
+
+Declarative description of the restriction map on one end of an edge: what a subsystem
+*presents* to whatever it is wired to.
+
+**Declaration is symbolic; lowering is numeric.** A `RestrictionSpec` is declared against the
+subsystem's **raw joint state** — the plain concatenation of its direct members' values, of
+dimension `n_members × D`. That dimension follows from declared arities alone, with no rank or
+nullspace computation anywhere, which is what lets validation stay numeric-free. Only at tower
+assembly is the declared map composed with the fibre-section basis discovered by the pushforward:
+
+```
+R_coarse = R · B_v        (D × total) · (total × k)  =  D × k
+```
+
+`EuclideanSheaf` permits non-square restriction maps, so `R_coarse` needs no special handling.
+
+A node's **direct members** are its children if it is a [`RefinedSystem`](@ref), or its raw
+agents if it is a [`LeafTeam`](@ref). Refinement is opaque: a refined child counts as exactly one
+member no matter how many agents it eventually expands to.
+
+Concrete specs: [`project`](@ref), [`centroid`](@ref), and [`RawRestriction`](@ref).
+"""
+abstract type RestrictionSpec end
+
+"""
+    ProjectMember(member)
+
+Backing type for [`project`](@ref). `member` is a direct-member index, or a `Symbol` naming a
+child of a [`RefinedSystem`](@ref).
+"""
+struct ProjectMember <: RestrictionSpec
+    member::Union{Int,Symbol}
+end
+
+"""
+    Centroid()
+
+Backing type for [`centroid`](@ref).
+"""
+struct Centroid <: RestrictionSpec end
+
+"""
+    RawRestriction(M::Matrix{Float64})
+
+Escape hatch: present an arbitrary declared matrix. `M` must be `D × (n_members · D)`, checked
+when it is materialized against a specific node.
+"""
+struct RawRestriction <: RestrictionSpec
+    M::Matrix{Float64}
+end
+
+"""
+    project(i::Int) -> RestrictionSpec
+    project(name::Symbol) -> RestrictionSpec
+
+Present direct member `i`'s own block unchanged (or the child named `name`). The materialized
+matrix is the selection matrix `[0 … I_D … 0]`.
+
+This is the default on every edge, and it is the one spec that lowers all the way to a single
+finest-level vertex — selecting a member, then that member's first member, and so on — so a
+`project`-wired tower places its edges on raw agents in `H_N` exactly as it did before per-edge
+maps existed.
+"""
+project(i::Union{Int,Symbol}) = ProjectMember(i)
+
+"""
+    centroid() -> RestrictionSpec
+
+Present the unweighted average of the subsystem's **direct** members, `(1/N) Σ`.
+
+Unlike [`project`](@ref), a centroid is a functional of several members at once, so it has no
+representative vertex in `H_N`; it exists only at the level of abstraction where the subsystem
+is a single vertex. See [`build_sheaf_tower`](@ref) for what that implies.
+"""
+centroid() = Centroid()
 
 # ---------------------------------------------------------------------------
 # Specification types
@@ -85,30 +169,57 @@ LeafTeam(name::Symbol, kind::Symbol, n_agents::Int, radius::Real; observers=[1])
     LeafTeam(name, kind, n_agents, radius, collect(Int, observers))
 
 """
-    RefinedSystem(name, children, internal_edges=Tuple{Int,Int}[])
+    SystemEdge(src, dst; src_map=project(1), dst_map=project(1))
+
+A consensus edge between two children of a [`RefinedSystem`](@ref), given as index pairs into
+`children`. `src_map` and `dst_map` declare what each endpoint *presents* on this edge (see
+[`RestrictionSpec`](@ref)); a subsystem may present something different on each of its edges.
+
+The defaults reproduce the plain `(i, j)` behaviour exactly, which is why an `internal_edges`
+list of bare tuples is still accepted.
+"""
+struct SystemEdge
+    src::Int
+    dst::Int
+    src_map::RestrictionSpec
+    dst_map::RestrictionSpec
+end
+
+SystemEdge(src::Int, dst::Int; src_map::RestrictionSpec=project(1), dst_map::RestrictionSpec=project(1)) =
+    SystemEdge(src, dst, src_map, dst_map)
+
+SystemEdge(e::Tuple{Int,Int}) = SystemEdge(e[1], e[2])
+SystemEdge(e::SystemEdge) = e
+
+"""
+    RefinedSystem(name, children, internal_edges=SystemEdge[])
 
 A subsystem whose vertices are themselves systems. `internal_edges` are consensus edges among
-`children`, given as `(i, j)` index pairs into `children`.
+`children`: either [`SystemEdge`](@ref)s, or bare `(i, j)` index pairs, which are promoted to
+`SystemEdge`s with the default `project(1)` maps on both ends.
 """
 struct RefinedSystem <: AbstractSystemNode
     name::Symbol
     children::Vector{AbstractSystemNode}
-    internal_edges::Vector{Tuple{Int,Int}}
+    internal_edges::Vector{SystemEdge}
 
-    function RefinedSystem(name::Symbol, children::Vector{AbstractSystemNode}, internal_edges::Vector{Tuple{Int,Int}})
+    function RefinedSystem(name::Symbol, children::Vector{AbstractSystemNode}, internal_edges::Vector{SystemEdge})
         @argcheck !isempty(children) "RefinedSystem $(name) must have at least one child"
         n = length(children)
-        for (i, j) in internal_edges
-            @argcheck 1 <= i <= n "internal_edges index $i out of range 1:$n for RefinedSystem $(name)"
-            @argcheck 1 <= j <= n "internal_edges index $j out of range 1:$n for RefinedSystem $(name)"
-            @argcheck i != j "internal_edges cannot connect child $i to itself"
+        for e in internal_edges
+            @argcheck 1 <= e.src <= n "internal_edges index $(e.src) out of range 1:$n for RefinedSystem $(name)"
+            @argcheck 1 <= e.dst <= n "internal_edges index $(e.dst) out of range 1:$n for RefinedSystem $(name)"
+            @argcheck e.src != e.dst "internal_edges cannot connect child $(e.src) to itself"
+            # Materializing here would need `D`, which the spec supplies later; the member
+            # designators are checked against arity at tower-assembly time instead.
         end
         new(name, children, internal_edges)
     end
 end
 
-RefinedSystem(name::Symbol, children::Vector{<:AbstractSystemNode}, internal_edges::Vector{Tuple{Int,Int}}=Tuple{Int,Int}[]) =
-    RefinedSystem(name, Vector{AbstractSystemNode}(children), internal_edges)
+RefinedSystem(name::Symbol, children::Vector{<:AbstractSystemNode},
+              internal_edges::AbstractVector=SystemEdge[]) =
+    RefinedSystem(name, Vector{AbstractSystemNode}(children), SystemEdge[SystemEdge(e) for e in internal_edges])
 
 """
     TargetSpec(name)
@@ -121,16 +232,25 @@ struct TargetSpec
 end
 
 """
-    Observation(system_path, target_index)
+    Observation(system_path, target_index; system_map=project(1))
 
 Declares that the system at `system_path` (a path of child indices from the root) observes
 target `target_index`. Arbitrary many-to-many incidence is allowed: one system may observe
 several targets and one target may be observed by several systems.
+
+`system_map` declares what the observing system presents on this edge (see
+[`RestrictionSpec`](@ref)); the target end is always the identity, since a target is a single
+`D`-dimensional vertex at every level. The default `project(1)` reproduces the pre-Issue-011
+behaviour of wiring the system's first agent to the target.
 """
 struct Observation
     system_path::Vector{Int}
     target_index::Int
+    system_map::RestrictionSpec
 end
+
+Observation(system_path::AbstractVector{Int}, target_index::Int; system_map::RestrictionSpec=project(1)) =
+    Observation(collect(Int, system_path), target_index, system_map)
 
 """
     NestedSystemSpec(root, targets, observations, D, affine)
@@ -158,6 +278,86 @@ struct NestedSystemSpec
         end
         new(root, targets, observations, D, affine)
     end
+end
+
+# ---------------------------------------------------------------------------
+# Materializing restriction declarations against a node
+# ---------------------------------------------------------------------------
+
+"""
+    _direct_member_names(node) -> Union{Vector{Symbol},Nothing}
+
+Names of `node`'s direct members, or `nothing` when they are unnamed (a [`LeafTeam`](@ref)'s raw
+agents are addressed by index only).
+"""
+_direct_member_names(node::RefinedSystem) = [c.name for c in node.children]
+_direct_member_names(::LeafTeam) = nothing
+
+"""
+    _n_direct_members(node) -> Int
+
+Number of direct members: children for a [`RefinedSystem`](@ref), raw agents for a
+[`LeafTeam`](@ref).
+"""
+_n_direct_members(node::RefinedSystem) = length(node.children)
+_n_direct_members(node::LeafTeam) = node.n_agents
+
+"""
+    _member_index(node, member) -> Int
+
+Resolve a direct-member designator to an index, checking it against `node`'s arity. A `Symbol`
+resolves against child names and throws a message naming the available children if unmatched.
+"""
+function _member_index(node::AbstractSystemNode, member::Int)
+    n = _n_direct_members(node)
+    @argcheck 1 <= member <= n "member index $member out of range 1:$n for system $(node.name)"
+    return member
+end
+
+function _member_index(node::AbstractSystemNode, member::Symbol)
+    names = _direct_member_names(node)
+    names === nothing && throw(ArgumentError(
+        "cannot select member :$member in $(node.name): a LeafTeam's agents are unnamed, " *
+        "use an integer index in 1:$(_n_direct_members(node))"))
+    idx = findfirst(==(member), names)
+    idx === nothing && throw(ArgumentError(
+        "system $(node.name) has no child named :$member (children: $(join(names, ", ")))"))
+    return idx
+end
+
+"""
+    materialize_restriction(r::RestrictionSpec, node::AbstractSystemNode, D::Int) -> Matrix{Float64}
+
+Build the `D × (n_members · D)` matrix for `r` against `node`'s raw joint state.
+
+Purely structural: it depends only on `node`'s declared arity, never on a rank, nullspace, or
+pseudo-inverse computation. Composition with the fibre basis — the only numeric step — happens
+later, at tower assembly.
+"""
+function materialize_restriction(r::ProjectMember, node::AbstractSystemNode, D::Int)
+    @argcheck D >= 1 "D must be positive (got $D)"
+    n = _n_direct_members(node)
+    i = _member_index(node, r.member)
+    R = zeros(Float64, D, n * D)
+    R[:, ((i - 1) * D + 1):(i * D)] = Matrix{Float64}(I, D, D)
+    return R
+end
+
+function materialize_restriction(::Centroid, node::AbstractSystemNode, D::Int)
+    @argcheck D >= 1 "D must be positive (got $D)"
+    n = _n_direct_members(node)
+    R = zeros(Float64, D, n * D)
+    for i in 1:n
+        R[:, ((i - 1) * D + 1):(i * D)] = Matrix{Float64}(I, D, D) ./ n
+    end
+    return R
+end
+
+function materialize_restriction(r::RawRestriction, node::AbstractSystemNode, D::Int)
+    @argcheck D >= 1 "D must be positive (got $D)"
+    total = _n_direct_members(node) * D
+    @argcheck size(r.M) == (D, total) "RawRestriction matrix is $(size(r.M)), expected ($D, $total) for system $(node.name)"
+    return copy(r.M)
 end
 
 # ---------------------------------------------------------------------------
@@ -330,42 +530,116 @@ function _add_all_leafteam_edges!(F::EuclideanSheaf, node::RefinedSystem, D::Int
 end
 
 """
-    _add_internal_edges!(F, node, agent_range, D)
+    _fine_representative(node, r, agent_range) -> Union{Int,Nothing}
 
-Add a consensus edge for every `(i, j)` in `node.internal_edges`, recursively over every
-`RefinedSystem` in the tree (not just the root).
+The single `H_N` vertex that `r` designates on `node`, or `nothing` when `r` designates no
+single vertex.
 
-TODO(011): the representative vertex used for each endpoint is the child's first agent —
-equivalent to `project(1)` — because declared per-edge restriction maps (`project`/`centroid`)
-are Issue 011's territory, not this one's. This is the one place this issue touches that
-territory; see the "Open detail" section of `docs/issues/009-nested-spec-and-tower-compiler.md`.
+Only [`project`](@ref) has a representative, and finding it is recursive: selecting a member of a
+refined system leaves another system, whose own representative is *its* first member, and so on
+down to a raw agent. Selecting a member of a [`LeafTeam`](@ref) lands on that agent directly.
+
+An aggregate map such as [`centroid`](@ref) returns `nothing`: it is a functional of several
+vertices at once and cannot be an edge endpoint in `H_N`, where those vertices are still
+separate. Such an edge is placed at the coarsest level where its endpoints are single vertices —
+see [`build_sheaf_tower`](@ref).
 """
-function _add_internal_edges!(F::EuclideanSheaf, node::RefinedSystem,
-                               agent_range::IdDict{AbstractSystemNode,UnitRange{Int}}, D::Int)
-    I_D = Matrix{Float64}(I, D, D)
-    for (i, j) in node.internal_edges
-        u = first(agent_range[node.children[i]])  # TODO(011): project(1) placeholder
-        v = first(agent_range[node.children[j]])  # TODO(011): project(1) placeholder
-        add_sheaf_edge!(F, u, v, I_D, I_D)
-    end
-    for c in node.children
-        c isa RefinedSystem && _add_internal_edges!(F, c, agent_range, D)
-    end
+function _fine_representative(node::LeafTeam, r::ProjectMember,
+                               agent_range::IdDict{AbstractSystemNode,UnitRange{Int}})
+    return first(agent_range[node]) + _member_index(node, r.member) - 1
+end
+
+function _fine_representative(node::RefinedSystem, r::ProjectMember,
+                               agent_range::IdDict{AbstractSystemNode,UnitRange{Int}})
+    child = node.children[_member_index(node, r.member)]
+    return _fine_representative(child, ProjectMember(1), agent_range)
+end
+
+_fine_representative(::AbstractSystemNode, ::RestrictionSpec,
+                     ::IdDict{AbstractSystemNode,UnitRange{Int}}) = nothing
+
+"""
+    _DeferredEdge
+
+An edge that could not be expressed in `H_N` because at least one endpoint presents an aggregate
+of several vertices. It is added at `level`, the finest level at which both endpoints are single
+vertices. `u_node`/`v_node` are `nothing` for a target endpoint (targets are single vertices
+everywhere and always present the identity).
+"""
+struct _DeferredEdge
+    level::Int
+    u_node::Union{AbstractSystemNode,Nothing}
+    u_map::Union{RestrictionSpec,Nothing}
+    u_target::Int
+    v_node::Union{AbstractSystemNode,Nothing}
+    v_map::Union{RestrictionSpec,Nothing}
+    v_target::Int
 end
 
 """
-    _add_observation_edges!(F, spec, agent_range)
+    _atomic_level(node, S, depth) -> Int
 
-Add an edge from each [`Observation`](@ref)'s representative vertex (its system's first agent,
-same TODO(011) caveat as `_add_internal_edges!`) to its target vertex.
+The finest tower level at which `node` is a single vertex. Below it, `node` has been split into
+its direct members — which is precisely the level whose fibre basis an aggregate restriction map
+must compose with.
 """
-function _add_observation_edges!(F::EuclideanSheaf, spec::NestedSystemSpec,
-                                  agent_range::IdDict{AbstractSystemNode,UnitRange{Int}})
-    I_D = Matrix{Float64}(I, spec.D, spec.D)
+_atomic_level(node::AbstractSystemNode, S::IdDict{AbstractSystemNode,Int}, depth::Int) = depth - S[node]
+
+"""
+    _wire_declared_edges!(F, spec, agent_range, S, depth) -> Vector{_DeferredEdge}
+
+Add every declared consensus and observation edge that can live in `H_N`, and return the ones
+that cannot.
+
+An edge lands in `H_N` exactly when **both** endpoints resolve to a single vertex there — which
+is the case for `project`-wired edges, and so for every spec written before per-edge maps
+existed. Keeping those edges at the finest level is what preserves the earlier behaviour and, more
+importantly, what keeps [`solve_direct`](@ref)'s baseline meaningful: a target pinned through an
+`H_N` edge still constrains individual agents when the tower's rigidity is relaxed.
+"""
+function _wire_declared_edges!(F::EuclideanSheaf, spec::NestedSystemSpec,
+                                agent_range::IdDict{AbstractSystemNode,UnitRange{Int}},
+                                S::IdDict{AbstractSystemNode,Int}, depth::Int)
+    D = spec.D
+    I_D = Matrix{Float64}(I, D, D)
+    deferred = _DeferredEdge[]
+
+    _wire_internal_edges!(F, spec.root, agent_range, S, depth, D, I_D, deferred)
+
     for obs in spec.observations
         node = _resolve_path(spec.root, obs.system_path)
-        rep = first(agent_range[node])  # TODO(011): project(1) placeholder
-        add_sheaf_edge!(F, rep, obs.target_index, I_D, I_D)
+        rep = _fine_representative(node, obs.system_map, agent_range)
+        if rep === nothing
+            push!(deferred, _DeferredEdge(_atomic_level(node, S, depth),
+                                          node, obs.system_map, 0,
+                                          nothing, nothing, obs.target_index))
+        else
+            add_sheaf_edge!(F, rep, obs.target_index, I_D, I_D)
+        end
+    end
+
+    return deferred
+end
+
+function _wire_internal_edges!(F::EuclideanSheaf, node::RefinedSystem,
+                                agent_range::IdDict{AbstractSystemNode,UnitRange{Int}},
+                                S::IdDict{AbstractSystemNode,Int}, depth::Int, D::Int,
+                                I_D::Matrix{Float64}, deferred::Vector{_DeferredEdge})
+    for e in node.internal_edges
+        cu, cv = node.children[e.src], node.children[e.dst]
+        ru = _fine_representative(cu, e.src_map, agent_range)
+        rv = _fine_representative(cv, e.dst_map, agent_range)
+        if ru === nothing || rv === nothing
+            # One aggregate endpoint forces *both* ends to be expressed at the coarse level,
+            # since an edge cannot straddle two levels.
+            lvl = min(_atomic_level(cu, S, depth), _atomic_level(cv, S, depth))
+            push!(deferred, _DeferredEdge(lvl, cu, e.src_map, 0, cv, e.dst_map, 0))
+        else
+            add_sheaf_edge!(F, ru, rv, I_D, I_D)
+        end
+    end
+    for c in node.children
+        c isa RefinedSystem && _wire_internal_edges!(F, c, agent_range, S, depth, D, I_D, deferred)
     end
 end
 
@@ -437,8 +711,7 @@ function build_sheaf_tower(spec::NestedSystemSpec)
     # --- Build H_N ---
     F = EuclideanSheaf{Float64}(fill(D, total_HN))
     _add_all_leafteam_edges!(F, root, D, spec.affine, agent_range)
-    _add_internal_edges!(F, root, agent_range, D)
-    _add_observation_edges!(F, spec, agent_range)
+    deferred = _wire_declared_edges!(F, spec, agent_range, S, depth)
 
     levels = Vector{EuclideanSheaf{Float64}}(undef, depth)
     homs = Vector{GraphHomomorphism}(undef, depth - 1)
@@ -453,6 +726,11 @@ function build_sheaf_tower(spec::NestedSystemSpec)
         level_slots[k] = lst
         level_pos[k] = IdDict{AbstractSystemNode,Int}(n => i for (i, n) in enumerate(lst))
     end
+
+    # Restriction matrices for deferred (aggregate-mapped) edge endpoints, filled in as the
+    # loop below reaches each endpoint's own atomic level — see `_DeferredEdge`.
+    R_cache = IdDict{AbstractSystemNode,Matrix{Float64}}()
+    I_D = Matrix{Float64}(I, D, D)
 
     for k in (depth - 1):-1:1
         fine_level = levels[k + 1]
@@ -482,6 +760,36 @@ function build_sheaf_tower(spec::NestedSystemSpec)
         homs[k] = hom
         levels[k] = pushforward_sheaf(hom, fine_level)
         bases[k] = all_fiber_bases(hom, fine_level)
+
+        # --- Materialize any deferred (aggregate) endpoint whose node becomes atomic here. ---
+        # Row ordering: `node`'s direct members occupy a contiguous block of `level_slots[k]`
+        # in their own declared order (`_level_owner_slots` visits `node.children` in order and
+        # `vmap` numbers vertices by list position), so `fiber_vertices(hom, cv)` — the row
+        # order `bases[k][cv]` was built against — already matches `materialize_restriction`'s
+        # column order. The dimension check below is a cheap guard against that invariant ever
+        # breaking; a silent mismatch would misassign restriction blocks rather than error.
+        for d in deferred
+            for (node, spec_map) in ((d.u_node, d.u_map), (d.v_node, d.v_map))
+                node === nothing && continue
+                haskey(R_cache, node) && continue
+                _atomic_level(node, S, depth) == k || continue
+                cv = n_targets + level_pos[k][node]   # bases[k] is indexed by coarse vertex, targets first
+                B = bases[k][cv]
+                @argcheck size(B, 1) == _n_direct_members(node) * D (
+                    "fibre basis at coarse vertex $cv (level $k, system $(node.name)) has " *
+                    "$(size(B,1)) rows, expected $(_n_direct_members(node) * D) — row ordering " *
+                    "does not match materialize_restriction's column ordering")
+                R_cache[node] = materialize_restriction(spec_map, node, D) * B
+            end
+        end
+        for d in deferred
+            d.level == k || continue
+            R_u = d.u_node === nothing ? I_D : R_cache[d.u_node]
+            R_v = d.v_node === nothing ? I_D : R_cache[d.v_node]
+            u_idx = d.u_node === nothing ? d.u_target : n_targets + level_pos[k][d.u_node]
+            v_idx = d.v_node === nothing ? d.v_target : n_targets + level_pos[k][d.v_node]
+            add_sheaf_edge!(levels[k], u_idx, v_idx, R_u, R_v)
+        end
 
         # --- Assert the target invariant: singleton fibre, identity basis, stalk D. ---
         for t in 1:n_targets

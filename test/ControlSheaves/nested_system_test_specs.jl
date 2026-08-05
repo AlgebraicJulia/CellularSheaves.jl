@@ -122,6 +122,76 @@ function default_targets(spec::NestedSystemSpec)
 end
 
 """
+    three_child_system() -> RefinedSystem
+
+A `RefinedSystem` with three named `D=4` children (`alpha`, `bravo`, `charlie`), for unit-testing
+[`materialize_restriction`](@ref) directly against a node without building a whole tower.
+"""
+function three_child_system()
+    alpha = LeafTeam(:alpha, :ring, 3, 1.0)
+    bravo = LeafTeam(:bravo, :ring, 3, 1.0)
+    charlie = LeafTeam(:charlie, :ring, 3, 1.0)
+    return RefinedSystem(:node, AbstractSystemNode[alpha, bravo, charlie])
+end
+
+"""
+    mixed_arity_system() -> RefinedSystem
+
+A `RefinedSystem` with two children of very different size: `wide` (6 raw agents) and `narrow`
+(2 raw agents). [`centroid`](@ref) must weight them `1/2` each regardless — a *direct* member is
+counted once, however many agents it eventually expands to.
+"""
+function mixed_arity_system()
+    wide = LeafTeam(:wide, :clique, 6, 1.0)
+    narrow = LeafTeam(:narrow, :path, 2, 1.0)
+    return RefinedSystem(:node, AbstractSystemNode[wide, narrow])
+end
+
+"""
+    spec_default() -> NestedSystemSpec
+    spec_explicit_project1() -> NestedSystemSpec
+
+The same two-team spec, one relying on `project(1)` being the default `system_map`/edge map, the
+other declaring it explicitly. `solve_hierarchical` must agree bit-for-bit between them.
+"""
+function spec_default()
+    team1 = LeafTeam(:team1, :ring, 3, 1.0)
+    team2 = LeafTeam(:team2, :ring, 3, 1.0)
+    root = RefinedSystem(:root, AbstractSystemNode[team1, team2])
+    targets = [TargetSpec(:t1), TargetSpec(:t2)]
+    observations = [Observation([1], 1), Observation([2], 2)]
+    return NestedSystemSpec(root, targets, observations, 3, true)
+end
+
+function spec_explicit_project1()
+    team1 = LeafTeam(:team1, :ring, 3, 1.0)
+    team2 = LeafTeam(:team2, :ring, 3, 1.0)
+    root = RefinedSystem(:root, AbstractSystemNode[team1, team2])
+    targets = [TargetSpec(:t1), TargetSpec(:t2)]
+    observations = [Observation([1], 1; system_map=project(1)), Observation([2], 2; system_map=project(1))]
+    return NestedSystemSpec(root, targets, observations, 3, true)
+end
+
+"""
+    centroid_wired_spec() -> NestedSystemSpec
+
+Two rigid rings joined by an internal edge that wires each ring's **centroid** — the unweighted
+average of its own raw agents — rather than a single representative agent. Exercises
+[`centroid`](@ref) inside a real tower build/solve, not just `materialize_restriction` in
+isolation.
+"""
+function centroid_wired_spec()
+    teamA = LeafTeam(:teamA, :ring, 3, 1.0)
+    teamB = LeafTeam(:teamB, :ring, 3, 1.0)
+    mid = RefinedSystem(:mid, AbstractSystemNode[teamA, teamB],
+                        [SystemEdge(1, 2; src_map=centroid(), dst_map=centroid())])
+    root = RefinedSystem(:root, AbstractSystemNode[mid])
+    targets = [TargetSpec(:t1)]
+    observations = [Observation([1, 1], 1)]
+    return NestedSystemSpec(root, targets, observations, 3, true)
+end
+
+"""
     degenerate_spec() -> NestedSystemSpec
 
 An over-constrained/malformed team: a `:ring` formation with only one agent (`build_escort_topology`

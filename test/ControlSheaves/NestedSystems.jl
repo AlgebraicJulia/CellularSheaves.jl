@@ -138,4 +138,66 @@ end
     @test_throws Exception solve_direct(tower, [zeros(2), zeros(3)])       # wrong stalk dim
 end
 
+# ---------------------------------------------------------------------------
+# Issue 011 — per-edge restriction maps
+# ---------------------------------------------------------------------------
+
+@testset "project(i) selects exactly child i's block" begin
+    node = three_child_system()
+    R = materialize_restriction(project(2), node, 4)
+    @test size(R) == (4, 12)
+    @test R[:, 5:8] ≈ I(4)
+    @test all(iszero, R[:, 1:4]) && all(iszero, R[:, 9:12])
+end
+
+@testset "project(:name) resolves by child name" begin
+    node = three_child_system()
+    @test materialize_restriction(project(:bravo), node, 4) ≈
+          materialize_restriction(project(2), node, 4)
+    @test_throws Exception materialize_restriction(project(:nonexistent), node, 4)
+end
+
+@testset "centroid averages direct children" begin
+    node = three_child_system()
+    R = materialize_restriction(centroid(), node, 4)
+    @test R[:, 1:4] ≈ I(4) / 3
+    @test R * repeat([1.0, 2.0, 3.0, 1.0], 3) ≈ [1.0, 2.0, 3.0, 1.0]
+end
+
+@testset "centroid treats a refined child as one opaque unit" begin
+    # `wide` refines into 6 agents, `narrow` into 2; centroid must still weight them 1/2 each.
+    node = mixed_arity_system()
+    R = materialize_restriction(centroid(), node, 4)
+    @test R[:, 1:4] ≈ I(4) / 2
+end
+
+@testset "raw matrix escape hatch validates its shape" begin
+    node = three_child_system()
+    @test_throws Exception materialize_restriction(RawRestriction(zeros(4, 5)), node, 4)
+end
+
+@testset "default project(1) reproduces Issue 009 behaviour" begin
+    tv = default_targets(spec_default())
+    q_explicit = solve_hierarchical(build_sheaf_tower(spec_explicit_project1()), tv)[end]
+    q_default = solve_hierarchical(build_sheaf_tower(spec_default()), tv)[end]
+    @test q_explicit == q_default
+end
+
+@testset "centroid-wired tower still satisfies the energy-gap theorem" begin
+    tower = build_sheaf_tower(centroid_wired_spec())
+    @test approximation_gap(tower, default_targets(tower.spec)).gap >= -1e-8
+end
+
+@testset "centroid-wired tower reproduces a rigid translation" begin
+    # Both rings are rigid and the single target is observed through only one of them (via the
+    # default project(1) on the observation edge), so moving the target still translates the
+    # *whole* two-ring assembly rigidly -- the centroid coupling adds no extra deformation for a
+    # single, unopposed target. Gap must stay ~0, matching the project(1)-only rigid case.
+    tower = build_sheaf_tower(centroid_wired_spec())
+    tv = default_targets(tower.spec)
+    q = solve_hierarchical(tower, tv)[end]
+    @test sheaf_energy(tower.levels[end], q) ≈ 0.0 atol=1e-8
+    @test approximation_gap(tower, tv).gap ≈ 0.0 atol=1e-8
+end
+
 end # testset NestedSystems
