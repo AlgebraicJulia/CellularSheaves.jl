@@ -32,14 +32,16 @@ module NestedSystems
 using LinearAlgebra
 using Graphs
 using ArgCheck
-using ...NetworkSheaves: vertex_stalks, get_restriction_map, EuclideanSheaf, underlying_graph
-using ...NetworkSheaves.EuclideanSheaves: add_sheaf_edge!
+using ...NetworkSheaves: vertex_stalks, get_restriction_map, EuclideanSheaf, underlying_graph,
+                         coboundary_map
+using ...NetworkSheaves.EuclideanSheaves: add_sheaf_edge!, harmonic_extension
 using ...NetworkSheaves.Formations: build_escort_topology
 using ...NetworkSheaves.GraphHomomorphisms: GraphHomomorphism, fiber_vertices
 using ...NetworkSheaves.Pushforwards: pushforward_sheaf, all_fiber_bases
 
 export AbstractSystemNode, LeafTeam, RefinedSystem, TargetSpec, Observation, NestedSystemSpec,
-       SheafTower, build_sheaf_tower
+       SheafTower, build_sheaf_tower,
+       solve_hierarchical, solve_direct, sheaf_energy, approximation_gap
 
 # ---------------------------------------------------------------------------
 # Specification types
@@ -509,6 +511,157 @@ function build_sheaf_tower(spec::NestedSystemSpec)
     agent_vertices = collect((n_targets + 1):(n_targets + n_agents))
 
     return SheafTower(spec, levels, homs, bases, target_vertices, agent_vertices, depth)
+end
+
+# ---------------------------------------------------------------------------
+# Hierarchical & direct solves, and the approximation gap between them
+# ---------------------------------------------------------------------------
+
+"""
+    _per_vertex(F::EuclideanSheaf, x::AbstractVector) -> Vector{Vector{Float64}}
+
+Split a flat cochain `x` on `F` into one value per vertex, using each vertex's own stalk
+dimension (stalks are **not** uniform above `H_N`).
+"""
+function _per_vertex(F::EuclideanSheaf, x::AbstractVector)
+    dims = vertex_stalks(F)
+    out = Vector{Vector{Float64}}(undef, length(dims))
+    off = 0
+    for v in eachindex(dims)
+        out[v] = Vector{Float64}(x[(off + 1):(off + dims[v])])
+        off += dims[v]
+    end
+    return out
+end
+
+"""
+    _boundary_dict(tower, target_values) -> Dict{Int,Vector{Float64}}
+
+Map each target's vertex index to its pinned value, checking arity and stalk dimension.
+Targets share the same vertex index at every level of the tower, so the resulting dictionary
+is a valid boundary condition for `tower.levels[1]` and `tower.levels[end]` alike.
+"""
+function _boundary_dict(tower::SheafTower, target_values::AbstractVector)
+    @argcheck length(target_values) == length(tower.target_vertices) "expected $(length(tower.target_vertices)) target values, got $(length(target_values))"
+    D = tower.spec.D
+    for (t, val) in enumerate(target_values)
+        @argcheck length(val) == D "target $t value has length $(length(val)), expected stalk dimension $D"
+    end
+    return Dict{Int,Vector{Float64}}(
+        tower.target_vertices[t] => Vector{Float64}(target_values[t])
+        for t in eachindex(target_values))
+end
+
+"""
+    solve_hierarchical(tower::SheafTower, target_values) -> Vector{Vector{Vector{Float64}}}
+
+Solve the tower top-down: one harmonic extension on the coarsest sheaf `tower.levels[1]` with
+`target_values` pinned at the target vertices, then successive fibre-basis lifts down to each
+finer level.
+
+Because every fibre basis `B_v` spans the fibre's *exact* global-section space, each lift is
+energy-preserving: the internal edges of a fibre contribute exactly zero, and the cross-edge
+energy of the coarse sheaf equals that of the lifted cochain on the finer one. The coarse solve
+therefore genuinely minimises finest-level energy — but only over configurations in which every
+team stays rigidly in formation. See [`approximation_gap`](@ref) for what that restriction costs.
+
+Returns one cochain per level, coarsest first, each as a vector of per-vertex values (per-vertex,
+because stalk dimensions differ between vertices above the finest level). The last entry holds
+the per-agent and per-target reference states on `tower.levels[end]`.
+"""
+function solve_hierarchical(tower::SheafTower, target_values::AbstractVector)
+    boundary = _boundary_dict(tower, target_values)
+
+    x0, _ = harmonic_extension(tower.levels[1], boundary)
+    q = _per_vertex(tower.levels[1], Vector(x0))
+
+    out = Vector{Vector{Vector{Float64}}}()
+    push!(out, q)
+
+    for k in eachindex(tower.homs)
+        fine = tower.levels[k + 1]
+        fine_dims = vertex_stalks(fine)
+        q_fine = Vector{Vector{Float64}}(undef, length(fine_dims))
+
+        for v in eachindex(q)
+            lifted = tower.bases[k][v] * q[v]
+            off = 0
+            # `fiber_vertices` returns the fibre in ascending vertex order, which is exactly
+            # the row ordering `fiber_section_basis` documents for the basis it returns.
+            for u in fiber_vertices(tower.homs[k], v)
+                d = fine_dims[u]
+                q_fine[u] = lifted[(off + 1):(off + d)]
+                off += d
+            end
+        end
+
+        push!(out, q_fine)
+        q = q_fine
+    end
+
+    return out
+end
+
+"""
+    solve_direct(tower::SheafTower, target_values) -> Vector{Vector{Float64}}
+
+Baseline: harmonic extension on the fully expanded finest sheaf `tower.levels[end]`, pinning the
+same targets that [`solve_hierarchical`](@ref) pins. Every agent moves independently, so teams
+may deform — the internal formation edges are penalised, not enforced.
+
+Returns per-vertex values on the finest level. This is the unconstrained optimum against which
+the hierarchical solution is measured; see [`approximation_gap`](@ref).
+"""
+function solve_direct(tower::SheafTower, target_values::AbstractVector)
+    boundary = _boundary_dict(tower, target_values)
+    x, _ = harmonic_extension(tower.levels[end], boundary)
+    return _per_vertex(tower.levels[end], Vector(x))
+end
+
+"""
+    sheaf_energy(F::EuclideanSheaf, x::AbstractVector) -> Float64
+
+Dirichlet energy `‖δx‖²` of a flat cochain `x` on `F`, where `δ` is the
+[`coboundary_map`](@ref). This is the quantity both solves minimise, and the common yardstick
+that makes them comparable.
+"""
+function sheaf_energy(F::EuclideanSheaf, x::AbstractVector)
+    d = coboundary_map(F)
+    return sum(abs2, d * x)
+end
+
+sheaf_energy(F::EuclideanSheaf, q::AbstractVector{<:AbstractVector}) =
+    sheaf_energy(F, reduce(vcat, q))
+
+"""
+    approximation_gap(tower::SheafTower, target_values)
+        -> (; hierarchical, direct, gap, relative_gap)
+
+Energy of both solutions measured on the *finest* sheaf, and their difference.
+
+`gap` is guaranteed nonnegative up to floating-point tolerance, and this is a theorem rather
+than an empirical observation. The hierarchical solution satisfies every constraint the direct
+problem imposes plus the extra requirement that each team lie exactly on its space of global
+sections; it is therefore a feasible point of the direct problem, and a feasible point can never
+beat the optimum. Equality holds exactly when the direct optimum was already fibrewise-exact —
+rigid teams pinned to a single target are the equality case. A positive gap quantifies what
+insisting on rigid formations costs: it is the energy the direct solve recovers by letting teams
+deform.
+
+`relative_gap` is `gap / direct`, or `0.0` when both energies vanish.
+"""
+function approximation_gap(tower::SheafTower, target_values::AbstractVector)
+    F = tower.levels[end]
+    q_h = solve_hierarchical(tower, target_values)[end]
+    q_d = solve_direct(tower, target_values)
+
+    E_h = sheaf_energy(F, q_h)
+    E_d = sheaf_energy(F, q_d)
+    gap = E_h - E_d
+    scale = max(E_d, eps(Float64))
+    relative_gap = E_d <= eps(Float64) && abs(gap) <= eps(Float64) ? 0.0 : gap / scale
+
+    return (hierarchical = E_h, direct = E_d, gap = gap, relative_gap = relative_gap)
 end
 
 end # module NestedSystems

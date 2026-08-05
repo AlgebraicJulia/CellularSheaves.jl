@@ -68,6 +68,12 @@ using Graphs
     qstar_direct = solve_direct_harmonic(F, spec.target_nodes, p_targets)
     @test size(qstar_direct) == (22, 4)
 
+    # Every ring here is rigid and pinned to exactly one target, so the direct optimum is
+    # already fibrewise-exact: the two-level solve loses nothing and must agree with the
+    # direct one value-for-value, not merely in shape. See `approximation_gap`
+    # (ControlSheaves.NestedSystems) for the general statement.
+    @test qstar_agents ≈ qstar_direct atol=1e-8
+
     # 7. Test Simulation Execution
     target_trajs = [
         t -> [1.0 + 0.05*cos(t), 0.05*sin(t), 1.5, 1.0],
