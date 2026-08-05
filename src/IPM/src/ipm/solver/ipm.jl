@@ -454,11 +454,12 @@ function step!(s::IPMSolver{T}) where {T}
 
                 if s.settings.vartol
                     # vartol (Zanetti–Gondzio §5): a relative target τ·R0 instead of the absolute
-                    # μ-schedule. R0 ≈ max(pres, dres) is the instance's RHS scale (∝ μ) and τ carries the
-                    # μ/μ₁ decay, so force_tol ∝ μ² (quadratic forcing) vs the current ∝ μ. tol0 = 1e-3,
-                    # tolmax = 0.01·feas_tol. (Shared-R0 proxy — per-instance normalization deferred.)
+                    # μ-schedule, so force_tol ∝ μ² (quadratic forcing) vs the current ∝ μ. Per-instance:
+                    # τ is passed to solvekkt! as a NEGATIVE force_tol (sentinel); the backend decodes it
+                    # and sets force_tol = τ·R0 from each solve's OWN rhs, so the predictor and corrector
+                    # get different R0. tol0 = 1e-3, tolmax = 0.01·feas_tol.
                     τv = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0))
-                    force_tol = τv * max(pres, dres)
+                    force_tol = -τv
                 else
                     force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
                 end

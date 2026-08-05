@@ -129,6 +129,15 @@ function solvekkt!(
     # denominator, craig's target is that tolerance times (1+ng) — no over-solving to a bare tolerance.
     # Only ng appears: craig owns the primal row; the dual row is craig-independent.
     #
+    #
+    # vartol (negative force_tol sentinel from step!): decode τ = -force_tol and make the target relative
+    # to THIS instance's own rhs, R0 = max(‖f‖/(1+nc), ‖rp‖/(1+ng)). Computed here, before the base solve,
+    # off the original rhs (trap 2). Predictor and corrector — and the HSD Woodbury column, rhs = (c, g) —
+    # each get their own R0.
+    #
+    if force_tol < zero(T)
+        force_tol = -force_tol * max(norm(f) / (one(T) + nc), norm(rp) / (one(T) + ng))
+    end
     atol = max(force_tol, floor_tol) * (one(T) + ng)
     #
     # base solve
@@ -193,6 +202,13 @@ function solvekkt!(
         axpy!(one(T), dy, Δy)
     end
 
+    if get(ENV, "VTDBG", "0") == "1"
+        # TEMP diagnostic: asked tolerance per KKT instance. ft = force_tol (effective, = τ·R0 under
+        # vartol), fl = floor_tol, tol = max, bind = which won, craig = base+refn CRAIG spent.
+        bind = force_tol ≥ floor_tol ? "FORCE" : "floor"
+        println("  VT ft=", force_tol, " fl=", floor_tol, " tol=", max(force_tol, floor_tol),
+                " bind=", bind, " craig=", (nbase - 1) + nrefine, " np=", npass, " st=", status)
+    end
     return nbase, nrefine, npass, status, fres, pres1, dres1
 end
 
