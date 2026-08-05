@@ -38,12 +38,15 @@ using ...NetworkSheaves.EuclideanSheaves: add_sheaf_edge!, harmonic_extension
 using ...NetworkSheaves.Formations: build_escort_topology
 using ...NetworkSheaves.GraphHomomorphisms: GraphHomomorphism, fiber_vertices
 using ...NetworkSheaves.Pushforwards: pushforward_sheaf, all_fiber_bases
+using ..AgentControllers: AbstractAgentDynamics
+using ..Layered: _default_initial_position
 
 export AbstractSystemNode, LeafTeam, RefinedSystem, TargetSpec, Observation, NestedSystemSpec,
-       SheafTower, build_sheaf_tower,
+       SheafTower, build_sheaf_tower, n_agents,
        solve_hierarchical, solve_direct, sheaf_energy, approximation_gap,
        RestrictionSpec, ProjectMember, Centroid, RawRestriction, project, centroid,
-       materialize_restriction, SystemEdge
+       materialize_restriction, SystemEdge,
+       AgentBinding, SystemBinding, ResolvedAgent, resolve_dynamics, homogeneous_binding
 
 # ---------------------------------------------------------------------------
 # Restriction-map declarations (Issue 011)
@@ -380,6 +383,16 @@ function _resolve_path(root::RefinedSystem, path::Vector{Int})
     end
     return node
 end
+
+"""
+    n_agents(spec::NestedSystemSpec) -> Int
+    n_agents(node::AbstractSystemNode) -> Int
+
+Total number of raw agents in `spec`'s tree (or in `node`'s subtree).
+"""
+n_agents(spec::NestedSystemSpec) = n_agents(spec.root)
+n_agents(node::LeafTeam) = node.n_agents
+n_agents(node::RefinedSystem) = sum(n_agents, node.children)
 
 """
     _collapse_depth(node) -> Int
@@ -970,6 +983,150 @@ function approximation_gap(tower::SheafTower, target_values::AbstractVector)
     relative_gap = E_d <= eps(Float64) && abs(gap) <= eps(Float64) ? 0.0 : gap / scale
 
     return (hierarchical = E_h, direct = E_d, gap = gap, relative_gap = relative_gap)
+end
+
+# ---------------------------------------------------------------------------
+# Dynamics binding cascade (Issue 012)
+# ---------------------------------------------------------------------------
+
+"""
+    AgentBinding(; dynamics=nothing, K_lqr=nothing, initial_position=nothing)
+
+Per-agent dynamics override. Any field left `nothing` falls back to the enclosing team's
+binding, then to successively more distant ancestors — see [`resolve_dynamics`](@ref). Fields
+resolve independently: an agent may override only its initial position while inheriting its
+dynamics model from an ancestor.
+"""
+Base.@kwdef struct AgentBinding
+    dynamics::Union{Nothing,AbstractAgentDynamics} = nothing
+    K_lqr::Union{Nothing,Matrix{Float64}} = nothing
+    initial_position::Union{Nothing,Vector{Float64}} = nothing
+end
+
+"""
+    SystemBinding(; dynamics=nothing, K_lqr=nothing, children=Dict(), agents=Dict())
+
+Dynamics bindings for one node of the system tree, mirroring the structure of the
+[`NestedSystemSpec`](@ref) it is resolved against.
+
+`dynamics`/`K_lqr` apply to every leaf agent in this subtree unless a descendant overrides them.
+`children` maps a child system's name to its own `SystemBinding`. `agents` maps a local agent
+index within a [`LeafTeam`](@ref) to an [`AgentBinding`](@ref).
+
+Child names and agent indices are validated against the spec during [`resolve_dynamics`](@ref):
+a name or index present here but absent from the spec is an error, so a typo surfaces
+immediately rather than as a silently-unbound agent.
+"""
+Base.@kwdef struct SystemBinding
+    dynamics::Union{Nothing,AbstractAgentDynamics} = nothing
+    K_lqr::Union{Nothing,Matrix{Float64}} = nothing
+    children::Dict{Symbol,SystemBinding} = Dict{Symbol,SystemBinding}()
+    agents::Dict{Int,AgentBinding} = Dict{Int,AgentBinding}()
+end
+
+"""
+    homogeneous_binding(dyn; K_lqr=zeros(0,0)) -> SystemBinding
+
+Shorthand for a root-level binding applying `dyn`/`K_lqr` to every agent in the tree — the
+common case, and the degenerate case that reproduces the old flat `HomogeneousDynamics`.
+"""
+homogeneous_binding(dyn::AbstractAgentDynamics; K_lqr::Matrix{Float64}=zeros(0, 0)) =
+    SystemBinding(dynamics=dyn, K_lqr=K_lqr)
+
+"""
+    ResolvedAgent
+
+A fully-bound leaf agent: its global agent index (matching [`SheafTower`](@ref)'s
+`agent_vertices`), its dotted path in the tree (for error messages and debugging), and the
+dynamics, gain, and initial position that won the inheritance cascade.
+"""
+struct ResolvedAgent
+    agent_index::Int
+    path::Vector{Symbol}
+    dynamics::AbstractAgentDynamics
+    K_lqr::Matrix{Float64}
+    initial_position::Vector{Float64}
+end
+
+"""
+    _fold(inherited::AgentBinding, local_::AgentBinding) -> AgentBinding
+
+Overlay `local_` on `inherited`, field by field: a non-`nothing` local field replaces the
+inherited one, a `nothing` field leaves the inherited value intact. This independence — not
+replacing the whole binding wholesale — is what lets an agent override just its initial
+position while still inheriting its dynamics model.
+"""
+_fold(inherited::AgentBinding, local_::AgentBinding) = AgentBinding(
+    dynamics = something(local_.dynamics, inherited.dynamics, Some(nothing)),
+    K_lqr = something(local_.K_lqr, inherited.K_lqr, Some(nothing)),
+    initial_position = something(local_.initial_position, inherited.initial_position, Some(nothing)),
+)
+
+_fold_system(inherited::AgentBinding, sb::SystemBinding) = _fold(inherited,
+    AgentBinding(dynamics=sb.dynamics, K_lqr=sb.K_lqr))
+
+"""
+    resolve_dynamics(spec::NestedSystemSpec, ctx::SystemBinding) -> Vector{ResolvedAgent}
+
+Walk `spec`'s tree carrying the inherited binding, overriding it wherever `ctx` supplies a more
+specific value, and return one [`ResolvedAgent`](@ref) per leaf agent in global agent-index
+order (matching [`SheafTower`](@ref)'s `agent_vertices`).
+
+Precedence, most specific first: per-agent, leaf team, nearer ancestor, root default. Each field
+resolves independently.
+
+Throws if any agent ends with no `dynamics` bound anywhere up its chain, or if `ctx` names a
+child or agent index that does not exist in `spec` — both errors report the full dotted path.
+"""
+function resolve_dynamics(spec::NestedSystemSpec, ctx::SystemBinding)
+    resolved = ResolvedAgent[]
+    next_idx = Ref(1)
+    _resolve_dynamics!(resolved, next_idx, spec.root, ctx, AgentBinding(), Symbol[])
+    return resolved
+end
+
+function _resolve_dynamics!(resolved::Vector{ResolvedAgent}, next_idx::Ref{Int},
+                             node::RefinedSystem, ctx::SystemBinding,
+                             inherited::AgentBinding, path::Vector{Symbol})
+    !isempty(ctx.agents) && throw(ArgumentError(
+        "SystemBinding declares `agents` at $(join([path; node.name], ".")), but $(node.name) " *
+        "is a RefinedSystem — per-agent overrides belong on the LeafTeam that owns them"))
+    for name in keys(ctx.children)
+        any(c -> c.name == name, node.children) || throw(ArgumentError(
+            "SystemBinding names child :$name at $(join([path; node.name], ".")), but " *
+            "$(node.name) has no such child (children: $(join([c.name for c in node.children], ", ")))"))
+    end
+
+    here = _fold_system(inherited, ctx)
+    for c in node.children
+        child_ctx = get(ctx.children, c.name, SystemBinding())
+        _resolve_dynamics!(resolved, next_idx, c, child_ctx, here, push!(copy(path), c.name))
+    end
+end
+
+function _resolve_dynamics!(resolved::Vector{ResolvedAgent}, next_idx::Ref{Int},
+                             node::LeafTeam, ctx::SystemBinding,
+                             inherited::AgentBinding, path::Vector{Symbol})
+    !isempty(ctx.children) && throw(ArgumentError(
+        "SystemBinding declares children at $(join(path, ".")), but $(node.name) is a LeafTeam " *
+        "with no children — use `agents` to bind individual agents by local index"))
+    for idx in keys(ctx.agents)
+        @argcheck 1 <= idx <= node.n_agents "SystemBinding names agent $idx at $(join(path, ".")), out of range 1:$(node.n_agents)"
+    end
+
+    here = _fold_system(inherited, ctx)
+    for i in 1:node.n_agents
+        local_binding = get(ctx.agents, i, AgentBinding())
+        b = _fold(here, local_binding)
+        b.dynamics === nothing && throw(ArgumentError(
+            "no dynamics bound for agent $i at $(join([path; Symbol(i)], ".")) — declare a " *
+            "`dynamics` at this agent, this team, or an ancestor"))
+        agent_index = next_idx[]
+        next_idx[] += 1
+        K_lqr = something(b.K_lqr, Some(zeros(0, 0)))
+        initial_position = something(b.initial_position, Some(_default_initial_position(b.dynamics, agent_index)))
+        push!(resolved, ResolvedAgent(agent_index, [path; Symbol(i)], b.dynamics, K_lqr, initial_position))
+    end
 end
 
 end # module NestedSystems

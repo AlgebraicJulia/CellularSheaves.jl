@@ -1,6 +1,8 @@
 using Test
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.AgentControllers
+using CellularSheaves.ControlSheaves.Layered: HomogeneousDynamics, get_agent_dynamics_config
 using LinearAlgebra
 using Graphs
 
@@ -198,6 +200,96 @@ end
     q = solve_hierarchical(tower, tv)[end]
     @test sheaf_energy(tower.levels[end], q) ≈ 0.0 atol=1e-8
     @test approximation_gap(tower, tv).gap ≈ 0.0 atol=1e-8
+end
+
+# ---------------------------------------------------------------------------
+# Issue 012 — nested dynamics context with most-specific-wins cascade
+# ---------------------------------------------------------------------------
+
+@testset "root default cascades to every leaf" begin
+    spec = three_level_spec()
+    ctx = SystemBinding(dynamics=QuadrotorDynamics())
+    resolved = resolve_dynamics(spec, ctx)
+    @test length(resolved) == n_agents(spec)
+    @test all(r -> r.dynamics isa QuadrotorDynamics, resolved)
+end
+
+@testset "most specific wins: agent over team over ancestor" begin
+    spec = two_level_spec()   # team1 (3 agents), team2 (3 agents)
+    ctx = SystemBinding(
+        dynamics = QuadrotorDynamics(),
+        children = Dict(:team1 => SystemBinding(
+            dynamics = PlanarQuadrotorDynamics(),
+            agents = Dict(2 => AgentBinding(dynamics = QuadrotorDynamics())))))
+    r = resolve_dynamics(spec, ctx)
+    @test r[1].dynamics isa PlanarQuadrotorDynamics   # team default
+    @test r[2].dynamics isa QuadrotorDynamics         # per-agent override
+    @test last(r).dynamics isa QuadrotorDynamics      # root default, other subtree (team2)
+end
+
+@testset "fields resolve independently" begin
+    # override only the initial position; dynamics must still be inherited
+    spec = two_level_spec()
+    ctx = SystemBinding(dynamics=QuadrotorDynamics(),
+                        children=Dict(:team1 => SystemBinding(
+                            agents=Dict(1 => AgentBinding(initial_position=[9.0, 9.0, 9.0])))))
+    r = resolve_dynamics(spec, ctx)
+    @test r[1].dynamics isa QuadrotorDynamics
+    @test r[1].initial_position == [9.0, 9.0, 9.0]
+end
+
+@testset "unbound dynamics throws naming the path" begin
+    spec = two_level_spec()
+    err = try resolve_dynamics(spec, SystemBinding()); nothing catch e; e end
+    @test err !== nothing
+    @test occursin("team1", sprint(showerror, err))
+end
+
+@testset "typo'd child name is rejected" begin
+    spec = two_level_spec()
+    ctx = SystemBinding(dynamics=QuadrotorDynamics(),
+                        children=Dict(:teamTypo => SystemBinding()))
+    @test_throws Exception resolve_dynamics(spec, ctx)
+end
+
+@testset "out-of-range agent index is rejected" begin
+    spec = two_level_spec()   # team1 has 3 agents
+    ctx = SystemBinding(dynamics=QuadrotorDynamics(),
+                        children=Dict(:team1 => SystemBinding(
+                            agents=Dict(99 => AgentBinding()))))
+    @test_throws Exception resolve_dynamics(spec, ctx)
+end
+
+@testset "agents declared on a RefinedSystem are rejected" begin
+    spec = three_level_spec()   # root -> mid -> {teamA, teamB}
+    ctx = SystemBinding(dynamics=QuadrotorDynamics(),
+                        children=Dict(:mid => SystemBinding(agents=Dict(1 => AgentBinding()))))
+    @test_throws Exception resolve_dynamics(spec, ctx)
+end
+
+@testset "root-only binding matches HomogeneousDynamics semantics" begin
+    spec = two_level_spec()
+    dyn = QuadrotorDynamics()
+    r = resolve_dynamics(spec, SystemBinding(dynamics=dyn))
+    old = HomogeneousDynamics(dyn)
+    @test all(i -> r[i].dynamics === get_agent_dynamics_config(old, i, 1)[1], eachindex(r))
+end
+
+@testset "resolved order matches the tower's agent ordering" begin
+    spec = three_level_spec()
+    tower = build_sheaf_tower(spec)
+    r = resolve_dynamics(spec, SystemBinding(dynamics=QuadrotorDynamics()))
+    @test [x.agent_index for x in r] == collect(eachindex(tower.agent_vertices))
+end
+
+@testset "homogeneous_binding shorthand matches an explicit root binding" begin
+    spec = two_level_spec()
+    dyn = QuadrotorDynamics()
+    K = ones(3, 10)
+    r1 = resolve_dynamics(spec, homogeneous_binding(dyn; K_lqr=K))
+    r2 = resolve_dynamics(spec, SystemBinding(dynamics=dyn, K_lqr=K))
+    @test all(a -> a.dynamics === dyn && a.K_lqr === K, r1)
+    @test [a.initial_position for a in r1] == [a.initial_position for a in r2]
 end
 
 end # testset NestedSystems
