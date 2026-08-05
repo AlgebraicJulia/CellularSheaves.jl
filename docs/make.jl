@@ -64,7 +64,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.Layered, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.Layered, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves, CellularSheaves.SheafInterface, CellularSheaves.NetworkSheaves.EuclideanSheaves, CellularSheaves.NetworkSheaves.GraphHomomorphisms, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.Pushforwards, CellularSheaves.NetworkSheaves.Pushouts, CellularSheaves.NetworkSheaves.CellularSheafParser, CellularSheaves.BlockSparseArrays, CellularSheaves.NetworkSheaves.PotentialSheaves, CellularSheaves.NetworkSheaves.TrajectorySheaves, CellularSheaves.NetworkSheaves.DistributedSolve, CellularSheaves.NetworkSheaves.Formations],
   draft=false,
   format=Documenter.HTML(
     assets=["assets/benchtables.css"],
@@ -146,6 +146,7 @@ makedocs(
       "api/dsl.md",
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
+      "api/formations.md",
       "api/trajectory_sheaves.md",
       "api/tikhonov.md",
       "api/agent_controllers.md",
