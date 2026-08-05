@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Receding-Horizon MPC via a Cached Harmonic Extension · CellularSheaves.jl</title><meta name="title" content="Receding-Horizon MPC via a Cached Harmonic Extension · CellularSheaves.jl"/><meta property="og:title" content="Receding-Horizon MPC via a Cached Harmonic Extension · CellularSheaves.jl"/><meta property="twitter:title" content="Receding-Horizon MPC via a Cached Harmonic Extension · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../search_index.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script><link href="../../../assets/benchtables.css" rel="stylesheet" type="text/css"/></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../../literate_example/">Code Example</a></li><li><a class="tocitem" href="../../sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../nullspace/">Computing the Nullspace of the Sheaf Laplacian</a></li><li><a class="tocitem" href="../../nearest_global_section_iterative/">Nearest Global Section: Iterative Method</a></li><li><a class="tocitem" href="../../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li><li><a class="tocitem" href="../../trajectory_sheaf/">Spring Oscillator: Four Colocation Methods Compared</a></li><li><input class="collapse-toggle" id="menuitem-2-7" type="checkbox" checked/><label class="tocitem" for="menuitem-2-7"><span class="docs-label">Control Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../simple_integrator/">Controlled Trajectory Examples: 0 — Scalar Integrator</a></li><li><a class="tocitem" href="../controlled_double_integrator/">Controlled Trajectory Examples: 1 — Double Integrator</a></li><li><a class="tocitem" href="../controlled_vehicle_platoon/">Controlled Trajectory Examples: 2 — Vehicle Platoon</a></li><li><a class="tocitem" href="../controlled_planar_quadrotor/">Controlled Trajectory Examples: 3 — Planar Quadrotor</a></li><li><a class="tocitem" href="../controlled_mass_spring_damper_chain/">Controlled Trajectory Examples: 4 — Mass-Spring-Damper Chain</a></li><li><a class="tocitem" href="../../../control/single_integrator_target_tracking/">Single‑Integrator Target Tracking (DSL Version)</a></li><li><a class="tocitem" href="../multi_quadrotor_target_tracking/">Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a></li><li class="is-active"><a class="tocitem" href>Receding-Horizon MPC via a Cached Harmonic Extension</a><ul class="internal"><li><a class="tocitem" href="#Sliding-Window-Structure"><span>Sliding-Window Structure</span></a></li><li><a class="tocitem" href="#Planar-Quadrotor-Dynamics"><span>Planar Quadrotor Dynamics</span></a></li><li><a class="tocitem" href="#Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC"><span>Scenario 1: Bobbing Targets, Open-Loop vs. MPC</span></a></li><li><a class="tocitem" href="#Scenario-2:-Effect-of-Planning-Horizon"><span>Scenario 2: Effect of Planning Horizon</span></a></li><li><a class="tocitem" href="#The-Cached-Extension-Operator"><span>The Cached Extension Operator</span></a></li><li><a class="tocitem" href="#Speedup:-Cached-vs.-Naive"><span>Speedup: Cached vs. Naive</span></a></li></ul></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-8" type="checkbox"/><label class="tocitem" for="menuitem-2-8"><span class="docs-label">Layered Control Architecture Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../layered/distributed_harmonic_tracking/">Distributed Harmonic Extension: Tracking Without a Central Solver</a></li><li><a class="tocitem" href="../../layered/tikhonov_harmonic_tracking/">Tikhonov-Filtered Harmonic Extension</a></li><li><a class="tocitem" href="../../layered/layered_scenario5/">Layered Control Architecture for Multi-Quadrotor Tracking (Scenario 5)</a></li><li><a class="tocitem" href="../../layered/escort/">Layered Control Architecture for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/escort_feedforward/">Feedforward Layered Control for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/multilayer_escort/">Multilayer Hierarchical Control for Team-of-Teams Escort Formation</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-9" type="checkbox"/><label class="tocitem" for="menuitem-2-9"><span class="docs-label">Asynchronous Diffusion</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B</a></li><li><a class="tocitem" href="../../asynch/step_size_comparison/">Step Size Comparison: Optimal vs. Conservative</a></li><li><a class="tocitem" href="../../asynch/restriction_map_comparison/">Restriction Map Type Comparison</a></li><li><a class="tocitem" href="../../asynch/orthogonal_projection/">Convergence Bounds vs. Maximum Delay B</a></li></ul></li></ul></li><li><span class="tocitem">Feature Guides</span><ul><li><a class="tocitem" href="../../../features/core_sheaf_workflows/">Core Sheaf Workflows</a></li><li><a class="tocitem" href="../../../features/morphisms_and_pushforwards/">Morphisms and Pushforwards</a></li><li><a class="tocitem" href="../../../features/trajectory_and_control/">Trajectory and Control</a></li><li><input class="collapse-toggle" id="menuitem-3-4" type="checkbox"/><label class="tocitem" for="menuitem-3-4"><span class="docs-label">Distributed Sheaf Solve</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/">Distributed Sheaf Solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_coordination/">Coordination as a harmonic extension</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_multifrontal/">The multifrontal factorization</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_distributed/">Distributing the solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/comparison/">Three methods, one communication model</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/api/">Usage and API</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-3-5" type="checkbox"/><label class="tocitem" for="menuitem-3-5"><span class="docs-label">Tikhonov Harmonic Tracking</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/">Tikhonov Harmonic Tracking</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/harmonic_manifold/">The Harmonic Manifold</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/stability/">Boundary-Layer Stability and ISS</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/feedforward/">Analytic Feedforward</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/scenarios/">Complete Tracking Scenarios</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/api/">Usage and API</a></li></ul></li></ul></li><li><span class="tocitem">Benchmarks</span><ul><li><a class="tocitem" href="../../../benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../benchmark_report/">Benchmark report</a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../../api/">API Reference</a></li><li><a class="tocitem" href="../../../api/network_sheaves/">Network Sheaves</a></li><li><a class="tocitem" href="../../../api/sheaf_interface/">Sheaf Interface</a></li><li><a class="tocitem" href="../../../api/euclidean_sheaves/">Euclidean Sheaves</a></li><li><a class="tocitem" href="../../../api/distributed_solve/">Distributed Solve</a></li><li><a class="tocitem" href="../../../api/graph_homomorphisms/">Graph Homomorphisms</a></li><li><a class="tocitem" href="../../../api/sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../../api/pushforwards/">Pushforwards</a></li><li><a class="tocitem" href="../../../api/pushouts/">Pushouts</a></li><li><a class="tocitem" href="../../../api/dsl/">Cellular Sheaf DSL</a></li><li><a class="tocitem" href="../../../api/block_sparse_arrays/">Block Sparse Arrays</a></li><li><a class="tocitem" href="../../../api/potential_sheaves/">Potential Sheaves</a></li><li><a class="tocitem" href="../../../api/trajectory_sheaves/">Trajectory Sheaves</a></li><li><a class="tocitem" href="../../../api/tikhonov/">Tikhonov</a></li><li><a class="tocitem" href="../../../api/agent_controllers/">Agent Controllers</a></li><li><a class="tocitem" href="../../../api/distributed_layered_control/">Distributed Layered Control</a></li><li><a class="tocitem" href="../../../api/layered/">Layered Escort Architecture</a></li><li><a class="tocitem" href="../../../api/herding_platoon/">Herding Platoon Utilities</a></li><li><a class="tocitem" href="../../../api/multi_agent_tracking/">Multi-Agent Tracking</a></li><li><a class="tocitem" href="../../../api/quadratic_costs/">Quadratic Costs</a></li><li><a class="tocitem" href="../../../api/asynch/">Asynchronous Sheaf Diffusion</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li><a class="is-disabled">Control Examples</a></li><li class="is-active"><a href>Receding-Horizon MPC via a Cached Harmonic Extension</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Receding-Horizon MPC via a Cached Harmonic Extension</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/src/generated/control/mpc_target_tracking.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Receding-Horizon-MPC-via-a-Cached-Harmonic-Extension"><a class="docs-heading-anchor" href="#Receding-Horizon-MPC-via-a-Cached-Harmonic-Extension">Receding-Horizon MPC via a Cached Harmonic Extension</a><a id="Receding-Horizon-MPC-via-a-Cached-Harmonic-Extension-1"></a><a class="docs-heading-anchor-permalink" href="#Receding-Horizon-MPC-via-a-Cached-Harmonic-Extension" title="Permalink"></a></h1><p>This example is the closed-loop counterpart of <a href="../multi_quadrotor_target_tracking/">Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a>. There, a single time-expanded sheaf is solved over the whole horizon and the energy-minimizing global section is read off directly.  Here we build a <strong>model-predictive controller</strong> (MPC) that re-plans at every timestep and show that the time-homogeneity of the tracking sheaf collapses each per-step solve into a single matrix-vector product.</p><p><strong>Vehicle model.</strong> Each agent is a planar quadrotor with state <span>$x = [y,\,z,\,\varphi,\,\dot y,\,\dot z,\,\dot\varphi]^\top \in \mathbb{R}^6$</span> and control <span>$u = [T_1,T_2]^\top \in \mathbb{R}^2$</span>, linearized about hover and discretized by zero-order hold at period <span>$h$</span>.</p><p><strong>Sheaf structure.</strong> The time-expanded sheaf has one vertex per <span>$(\text{entity},\, t)$</span> pair with stalk <span>$\mathbb{R}^{n_x+n_u}$</span>. Three edge families encode:</p><ol><li><em>Dynamics</em>: <span>$x_{t+1} = A_d x_t + B_d u_t$</span> for each agent and target.</li><li><em>Consensus</em>: inter-agent agreement on a chosen coordinate subspace.</li><li><em>Tracking</em>: agent-target alignment in a chosen coordinate subspace.</li></ol><p><strong>MPC formulation.</strong> At each timestep <span>$t$</span> the controller:</p><ol><li>Extracts the window sub-problem on <span>$[t,\, t+W]$</span>.</li><li>Pins the current agent state and the next <span>$W$</span> target samples as <em>boundary</em> <span>$B$</span>.</li><li>Solves for the free <em>interior</em> vertices <span>$I$</span> via harmonic extension, finding the section of minimum Laplacian energy consistent with the boundary:<p class="math-container">\[x_I = -L_{II}^{+} L_{IB}\, x_B.\]</p></li><li>Applies only the first control <span>$u_t$</span>, advances the true dynamics, and repeats.</li></ol><p>When <span>$L_{II}$</span> is singular its nullspace <span>$N = \ker L_{II}$</span> represents free coordination degrees of freedom.  A control cost <span>$Q$</span> selects the cost-optimal representative via the projection</p><p class="math-container">\[M = \bigl(I - N(N^\top Q N)^{+} N^\top Q\bigr)\bigl(-L_{II}^{+} L_{IB}\bigr),\]</p><p>so that every per-step solve is the single dense matvec <span>$x_I = M\, x_B$</span>.</p><p>The problem-construction and solve utilities used below come from <code>CellularSheaves.ControlSheaves.MultiAgentTracking</code>.</p><ul><li>Problem specification is written with <code>@tracking_problem</code> from <code>CellularSheaves.ControlSheaves.TrackingDSL</code>.</li><li>The open-loop solver pipeline is <code>build_boundary -&gt; run_scenario</code>.</li><li>The closed-loop pipeline is <code>run_mpc_scenario</code>.</li><li>Animations are produced by <code>animate_tracking_xy</code>, implemented by the plotting extension when <code>Plots</code> is loaded.</li></ul><pre><code class="language-julia hljs">using CellularSheaves
+using CellularSheaves.ControlSheaves.MultiAgentTracking
+using CellularSheaves.ControlSheaves.TrackingDSL
+using CellularSheaves.TrajectorySheaves: continuous_to_discrete_zoh
+using LinearAlgebra
+using Printf
+using Plots</code></pre><h2 id="Sliding-Window-Structure"><a class="docs-heading-anchor" href="#Sliding-Window-Structure">Sliding-Window Structure</a><a id="Sliding-Window-Structure-1"></a><a class="docs-heading-anchor-permalink" href="#Sliding-Window-Structure" title="Permalink"></a></h2><p>The diagram below shows one MPC step at <span>$t = 3$</span> with window <span>$W = 4$</span>. Filled vertices are pinned (boundary <span>$B$</span>) and open vertices are solved (interior <span>$I$</span>).  Arrows within the window show the dynamics edges <span>$(A_d, B_d)$</span> and dashed vertical arrows show the tracking edges.</p><pre><code class="language-julia hljs">let
+    k_d   = 10
+    t_now = 3
+    W_d   = 4
+    t_end = t_now + W_d
+    ay    =  0.85
+    ty    = -0.85
+
+    p = plot(size=(860, 230), legend=false, framestyle=:none,
+             xlims=(-0.8, k_d + 0.5), ylims=(-1.45, 1.45),
+             title=&quot;MPC window at t = $t_now,  W = $W_d&quot;,
+             titlefontsize=11)
+
+    vspan!(p, [t_now - 0.45, t_end + 0.45]; color=:steelblue, alpha=0.07, label=&quot;&quot;)
+    plot!(p, [0, k_d], [0.0, 0.0]; color=:gray70, lw=1)
+    for t in 0:k_d
+        annotate!(p, t, -0.22, text(&quot;$t&quot;, 7, :center, :gray55))
+    end
+    for t in t_now:t_end-1
+        for (row, col) in ((ay, :steelblue), (ty, :darkorange))
+            plot!(p, [t + 0.18, t + 0.82], [row, row];
+                  color=col, lw=1.6, arrow=(:closed, 0.3), alpha=0.8)
+        end
+    end
+    for t in t_now:t_end
+        plot!(p, [t, t], [ay - 0.13, ty + 0.13];
+              color=:gray50, lw=1, ls=:dash, alpha=0.6, arrow=(:both, 0.22))
+    end
+    for t in 0:k_d
+        in_w = t_now &lt;= t &lt;= t_end
+        fill_a = (t == t_now) ? :steelblue : (in_w ? :white : :lightgray)
+        scatter!(p, [t], [ay]; color=fill_a,
+                 markerstrokecolor=(in_w ? :steelblue : :gray70),
+                 markerstrokewidth=2, markersize=(t == t_now ? 8 : 6), markershape=:circle)
+        scatter!(p, [t], [ty]; color=(in_w ? :darkorange : :lightgray),
+                 markerstrokecolor=(in_w ? :darkorange : :gray70),
+                 markerstrokewidth=2, markersize=6, markershape=:rect)
+    end
+    annotate!(p, -0.6, ay, text(&quot;agent&quot;,  8, :right, :steelblue))
+    annotate!(p, -0.6, ty, text(&quot;target&quot;, 8, :right, :darkorange))
+    annotate!(p, t_now,       ay + 0.32, text(&quot;pinned (boundary)&quot;, 8, :center, :steelblue))
+    annotate!(p, t_now + 2.5, ay + 0.32, text(&quot;free (interior)&quot;,   8, :center, :steelblue))
+    annotate!(p, t_now + W_d/2, 0.28,   text(&quot;dynamics (A_d, B_d)&quot;, 8, :center, :gray40))
+    annotate!(p, t_end + 1.0, (ay+ty)/2, text(&quot;tracking\nedge&quot;, 7, :center, :gray50))
+    p
+end</code></pre><p><img src="../mpc_target_tracking-4.svg" alt/></p><h2 id="Planar-Quadrotor-Dynamics"><a class="docs-heading-anchor" href="#Planar-Quadrotor-Dynamics">Planar Quadrotor Dynamics</a><a id="Planar-Quadrotor-Dynamics-1"></a><a class="docs-heading-anchor-permalink" href="#Planar-Quadrotor-Dynamics" title="Permalink"></a></h2><p>State: <span>$x = [y, z, \varphi, \dot y, \dot z, \dot\varphi]$</span>. The linearisation is taken around the hover trim condition. Dynamics, projection matrices, bobbing targets, and helper utilities are set up identically to the open-loop example.</p><pre><code class="language-julia hljs">g      = 9.81
+m_veh  = 0.5
+I_quad = 0.01
+ell    = 0.25
+
+Ac = [0.0  0.0   0.0   1.0  0.0  0.0;
+      0.0  0.0   0.0   0.0  1.0  0.0;
+      0.0  0.0   0.0   0.0  0.0  1.0;
+      0.0  0.0  -g     0.0  0.0  0.0;
+      0.0  0.0   0.0   0.0  0.0  0.0;
+      0.0  0.0   0.0   0.0  0.0  0.0]
+
+Bc = [0.0               0.0;
+      0.0               0.0;
+      0.0               0.0;
+      0.0               0.0;
+      1.0 / m_veh       1.0 / m_veh;
+      ell / (2I_quad)  -ell / (2I_quad)]
+
+h = 0.05
+Ad, Bd = continuous_to_discrete_zoh(Ac, Bc, h)
+nx = size(Ad, 1)
+nu = size(Bd, 2)
+
+IDX_Y   = 1
+IDX_Z   = 2
+IDX_ZDT = 5
+
+k     = 40
+times = h .* collect(0:k)
+
+R_yz = state_projection_matrix([IDX_Y, IDX_Z], nx, nu)
+R_y  = state_projection_matrix([IDX_Y],         nx, nu)
+
+omega = 2π * 2 / (k * h)
+bt1   = BobbingTarget(-0.3, 1.2,  0.3, omega)
+bt2   = BobbingTarget( 0.3, 1.8, -0.3, omega)
+traj_bt1 = trajectory(bt1, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
+traj_bt2 = trajectory(bt2, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
+
+@recipe function f(sr::ScenarioResult)
+    layout := (1, 2)
+    size := (800, 380)
+    plot_title := &quot;$(sr.label): null dim = $(sr.null_dim),  ||dz|| = $(@sprintf(&quot;%.3e&quot;, sr.residual))&quot;
+    agent_colors  = [:steelblue, :darkorange, :green, :crimson]
+    agent_styles  = [:solid, :dash, :dashdot, :dot]
+    target_colors = [:gray, :black, :darkgreen, :purple]
+    for (i, traj) in enumerate(sr.agent_trajs)
+        @series begin
+            subplot   := 1
+            title     := &quot;y(t)&quot;
+            xlabel    := &quot;t (s)&quot;
+            ylabel    := &quot;y (m)&quot;
+            label     := &quot;A$i&quot;
+            lw        := 2
+            linecolor := agent_colors[i]
+            linestyle := agent_styles[i]
+            sr.times, traj[:, sr.y_col]
+        end
+        @series begin
+            subplot   := 2
+            title     := &quot;z(t)&quot;
+            xlabel    := &quot;t (s)&quot;
+            ylabel    := &quot;z (m)&quot;
+            label     := &quot;A$i&quot;
+            lw        := 2
+            linecolor := agent_colors[i]
+            linestyle := agent_styles[i]
+            sr.times, traj[:, sr.z_col]
+        end
+    end
+    for (j, traj_j) in enumerate(sr.target_trajs)
+        @series begin
+            subplot   := 1
+            label     := &quot;T$j&quot;
+            lw        := 1
+            linecolor := target_colors[j]
+            linestyle := :dot
+            sr.times, getindex.(traj_j, IDX_Y)
+        end
+        @series begin
+            subplot   := 2
+            label     := &quot;T$j&quot;
+            lw        := 1
+            linecolor := target_colors[j]
+            linestyle := :dot
+            sr.times, getindex.(traj_j, IDX_Z)
+        end
+    end
+end</code></pre><h2 id="Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC"><a class="docs-heading-anchor" href="#Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC">Scenario 1: Bobbing Targets, Open-Loop vs. MPC</a><a id="Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-1:-Bobbing-Targets,-Open-Loop-vs.-MPC" title="Permalink"></a></h2><p>Two agents track vertically bobbing targets at opposite lateral positions (T1 at <span>$y=-0.3$</span>, T2 at <span>$y=+0.3$</span>) with anti-phase bobs.  A <span>$y$</span>-consensus edge keeps the agents laterally close while <span>$(y,z)$</span>-tracking pulls each agent toward its own target.  The setup matches Scenario 2 of the open-loop example.</p><p><strong>When open-loop and MPC agree.</strong> The two solvers agree to machine precision only on sheaf-consistent problems, where all tracking, consensus, and dynamics constraints can be satisfied simultaneously.  On such problems the harmonic section has zero Laplacian energy and <span>$x_{t+1} = A_d x_t + B_d u_t$</span> holds exactly at every vertex.</p><p><strong>When they differ.</strong> The nonzero residual is not caused by the dynamics being infeasible — it arises from a <em>structural</em> contradiction between the consensus and tracking edges: <code>consensus</code> demands <span>$R_y x_{a_1}(t) = R_y x_{a_2}(t)$</span> at every step, while each <code>track</code> edge pulls its agent toward a target at a <em>different</em> lateral position.  Since the two targets are not at the same <span>$y$</span> coordinate, no global section can satisfy both constraints exactly, so the harmonic extension is a minimum-energy compromise over the consensus and tracking edges.  The open-loop extractor reads this compromise directly from the sheaf; MPC additionally enforces the true dynamics at every step, so the two trajectories are close but not identical.</p><pre><code class="language-julia hljs">prog1 = @tracking_problem begin
+    agent(a1; dynamics=(Ad, Bd), period=h)
+    agent(a2; dynamics=(Ad, Bd), period=h)
+    target(t1)
+    target(t2)
+    horizon(K)
+    times(Tall = 0:K)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
+    track(tr1; agent=a1, target=t1, maps=(R_yz,R_yz), at=Tall)
+    track(tr2; agent=a2, target=t2, maps=(R_yz,R_yz), at=Tall)
+end
+ctx1  = Dict{Symbol,Any}(:K =&gt; k, :Ad =&gt; Ad, :Bd =&gt; Bd, :R_y =&gt; R_y, :R_yz =&gt; R_yz, :h =&gt; h)
+prob1 = lower_tracking_program(prog1, ctx1; tracking_weight=5.0, consensus_weight=0.8).problem
+
+x0_a1_s1 = [0.0, traj_bt1[1][IDX_Z], 0.0, 0.0, traj_bt1[1][IDX_ZDT], 0.0]
+x0_a2_s1 = [0.0, traj_bt2[1][IDX_Z], 0.0, 0.0, traj_bt2[1][IDX_ZDT], 0.0]
+
+bnd1 = Dict{Int,Vector{Float64}}()
+for (i, x0) in enumerate([x0_a1_s1, x0_a2_s1])
+    bnd1[agent_vertex(prob1, i, 0)] = vcat(x0, zeros(nu))
+end
+for (j, traj) in enumerate([traj_bt1, traj_bt2]), (t, x) in enumerate(traj)
+    bnd1[target_vertex(prob1, j, t - 1)] = x
+end
+result1_ol  = run_scenario(&quot;open-loop&quot;, prob1, bnd1, times;
+                           target_trajs=[traj_bt1, traj_bt2], y_col=IDX_Y, z_col=IDX_Z)
+result1_mpc = run_mpc_scenario(&quot;MPC (W=k)&quot;, prob1, [x0_a1_s1, x0_a2_s1],
+                               [traj_bt1, traj_bt2], times;
+                               window=k, cost=1.0, y_col=IDX_Y, z_col=IDX_Z)
+
+show(stdout, MIME(&quot;text/plain&quot;), result1_ol);  println()
+show(stdout, MIME(&quot;text/plain&quot;), result1_mpc); println()</code></pre><pre><code class="nohighlight hljs">ScenarioResult:
+  label    : open-loop
+  null dim : 16
+  ||dz||   : 3.117
+  agents   : 2
+  targets  : 2
+ScenarioResult:
+  label    : MPC (W=k)
+  null dim : 11
+  ||dz||   : 0.6606
+  agents   : 2
+  targets  : 2
+</code></pre><p>The side-by-side animation shows open-loop (left) and MPC <span>$W=k$</span> (right) in the <span>$y$</span>-<span>$z$</span> plane.  Target trails are shown as scatter dots; agent paths accumulate as the simulation advances.</p><pre><code class="language-julia hljs">anim1 = @animate for t_idx in 1:k+1
+    p = plot(layout=(1, 2), size=(900, 440), link=:both)
+    for (panel, res, title_str) in (
+            (1, result1_ol,  &quot;Open-loop&quot;),
+            (2, result1_mpc, &quot;MPC (W=k)&quot;))
+        sp = p[panel]
+        plot!(sp; title=&quot;$title_str  —  t = $(@sprintf(&quot;%.3f&quot;, times[t_idx]))&quot;,
+              xlabel=&quot;y (m)&quot;, ylabel=(panel == 1 ? &quot;z (m)&quot; : &quot;&quot;),
+              xlims=(-0.65, 0.65), ylims=(0.7, 2.4),
+              legend=:outerright, aspect_ratio=:equal)
+        for (j, traj) in enumerate([traj_bt1, traj_bt2])
+            tx = [v[IDX_Y] for v in traj[1:t_idx]]
+            tz = [v[IDX_Z] for v in traj[1:t_idx]]
+            scatter!(sp, tx, tz; color=[:gray, :black][j],
+                     marker=:star5, markersize=4, alpha=0.6, label=&quot;T$j&quot;)
+        end
+        for i in 1:2
+            plot!(sp, res.agent_trajs[i][1:t_idx, IDX_Y],
+                      res.agent_trajs[i][1:t_idx, IDX_Z];
+                  seriestype=:path, color=[:steelblue, :darkorange][i],
+                  marker=:circle, markersize=4, alpha=0.6,
+                  linestyle=[:solid, :dash][i], label=&quot;A$i&quot;)
+        end
+    end
+    p
+end
+gif(anim1, &quot;mpc_side_by_side.gif&quot;; fps=20)</code></pre><pre><code class="nohighlight hljs">[ Info: Saved animation to /home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/src/generated/control/mpc_side_by_side.gif
+</code></pre><p><img src="../mpc_side_by_side.gif" alt="Open-loop vs MPC (W=k)"/></p><h2 id="Scenario-2:-Effect-of-Planning-Horizon"><a class="docs-heading-anchor" href="#Scenario-2:-Effect-of-Planning-Horizon">Scenario 2: Effect of Planning Horizon</a><a id="Scenario-2:-Effect-of-Planning-Horizon-1"></a><a class="docs-heading-anchor-permalink" href="#Scenario-2:-Effect-of-Planning-Horizon" title="Permalink"></a></h2><p>Both agents start at <span>$(y=0, z=0.35)$</span>, well below and between their targets. Target 1 is at <span>$y=-0.35, z=1.2$</span> and Target 2 at <span>$y=+0.35, z=1.8$</span>; both complete 3.5 vertical bob cycles over the horizon.  A <span>$y$</span>-consensus edge keeps the agents laterally close while <span>$(y,z)$</span>-tracking pulls each agent toward its own target at opposite lateral positions — the same structural tension as Scenario 1, which makes window size matter.</p><p><strong>Planning horizon controls reactivity.</strong> A shorter window means the controller optimizes over fewer future steps.  At <span>$W=2$</span> the controller is essentially greedy, reacting to the current target position without anticipating the next bob or the consensus constraint.  At <span>$W=k$</span> it plans over the full horizon, finding a smoother compromise between tracking and lateral agreement.  Three window sizes are compared.</p><pre><code class="language-julia hljs">omega_fast = 2π * 3.5 / (k * h)
+bt1_s2     = BobbingTarget(-0.35, 1.2,  0.45, omega_fast)
+bt2_s2     = BobbingTarget( 0.35, 1.8, -0.45, omega_fast)
+traj_s2_1  = trajectory(bt1_s2, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
+traj_s2_2  = trajectory(bt2_s2, 0:k, h, nx, nu, IDX_Y, IDX_Z, IDX_ZDT)
+
+prog2 = @tracking_problem begin
+    agent(a1; dynamics=(Ad, Bd), period=h)
+    agent(a2; dynamics=(Ad, Bd), period=h)
+    target(t1)
+    target(t2)
+    horizon(K)
+    times(Tall = 0:K)
+    consensus(c1; agents=(a1,a2), maps=(R_y,R_y), at=Tall)
+    track(tr1; agent=a1, target=t1, maps=(R_yz,R_yz), at=Tall)
+    track(tr2; agent=a2, target=t2, maps=(R_yz,R_yz), at=Tall)
+end
+ctx2  = Dict{Symbol,Any}(:K =&gt; k, :Ad =&gt; Ad, :Bd =&gt; Bd, :R_y =&gt; R_y, :R_yz =&gt; R_yz, :h =&gt; h)
+prob2 = lower_tracking_program(prog2, ctx2; tracking_weight=5.0, consensus_weight=0.8).problem
+
+x0_s2 = [[0.0, 0.35, 0.0, 0.0, 0.0, 0.0],
+          [0.0, 0.35, 0.0, 0.0, 0.0, 0.0]]
+
+result2_w2 = run_mpc_scenario(&quot;MPC W=2&quot;, prob2, x0_s2, [traj_s2_1, traj_s2_2], times;
+                              window=2, cost=1.0, y_col=IDX_Y, z_col=IDX_Z)
+result2_wk = run_mpc_scenario(&quot;MPC W=k&quot;, prob2, x0_s2, [traj_s2_1, traj_s2_2], times;
+                              window=k, cost=1.0, y_col=IDX_Y, z_col=IDX_Z)
+
+show(stdout, MIME(&quot;text/plain&quot;), result2_w2); println()
+show(stdout, MIME(&quot;text/plain&quot;), result2_wk); println()</code></pre><pre><code class="nohighlight hljs">ScenarioResult:
+  label    : MPC W=2
+  null dim : 2
+  ||dz||   : 0.7707
+  agents   : 2
+  targets  : 2
+ScenarioResult:
+  label    : MPC W=k
+  null dim : 11
+  ||dz||   : 0.8014
+  agents   : 2
+  targets  : 2
+</code></pre><p>The null dimension of the window Laplacian grows with planning horizon. At <span>$W=2$</span> there are 2 free coordination directions; at <span>$W=k$</span> there are 11. Each extra null dimension is an additional degree of freedom in the consensus–tracking compromise that the control cost must resolve.  With <code>cost=1.0</code> the cost-optimal representative is unique regardless of null dimension.</p><p>The W=2 closed-loop animation in the <span>$y$</span>-<span>$z$</span> plane:</p><pre><code class="language-julia hljs">animate_tracking_xy(result2_w2;
+    filename=&quot;mpc_scenario2.gif&quot;, x_col=IDX_Y, y_col=IDX_Z,
+    xlims=(-0.75, 0.75), ylims=(0.1, 2.6), fps=20)</code></pre><pre><code class="nohighlight hljs">[ Info: Saved animation to /home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/src/generated/control/mpc_scenario2.gif
+</code></pre><p><img src="../mpc_scenario2.gif" alt="Scenario 2 animation (W=2)"/></p><h2 id="The-Cached-Extension-Operator"><a class="docs-heading-anchor" href="#The-Cached-Extension-Operator">The Cached Extension Operator</a><a id="The-Cached-Extension-Operator-1"></a><a class="docs-heading-anchor-permalink" href="#The-Cached-Extension-Operator" title="Permalink"></a></h2><p><code>tracking_extension_operator</code> factorizes <span>$L_{II}$</span> once for a given window length and folds in the control-cost nullspace projection to produce a dense operator <span>$M$</span> such that each MPC step reduces to <code>M * x_B</code>.</p><pre><code class="language-julia hljs">op = tracking_extension_operator(window_problem(prob2, 0, 5); cost=1.0)
+@printf(&quot;boundary DOFs       : %d\n&quot;, length(op.boundary))
+@printf(&quot;interior DOFs       : %d\n&quot;, length(op.interior))
+@printf(&quot;null_dim (ker L_II) : %d\n&quot;, op.null_dim)
+@printf(&quot;M size              : %d x %d\n&quot;, size(op.M)...)</code></pre><pre><code class="nohighlight hljs">boundary DOFs       : 108
+interior DOFs       : 80
+null_dim (ker L_II) : 7
+M size              : 80 x 108
+</code></pre><h2 id="Speedup:-Cached-vs.-Naive"><a class="docs-heading-anchor" href="#Speedup:-Cached-vs.-Naive">Speedup: Cached vs. Naive</a><a id="Speedup:-Cached-vs.-Naive-1"></a><a class="docs-heading-anchor-permalink" href="#Speedup:-Cached-vs.-Naive" title="Permalink"></a></h2><p>The cached controller amortizes a single <span>$L_{II}$</span> factorization over every full-window step.  Steps near the end of the horizon use shorter unique windows and fall back to the naive path, but for a long horizon these are a small fraction of all steps.  At <span>$W=k$</span> every step uses a distinct-length window so the cache never reuses its operator, and the two solvers are equivalent (speedup <span>$\approx 1\times$</span>).</p><pre><code class="language-julia hljs">Ws       = [2, 4, 8, 16, 32]
+t_naive  = Float64[]
+t_cached = Float64[]
+for W in Ws
+    run_mpc_scenario(&quot;&quot;, prob2, x0_s2, [traj_s2_1, traj_s2_2], times; window=W, solver=:naive)
+    run_mpc_scenario(&quot;&quot;, prob2, x0_s2, [traj_s2_1, traj_s2_2], times; window=W, solver=:cached)
+    tn = minimum(@elapsed(run_mpc_scenario(&quot;&quot;, prob2, x0_s2, [traj_s2_1, traj_s2_2], times; window=W, solver=:naive))  for _ in 1:7)
+    tc = minimum(@elapsed(run_mpc_scenario(&quot;&quot;, prob2, x0_s2, [traj_s2_1, traj_s2_2], times; window=W, solver=:cached)) for _ in 1:7)
+    push!(t_naive, tn); push!(t_cached, tc)
+    @printf(&quot;W=%-2d  naive %6.2f ms  cached %6.2f ms  speedup %4.1f x\n&quot;,
+            W, 1e3tn, 1e3tc, tn/tc)
+end
+
+speedups = t_naive ./ t_cached
+
+p_speed = plot(layout=(1, 2), size=(860, 360),
+               bottom_margin=5Plots.mm, left_margin=5Plots.mm)
+plot!(p_speed[1], Ws, 1e3 .* t_naive;
+      label=&quot;naive&quot;,  color=:crimson,   lw=2, marker=:circle, ms=5,
+      xlabel=&quot;Window size W&quot;, ylabel=&quot;Time (ms)&quot;,
+      title=&quot;Solve time (log scale)&quot;, yaxis=:log,
+      legend=:bottomright, grid=true, gridalpha=0.25)
+plot!(p_speed[1], Ws, 1e3 .* t_cached;
+      label=&quot;cached&quot;, color=:steelblue, lw=2, marker=:circle, ms=5)
+bar!(p_speed[2], string.(Ws), speedups;
+     color=:steelblue, legend=false,
+     xlabel=&quot;Window size W&quot;, ylabel=&quot;Speedup (naive / cached)&quot;,
+     title=&quot;Cached MPC speedup&quot;,
+     ylims=(0, maximum(speedups) * 1.3),
+     grid=true, gridalpha=0.25)
+for (i, s) in enumerate(speedups)
+    annotate!(p_speed[2], i - 0.5, s + maximum(speedups) * 0.05,
+              text(@sprintf(&quot;%.1f x&quot;, s), 9, :center, :steelblue))
+end
+hline!(p_speed[2], [1.0]; color=:gray50, lw=1, ls=:dash, label=&quot;&quot;)
+p_speed</code></pre><p><img src="../mpc_target_tracking-21.svg" alt/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../multi_quadrotor_target_tracking/">« Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a><a class="docs-footer-nextpage" href="../../layered/distributed_harmonic_tracking/">Distributed Harmonic Extension: Tracking Without a Central Solver »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Wednesday 5 August 2026 17:25">Wednesday 5 August 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
