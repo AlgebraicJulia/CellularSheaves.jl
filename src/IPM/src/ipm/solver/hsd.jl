@@ -728,7 +728,14 @@ function step!(s::HSDSolver{T}) where {T}
             #   floor: 100ϵ (1 + max(‖rp‖₂/(1+ng), ‖rd‖₂/(1+nc)))  — same scaled-2-norm units as res
             #
             μ1 = isempty(s.hist.μ) ? μ : first(s.hist.μ)
-            force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
+            if s.settings.vartol
+                # vartol (Zanetti–Gondzio §5): relative target τ·R0, R0 ≈ max(pres, dres) ∝ μ, so
+                # force_tol ∝ μ² (quadratic forcing) vs the current ∝ μ. See the IPM step! for notes.
+                τv = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0))
+                force_tol = τv * max(pres, dres)
+            else
+                force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
+            end
             floor_tol = 100eps(T) * (1 + max(norm(w.rp) / (1 + s.ng[]),
                                              norm(w.rd) / (1 + s.nc[])))
             #
