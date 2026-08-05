@@ -7,12 +7,26 @@ function Base.size(hist::AbstractHistory)
     return size(hist.μ)
 end
 
-function getaug(hist::AbstractHistory{T}, cap::T) where {T}
+function getaug(hist::AbstractHistory{T}, cap::T, policy::Int = 0) where {T}
     α = hist.α[end]
     αmin = hist.αmin[end]
     αmax = hist.αmax[end]
 
-    if isnan(αmin)
+    if policy == 1
+        #
+        # Policy 1 + closed-window descent (policies_1_and_2.md §4–§5). αmin/αmax are the aggregated
+        # window boundaries stored by step! under this policy:
+        #   • window open (a0 ≤ ac) → geometric mean (nothing to optimise inside, maximin midpoint);
+        #   • window closed (a0 > ac) → one decade below the ceiling a_c, so α DESCENDS with the
+        #     collapsing ceiling rather than freezing. Holding froze e04-hsd two decades too high and
+        #     stalled it; the one-decade drop is a stand-in for Policy 2's measured level spacing until
+        #     the correction-residual history is wired.
+        # If a boundary can't be priced (NaN) there is nothing to descend toward, so hold.
+        #
+        if isfinite(αmin) && isfinite(αmax)
+            α = αmin ≤ αmax ? sqrt(αmin) * sqrt(αmax) : αmax / exp10(one(T))
+        end
+    elseif isnan(αmin)
         α /= 100
     elseif isnan(αmax)
         α = αmin * exp10(T(1.5))

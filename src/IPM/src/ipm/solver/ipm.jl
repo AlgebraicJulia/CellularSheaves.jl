@@ -519,8 +519,13 @@ function step!(s::IPMSolver{T}) where {T}
                 state = pok && cok
                 tol = max(force_tol, floor_tol)
 
-                αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass), T(CTRL_BDG_IPM))
-                αmax = augmax(s.α[], pdres, tol, state, pbase, T(CTRL_GAP_IPM))
+                if s.settings.policy == 1
+                    # Tier 1: aggregate the predictor and corrector solves (worst case each end).
+                    αmin, αmax = augwindow1(s.α[], _nanmax(pfres, cfres), _nanmax(pdres, cdres), tol)
+                else
+                    αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass), T(CTRL_BDG_IPM))
+                    αmax = augmax(s.α[], pdres, tol, state, pbase, T(CTRL_GAP_IPM))
+                end
 
                 if isstalled(s)
                     if s.settings.verbose > 1

@@ -15,6 +15,7 @@
     aaug::T = zero(T)   # absolute augmentation (raw-α override: set raug=0, aaug=α_raw)
     raug::T = 1e7       # relative augmentation, in initial-problem units (the anchored knob)
     fix_alpha::Bool = false   # ORACLE ONLY: setaug! becomes a no-op so a caller-injected α survives step!
+    policy::Int = 0     # α policy: 0 = current (fudged window + cap), 1 = policies_1_and_2.md Policy 1
     elim::E = DEFAULT_ELIMINATION_ALGORITHM   # KKT elimination ordering (construction-time)
 end
 

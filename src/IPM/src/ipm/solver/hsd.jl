@@ -825,8 +825,13 @@ function step!(s::HSDSolver{T}) where {T}
                 state = pok && cok && wok
                 tol = max(force_tol, floor_tol)
 
-                αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass, wpass), T(CTRL_BDG_HSD))
-                αmax = augmax(s.α[], pdres, tol, state, pbase, T(CTRL_GAP_HSD))
+                if s.settings.policy == 1
+                    # Tier 1: aggregate the predictor, corrector, and Woodbury solves (worst case each end).
+                    αmin, αmax = augwindow1(s.α[], _nanmax(pfres, cfres, wfres), _nanmax(pdres, cdres, wdres), tol)
+                else
+                    αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass, wpass), T(CTRL_BDG_HSD))
+                    αmax = augmax(s.α[], pdres, tol, state, pbase, T(CTRL_GAP_HSD))
+                end
 
                 if isstalled(s)
                     if s.settings.verbose > 1
