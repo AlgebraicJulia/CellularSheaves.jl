@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Centroid-Coupled Formation Tracking · CellularSheaves.jl</title><meta name="title" content="Centroid-Coupled Formation Tracking · CellularSheaves.jl"/><meta property="og:title" content="Centroid-Coupled Formation Tracking · CellularSheaves.jl"/><meta property="twitter:title" content="Centroid-Coupled Formation Tracking · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../search_index.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script><link href="../../../assets/benchtables.css" rel="stylesheet" type="text/css"/></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../../literate_example/">Code Example</a></li><li><a class="tocitem" href="../../sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../nullspace/">Computing the Nullspace of the Sheaf Laplacian</a></li><li><a class="tocitem" href="../../nearest_global_section_iterative/">Nearest Global Section: Iterative Method</a></li><li><a class="tocitem" href="../../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li><li><a class="tocitem" href="../../trajectory_sheaf/">Spring Oscillator: Four Colocation Methods Compared</a></li><li><input class="collapse-toggle" id="menuitem-2-7" type="checkbox"/><label class="tocitem" for="menuitem-2-7"><span class="docs-label">Control Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../control/simple_integrator/">Controlled Trajectory Examples: 0 — Scalar Integrator</a></li><li><a class="tocitem" href="../../control/controlled_double_integrator/">Controlled Trajectory Examples: 1 — Double Integrator</a></li><li><a class="tocitem" href="../../control/controlled_vehicle_platoon/">Controlled Trajectory Examples: 2 — Vehicle Platoon</a></li><li><a class="tocitem" href="../../control/controlled_planar_quadrotor/">Controlled Trajectory Examples: 3 — Planar Quadrotor</a></li><li><a class="tocitem" href="../../control/controlled_mass_spring_damper_chain/">Controlled Trajectory Examples: 4 — Mass-Spring-Damper Chain</a></li><li><a class="tocitem" href="../../../control/single_integrator_target_tracking/">Single‑Integrator Target Tracking (DSL Version)</a></li><li><a class="tocitem" href="../../control/multi_quadrotor_target_tracking/">Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a></li><li><a class="tocitem" href="../../control/mpc_target_tracking/">Receding-Horizon MPC via a Cached Harmonic Extension</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-8" type="checkbox"/><label class="tocitem" for="menuitem-2-8"><span class="docs-label">Layered Control Architecture Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../layered/distributed_harmonic_tracking/">Distributed Harmonic Extension: Tracking Without a Central Solver</a></li><li><a class="tocitem" href="../../layered/tikhonov_harmonic_tracking/">Tikhonov-Filtered Harmonic Extension</a></li><li><a class="tocitem" href="../../layered/layered_scenario5/">Layered Control Architecture for Multi-Quadrotor Tracking (Scenario 5)</a></li><li><a class="tocitem" href="../../layered/escort/">Layered Control Architecture for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/escort_feedforward/">Feedforward Layered Control for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/multilayer_escort/">Multilayer Hierarchical Control for Team-of-Teams Escort Formation</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-9" type="checkbox" checked/><label class="tocitem" for="menuitem-2-9"><span class="docs-label">Nested Systems Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li class="is-active"><a class="tocitem" href>Centroid-Coupled Formation Tracking</a><ul class="internal"><li><a class="tocitem" href="#Topology"><span>Topology</span></a></li><li><a class="tocitem" href="#The-point"><span>The point</span></a></li><li><a class="tocitem" href="#Topology-specification"><span>Topology specification</span></a></li><li><a class="tocitem" href="#Target-motion:-two-targets-spiraling-apart"><span>Target motion: two targets spiraling apart</span></a></li><li><a class="tocitem" href="#Dynamics-and-gains"><span>Dynamics and gains</span></a></li><li><a class="tocitem" href="#Run-the-closed-loop-simulation-with-full-feedforward"><span>Run the closed-loop simulation with full feedforward</span></a></li><li><a class="tocitem" href="#Diagnostics:-formation-error,-tracking-error,-and-the-approximation-gap"><span>Diagnostics: formation error, tracking error, and the approximation gap</span></a></li><li><a class="tocitem" href="#Plots"><span>Plots</span></a></li><li><a class="tocitem" href="#Animated-top-down-view"><span>Animated top-down view</span></a></li></ul></li><li><a class="tocitem" href="../wheel_formation/">Hub-and-Spoke Wheel Escort Formation</a></li><li><a class="tocitem" href="../n_ring_formation/">N-Ring Cyclic Escort Formation</a></li><li><a class="tocitem" href="../rescaling_formation/">Emergent Rescaling: A Rigid Team Absorbing Divergent Targets Through Scale</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-10" type="checkbox"/><label class="tocitem" for="menuitem-2-10"><span class="docs-label">Asynchronous Diffusion</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B</a></li><li><a class="tocitem" href="../../asynch/step_size_comparison/">Step Size Comparison: Optimal vs. Conservative</a></li><li><a class="tocitem" href="../../asynch/restriction_map_comparison/">Restriction Map Type Comparison</a></li><li><a class="tocitem" href="../../asynch/orthogonal_projection/">Convergence Bounds vs. Maximum Delay B</a></li></ul></li></ul></li><li><span class="tocitem">Feature Guides</span><ul><li><a class="tocitem" href="../../../features/core_sheaf_workflows/">Core Sheaf Workflows</a></li><li><a class="tocitem" href="../../../features/morphisms_and_pushforwards/">Morphisms and Pushforwards</a></li><li><a class="tocitem" href="../../../features/trajectory_and_control/">Trajectory and Control</a></li><li><input class="collapse-toggle" id="menuitem-3-4" type="checkbox"/><label class="tocitem" for="menuitem-3-4"><span class="docs-label">Distributed Sheaf Solve</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/">Distributed Sheaf Solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_coordination/">Coordination as a harmonic extension</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_multifrontal/">The multifrontal factorization</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_distributed/">Distributing the solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/comparison/">Three methods, one communication model</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/api/">Usage and API</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-3-5" type="checkbox"/><label class="tocitem" for="menuitem-3-5"><span class="docs-label">Tikhonov Harmonic Tracking</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/">Tikhonov Harmonic Tracking</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/harmonic_manifold/">The Harmonic Manifold</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/stability/">Boundary-Layer Stability and ISS</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/feedforward/">Analytic Feedforward</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/scenarios/">Complete Tracking Scenarios</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/api/">Usage and API</a></li></ul></li></ul></li><li><span class="tocitem">Benchmarks</span><ul><li><a class="tocitem" href="../../../benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../benchmark_report/">Benchmark report</a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../../api/">API Reference</a></li><li><a class="tocitem" href="../../../api/network_sheaves/">Network Sheaves</a></li><li><a class="tocitem" href="../../../api/sheaf_interface/">Sheaf Interface</a></li><li><a class="tocitem" href="../../../api/euclidean_sheaves/">Euclidean Sheaves</a></li><li><a class="tocitem" href="../../../api/distributed_solve/">Distributed Solve</a></li><li><a class="tocitem" href="../../../api/graph_homomorphisms/">Graph Homomorphisms</a></li><li><a class="tocitem" href="../../../api/sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../../api/pushforwards/">Pushforwards</a></li><li><a class="tocitem" href="../../../api/pushouts/">Pushouts</a></li><li><a class="tocitem" href="../../../api/dsl/">Cellular Sheaf DSL</a></li><li><a class="tocitem" href="../../../api/block_sparse_arrays/">Block Sparse Arrays</a></li><li><a class="tocitem" href="../../../api/potential_sheaves/">Potential Sheaves</a></li><li><a class="tocitem" href="../../../api/formations/">Formations</a></li><li><a class="tocitem" href="../../../api/trajectory_sheaves/">Trajectory Sheaves</a></li><li><a class="tocitem" href="../../../api/tikhonov/">Tikhonov</a></li><li><a class="tocitem" href="../../../api/agent_controllers/">Agent Controllers</a></li><li><a class="tocitem" href="../../../api/distributed_layered_control/">Distributed Layered Control</a></li><li><a class="tocitem" href="../../../api/layered/">Layered Escort Architecture</a></li><li><a class="tocitem" href="../../../api/nested_systems/">Nested Systems: Sheaf Tower Compiler</a></li><li><a class="tocitem" href="../../../api/herding_platoon/">Herding Platoon Utilities</a></li><li><a class="tocitem" href="../../../api/multi_agent_tracking/">Multi-Agent Tracking</a></li><li><a class="tocitem" href="../../../api/quadratic_costs/">Quadratic Costs</a></li><li><a class="tocitem" href="../../../api/asynch/">Asynchronous Sheaf Diffusion</a></li><li><a class="tocitem" href="../../../api/tracking_dsl/">TrackingDSL</a></li><li><a class="tocitem" href="../../../api/ipm/">IPM</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li><a class="is-disabled">Nested Systems Examples</a></li><li class="is-active"><a href>Centroid-Coupled Formation Tracking</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Centroid-Coupled Formation Tracking</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/src/generated/nested/centroid_formation_tracking.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Centroid-Coupled-Formation-Tracking"><a class="docs-heading-anchor" href="#Centroid-Coupled-Formation-Tracking">Centroid-Coupled Formation Tracking</a><a id="Centroid-Coupled-Formation-Tracking-1"></a><a class="docs-heading-anchor-permalink" href="#Centroid-Coupled-Formation-Tracking" title="Permalink"></a></h1><p>This example demonstrates two <code>NestedSystems</code> features that have no equivalent in the flat <code>Layered</code> pipeline, and along the way makes a point about hierarchical control that is easy to miss: <strong>consensus enforced at a coarse level can silently override tracking at the fine level, even though every individual piece is behaving &quot;correctly.&quot;</strong></p><ul><li><strong><code>centroid</code> restriction maps</strong> (Issue 011) – a subsystem can present the <em>unweighted average</em> of its own members on an edge, not just one representative agent.</li><li><strong><code>approximation_gap</code></strong> (Issue 010) – the energy cost of forcing a hierarchy to stay rigid, measured against an unconstrained baseline.</li></ul><h2 id="Topology"><a class="docs-heading-anchor" href="#Topology">Topology</a><a id="Topology-1"></a><a class="docs-heading-anchor-permalink" href="#Topology" title="Permalink"></a></h2><p>Two rigid rings, <code>ringA</code> (4 agents) and <code>ringB</code> (5 agents – deliberately different sizes, so the two rings are visually distinguishable even when they land on top of each other, which is exactly what happens here), are grouped under a single subsystem <code>mid</code>. <code>mid</code>&#39;s <em>internal</em> edge uses <code>centroid()</code> on both ends: it ties <code>ringA</code>&#39;s own average position to <code>ringB</code>&#39;s own average position, not any single agent – and because <code>mid</code> is a <em>single</em> coarsest-level vertex, this isn&#39;t a soft preference, it&#39;s the defining constraint of <code>mid</code>&#39;s own space of admissible configurations. Both rings&#39; centroids are forced to coincide, full stop.</p><p>Each ring still observes its <strong>own</strong> target – but through <em>several</em> agents at once (every other agent around the ring), not the usual single representative. Only the <em>first</em> of these uses plain <code>project(1)</code>; the rest use <code>NestedSystems.translation_pin</code>, which pins only the translation components and deliberately leaves the homogeneous coordinate alone. That distinction matters: several full pins to the same target are mutually inconsistent for a rigid body by construction (that inconsistency, distributed as a least-squares compromise across the ring, is what rebalances a ring&#39;s &quot;vote&quot; against competing edges – see <code>n_ring_formation.jl</code> for where that actually matters). Left unmodified, that compromise doesn&#39;t stay confined to translation – it drags the homogeneous coordinate away from <code>1</code> too, which rescales the entire rigid body, since these affine restriction maps only represent pure translation correctly when it stays exactly <code>1</code>. <code>translation_pin</code> avoids that entirely, and because it&#39;s deferred (no <code>H_N</code> representative, like <code>centroid()</code>), only the one true <code>project(1)</code> pin per ring is visible to the <em>direct</em> baseline below – so <code>solve_direct</code> reduces to exactly the same &quot;two independent rigid rings, zero energy&quot; case as the original single-pin design, uncomplicated by the redundancy.</p><h2 id="The-point"><a class="docs-heading-anchor" href="#The-point">The point</a><a id="The-point-1"></a><a class="docs-heading-anchor-permalink" href="#The-point" title="Permalink"></a></h2><p><code>mid</code>&#39;s constraint means the hierarchical solve cannot place <code>ringA</code> at target 1 and <code>ringB</code> at target 2 independently – it must find the <em>one</em> shared point that best satisfies both target pins at once, which lands <strong>exactly</strong> on the midpoint of the two targets (verified numerically), not on either target itself. As the targets spiral apart below, watch both rings sit together on that midpoint while their own targets move away in opposite directions – individually &quot;rigid and correctly solved,&quot; yet visibly failing to escort either target. The gap panel quantifies exactly what this costs, and the tracking-error panel shows the failure directly, growing with separation instead of settling to zero the way a properly independent ring would.</p><pre><code class="language-julia hljs">using CellularSheaves
+using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.AgentControllers
+using LinearAlgebra
+using Plots
+using Printf
+
+# `@__DIR__` resolves relative to Literate.jl&#39;s *output* location while a page is being
+# executed, not this file&#39;s own source directory -- so the plotting helpers are located from the
+# package root instead, which is stable regardless of how this script gets run. The simulation
+# driver and multi-pin helpers themselves live in `NestedSystems` (already `using`-ed above).
+include(joinpath(pkgdir(CellularSheaves), &quot;docs&quot;, &quot;literate&quot;, &quot;nested&quot;, &quot;_plot_helpers.jl&quot;))</code></pre><pre><code class="nohighlight hljs">Main.var&quot;##696&quot;.fade_alpha</code></pre><h2 id="Topology-specification"><a class="docs-heading-anchor" href="#Topology-specification">Topology specification</a><a id="Topology-specification-1"></a><a class="docs-heading-anchor-permalink" href="#Topology-specification" title="Permalink"></a></h2><pre><code class="language-julia hljs">const D = 4   # SE(3) homogeneous: 3D translation + 1 homogeneous row
+
+ringA = LeafTeam(:ringA, :ring, 4, 1.0)
+ringB = LeafTeam(:ringB, :ring, 5, 1.0)
+mid = RefinedSystem(:mid, AbstractSystemNode[ringA, ringB],
+                    [SystemEdge(1, 2; src_map=centroid(), dst_map=centroid())])
+root = RefinedSystem(:root, AbstractSystemNode[mid])
+targets = [TargetSpec(:t1), TargetSpec(:t2)]
+
+# Redundant pin: every other agent around each ring observes its own target, rather than the
+# usual single representative -- see the topology note above. Only the first pin per ring uses
+# plain `project`; the rest use `translation_pin`, which leaves the homogeneous coordinate alone
+# (see its docstring in `_nested_simulation.jl` -- letting several full D×D pins fight over the
+# same target drags the homogeneous row away from 1 and rescales the whole rigid body).
+observations = vcat(
+    [Observation([1, 1], 1; system_map=redundant_pin(ringA.n_agents, D, k)) for k in 1:2:ringA.n_agents],
+    [Observation([1, 2], 2; system_map=redundant_pin(ringB.n_agents, D, k)) for k in 1:2:ringB.n_agents],
+)
+spec = NestedSystemSpec(root, targets, observations, D, true)
+tower = build_sheaf_tower(spec)
+
+# Agents are assigned depth-first: ringA&#39;s 4 agents, then ringB&#39;s 5.
+ring_ranges = agent_index_ranges([ringA.n_agents, ringB.n_agents])</code></pre><pre><code class="nohighlight hljs">2-element Vector{UnitRange{Int64}}:
+ 1:4
+ 5:9</code></pre><h2 id="Target-motion:-two-targets-spiraling-apart"><a class="docs-heading-anchor" href="#Target-motion:-two-targets-spiraling-apart">Target motion: two targets spiraling apart</a><a id="Target-motion:-two-targets-spiraling-apart-1"></a><a class="docs-heading-anchor-permalink" href="#Target-motion:-two-targets-spiraling-apart" title="Permalink"></a></h2><p>Both targets orbit a common center at angular rate <code>ω</code> while their shared radius <code>ρ(t) = ρ0 + k t</code> grows – so their pairwise separation <code>Δ(t) = 2ρ(t)</code> increases smoothly over the run, sweeping the demonstration from a small gap up to a clearly-growing one within a single run. Velocity/acceleration below are the exact analytic derivatives (standard polar product rule), verified against finite differences before use – not finite-differenced at runtime.</p><pre><code class="language-julia hljs">const ρ0, k_sep, ω, h_alt = 0.5, 0.15, 0.4, 1.5
+
+ρ(t) = ρ0 + k_sep * t
+θ(t) = ω * t
+
+target1(t) = [ρ(t) * cos(θ(t)), ρ(t) * sin(θ(t)), h_alt, 1.0]
+target1_vel(t) = [k_sep * cos(θ(t)) - ρ(t) * ω * sin(θ(t)),
+                  k_sep * sin(θ(t)) + ρ(t) * ω * cos(θ(t)), 0.0, 0.0]
+target1_acc(t) = [-2k_sep * ω * sin(θ(t)) - ρ(t) * ω^2 * cos(θ(t)),
+                    2k_sep * ω * cos(θ(t)) - ρ(t) * ω^2 * sin(θ(t)), 0.0, 0.0]
+
+# target2 sits diametrically opposite target1 (angle θ+π): negate x, y and their derivatives.
+target2(t) = [-target1(t)[1], -target1(t)[2], h_alt, 1.0]
+target2_vel(t) = [-target1_vel(t)[1], -target1_vel(t)[2], 0.0, 0.0]
+target2_acc(t) = [-target1_acc(t)[1], -target1_acc(t)[2], 0.0, 0.0]</code></pre><pre><code class="nohighlight hljs">target2_acc (generic function with 1 method)</code></pre><h2 id="Dynamics-and-gains"><a class="docs-heading-anchor" href="#Dynamics-and-gains">Dynamics and gains</a><a id="Dynamics-and-gains-1"></a><a class="docs-heading-anchor-permalink" href="#Dynamics-and-gains" title="Permalink"></a></h2><pre><code class="language-julia hljs">DT, STEPS = 0.05, 200
+dyn = QuadrotorDynamics()
+Ad, Bd = CellularSheaves.AgentControllers.discrete_matrices(dyn, DT)
+Q_lqr = Matrix(Diagonal([500.0, 500.0, 500.0, 150.0, 150.0, 100.0, 100.0, 100.0, 5.0, 5.0]))
+R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
+K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10 * Q_lqr, R_lqr)
+bindings = homogeneous_binding(dyn; K_lqr=K)</code></pre><pre><code class="nohighlight hljs">CellularSheaves.ControlSheaves.NestedSystems.SystemBinding(CellularSheaves.ControlSheaves.AgentControllers.QuadrotorDynamics(9.81, 0.5, 0.01, 0.01), [0.0 0.0 21.166309247170133 0.0 0.0 0.0 0.0 10.52467760470746 0.0 0.0; 0.0 -1.4667218880511859 0.0 2.392340797060175 0.0 0.0 -1.0703393879965994 0.0 0.25550801774491644 0.0; 1.4667218880511854 0.0 0.0 0.0 2.3923407970601733 1.070339387996599 0.0 0.0 0.0 0.2555080177449164], Dict{Symbol, CellularSheaves.ControlSheaves.NestedSystems.SystemBinding}(), Dict{Int64, CellularSheaves.ControlSheaves.NestedSystems.AgentBinding}())</code></pre><h2 id="Run-the-closed-loop-simulation-with-full-feedforward"><a class="docs-heading-anchor" href="#Run-the-closed-loop-simulation-with-full-feedforward">Run the closed-loop simulation with full feedforward</a><a id="Run-the-closed-loop-simulation-with-full-feedforward-1"></a><a class="docs-heading-anchor-permalink" href="#Run-the-closed-loop-simulation-with-full-feedforward" title="Permalink"></a></h2><pre><code class="language-julia hljs">prob = NestedEscortProblem(tower, bindings, [target1, target2];
+                           target_velocities=[target1_vel, target2_vel],
+                           target_accelerations=[target1_acc, target2_acc],
+                           dt=DT, steps=STEPS)
+res = run_nested_escort_simulation(prob; use_feedforward=true)
+time_grid = 0:DT:(STEPS*DT)</code></pre><pre><code class="nohighlight hljs">0.0:0.05:10.0</code></pre><h2 id="Diagnostics:-formation-error,-tracking-error,-and-the-approximation-gap"><a class="docs-heading-anchor" href="#Diagnostics:-formation-error,-tracking-error,-and-the-approximation-gap">Diagnostics: formation error, tracking error, and the approximation gap</a><a id="Diagnostics:-formation-error,-tracking-error,-and-the-approximation-gap-1"></a><a class="docs-heading-anchor-permalink" href="#Diagnostics:-formation-error,-tracking-error,-and-the-approximation-gap" title="Permalink"></a></h2><p><code>approximation_gap</code> needs no agent dynamics at all – it is a static property of the tower and the current target positions – so it is swept separately from the closed-loop simulation above, at the same time grid.</p><pre><code class="language-julia hljs">gap_history = [approximation_gap(tower, [target1(t), target2(t)]) for t in time_grid[1:STEPS]]
+
+ring_names = [&quot;ringA&quot;, &quot;ringB&quot;]
+ring_radius = [1.0, 1.0]
+ring_targets = [target1, target2]
+form_err = [zeros(STEPS) for _ in 1:2]
+track_err = [zeros(STEPS) for _ in 1:2]
+
+for step in 1:STEPS
+    t = time_grid[step]
+    for (r, rng) in enumerate(ring_ranges)
+        positions = [res.sim_data[step][i][1:3] for i in rng]
+        c = sum(positions) / length(positions)
+        form_err[r][step] = sum(abs(norm(p .- c) - ring_radius[r]) for p in positions) / length(positions)
+        track_err[r][step] = norm(c[1:2] .- ring_targets[r](t)[1:2])
+    end
+end</code></pre><h2 id="Plots"><a class="docs-heading-anchor" href="#Plots">Plots</a><a id="Plots-1"></a><a class="docs-heading-anchor-permalink" href="#Plots" title="Permalink"></a></h2><pre><code class="language-julia hljs">colors = [:steelblue, :crimson]
+
+# Panel 1: top-down view, and the animated version below both need consistent axis limits --
+# computed once, from every agent and target position across the whole run.
+all_x = Float64[]; all_y = Float64[]
+for rng in ring_ranges, i in rng, step in 1:STEPS
+    push!(all_x, res.sim_data[step][i][1]); push!(all_y, res.sim_data[step][i][2])
+end
+for traj in (target1, target2), t in time_grid[1:STEPS]
+    p = traj(t)
+    push!(all_x, p[1]); push!(all_y, p[2])
+end
+const TOPDOWN_XLIM = (minimum(all_x) - 0.5, maximum(all_x) + 0.5)
+const TOPDOWN_YLIM = (minimum(all_y) - 0.5, maximum(all_y) + 0.5)
+
+# Panel 1 proper: a composite of the *whole* run, not just its final state. Every agent&#39;s full
+# path is drawn thin and faint (dt is far finer than a static plot needs, and overlapping,
+# low-alpha paths read as darker where multiple agents pass through the same region -- exactly
+# what makes the two rings&#39; shared convergence near the midpoint visible). A handful of ring
+# outlines are drawn at sparse, evenly-spaced snapshots (not one per step) with alpha fading from
+# faint (early) to solid (final), so the ring&#39;s shape/position over time reads as a single image
+# rather than needing the animation.
+function top_down_composite(; n_snapshots::Int=8)
+    snaps = snapshot_steps(STEPS, n_snapshots)
+    p = plot(title=&quot;Top-Down View (full trajectory)&quot;, aspect_ratio=1,
+            xlabel=&quot;x (m)&quot;, ylabel=&quot;y (m)&quot;, xlims=TOPDOWN_XLIM, ylims=TOPDOWN_YLIM,
+            legend=:topright, size=(600, 500))
+    for (r, rng) in enumerate(ring_ranges)
+        for i in rng
+            px = [res.sim_data[s][i][1] for s in 1:STEPS]
+            py = [res.sim_data[s][i][2] for s in 1:STEPS]
+            plot!(p, px, py, color=colors[r], alpha=0.12, linewidth=1, label=&quot;&quot;)
+        end
+        for (si, s) in enumerate(snaps)
+            a = fade_alpha(si, length(snaps))
+            fx = [res.sim_data[s][i][1] for i in rng]
+            fy = [res.sim_data[s][i][2] for i in rng]
+            plot!(p, [fx; fx[1]], [fy; fy[1]], color=colors[r], linestyle=:dash, alpha=a,
+                 label=(s == snaps[end] ? ring_names[r] : &quot;&quot;))
+            scatter!(p, fx, fy, color=colors[r], markersize=3, alpha=a, label=&quot;&quot;)
+        end
+    end
+    for (r, traj) in enumerate([target1, target2])
+        tp = [traj(t) for t in time_grid[1:STEPS]]
+        plot!(p, [q[1] for q in tp], [q[2] for q in tp], color=colors[r], linestyle=:dot, alpha=0.5, label=&quot;&quot;)
+        for (si, s) in enumerate(snaps)
+            pt = traj(time_grid[s])
+            a = fade_alpha(si, length(snaps))
+            scatter!(p, [pt[1]], [pt[2]], marker=:star5, markersize=(s == snaps[end] ? 10 : 5),
+                    color=colors[r], alpha=a, label=(s == snaps[end] ? &quot;target $r&quot; : &quot;&quot;))
+        end
+    end
+
+    # The midpoint of the two targets -- direct visual proof that the rings are converging on
+    # this shared point rather than on either target.
+    mp = [(target1(t) .+ target2(t)) ./ 2 for t in time_grid[1:STEPS]]
+    plot!(p, [q[1] for q in mp], [q[2] for q in mp], color=:black, linestyle=:dot, alpha=0.4, label=&quot;&quot;)
+    scatter!(p, [mp[end][1]], [mp[end][2]], marker=:xcross, markersize=8, color=:black,
+            label=&quot;target midpoint&quot;)
+    return p
+end
+
+p1 = top_down_composite()
+
+# The animated version reuses the same per-step rendering logic in miniature -- current agent
+# positions and outline only, no accumulated trail (the composite above already shows the whole
+# run at once; the animation&#39;s job is to convey motion, not repeat the same information).
+function top_down_frame(step::Int)
+    t = time_grid[step]
+    p = plot(title=@sprintf(&quot;Top-Down View (t = %.2f s)&quot;, t), aspect_ratio=1,
+            xlabel=&quot;x (m)&quot;, ylabel=&quot;y (m)&quot;, xlims=TOPDOWN_XLIM, ylims=TOPDOWN_YLIM,
+            legend=:topright, size=(600, 500))
+    for (r, rng) in enumerate(ring_ranges)
+        cx = [sum(res.sim_data[s][i][1] for i in rng) / length(rng) for s in 1:step]
+        cy = [sum(res.sim_data[s][i][2] for i in rng) / length(rng) for s in 1:step]
+        plot!(p, cx, cy, color=colors[r], alpha=0.4, label=&quot;&quot;)
+
+        fx = [res.sim_data[step][i][1] for i in rng]
+        fy = [res.sim_data[step][i][2] for i in rng]
+        scatter!(p, fx, fy, color=colors[r], markersize=4, label=ring_names[r])
+        plot!(p, [fx; fx[1]], [fy; fy[1]], color=colors[r], linestyle=:dash, label=&quot;&quot;)
+    end
+    for (r, traj) in enumerate([target1, target2])
+        tp = [traj(tt) for tt in time_grid[1:step]]
+        plot!(p, [q[1] for q in tp], [q[2] for q in tp], color=colors[r], linestyle=:dot, alpha=0.5, label=&quot;&quot;)
+        pt = traj(t)
+        scatter!(p, [pt[1]], [pt[2]], marker=:star5, markersize=10, color=colors[r], label=&quot;target $r&quot;)
+    end
+
+    # The midpoint of the two targets -- direct visual proof that the rings are converging on
+    # this shared point rather than on either target.
+    mp = [(target1(tt) .+ target2(tt)) ./ 2 for tt in time_grid[1:step]]
+    plot!(p, [q[1] for q in mp], [q[2] for q in mp], color=:black, linestyle=:dot, alpha=0.4, label=&quot;&quot;)
+    scatter!(p, [mp[end][1]], [mp[end][2]], marker=:xcross, markersize=8, color=:black,
+            label=&quot;target midpoint&quot;)
+    return p
+end
+
+# Panel 2: formation radius error over time.
+p2 = plot(title=&quot;Formation Radius Error&quot;, xlabel=&quot;time (s)&quot;, ylabel=&quot;error (m)&quot;)
+for r in 1:2
+    plot!(p2, time_grid[1:STEPS], form_err[r], color=colors[r], label=ring_names[r], linewidth=2)
+end
+
+# Panel 3: centroid tracking error over time.
+p3 = plot(title=&quot;Centroid Tracking Error&quot;, xlabel=&quot;time (s)&quot;, ylabel=&quot;error (m)&quot;)
+for r in 1:2
+    plot!(p3, time_grid[1:STEPS], track_err[r], color=colors[r], label=ring_names[r], linewidth=2)
+end
+
+# Panel 4: the approximation gap -- validates Issues 010+011 directly.
+p4 = plot(title=&quot;Hierarchical vs. Direct Energy&quot;, xlabel=&quot;time (s)&quot;, ylabel=&quot;Dirichlet energy&quot;)
+plot!(p4, time_grid[1:STEPS], [g.hierarchical for g in gap_history], color=:darkorange,
+     label=&quot;hierarchical&quot;, linewidth=2)
+plot!(p4, time_grid[1:STEPS], [g.direct for g in gap_history], color=:gray, label=&quot;direct&quot;,
+     linewidth=2, linestyle=:dash)
+plot!(p4, time_grid[1:STEPS], [g.gap for g in gap_history], color=:forestgreen, label=&quot;gap&quot;,
+     linewidth=2, linestyle=:dot)
+
+plot(p1, p2, p3, p4, layout=(2, 2), size=(1000, 800),
+    plot_title=&quot;Centroid-Coupled Formation: Gap Opens as Targets Separate&quot;)</code></pre><p><img src="../centroid_formation_tracking-14.svg" alt/></p><p><code>direct</code> stays roughly flat – it reflects only the cost of pinning several points of one rigid ring to a single target simultaneously (unavoidable once more than one agent observes the same point), which doesn&#39;t depend on how far apart the <em>two</em> targets are. <code>hierarchical</code> and <code>gap</code> both grow with separation on top of that floor: the added cost of forcing <code>ringA</code> and <code>ringB</code> onto the same shared point as their targets pull apart.</p><pre><code class="language-julia hljs">@printf(&quot;Final gap: %.4f  (hierarchical: %.4f, direct: %.4f)\n&quot;,
+       gap_history[end].gap, gap_history[end].hierarchical, gap_history[end].direct)</code></pre><pre><code class="nohighlight hljs">Final gap: 9.9401  (hierarchical: 9.9401, direct: 0.0000)
+</code></pre><h2 id="Animated-top-down-view"><a class="docs-heading-anchor" href="#Animated-top-down-view">Animated top-down view</a><a id="Animated-top-down-view-1"></a><a class="docs-heading-anchor-permalink" href="#Animated-top-down-view" title="Permalink"></a></h2><p>Same <code>top_down_frame</code> function as panel 1 above, stepped through the run.</p><pre><code class="language-julia hljs">anim = @animate for step in 1:4:STEPS
+    top_down_frame(step)
+end
+gif(anim, &quot;centroid_formation_top_down.gif&quot;, fps=10)</code></pre><pre><code class="nohighlight hljs">Plots.AnimatedGif(&quot;/home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/src/generated/nested/centroid_formation_top_down.gif&quot;)</code></pre><p><img src="../centroid_formation_top_down.gif" alt="Centroid formation top-down animation"/></p><pre><code class="language-julia hljs">println(&quot;Centroid formation tracking example complete.&quot;)</code></pre><pre><code class="nohighlight hljs">Centroid formation tracking example complete.
+</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../layered/multilayer_escort/">« Multilayer Hierarchical Control for Team-of-Teams Escort Formation</a><a class="docs-footer-nextpage" href="../wheel_formation/">Hub-and-Spoke Wheel Escort Formation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Thursday 6 August 2026 05:37">Thursday 6 August 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
