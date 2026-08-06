@@ -1,32 +1,37 @@
 # # Emergent Rescaling: A Rigid Team Absorbing Divergent Targets Through Scale
 #
-# The other two examples in this section go out of their way to keep the affine homogeneous
-# coordinate pinned at exactly `1` -- `translation_pin` exists specifically to stop several
-# redundant pins from dragging it away and rescaling a rigid body as an unwanted side effect. This
-# example does the opposite: it uses **unmodified, fully redundant `project(k)` pins** on purpose,
-# and shows that the "bug" is actually a legitimate, useful degree of freedom.
+# **The homogeneous-coordinate drift the other pages work to suppress is, used deliberately, a
+# useful degree of freedom.**
+#
+# Elsewhere in this section `translation_pin` exists precisely to stop several redundant pins from
+# dragging the affine homogeneous coordinate away from `1` and rescaling a rigid body as an
+# unwanted side effect. This page does the opposite on purpose: it uses **full, untruncated
+# `project(k)` pins** and lets the drift happen.
 #
 # ## The mechanism
 #
-# A rigid team's space of exact global sections is `D`-dimensional pure translation -- normally
-# `D-1` translation coordinates plus a homogeneous row that stays locked at `1`. But when several
-# agents are *each* pinned to a *different* target (as opposed to redundantly pinning several
-# agents to the *same* target, as in `centroid_formation_tracking.jl`), those pins are jointly
-# satisfiable only if the targets happen to sit at exactly the team's nominal relative geometry.
-# The moment they don't, the least-squares compromise the harmonic solve finds doesn't just
-# translate the team -- it also finds the homogeneous coordinate `w` that best explains the
-# mismatch, and because these affine restriction maps scale every translation offset by `w`, that
-# compromise **rescales the whole rigid body uniformly**, without ever bending its angles.
+# A rigid team's space of exact global sections is `D`-dimensional pure translation: `D-1`
+# translation coordinates, plus a homogeneous row normally locked at `1`.
+#
+# Now pin each agent to a *different* target -- not several agents to the *same* target, as in
+# `centroid_formation_tracking.jl`. Those pins are jointly satisfiable only if the targets happen
+# to sit at exactly the team's nominal relative geometry. As soon as they do not, the harmonic
+# solve's least-squares compromise does more than translate the team: it also picks the
+# homogeneous coordinate `w` that best explains the mismatch.
+#
+# And because these affine restriction maps scale every translation offset by `w`, choosing `w`
+# **rescales the whole rigid body uniformly** -- without ever bending an angle.
 #
 # ## Setup
 #
-# Six targets start at a common origin and diverge outward along a rigid hexagon's own six
-# nominal directions -- but at six *different* rates, so their divergence is not a uniform
-# scaling of the hexagon. A 6-agent rigid ring, one agent pinned to each target via a full
-# (untruncated) `project(k)`, has only one shared translation-plus-scale to offer in response.
-# We compare it against an **unconstrained** placement -- each of the six targets tracked by its
-# own independent, unconnected point, with no shape constraint at all -- which is free to trace
-# out whatever irregular shape the six different divergence rates actually produce.
+# Six targets start at a common origin and diverge outward along a rigid hexagon's own six nominal
+# directions, but at six *different* rates, so their spread is deliberately not a uniform scaling
+# of the hexagon.
+#
+# A 6-agent rigid ring, one agent pinned to each target, has only a shared translation-plus-scale
+# to offer in response. The comparison is against an **unconstrained** placement: six independent,
+# unconnected points, one per target, free to trace whatever irregular shape those divergence
+# rates actually produce.
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
@@ -36,9 +41,8 @@ using Statistics
 using Plots
 using Printf
 
-## `@__DIR__` resolves relative to Literate.jl's *output* location while a page is being
-## executed, not this file's own source directory -- so the plotting helpers are located from the
-## package root instead, which is stable regardless of how this script gets run.
+## Located from the package root, not `@__DIR__`: while Literate.jl executes a page, `@__DIR__`
+## points at the *output* directory rather than at this file.
 include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_helpers.jl"))
 
 # ## Topology: one rigid ring, every agent individually pinned
@@ -47,13 +51,11 @@ const N = 6
 const D = 4
 const h_alt = 1.5
 
-## Written in the [`NestedDSL`](@ref) specification language. The `for` loop is Julia's own --
-## `@nested_system` runs its block rather than quoting it, so declaring one target and one pin
-## per agent needs no iteration construct in the DSL itself. `$(...)` marks a name that is
-## computed rather than written literally.
+## Written in the [`NestedDSL`](@ref) language. The `for` loop is Julia's own -- `@nested_system`
+## runs its block rather than quoting it -- and `$(...)` marks a computed name.
 ##
-## Deliberately full, untruncated `project(formation, k)` pins -- no `redundant_pin`/
-## `translation_pin` here, since the whole point is to let the homogeneous coordinate drift.
+## The `project(formation, k)` pins are deliberately full and untruncated: no `redundant_pin` or
+## `translation_pin` here, since letting the homogeneous coordinate drift is the whole point.
 system = compile_nested_system(@nested_system begin
     @dim D
     @team formation = ring(N; radius=1.0)
@@ -83,9 +85,8 @@ time_grid = range(0.0, T_FINAL, length=N_STEPS)
 
 # ## Sweep the reference solve over time
 #
-# This is deliberately reference-only -- no closed-loop agent dynamics -- since the point is
-# purely about what the harmonic solve geometrically produces, and closed-loop tracking lag would
-# only obscure that with an unrelated confound.
+# Reference-only, with no closed-loop agent dynamics: the question is purely what the harmonic
+# solve produces geometrically, and tracking lag would only add an unrelated confound.
 
 rigid = [solve_hierarchical(tower, [traj(t) for traj in target_trajectories])[end] for t in time_grid]
 rigid_agents = [[q[v] for v in tower.agent_vertices] for q in rigid]
@@ -167,10 +168,10 @@ formation_snapshot!(p4, unconstrained_agents[end], colors.unconstrained, 1.0, "u
 plot(p1, p2, p3, p4, layout=(2, 2), size=(1100, 900),
     plot_title="Emergent Rescaling vs. Shear Under Divergent Targets")
 
-# The rigid formation traces a perfect (growing) regular hexagon at every snapshot -- its shape
-# irregularity panel should read as (numerically) zero throughout, confirming it never shears, only
-# rescales. The unconstrained swarm's irregularity grows steadily, and its final shape is visibly
-# not a regular hexagon -- the six different divergence rates show up directly as distortion.
+# The rigid formation traces a perfect, growing regular hexagon at every snapshot: its
+# irregularity panel reads as numerically zero throughout, confirming that it only ever rescales
+# and never shears. The unconstrained swarm's irregularity climbs steadily, and its final shape is
+# visibly not a regular hexagon -- the six divergence rates showing up directly as distortion.
 
 # ## Animated top-down view
 

@@ -1,26 +1,25 @@
 # # A Four-Level Fleet, Written in the Nested DSL
 #
-# Every other page in this section is two levels deep: a root whose children are escort rings.
-# This one goes four -- `root → wing → flight → escort team → agents` -- and is written entirely
-# in the [`NestedDSL`](@ref) specification language rather than by hand-assembling
+# The other pages in this section nest at most one subsystem inside the root. This one nests two,
+# for four levels of tree -- `root → wing → flight → escort team → agents` -- and is written
+# entirely in the [`NestedDSL`](@ref) language rather than by hand-assembling
 # [`RefinedSystem`](@ref) and [`SystemEdge`](@ref) values.
 #
-# The point of the page is twofold.
+# It makes two points, and documents one sharp edge.
 #
-# **Composition.** The fleet is not written out as one big literal. Three ordinary Julia
-# functions -- `escort`, `relay`, and `flight` -- each return a [`SystemFragment`](@ref), and the
-# fleet is assembled by calling them. `escort` is used at *two different depths* without change
-# -- inside a flight, and directly inside a wing -- because a fragment's paths are relative to
-# wherever it lands and lowering rewrites them against its final position. There are no looping or conditional constructs in the DSL; Julia's
-# own are used instead, which is the whole design.
+# **Composition.** The fleet is not one big literal. Three ordinary Julia functions -- `escort`,
+# `relay`, and `flight` -- each return a [`SystemFragment`](@ref), and the fleet is assembled by
+# calling them. `escort` is used at two different depths without change, because a fragment's
+# paths are relative to wherever it lands and lowering rewrites them against its final position.
+# The DSL has no looping or conditional constructs; Julia's own do that work, which is the whole
+# design.
 #
-# **What depth costs.** With three pushforward steps between the coarsest sheaf and the raw
-# agents, the rigidity the hierarchy imposes is much stronger than in a shallow spec, and
-# [`approximation_gap`](@ref) measures exactly what that buys and what it costs.
+# **What depth costs.** Three pushforward steps separate the coarsest sheaf from the raw agents,
+# so the rigidity the hierarchy imposes is far stronger than in a shallow spec.
+# [`approximation_gap`](@ref) measures what that buys and what it costs.
 #
-# Along the way this page documents one genuine sharp edge -- [`centroid`](@ref) means something
-# different on a refined subsystem than it does on a leaf team -- with a measurement rather than
-# a warning.
+# **The sharp edge.** [`centroid`](@ref) means something different on a refined subsystem than it
+# does on a leaf team. The page shows the difference with a measurement rather than a warning.
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
@@ -31,9 +30,8 @@ using Statistics
 using Plots
 using Printf
 
-## `@__DIR__` resolves relative to Literate.jl's *output* location while a page is being
-## executed, not this file's own source directory -- so the plotting helpers are located from the
-## package root instead, which is stable regardless of how this script gets run.
+## Located from the package root, not `@__DIR__`: while Literate.jl executes a page, `@__DIR__`
+## points at the *output* directory rather than at this file.
 include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_helpers.jl"))
 
 const D = 4   # SE(3) homogeneous: 3D translation + 1 homogeneous row
@@ -41,13 +39,13 @@ const D = 4   # SE(3) homogeneous: 3D translation + 1 homogeneous row
 # ## Reusable fragments
 #
 # Each of these is an ordinary Julia function returning a [`SystemFragment`](@ref) -- a value, not
-# a macro, not a template. `$(...)` marks a name that is computed rather than written literally;
-# everything else in the block is an ordinary Julia expression evaluated on the spot.
+# a macro and not a template. `$(...)` marks a computed name; everything else in the block is an
+# ordinary Julia expression evaluated on the spot.
 #
-# Note that `escort` declares its own `@target` *and* the observation that tracks it. A target is
-# global no matter how deeply the fragment declaring it ends up nested, so an escort team can
-# carry the target it is responsible for around with it -- which is what lets the same function
-# serve a team three levels down and a team two levels down without either knowing where it is.
+# Note that `escort` declares its own `@target` *as well as* the observation that tracks it.
+# Targets are global however deeply the declaring fragment is nested, so an escort team can carry
+# the target it is responsible for along with it. That is what lets one function serve a team
+# three levels down and a team two levels down, with neither call knowing where it will land.
 
 """
     escort(name, m, r, tgt) -> SystemFragment
@@ -101,10 +99,12 @@ end
 
 # ## The fleet
 #
-# Four levels: the root holds two wings; `wingA` holds a flight and a directly-attached escort;
-# the flight holds two escorts; each escort holds its agents. `wingB` is deliberately *shallower*
-# than `wingA` -- an irregular tree, with siblings differing in depth, arity, and team size, which
-# is exactly the case a tower compiler is easiest to get wrong on.
+# The root holds two wings. `wingA` holds a flight and a directly-attached escort; the flight
+# holds two escorts; each escort holds its agents.
+#
+# `wingB` is deliberately *shallower* than `wingA`. The result is an irregular tree whose siblings
+# differ in depth, arity, and team size -- exactly the case a tower compiler is easiest to get
+# wrong on.
 
 fleet = @nested_system begin
     @dim D
@@ -143,14 +143,15 @@ for (k, level) in enumerate(tower.levels)
 end
 
 # The tower collapses from 31 vertices at the finest level to 8 at the coarsest, one pushforward
-# per level of the tree. Every intermediate level is a genuine sheaf in its own right, and the
-# single harmonic solve [`solve_hierarchical`](@ref) performs happens on the 8-vertex `H₀`.
+# per level of the tree. Every intermediate level is a genuine sheaf in its own right, and the one
+# harmonic solve [`solve_hierarchical`](@ref) performs happens on the 8-vertex `H₀`.
 
 # ## Names, not indices
 #
-# The compiled system keeps the name tables, so downstream code never has to reconstruct which
-# block of agent indices belongs to which team -- the bookkeeping that
-# [`agent_index_ranges`](@ref) does by hand on the other pages in this section.
+# The compiled system keeps its name tables, so downstream code never has to reconstruct which
+# block of agent indices belongs to which team. That bookkeeping is what
+# [`agent_index_ranges`](@ref) does by hand on the other pages in this section, and it gets harder
+# to keep in sync the deeper the tree goes.
 
 team_paths = ["wingA.flight1.alpha", "wingA.flight1.bravo", "wingA.charlie",
               "wingB.delta", "wingB.echo"]
@@ -161,9 +162,9 @@ end
 
 # ## Target motion: two wings, two orbiting clusters
 #
-# `wingA`'s three targets sit on a triangle around one centre and `wingB`'s two on a segment
-# around another; both centres orbit a common origin in opposite directions, so the two wings
-# are pulled steadily apart and back together while the relay chain between them stays taut.
+# `wingA`'s three targets sit on a triangle around one centre, `wingB`'s two on a segment around
+# another. The centres orbit a common origin in opposite directions, so the wings are pulled
+# steadily apart and back together while the relay chain between them stays taut.
 
 const ω, R_orbit, h_alt = 0.35, 2.5, 1.5
 
@@ -197,8 +198,8 @@ accelerations = Dict(n => target_acc(n) for n in system.targets)
 #
 # The tower is linear in the target positions, so the influence of any target on any team is
 # directly measurable: nudge one target and watch a team's solved centroid move. In a four-level
-# tree the interesting question is how far influence *reaches* -- does `wingB`'s target motion
-# show up in `wingA`'s escorts at all, three levels of pushforward away?
+# tree the interesting question is how far that influence *reaches* -- does a target in one wing
+# move the escorts in the other, three levels of pushforward away?
 
 """
     response_weights(system, path) -> Dict{Symbol,Float64}
@@ -228,35 +229,41 @@ w_alpha = response_weights(system, "wingA.flight1.alpha")
         join([@sprintf("%s=%.3f", n, w_alpha[n]) for n in system.targets], ", "),
         sum(values(w_alpha)))
 
-# Three things are worth reading off those weights. `alpha` splits its own weight **evenly with
-# `bravo`'s target** (`t1` and `t2` both around `0.33`) -- the two are tied through the same relay
-# `r1` and are perfectly symmetric within `flight1`, so neither gets to claim its own target. `t3`,
-# one level further out in the same wing, still carries about `0.20`. And the weights on `t4` and
-# `t5` -- targets in the *other wing*, reachable only by climbing to the root and back down -- are
-# small but emphatically **not zero**.
+# Three things are worth reading off those weights.
+#
+# - `alpha` splits its weight **evenly with `bravo`'s target**, `t1` and `t2` both near `0.33`.
+#   The two are tied through the same relay `r1` and are perfectly symmetric within `flight1`, so
+#   neither gets to claim its own target.
+# - `t3`, one level further out in the same wing, still carries about `0.20`.
+# - `t4` and `t5` are in the *other wing*, reachable only by climbing to the root and back down.
+#   Their weights are small but emphatically **not zero**.
 #
 # That last point is the hierarchy doing its job: the relay chain `r1 → r2 → r4 → r3` is a real
-# mechanical path and every level of the tower propagates along it. It is also why a deep spec
-# cannot be reasoned about one team at a time -- no team here is tracking only its own target,
-# and the weights, not the topology diagram, are what say by how much.
+# mechanical path, and every level of the tower propagates along it. It is also why a deep
+# specification cannot be reasoned about one team at a time. No team here tracks only its own
+# target, and it is the weights, not the topology diagram, that say by how much.
 
 # ## A sharp edge: `centroid` on a refined system is not `centroid` on a team
 #
-# `@link centroid(alpha) => r1` and `@link centroid(flight1) => r2` look symmetric, but they are
-# not. [`materialize_restriction`](@ref) builds a restriction map against a node's **direct
-# members**, and composes it with the fibre-section basis discovered by the pushforward. For a
-# leaf team the members are raw agents, whose stalk coordinates *are* world positions, so the
-# average is the geometric centroid one expects. For a refined system the members are themselves
-# coarse vertices, whose stalk coordinates are coefficients in whatever basis
-# `fiber_section_basis` happened to return -- and averaging coefficients in two
-# differently-chosen bases is not the average of the two positions.
+# `@link centroid(alpha) => r1` and `@link centroid(flight1) => r2` look symmetric. They are not.
 #
-# In practice a `centroid()` chain through several refined levels drags the affine homogeneous
-# coordinate away from `1`, and since these restriction maps only represent pure translation when
-# that row is exactly `1` (see `rescaling_formation.jl`), the whole fleet quietly rescales. This
-# page uses `project(flight1, 1)` and `project(wingA, 1)` on refined endpoints for exactly that
-# reason -- `project` resolves recursively down to a single raw agent and therefore lands on
-# `H_N` with identity maps, immune to the choice of basis. `centroid` is used only on leaf teams.
+# [`materialize_restriction`](@ref) builds a restriction map against a node's **direct members**,
+# then composes it with the fibre-section basis the pushforward discovered. What those members
+# are makes all the difference:
+#
+# - For a **leaf team**, the members are raw agents, whose stalk coordinates *are* world
+#   positions. Averaging them gives the geometric centroid, as expected.
+# - For a **refined system**, the members are themselves coarse vertices, whose stalk coordinates
+#   are coefficients in whatever basis `fiber_section_basis` happened to return. Averaging
+#   coefficients from two differently-chosen bases is not the average of the two positions.
+#
+# In practice, a `centroid()` chain through several refined levels drags the affine homogeneous
+# coordinate away from `1` -- and since these restriction maps represent pure translation only
+# while that row is exactly `1` (see `rescaling_formation.jl`), the whole fleet quietly rescales.
+#
+# That is why this page uses `project(flight1, 1)` and `project(wingA, 1)` on its refined
+# endpoints, and reserves `centroid` for leaf teams. `project` resolves recursively down to a
+# single raw agent, so it lands on `H_N` with identity maps and is immune to the choice of basis.
 #
 # The difference is measurable. Translating every target by a common vector must translate every
 # agent by that same vector -- it is an exact global section, so a well-posed tower reproduces it
@@ -306,9 +313,9 @@ system_centroid = compile_nested_system(fleet_centroid)
 @printf("translation defect (centroid on refined endpoints):  %.2e\n",
         translation_defect(system_centroid, base_vals, shift))
 
-# The first is at solver tolerance; the second is not. Swapping two endpoint designators is a
-# one-token edit in the DSL, which makes this the kind of thing worth *measuring* rather than
-# guessing at -- and the two specs above differ by exactly those two tokens.
+# The first is at solver tolerance; the second is not, by fifteen orders of magnitude. The two
+# specifications differ by exactly two tokens -- which is why this is worth *measuring* rather
+# than reasoning about, since nothing in the source makes the difference visible.
 
 # ## The cost of four levels of rigidity
 
@@ -316,22 +323,22 @@ gap = approximation_gap(tower, target_vector(system, base_vals))
 @printf("hierarchical energy = %.3f, direct energy = %.3f, gap = %.3f (relative %.2f)\n",
         gap.hierarchical, gap.direct, gap.gap, gap.relative_gap)
 
-# The direct baseline lets every agent move independently, so it can satisfy all five target pins
-# at once and pays almost nothing; the hierarchical solve must keep every team rigid *and* every
-# level of the tree consistent, and pays a substantial gap for it. That gap is not a defect --
-# it is the price of the guarantee that each escort ring stays in formation, which is the whole
-# reason to impose a hierarchy in the first place. The theorem of `NestedSystems` is that the gap
-# is always nonnegative, and it is:
+# The direct baseline lets every agent move independently, so it satisfies all five target pins at
+# once and pays almost nothing. The hierarchical solve must keep every team rigid *and* every
+# level of the tree consistent, and pays a substantial gap for it.
+#
+# That gap is not a defect. It is the price of the guarantee that each escort ring stays in
+# formation -- the whole reason to impose a hierarchy. `NestedSystems` guarantees the gap is never
+# negative, and it is not:
 
 @assert gap.gap >= -1e-8 "hierarchical energy must not beat the unconstrained optimum"
 
 # ## Dynamics, declared in a second fragment
 #
-# The gains only exist once `solve_dare` has run, which is ordinary Julia that has to happen
-# after the topology is written. Because a fragment is a value, that is not a problem: the
-# binding cascade is its own fragment, merged onto the topology. Relays get a softer gain than
-# escorts -- they exist purely for structural coordination and should not fight the escorts they
-# bridge.
+# The gains do not exist until `solve_dare` has run, which is ordinary Julia that has to happen
+# after the topology is written. Because a fragment is a value, that is no obstacle: the binding
+# cascade is its own fragment, merged onto the topology. Relays get a softer gain than escorts --
+# they exist purely for structural coordination and should not fight the teams they bridge.
 
 DT, STEPS = 0.05, 200
 dyn = QuadrotorDynamics()
@@ -492,10 +499,10 @@ plot(p1, p2, p3, p4, layout=(2, 2), size=(1200, 950),
 @printf("Mean steady-state formation error (last 20%% of run): %.4f m\n",
         mean(mean(form_err[p][round(Int, 0.8STEPS):end]) for p in team_paths))
 
-# The rings hold their formation to about `0.14 m` against radii of `0.6`--`0.7 m` -- a few
-# percent -- while their centroids sit `1.3 m` from their own targets, which is simply the blend
-# the response weights above already predicted: no team is tracking only its own target. That is
-# the same trade the shallower pages measure, compounded across an extra level of the tree.
+# The rings hold their formation to about `0.14 m` against radii of `0.6`--`0.7 m`, a few percent,
+# while their centroids sit some `1.3 m` from their own targets. That second number is not a
+# tracking failure: it is the blend the response weights predicted, since no team here tracks only
+# its own target. It is the same trade the shallower pages measure, one level deeper.
 
 # ## Animated view
 
