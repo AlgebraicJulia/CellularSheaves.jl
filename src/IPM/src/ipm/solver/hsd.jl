@@ -217,11 +217,11 @@ end
 #
 #   Δκa = -κ (1 + Δτa/τ)
 #
-function solvepredictor!(s::HSDSolver{T}, gap::T; force_tol::T, floor_tol::T) where {T}
+function solvepredictor!(s::HSDSolver{T}, gap::T; ptol::T, ytol::T, τtol::T) where {T}
     return solvepredictor!(
         s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.p, s.d,
-        s.τ[], s.κ[], s.nc[], s.ng[], gap;
-        force_tol, floor_tol,
+        s.τ[], s.κ[], gap;
+        ptol, ytol, τtol,
     )
 end
 
@@ -238,11 +238,10 @@ function solvepredictor!(
         d::AbstractVector{T},
         τ::T,
         κ::T,
-        nc::T,
-        ng::T,
         gap::T;
-        force_tol::T,
-        floor_tol::T,
+        ptol::T,
+        ytol::T,
+        τtol::T,
     ) where {T}
     axpby!(-1,  d, 0, w.f)
     axpby!( 1, w.rd, 1, w.f)
@@ -254,8 +253,8 @@ function solvepredictor!(
     #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
     pbase, prefn, ppass, pstat, pfres, ppres, pdres, Δτa = solvekkt!(
-        kkt, w.Δpa, w.Δya, H, B, c, g, w.Qp, p, τ, κ, w.f, w.rp, gap, nc, ng;
-        force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
+        kkt, w.Δpa, w.Δya, H, B, c, g, w.Qp, p, τ, κ, w.f, w.rp, gap;
+        ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δda:
@@ -286,12 +285,12 @@ end
 #
 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
 #
-function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T; force_tol::T, floor_tol::T) where {T}
+function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T; ptol::T, ytol::T, τtol::T) where {T}
     return solvecorrector!(
         s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.K, s.p, s.d,
-        s.caches, s.conewrk, s.ν, s.τ[], s.κ[], s.nc[], s.ng[],
+        s.caches, s.conewrk, s.ν, s.τ[], s.κ[],
         μ, gap, Δτa, Δκa;
-        force_tol, floor_tol,
+        ptol, ytol, τtol,
     )
 end
 
@@ -312,14 +311,13 @@ function solvecorrector!(
         ν::Integer,
         τ::T,
         κ::T,
-        nc::T,
-        ng::T,
         μ::T,
         gap::T,
         Δτa::T,
         Δκa::T;
-        force_tol::T,
-        floor_tol::T,
+        ptol::T,
+        ytol::T,
+        τtol::T,
     ) where {T}
     #
     # compute the largest step length αa ∈ (0, 1]
@@ -396,8 +394,8 @@ function solvecorrector!(
     #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
     cbase, crefn, cpass, cstat, cfres, cpres, cdres, Δτ = solvekkt!(
-        kkt, w.Δp, w.Δy, H, B, c, g, w.Qp, p, τ, κ, w.f, w.rp, fτ, nc, ng, w.Δya;
-        force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
+        kkt, w.Δp, w.Δy, H, B, c, g, w.Qp, p, τ, κ, w.f, w.rp, fτ, w.Δya;
+        ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δd:
@@ -630,12 +628,12 @@ end
 # HSD bordered do-once: factor F and solve/cache the Woodbury column + capacitance. The border w₂ solve
 # needs the refinement tolerances, so step! computes them before calling this. Updates the running ρ-floor
 # and the warm start s.Δy0. Returns (ok, ρ, wtuple) where wtuple carries the border solve's counts.
-function initkkt!(s::HSDSolver{T}; force_tol::T, floor_tol::T) where {T}
+function initkkt!(s::HSDSolver{T}; ptol::T, ytol::T) where {T}
     w = s.wrk; set = s.settings
     flag, ρ, wtuple = initkkt!(
         s.kkt, s.H, s.Hc, s.B, s.c, s.g, s.Q;
         α=s.α[], rgmin=s.ρ[], p=s.p, τ=s.τ[], κ=s.κ[], Qp=w.Qp, y0=s.Δy0,
-        nc=s.nc[], ng=s.ng[], force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
+        ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     s.ρ[] = max(s.ρ[], ρ)
     flag && copyto!(s.Δy0, s.kkt.Δy2)   # warm start for next iteration's w₂ solve
@@ -648,7 +646,7 @@ function step!(s::HSDSolver{T}) where {T}
     pbase = cbase = wbase = 0   # base-solve CRAIG per role (woodbury counted into craig1, archive-wins)
     prefn = crefn = wrefn = 0   # refinement CRAIG per role
     ppass = cpass = wpass = 0   # refinement passes per role
-    pstat = cstat = wstat = REACHED_FORCE   # refinement exit status per role
+    pstat = cstat = wstat = REACHED   # refinement exit status per role
 
     step = zero(T)
     pfres = ppres = pdres = T(NaN)
@@ -748,12 +746,20 @@ function step!(s::HSDSolver{T}) where {T}
                 force_tol = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0)) * max(pres, dres)
             end
             #
+            # convert to the KKT solver's absolute residual targets: ptol (primal) / ytol (dual). The
+            # homogeneous τ is NOT folded in here — it lives in the HSD residual scaling, not the KKT solve.
+            #
+            tol = max(force_tol, floor_tol)
+            ptol = tol * (1 + s.ng[])
+            ytol = tol * (1 + s.nc[])
+            τtol = tol * (1 + s.ng[] + s.nc[])   # border-row target (bordered predictor/corrector only)
+            #
             # factor F and solve/cache the Woodbury column w₂ + capacitance (the bordered do-once)
             #
             #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
             #   [ B   0  ] [ Δy2 ] = [ g ] ,   S = Δp2ᵀ W Δp2 + (Δp2 - p/τ)ᵀ Q (Δp2 - p/τ) + κ/τ
             #
-            initok, ρ, wtuple = @timeit s.timers "initkkt" initkkt!(s; force_tol, floor_tol)
+            initok, ρ, wtuple = @timeit s.timers "initkkt" initkkt!(s; ptol, ytol)
             if !initok
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
@@ -762,6 +768,8 @@ function step!(s::HSDSolver{T}) where {T}
                 status = nearstatus(s, NUMERICAL_FAILURE)
             else
                 wbase, wrefn, wpass, wstat, wfres, wpres, wdres = wtuple
+                # border entry residuals come back UNSCALED; re-scale to the recorded scaled units.
+                wpres = wpres / (1 + s.ng[]); wdres = wdres / (1 + s.nc[])
                 #
                 # solve for the Mehrota predictor direction
                 #
@@ -769,7 +777,9 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δya ] = [ rp     ]
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
                 #
-                pbase, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s, gap; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s, gap; ptol, ytol, τtol)
+                # entry residuals come back UNSCALED; re-scale to the recorded scaled units for the history.
+                ppres = ppres / (1 + s.ng[]); pdres = pdres / (1 + s.nc[])
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -783,7 +793,9 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δy ] = [ rp                          ]
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
                 #
-                cbase, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
+                # entry residuals come back UNSCALED; re-scale to the recorded scaled units for the history.
+                cpres = cpres / (1 + s.ng[]); cdres = cdres / (1 + s.nc[])
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -791,7 +803,7 @@ function step!(s::HSDSolver{T}) where {T}
                     end
                 end
 
-                if s.settings.verbose > 1 && (pstat != REACHED_FORCE || cstat != REACHED_FORCE || wstat != REACHED_FORCE)
+                if s.settings.verbose > 1 && (pstat !== REACHED || cstat !== REACHED || wstat !== REACHED)
                     @info "KKT solve above target tolerance" pstat cstat wstat
                 end
                 #
@@ -835,11 +847,10 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   α* ∈ [αmin, αmax]
                 #
-                pok = pstat === REACHED_FORCE || pstat === REACHED_FLOOR
-                cok = cstat === REACHED_FORCE || cstat === REACHED_FLOOR
-                wok = wstat === REACHED_FORCE || wstat === REACHED_FLOOR
+                pok = pstat === REACHED
+                cok = cstat === REACHED
+                wok = wstat === REACHED
                 state = pok && cok && wok
-                tol = max(force_tol, floor_tol)
 
                 if s.settings.policy == 1
                     # Tier 1: aggregate the predictor, corrector, and Woodbury solves (worst case each end).
@@ -869,13 +880,6 @@ function step!(s::HSDSolver{T}) where {T}
     push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ, τ=s.τ[], κ=s.κ[],
         pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat,
         pfres, ppres, pdres, cfres, cpres, cdres, wfres, wpres, wdres, αmin, αmax))
-    if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
-        if s.settings.verbose > 1
-            @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"
-        end
-
-        status = nearstatus(s, NUMERICAL_FAILURE)
-    end
 
     return status
 end

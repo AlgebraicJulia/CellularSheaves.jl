@@ -37,11 +37,6 @@ function getaug(hist::AbstractHistory{T}, cap::T, policy::Int = 0) where {T}
     return α
 end
 
-function atfloor(hist::AbstractHistory; patience::Int=3)
-    n = length(hist)
-    return n ≥ patience && all(hist.cstat[i] != REACHED_FORCE for i in n-patience+1:n)
-end
-
 function isstalled(hist::AbstractHistory{T}; window=6, threshold=0.5) where {T}
     n = length(hist); flag = false
 

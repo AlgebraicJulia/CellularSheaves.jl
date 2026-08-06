@@ -47,10 +47,8 @@ function initkkt!(
         κ::T,
         Qp::AbstractVector{T},
         y0,
-        nc::T,
-        ng::T,
-        force_tol::T,
-        floor_tol::T,
+        ptol::T,
+        ytol::T,
         stall::T,
         itmax::Int,
     ) where {T}
@@ -65,8 +63,8 @@ function initkkt!(
     # NUMERICAL_FAILURE. So it stays at working tol.) NB the RHS here IS (c, g) with nc/ng = ‖c‖/‖g‖, so
     # (1+nc)/(1+ng) is a genuine relative-residual test, not fixed problem-data constants — don't "fix" it.
     #
-    wtuple = solvekkt!(bw.inner, bw.Δp2, bw.Δy2, H, B, c, g, nc, ng, y0;
-                       force_tol, floor_tol, stall, itmax)
+    wtuple = solvekkt!(bw.inner, bw.Δp2, bw.Δy2, H, B, c, g, y0;
+                       ptol, ytol, stall, itmax)
     #
     # cache the capacitance scalar S and border row aτ = c - 2Qp/τ (stable split form)
     #
@@ -92,23 +90,22 @@ function solvekkt!(
         f::AbstractVector{T},
         rp::AbstractVector{T},
         fτ::T,
-        nc::T,
-        ng::T,
         y0 = nothing;
-        force_tol::T,
-        floor_tol::T,
+        ptol::T,
+        ytol::T,
+        τtol::T,
         stall::T,
         itmax::Int,
     ) where {T}
-    # craig units: scale the base solve's tolerance by (1+ng) here — one conversion, one place. newton!
-    # forwards this straight to solveuzw!; do not re-scale inside it. First-order in the bordered path
-    # (the Schur lift injects dτ·r₂ each pass — see refinehsd! and §3).
-    atol = max(force_tol, floor_tol) * (one(T) + ng)
+    # craig units: the base solve's primal tolerance IS ptol — one place. newton! forwards this straight
+    # to solveuzw!; do not re-scale inside it. First-order in the bordered path (the Schur lift injects
+    # dτ·r₂ each pass — see refinehsd! and §3).
+    atol = ptol
     nbase, Δτ, fres = newton!(Δp, Δy, bw.inner, H, B, g, f, rp, fτ, bw.Δp2, bw.Δy2, bw.aτ, bw.S[], y0; atol)
     npass, nrefine, status, Δτ, pres1, dres1 = refinehsd!(
         Δp, Δy, Δτ, bw.inner, H, B, c, g, Qp, p, bw.aτ, τ, κ, rp, f, fτ, bw.Δp2, bw.Δy2, bw.S[],
-        bw.inner.sp, bw.inner.sd, bw.inner.dp, bw.inner.dy, nc, ng;
-        itmax, force_tol, floor_tol, stall,
+        bw.inner.sp, bw.inner.sd, bw.inner.dp, bw.inner.dy;
+        itmax, ptol, ytol, τtol, stall,
     )
     return nbase, nrefine, npass, status, fres, pres1, dres1, Δτ
 end
@@ -175,23 +172,22 @@ function refinehsd!(
     sp::AbstractVector{T},  # scratch for primal residual
     sd::AbstractVector{T},  # scratch for dual residual
     dp::AbstractVector{T},  # scratch for correction
-    dy::AbstractVector{T},
-    nc::T,
-    ng::T;
+    dy::AbstractVector{T};
     itmax::Int,
-    force_tol::T,
-    floor_tol::T,
+    ptol::T,
+    ytol::T,
+    τtol::T,
     stall::T,
 ) where {UPLO, T}
     niter = 0
     npass = 0
     #
-    # craig works in unscaled 2-norms; the loop measures pres = ‖sp‖₂/(1+ng), so its craig tolerance is
-    # that × (1+ng). First-order in the bordered path: craig's exit residual is sp − B·dp_uzw, but the
-    # applied dp is Schur-lifted (dp_uzw + dτ·Δp2), so sp' = craig_resid + dτ·r₂ (r₂ = g − B·Δp2, §3). So
-    # (1+ng) is the correct first-order translation, not an equality. Only ng — the dual row is border-free.
+    # craig works in unscaled 2-norms; the loop measures pres = ‖sp‖₂ against ptol, so its craig tolerance
+    # IS ptol. First-order in the bordered path: craig's exit residual is sp − B·dp_uzw, but the applied dp
+    # is Schur-lifted (dp_uzw + dτ·Δp2), so sp' = craig_resid + dτ·r₂ (r₂ = g − B·Δp2, §3). So ptol is the
+    # correct first-order translation, not an equality. Only ptol — the dual row is border-free.
     #
-    atol = max(force_tol, floor_tol) * (one(T) + ng)
+    atol = ptol
     status = REFINE_ITMAX
     prv = typemax(T)
     #
@@ -221,24 +217,22 @@ function refinehsd!(
         #
         sτ += (2dot(Qp, Δp) - Δτ * pQpτκ) / τ
 
-        pres = norm(sp) / (one(T) + ng)
-        dres = norm(sd) / (one(T) + nc)
-        τres = abs(sτ) / (one(T) + nc + ng)
+        pres = norm(sp)
+        dres = norm(sd)
+        τres = abs(sτ)
 
         if isone(i)
             pres1 = pres
             dres1 = dres
         end
 
-        res = max(pres, dres, τres)
+        # τ (border) row: τtol is the caller's absolute target for the border residual (= tol·(1+nc+ng),
+        # matching the old abs(sτ)/(1+nc+ng) ≤ tol test exactly). Converged iff all three rows are within
+        # their targets: ‖sp‖ ≤ ptol ∧ ‖sd‖ ≤ ytol ∧ abs(sτ) ≤ τtol.
+        res = max(pres / ptol, dres / ytol, τres / τtol)
 
-        if res ≤ force_tol
-            status = REACHED_FORCE
-            break
-        end
-
-        if res ≤ floor_tol
-            status = REACHED_FLOOR
+        if res ≤ one(T)
+            status = REACHED
             break
         end
 

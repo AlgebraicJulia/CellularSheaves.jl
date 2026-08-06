@@ -87,10 +87,10 @@ end
 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
 #   [ B   0  ] [ Δya ] = [ rp     ]
 #
-function solvepredictor!(s::IPMSolver{T}; force_tol::T, floor_tol::T) where {T}
+function solvepredictor!(s::IPMSolver{T}; ptol::T, ytol::T) where {T}
     return solvepredictor!(
-        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.d, s.nc[], s.ng[];
-        force_tol, floor_tol,
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.d;
+        ptol, ytol,
     )
 end
 
@@ -101,11 +101,9 @@ function solvepredictor!(
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         Q::BlockSparseMatrix{T},
-        d::AbstractVector{T},
-        nc::T,
-        ng::T;
-        force_tol::T,
-        floor_tol::T,
+        d::AbstractVector{T};
+        ptol::T,
+        ytol::T,
     ) where {T}
     axpby!(-1, d, 0, w.f)
     axpby!(1, w.rd, 1, w.f)
@@ -116,8 +114,8 @@ function solvepredictor!(
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
     pbase, prefn, ppass, pstat, pfres, ppres, pdres = solvekkt!(
-        kkt, w.Δpa, w.Δya, H, B, w.f, w.rp, nc, ng;
-        force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
+        kkt, w.Δpa, w.Δya, H, B, w.f, w.rp;
+        ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δda:
@@ -139,11 +137,11 @@ end
 #
 # where rd* is the corrected dual residual
 #
-function solvecorrector!(s::IPMSolver{T}, μ::T; force_tol::T, floor_tol::T) where {T}
+function solvecorrector!(s::IPMSolver{T}, μ::T; ptol::T, ytol::T) where {T}
     return solvecorrector!(
         s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.K, s.p, s.d,
-        s.caches, s.conewrk, s.ν, s.nc[], s.ng[], μ;
-        force_tol, floor_tol,
+        s.caches, s.conewrk, s.ν, μ;
+        ptol, ytol,
     )
 end
 
@@ -160,11 +158,9 @@ function solvecorrector!(
         caches::Caches{T},
         conewrk::ConeWorkspace{T},
         ν::Integer,
-        nc::T,
-        ng::T,
         μ::T;
-        force_tol::T,
-        floor_tol::T,
+        ptol::T,
+        ytol::T,
     ) where {T}
     #
     # compute the largest step length τa ∈ (0, 1]
@@ -221,8 +217,8 @@ function solvecorrector!(
     #   [ B   0  ] [ Δy ] = [ rp  ]
     #
     cbase, crefn, cpass, cstat, cfres, cpres, cdres = solvekkt!(
-        kkt, w.Δp, w.Δy, H, B, w.f, w.rp, nc, ng, w.Δya;
-        force_tol, floor_tol, stall=set.refine_stall, itmax=set.refine_itmax,
+        kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya;
+        ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δd:
@@ -371,7 +367,7 @@ function step!(s::IPMSolver{T}) where {T}
     pbase = cbase = 0       # base-solve CRAIG per role
     prefn = crefn = 0       # refinement CRAIG per role
     ppass = cpass = 0       # refinement passes per role
-    pstat = cstat = REACHED_FORCE   # refinement exit status per role
+    pstat = cstat = REACHED   # refinement exit status per role
     step = zero(T)
     pfres = ppres = pdres = T(NaN)
     cfres = cpres = cdres = T(NaN)
@@ -452,9 +448,9 @@ function step!(s::IPMSolver{T}) where {T}
                     μ1 = first(s.hist.μ)
                 end
 
-                # forcing term η (vartol / EW Choice 2). Relative forcing passes η to the backend as a
-                # NEGATIVE force_tol (sentinel); the backend decodes it and sets force_tol = η·R0 from each
-                # solve's own rhs (per-instance R0). mode 0 = absolute μ-schedule (positive force_tol).
+                # forcing term η (vartol / EW Choice 2). vartol uses the positive shared-R0 proxy
+                # force_tol = η·max(pres,dres); mode 0 = absolute μ-schedule. force_tol/floor_tol are
+                # combined into tol below, then converted to the solver's absolute ptol/ytol targets.
                 floor_tol = 100eps(T) * (1 + max(norm(w.rp) / (1 + s.ng[]),
                                                  norm(w.rd) / (1 + s.nc[])))
                 mode = s.settings.forcing == 0 && s.settings.vartol ? 1 : s.settings.forcing
@@ -468,16 +464,24 @@ function step!(s::IPMSolver{T}) where {T}
                     force_tol = max(ηv * max(pres, dres), s.settings.feas_tol)
                 elseif mode == 4
                     force_tol = s.settings.feas_tol   # fixtol: solve to feas_tol every iteration
-                else                        # vartol: relative target η·R0, passed as the −η sentinel
-                    force_tol = -max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0))
+                else                        # vartol: relative target η·max(pres,dres) (shared-R0 proxy)
+                    force_tol = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0)) * max(pres, dres)
                 end
+                #
+                # convert to the KKT solver's absolute residual targets: ptol (primal) / ytol (dual).
+                #
+                tol = max(force_tol, floor_tol)
+                ptol = tol * (1 + s.ng[])
+                ytol = tol * (1 + s.nc[])
                 #
                 # solve for the Mehrotra predictor direction
                 #
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                pbase, prefn, ppass, pstat, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s; force_tol, floor_tol)
+                pbase, prefn, ppass, pstat, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s; ptol, ytol)
+                # entry residuals come back UNSCALED; re-scale to the recorded scaled units for the history.
+                ppres = ppres / (1 + s.ng[]); pdres = pdres / (1 + s.nc[])
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -492,7 +496,9 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                cbase, crefn, cpass, cstat, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ; force_tol, floor_tol)
+                cbase, crefn, cpass, cstat, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ; ptol, ytol)
+                # entry residuals come back UNSCALED; re-scale to the recorded scaled units for the history.
+                cpres = cpres / (1 + s.ng[]); cdres = cdres / (1 + s.nc[])
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -500,7 +506,7 @@ function step!(s::IPMSolver{T}) where {T}
                     end
                 end
 
-                if s.settings.verbose > 1 && (pstat != REACHED_FORCE || cstat != REACHED_FORCE)
+                if s.settings.verbose > 1 && (pstat !== REACHED || cstat !== REACHED)
                     @info "KKT solve above target tolerance" pstat cstat
                 end
                 #
@@ -530,10 +536,9 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 #   α* ∈ [αmin, αmax]
                 #
-                pok = pstat === REACHED_FORCE || pstat === REACHED_FLOOR
-                cok = cstat === REACHED_FORCE || cstat === REACHED_FLOOR
+                pok = pstat === REACHED
+                cok = cstat === REACHED
                 state = pok && cok
-                tol = max(force_tol, floor_tol)
 
                 if s.settings.policy == 1
                     # Tier 1: aggregate the predictor and corrector solves (worst case each end).
@@ -562,13 +567,6 @@ function step!(s::IPMSolver{T}) where {T}
 
     push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat,
         pfres, ppres, pdres, cfres, cpres, cdres, αmin, αmax))
-    if status == CONTINUE && atfloor(s.hist; patience=s.settings.floor_patience)
-        if s.settings.verbose > 1
-            @warn "Refinement floor reached $(s.settings.floor_patience) consecutive times"
-        end
-
-        status = nearstatus(s, NUMERICAL_FAILURE)
-    end
 
     return status
 end

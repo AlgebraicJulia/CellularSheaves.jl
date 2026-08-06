@@ -79,10 +79,6 @@ function isnumfail(s::AbstractSolver)
     return isnumfail(s.hist; threshold=s.settings.stall_tol)
 end
 
-function atfloor(s::AbstractSolver)
-    return atfloor(s.hist; patience=s.settings.floor_patience)
-end
-
 function initkkt!(s::AbstractSolver{T}) where {T}
     # s.ρ[] is the running ρ-shift floor (state): it feeds in as the ladder's starting rung and rises
     # monotonically so a later solve never re-climbs from below a shift an earlier one already needed.

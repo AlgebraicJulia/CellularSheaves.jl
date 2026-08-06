@@ -20,7 +20,7 @@
 
 using LinearAlgebra: norm, Symmetric
 using Printf: @sprintf
-using CellularSheaves.IPM: step!, mu, CONTINUE, REACHED_FORCE, REACHED_FLOOR,
+using CellularSheaves.IPM: step!, mu, CONTINUE, REACHED,
     getaug, CTRL_CAP_IPM, CTRL_CAP_HSD, IPMSolver, HSDSolver
 
 # The controller cap the live setaug! would use, per solver kind.
@@ -29,7 +29,7 @@ _ctrl_cap(::HSDSolver) = CTRL_CAP_HSD
 
 const DEFAULT_ALPHA_GRID = [round(10.0^e, sigdigits=4) for e in 0.0:0.5:18.0]   # half-decades 1e0..1e18 (37 pts)
 
-_reached(st) = st === REACHED_FORCE || st === REACHED_FLOOR
+_reached(st) = st === REACHED
 
 function _oracle_state(row)
     r = _reached(row.pstat) && _reached(row.cstat)

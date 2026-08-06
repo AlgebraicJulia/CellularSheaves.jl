@@ -103,10 +103,11 @@ function inituzw!(
     return false, ρ
 end
 
-# Solve the 2-row KKT system to atol = max(force_tol, floor_tol): a base solve plus the solver-owned
-# iterative-refinement loop, returning a typed exit (Govaerts–Pryce BE+1). This is the guarantee — the
-# residual is driven to atol or the exit says why not (floor / stalled / itmax). Refinement scratch is
-# workspace-resident. Returns (nbase, nrefine, npass, status, fres, entry_pres, entry_dres).
+# Solve the 2-row KKT system to the absolute residual targets ptol (primal) / ytol (dual): a base solve
+# plus the solver-owned iterative-refinement loop, returning a typed exit (Govaerts–Pryce BE+1). This is
+# the guarantee — the residual is driven so that ‖sp‖ ≤ ptol ∧ ‖sd‖ ≤ ytol (status REACHED) or the exit
+# says why not (stalled / itmax). Refinement scratch is workspace-resident.
+# Returns (nbase, nrefine, npass, status, fres, entry_pres, entry_dres).
 function solvekkt!(
     wrk::UzawaSolver{UPLO, T},
     Δp::AbstractVector{T},
@@ -115,30 +116,18 @@ function solvekkt!(
     B::BlockSparseMatrix{T},
     f::AbstractVector{T},
     rp::AbstractVector{T},
-    nc::T,
-    ng::T,
     y0 = nothing;
-    force_tol::T,
-    floor_tol::T,
+    ptol::T,
+    ytol::T,
     stall::T,
     itmax::Int,
 ) where {UPLO, T}
     #
     # craig's exit residual is the next refinement pass's primal residual sp (rp − B(Δp+dp) = sp − B·dp),
-    # and the loop's convergence test is pres = ‖sp‖₂/(1+ng) ≤ max(force_tol, floor_tol). Clearing the
-    # denominator, craig's target is that tolerance times (1+ng) — no over-solving to a bare tolerance.
-    # Only ng appears: craig owns the primal row; the dual row is craig-independent.
+    # and the loop's convergence test is ‖sp‖₂ ≤ ptol. So craig's target IS ptol — no over-solving to a
+    # bare tolerance. Only ptol appears: craig owns the primal row; the dual row is craig-independent.
     #
-    #
-    # vartol (negative force_tol sentinel from step!): decode τ = -force_tol and make the target relative
-    # to THIS instance's own rhs, R0 = max(‖f‖/(1+nc), ‖rp‖/(1+ng)). Computed here, before the base solve,
-    # off the original rhs (trap 2). Predictor and corrector — and the HSD Woodbury column, rhs = (c, g) —
-    # each get their own R0.
-    #
-    if force_tol < zero(T)
-        force_tol = -force_tol * max(norm(f) / (one(T) + nc), norm(rp) / (one(T) + ng))
-    end
-    atol = max(force_tol, floor_tol) * (one(T) + ng)
+    atol = ptol
     #
     # base solve
     #
@@ -164,22 +153,17 @@ function solvekkt!(
         axpby!(one(T), f,  -one(T), sd)
         axpby!(one(T), rp, -one(T), sp)
 
-        dres = norm(sd) / (one(T) + nc)
-        pres = norm(sp) / (one(T) + ng)
-        res = max(dres, pres)
+        dres = norm(sd)
+        pres = norm(sp)
+        res = max(pres / ptol, dres / ytol)
 
         if isone(i)
             pres1 = pres
             dres1 = dres
         end
 
-        if res ≤ force_tol
-            status = REACHED_FORCE
-            break
-        end
-
-        if res ≤ floor_tol
-            status = REACHED_FLOOR
+        if res ≤ one(T)
+            status = REACHED
             break
         end
 
@@ -202,13 +186,6 @@ function solvekkt!(
         axpy!(one(T), dy, Δy)
     end
 
-    if get(ENV, "VTDBG", "0") == "1"
-        # TEMP diagnostic: asked tolerance per KKT instance. ft = force_tol (effective, = τ·R0 under
-        # vartol), fl = floor_tol, tol = max, bind = which won, craig = base+refn CRAIG spent.
-        bind = force_tol ≥ floor_tol ? "FORCE" : "floor"
-        println("  VT ft=", force_tol, " fl=", floor_tol, " tol=", max(force_tol, floor_tol),
-                " bind=", bind, " craig=", (nbase - 1) + nrefine, " np=", npass, " st=", status)
-    end
     return nbase, nrefine, npass, status, fres, pres1, dres1
 end
 
