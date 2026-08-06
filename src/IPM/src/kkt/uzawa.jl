@@ -210,6 +210,7 @@ function solveuzw!(
         atol::T,
         y0 = nothing;
         θ::T = zero(T),
+        craig::Bool = true,
     ) where {UPLO, T}
     m, n = size(B)
 
@@ -260,8 +261,15 @@ function solveuzw!(
     #   x ← x +   δx
     #   r ← r - B δx
     #
-    nc, _ = craig!(itrwrk, B, F, divwrk, x, y, r; atol = max(atol, θ * nr0))
-    niter += nc
+    # bare backsolve (craig=false): skip the CRAIG correction — x is the base F-apply, y is recovered from
+    # the raw residual r. One application, returns nr0 as the residual. Used for the Woodbury column, whose
+    # accuracy is set by the consumer's targets, not solved up front (bordered.jl §Change 2).
+    if craig
+        nc, _ = craig!(itrwrk, B, F, divwrk, x, y, r; atol = max(atol, θ * nr0))
+        niter += nc
+    else
+        fill!(y, zero(T))   # no CRAIG correction (δy = 0); craig! is what writes y, so zero it explicitly
+    end
     #
     # recover y:
     #
@@ -275,4 +283,20 @@ function solveuzw!(
     end
 
     return niter, nr0
+end
+
+# Bare backsolve of the 2-row KKT system: one F-apply, no CRAIG, no refinement. Returns (napp=1, nr0)
+# where nr0 = ‖g − B x‖. The Woodbury column uses this — its accuracy is driven later, against the
+# consumer's targets, rather than solved up front (bordered.jl Change 2).
+function backsolve!(
+        wrk::UzawaSolver{UPLO, T},
+        x::AbstractVector{T},
+        y::AbstractVector{T},
+        A::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        f::AbstractVector{T},
+        g::AbstractVector{T},
+        y0 = nothing,
+    ) where {UPLO, T}
+    return solveuzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, A, B, f, g, wrk.α[], zero(T), y0; craig=false)
 end

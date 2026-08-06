@@ -1,8 +1,10 @@
 # Bordered KKT solver — wraps a 2-row KKTSolver and adds the HSD τ-border via a Woodbury/Schur update.
-# The Woodbury column w₂ = KKT⁻¹[c; g] and the capacitance scalar S are cached: they are fixed for a
-# given factorization and reused by the predictor and corrector solves at that factorization. The border
-# data (c, g, Q, Hc) is passed per call, not stored. initkkt! factors + solves/caches w₂ + capacitance;
-# solvekkt! does the bordered base solve (newton!) + the 3-row refinement (refinehsd!).
+# The Woodbury column w₂ = KKT⁻¹[c; g] and the capacitance scalar S are cached for a given factorization
+# and reused by the predictor and corrector at that factorization. The column starts as a bare backsolve
+# (1 application) and is driven per consumer to targets derived from dt = num/S (Change 2), so S moves as
+# the column tightens — cache (Δp2, Δy2, S) together and recompute S whenever the column moves. The border
+# data (c, g, Q, Hc) is passed per call, not stored. initkkt! factors + bare-backsolves w₂ + caches
+# capacitance; solvekkt! does the 2-row base solve + column loop + Schur lift + 3-row refinement net.
 struct BorderedSolver{T, W <: KKTSolver{T}} <: KKTSolver{T}
     inner::W          # the 2-row solver (factor + base solve primitive)
     Δp2::FVector{T}    # cached Woodbury column, primal part (n)
@@ -21,7 +23,7 @@ function BorderedSolver(inner::W, B::BlockSparseMatrix{T, I}) where {T, I, W <: 
 end
 
 ############################################################################################
-# woodbury! / capacitance! / newton!
+# initkkt! (bare backsolve) / solvekkt! (base + column loop + lift) / capacitance!
 ############################################################################################
 
 # solve for the Woodbury auxiliary directions
@@ -55,26 +57,23 @@ function initkkt!(
     ok, ρ = initkkt!(bw.inner, H; α, rgmin)
     ok || return ok, ρ, (0, 0, 0, REFINE_ITMAX, T(NaN), T(NaN), T(NaN))
     #
-    # solve & cache the Woodbury column   [ H -Bᵀ; B 0 ] [Δp2; Δy2] = [c; g]  to the working tolerance.
-    # (The units spec's §3 solved it to floor_tol — the theory being that its residual r₂ = g − B·Δp2 is
-    # re-injected as dτ·r₂ by every Schur lift, and the capacitance bw.S[] is computed from Δp2. But §2
-    # showed dτ·r₂ is NOT the refinement bottleneck here — npass didn't rise — and forcing the column to
-    # ~100eps burned 22–28 CRAIG on it, drove Δp2/S to the noise floor, and broke e04-hsd to
-    # NUMERICAL_FAILURE. So it stays at working tol.) NB the RHS here IS (c, g) with nc/ng = ‖c‖/‖g‖, so
-    # (1+nc)/(1+ng) is a genuine relative-residual test, not fixed problem-data constants — don't "fix" it.
+    # bare backsolve for the Woodbury column [ H -Bᵀ; B 0 ][Δp2; Δy2] = [c; g] — ONE application, no CRAIG,
+    # no refinement (Change 2). The column is not solved to a tolerance here: its required accuracy is set
+    # per consumer by dt = num/S (computable only after S, which this backsolve yields). Solving it up
+    # front to the Newton tolerances over-solves fixed data (c,g) by up to 10 decades late in a run.
     #
-    wtuple = solvekkt!(bw.inner, bw.Δp2, bw.Δy2, H, B, c, g, y0;
-                       ptol, ytol, stall, itmax)
+    napp, r2 = backsolve!(bw.inner, bw.Δp2, bw.Δy2, H, B, c, g, y0)
     #
     # cache the capacitance scalar S and border row aτ = c - 2Qp/τ (stable split form)
     #
     bw.S[] = capacitance!(bw.QΔp2, bw.aτ, τ, κ, bw.Δp2, bw.Δy2, c, g, Qp, p, Hc, Q)
-    return ok, ρ, wtuple
+    return ok, ρ, (napp, 0, 0, REACHED, r2, r2, T(NaN))
 end
 
-# BorderedSolver solve: the bordered guarantee — newton! (2-row base + Schur lift, reusing the cached
-# Woodbury column and capacitance) then refinehsd! (3-row iterative refinement). Refinement scratch is
-# the inner solver's. Returns (nbase, nrefine, npass, status, fres, entry_pres, entry_dres, Δτ).
+# BorderedSolver solve: 2-row base solve to (ptol, ytol), then the column loop (tighten the Woodbury
+# column to the consumer's dt-derived targets, recomputing S), then the Schur lift, then refinehsd!
+# (3-row refinement net). Refinement scratch is the inner solver's. Column re-solve CRAIG folds into
+# nbase. Returns (nbase, nrefine, npass, status, fres, entry_pres, entry_dres, Δτ).
 function solvekkt!(
         bw::BorderedSolver{T},
         Δp::AbstractVector{T},
@@ -97,14 +96,70 @@ function solvekkt!(
         stall::T,
         itmax::Int,
     ) where {T}
-    # craig units: the base solve's primal tolerance IS ptol — one place. newton! forwards this straight
-    # to solveuzw!; do not re-scale inside it. First-order in the bordered path (the Schur lift injects
-    # dτ·r₂ each pass — see refinehsd! and §3).
-    atol = ptol
-    nbase, Δτ, fres = newton!(Δp, Δy, bw.inner, H, B, g, f, rp, fτ, bw.Δp2, bw.Δy2, bw.aτ, bw.S[], y0; atol)
+    inner = bw.inner
+    #
+    # base solve: the 2-row Newton system to (ptol, ytol) — backsolve + CRAIG (primal) + IR (dual). num
+    # and rb come from this and need no column; this is the one reordering — base solve BEFORE the column.
+    #
+    nb, nr, _, _, fres, _, _ = solvekkt!(inner, Δp, Δy, H, B, f, rp, y0; ptol, ytol, stall, itmax)
+    nbase = nb + nr
+    #
+    # rb = ‖rp - B·Δp0‖ (primal budget already spent); num = fτ - aτᵀΔp0 - gᵀΔy0 (needs no column).
+    #
+    sp = inner.sp; sd = inner.sd
+    mul!(sp, B, Δp)
+    axpby!(one(T), rp, -one(T), sp)
+    rb = norm(sp)
+    num = fτ - dot(bw.aτ, Δp) - dot(g, Δy)
+    #
+    # column loop: drive the Woodbury column to targets set by the consumer's dt = num/S. The lift injects
+    # dt·r₂ into the primal row (must fit ptol - rb) and dt·r_d2 into the dual row (must fit ytol), where
+    # r₂ = g - B·Δp2 and r_d2 = H·Δp2 - Bᵀ·Δy2 - c. Tightening the column moves Δp2,Δy2 → S → dt →
+    # targets, so recompute S and re-check (cap 6, observed depth ≤ 2). δ and the CRAIG floor are fixed.
+    #
+    δ = dot(p, Qp) / τ^2 + κ / τ
+    flr = eps(T) * (norm(c) + norm(g)) * κ
+    for _ in 1:6
+        dt = num / bw.S[]
+        adt = abs(dt)
+        ptgt = (ptol - rb) / adt
+        ytgt = ytol / adt
+        #
+        # a target under the CRAIG floor cannot be reached by tightening the column — proceed and let the
+        # 3-row refinement net see the (small) injected residual rather than thrashing CRAIG on it.
+        #
+        (ptgt < flr || ytgt < flr) && break
+        #
+        # r₂ = ‖g - B·Δp2‖ (primal) and r_d2 = ‖H·Δp2 - Bᵀ·Δy2 - c‖ (dual); mulkkt! yields both pieces.
+        #
+        mulkkt!(sd, sp, H, B, bw.Δp2, bw.Δy2)
+        axpby!(one(T), g, -one(T), sp)
+        r2 = norm(sp)
+        axpy!(-one(T), c, sd)
+        r_d2 = norm(sd)
+        (r2 ≤ ptgt && r_d2 ≤ ytgt) && break
+        #
+        # tighten the column to (ptgt, ytgt) and recompute S from the moved column (bare inner product —
+        # a tightened column barely cancels; also pre-figures the capacitance guard removal).
+        #
+        nb2, nr2, _, _, _, _, _ = solvekkt!(inner, bw.Δp2, bw.Δy2, H, B, c, g; ptol=ptgt, ytol=ytgt, stall, itmax)
+        nbase += nb2 + nr2
+        bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + δ
+    end
+    #
+    # lift (dt paired with the FINAL S — the τ-row exactness of Change 1 needs S formed from the same
+    # Δp2,Δy2 the lift adds).
+    #
+    dt = num / bw.S[]
+    Δτ = dt
+    axpy!(dt, bw.Δp2, Δp)
+    axpy!(dt, bw.Δy2, Δy)
+    #
+    # 3-row refinement safety net (should pass at pass 0 when both targets were met).
+    #
     npass, nrefine, status, Δτ, pres1, dres1 = refinehsd!(
-        Δp, Δy, Δτ, bw.inner, H, B, c, g, Qp, p, bw.aτ, τ, κ, rp, f, fτ, bw.Δp2, bw.Δy2, bw.S[],
-        bw.inner.sp, bw.inner.sd, bw.inner.dp, bw.inner.dy;
+        Δp, Δy, Δτ, inner, H, B, c, g, Qp, p, bw.aτ, τ, κ, rp, f, fτ, bw.Δp2, bw.Δy2, bw.S[],
+        inner.sp, inner.sd, inner.dp, inner.dy;
         itmax, ptol, ytol, τtol, stall,
     )
     return nbase, nrefine, npass, status, fres, pres1, dres1, Δτ
@@ -294,53 +349,4 @@ function refinehsd!(
     end
 
     return npass, niter, status, Δτ, pres1, dres1
-end
-
-#
-# solve for the directions Δp, Δy, and Δτ
-#
-#   [  H          -Bᵀ             -c ] [ Δp ]   [ f  ]
-#   [  B           0              -g ] [ Δy ] = [ rp ]
-#   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ fτ ]
-#
-function newton!(
-        Δp::AbstractVector{T},
-        Δy::AbstractVector{T},
-        wrk::UzawaSolver{UPLO, T},
-        H::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        g::AbstractVector{T},
-        f::AbstractVector{T},
-        rp::AbstractVector{T},
-        fτ::T,
-        Δp2::AbstractVector{T},
-        Δy2::AbstractVector{T},
-        aτ::AbstractVector{T},
-        S::T,
-        y0 = nothing;
-        atol::T,
-    ) where {UPLO, T}
-    #
-    # base solve for Δp and Δy (the 2-row primitive; the 3-row refinement is refinehsd!):
-    #
-    #   [ H -Bᵀ ] [ Δp ] = [ f  ]
-    #   [ B  0  ] [ Δy ]   [ rp ]
-    #
-    niter, nr0 = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.F, H, B, f, rp, wrk.α[], atol, y0)
-    #
-    # apply the Schur lift:
-    #
-    #   Δτ = (fτ - aτᵀΔp - gᵀΔy) / S
-    #
-    Δτ = (fτ - dot(aτ, Δp) - dot(g, Δy)) / S
-    #
-    # apply Woodbury update:
-    #
-    #   Δp ← Δp + Δτ Δp2
-    #   Δy ← Δy + Δτ Δy2
-    #
-    axpy!(Δτ, Δp2, Δp)
-    axpy!(Δτ, Δy2, Δy)
-
-    return niter, Δτ, nr0
 end
