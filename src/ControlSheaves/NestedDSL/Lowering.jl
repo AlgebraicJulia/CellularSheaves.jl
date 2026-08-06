@@ -361,15 +361,20 @@ targets by the names they declared.
 Every declared target must be present; an unknown name is an error rather than being ignored.
 """
 function target_vector(c::CompiledNestedSystem, values::AbstractDict)
-    for k in keys(values)
-        Symbol(k) in c.targets || throw(NestedDSLError(
+    normalized = Dict{Symbol,Any}()
+    for (k, v) in values
+        name = Symbol(k)
+        name in c.targets || throw(NestedDSLError(
             "unknown target `$k` (declared: $(join(c.targets, ", ")))"))
+        haskey(normalized, name) && throw(NestedDSLError(
+            "target `$name` given more than once (keys collide once normalized to symbols)"))
+        normalized[name] = v
     end
     out = Vector{Any}(undef, length(c.targets))
     for (i, name) in enumerate(c.targets)
-        haskey(values, name) || throw(NestedDSLError(
+        haskey(normalized, name) || throw(NestedDSLError(
             "no value given for target `$name` (declared targets: $(join(c.targets, ", ")))"))
-        out[i] = values[name]
+        out[i] = normalized[name]
     end
     return identity.(out)
 end

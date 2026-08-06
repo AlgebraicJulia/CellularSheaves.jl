@@ -91,11 +91,14 @@ _dsl_error(msg) = throw(NestedDSLError(msg))
 
 Run a block of declarations, returning the [`SystemFragment`](@ref) they build.
 
-The block is executed as ordinary Julia in the caller's scope; only the declaration macros
-listed in the module docstring are interpreted, and everything else — loops, conditionals, local
-variables, function calls — behaves exactly as it would outside the block. A nested
-`@nested_system` (which `@system … begin … end` uses internally) shadows the outer builder, so
-declarations always attach to the innermost enclosing node.
+The block is executed as ordinary Julia; only the declaration macros listed in the module
+docstring are interpreted, and everything else — loops, conditionals, local variables, function
+calls — behaves exactly as it would outside the block, with one exception: the whole block is
+wrapped in a `let`, so it opens its own local scope. Variables from the enclosing scope are
+still visible and mutable, but a bare assignment inside the block creates a new local rather than
+leaking out (the same as writing a `let` block yourself at that spot). A nested `@nested_system`
+(which `@system … begin … end` uses internally) shadows the outer builder, so declarations always
+attach to the innermost enclosing node.
 
 The returned fragment describes *one node*. It carries no notion of where in a tree it sits, so
 it may be merged with another fragment for the same node ([`merge`](@ref)), spliced into one
