@@ -162,6 +162,10 @@ end
             @test_throws NestedDSLError target_vector(c, Dict(:t1 => [1.0, 0, 0, 1],
                                                               :t2 => [1.0, 0, 0, 1],
                                                               :t9 => [1.0, 0, 0, 1]))
+            # String keys normalize to the same Symbol lookups as keyword-style Symbol keys.
+            v_str = target_vector(c, Dict("t1" => [1.0, 0, 0, 1], "t2" => [2.0, 0, 0, 1]))
+            @test v_str == v
+            @test_throws NestedDSLError target_vector(c, Dict("t1" => [1.0, 0, 0, 1]))
         end
     end
 
