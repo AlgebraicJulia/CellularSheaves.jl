@@ -164,4 +164,23 @@ plot(p1, p2, p3, p4, layout=(2, 2), size=(1100, 900),
 # rescales. The unconstrained swarm's irregularity grows steadily, and its final shape is visibly
 # not a regular hexagon -- the six different divergence rates show up directly as distortion.
 
+# ## Animated top-down view
+
+function rescaling_frame(step::Int)
+    t = time_grid[step]
+    p = plot(title=@sprintf("Top-Down View (t = %.2f s)", t), aspect_ratio=1,
+            xlabel="x (m)", ylabel="y (m)", xlims=TOPDOWN_XLIM, ylims=TOPDOWN_YLIM,
+            legend=:outertopright)
+    formation_snapshot!(p, rigid_agents[step], colors.rigid, 1.0, "rigid (rescaling)")
+    formation_snapshot!(p, unconstrained_agents[step], colors.unconstrained, 1.0, "unconstrained")
+    return p
+end
+
+anim = @animate for step in 1:4:N_STEPS
+    rescaling_frame(step)
+end
+gif(anim, "rescaling_formation_top_down.gif", fps=10)
+
+# ![Rescaling formation top-down animation](rescaling_formation_top_down.gif)
+
 println("Emergent rescaling formation example complete.")
