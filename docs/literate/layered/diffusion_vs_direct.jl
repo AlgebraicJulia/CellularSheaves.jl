@@ -371,46 +371,61 @@ dir_stages = stage_profile(:direct, profile_scenario; ticks = dir_settle.ticks, 
 @printf("6x6 grid: Diffusion converges in %d ticks, Direct in %d\n",
         diff_settle.ticks, dir_settle.ticks)
 
-# Timing is reported as a minimum and a 90th percentile. The spread between them is the
-# honest measure of how much garbage collection and scheduler noise a stage suffers, which a
-# bare minimum hides. Allocation is measured inside a function, because at global scope the
-# boxing of non-constant globals is attributed to the call and reports allocations that the
-# stage never performs.
+# Times are per call, reported as a minimum and a 90th percentile. The spread between them
+# is the honest measure of how much garbage collection and scheduler noise a stage suffers,
+# which a bare minimum hides. Allocation is measured inside a function, because at global
+# scope the boxing of non-constant globals is attributed to the call and reports allocations
+# that the stage never performs.
 
-stage_rows(stages) = [((string(st.stage), st.description, st.cadence, comma(st.calls),
-        @sprintf("%.3f µs", 1e6st.t_min), @sprintf("%.3f µs", 1e6st.t_p90),
-        @sprintf("%.1f µs", 1e6 * st.calls * st.t_min),
-        fmt_bytes(st.bytes), comma(st.allocs), comma(st.flops), comma(st.nonzeros),
-        fmt_bytes(st.resident)), nowin(12)) for st in stages]
+## Split across two tables so that neither exceeds the width of the page: a wide
+## table whose columns cannot shrink below their contents overflows regardless of
+## the width it declares.
+timing_rows(stages) = [((st.description, st.cadence, comma(st.calls),
+        @sprintf("%.3f / %.3f", 1e6st.t_min, 1e6st.t_p90),
+        @sprintf("%.1f", 1e6 * st.calls * st.t_min)), nowin(5)) for st in stages]
 
-stage_headers = ["stage", "what it does", "cadence", "calls", "min", "p90", "total",
-    "alloc/call", "allocs", "flop/call", "nonzeros", "per-agent memory"]
+timing_headers = ["stage", "cadence", "calls", "µs/call (min / p90)", "µs total"]
+
+resource_rows(stages) = [((st.description, fmt_bytes(st.bytes), comma(st.allocs),
+        comma(st.flops), comma(st.nonzeros), fmt_bytes(st.resident)), nowin(6))
+    for st in stages]
+
+resource_headers = ["stage", "alloc/call", "allocs", "flop/call", "nonzeros",
+    "memory/agent"]
 
 # **Diffusion**, top to bottom. There is no setup: the loop is a neighbour sum and two
 # vector updates.
 
-bench_table(stage_headers, stage_rows(diff_stages))
+bench_table(timing_headers, timing_rows(diff_stages))
+
+# The same stages, by the resources they consume rather than the time they take.
+
+bench_table(resource_headers, resource_rows(diff_stages))
 
 # **Direct**, top to bottom. The first four stages are the harmonic extension, and they are
 # charged in full.
 
-bench_table(stage_headers, stage_rows(dir_stages))
+bench_table(timing_headers, timing_rows(dir_stages))
+
+# And Direct's resource profile, where the setup stages account for essentially all of the
+# allocation.
+
+bench_table(resource_headers, resource_rows(dir_stages))
 
 diff_tot = stage_totals(diff_stages)
 dir_tot = stage_totals(dir_stages)
 setup_share = 100 * sum(st.t_min for st in dir_stages if st.cadence == "once") /
               sum(st.calls * st.t_min for st in dir_stages)
 
-bench_table(["law", "total compute", "heap allocated", "allocations", "arithmetic",
-             "per-agent memory", "fleet memory"],
-    [(("Diffusion", @sprintf("%.1f µs", 1e6diff_tot.seconds), fmt_bytes(diff_tot.bytes),
-       comma(diff_tot.allocs), @sprintf("%.2f Mflop", diff_tot.flops / 1e6),
-       fmt_bytes(diff_tot.resident), fmt_bytes(diff_tot.resident_fleet)),
-      (false, false, true, true, false, true, true)),
-     (("Direct", @sprintf("%.1f µs", 1e6dir_tot.seconds), fmt_bytes(dir_tot.bytes),
-       comma(dir_tot.allocs), @sprintf("%.2f Mflop", dir_tot.flops / 1e6),
-       fmt_bytes(dir_tot.resident), fmt_bytes(dir_tot.resident_fleet)),
-      (false, true, false, false, true, false, false))])
+bench_table(["law", "compute", "allocated", "arithmetic", "memory/agent"],
+    [(("Diffusion", @sprintf("%.1f µs", 1e6diff_tot.seconds),
+       @sprintf("%s (%s)", fmt_bytes(diff_tot.bytes), comma(diff_tot.allocs)),
+       @sprintf("%.2f Mflop", diff_tot.flops / 1e6), fmt_bytes(diff_tot.resident)),
+      (false, false, true, false, true)),
+     (("Direct", @sprintf("%.1f µs", 1e6dir_tot.seconds),
+       @sprintf("%s (%s)", fmt_bytes(dir_tot.bytes), comma(dir_tot.allocs)),
+       @sprintf("%.2f Mflop", dir_tot.flops / 1e6), fmt_bytes(dir_tot.resident)),
+      (false, true, false, true, false))])
 
 @printf("The harmonic extension is %.0f%% of Direct's total compute on this scenario.\n",
         setup_share)
@@ -589,14 +604,14 @@ summary_rows = map(unique(r.name for r in result)) do fam
     last(sort(fr; by = r -> r.agents))
 end
 
-bench_table(["topology", "agents", "κ(ℋ)", "treewidth", "Diffusion ticks", "Direct ticks",
-             "Diffusion compute", "Direct compute", "Direct faster", "Direct fewer slots"],
+bench_table(["topology", "agents", "κ(ℋ)", "treewidth", "ticks (diff / direct)",
+             "µs (diff / direct)", "Direct faster", "fewer slots"],
     [((r.label, comma(r.agents), @sprintf("%.1f", r.condition), string(r.treewidth),
-       comma(r.diffusion.ticks), comma(r.direct.ticks),
-       @sprintf("%.1f µs", 1e6r.diffusion.seconds), @sprintf("%.1f µs", 1e6r.direct.seconds),
+       @sprintf("%s / %s", comma(r.diffusion.ticks), comma(r.direct.ticks)),
+       @sprintf("%.1f / %.1f", 1e6r.diffusion.seconds, 1e6r.direct.seconds),
        @sprintf("%.1f×", r.speedup), @sprintf("%.0f×", r.slot_ratio)),
-      (false, false, false, false, false, r.speedup >= 1, r.speedup < 1, r.speedup >= 1,
-       false, false)) for r in summary_rows])
+      (false, false, false, false, false, false, r.speedup >= 1, true))
+     for r in summary_rows])
 
 # One row per family at its largest sparsely-covered size, with the faster law's tick count
 # shaded. Here is how the two coverage regimes split.
@@ -677,8 +692,8 @@ direct_wins = filter(r -> r.speedup >= 1, result.rows)
 
 # The eight widest margins:
 
-bench_table(["topology", "agents", "coverage", "κ(ℋ)", "treewidth", "Diffusion", "Direct",
-             "Diffusion faster by"],
+bench_table(["topology", "agents", "coverage", "κ(ℋ)", "tw", "Diffusion", "Direct",
+             "faster by"],
     [((r.label, comma(r.agents), string(r.coverage), @sprintf("%.1f", r.condition),
        string(r.treewidth), @sprintf("%.1f µs", 1e6r.diffusion.seconds),
        @sprintf("%.1f µs", 1e6r.direct.seconds), @sprintf("%.2f×", 1 / r.speedup)),
@@ -708,17 +723,16 @@ adversarial_rows = map(((:expander, 32), (:expander, 64), (:expander, 128))) do 
     (sc, st, dif, dir)
 end
 
-bench_table(["n", "κ(ℋ)", "treewidth", "fill", "Diffusion ticks", "Direct ticks",
-             "Diffusion", "Direct", "Diffusion slots", "Direct slots", "winner"],
+bench_table(["n", "κ(ℋ)", "tw", "fill", "Diffusion", "Direct", "slots (D/D)", "winner"],
     [((comma(sc.nagents), @sprintf("%.2f", spectral_summary(sc).condition),
-       string(st.treewidth), comma(st.fill), comma(dif.ticks), comma(dir.ticks),
-       @sprintf("%.1f µs", 1e6dif.seconds), @sprintf("%.1f µs", 1e6dir.seconds),
-       comma(dif.slots), comma(dir.slots),
+       string(st.treewidth), comma(st.fill),
+       @sprintf("%s ticks, %.1f µs", comma(dif.ticks), 1e6dif.seconds),
+       @sprintf("%s ticks, %.1f µs", comma(dir.ticks), 1e6dir.seconds),
+       @sprintf("%s / %s", comma(dif.slots), comma(dir.slots)),
        dif.seconds < dir.seconds ? @sprintf("Diffusion, %.2f×", dir.seconds / dif.seconds) :
                                    @sprintf("Direct, %.1f×", dif.seconds / dir.seconds)),
-      (false, false, false, false, false, false,
-       dif.seconds < dir.seconds, dif.seconds >= dir.seconds, false, true,
-       dif.seconds < dir.seconds))
+      (false, false, false, false, dif.seconds < dir.seconds, dif.seconds >= dir.seconds,
+       false, dif.seconds < dir.seconds))
      for (sc, st, dif, dir) in adversarial_rows])
 
 # The construction works, and it is the only family in the sweep where Diffusion wins at
