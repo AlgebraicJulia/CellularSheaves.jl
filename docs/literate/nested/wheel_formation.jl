@@ -19,6 +19,7 @@
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.NestedDSL
 using CellularSheaves.ControlSheaves.AgentControllers
 using LinearAlgebra
 using Statistics
@@ -44,7 +45,8 @@ escort_radius(n::Int, R_big::Real, m_i::Int, m_max::Int; safety::Real=0.35) =
 """
     build_wheel_spec(n; m=fill(5, n), R_big=3.0, hub_radius=0.4, safety=0.35, D=4, pin_scheme=:redundant)
 
-Build the `n`-spoke hub-and-wheel `NestedSystemSpec`, its compiled `SheafTower`, and the agent
+Build the `n`-spoke hub-and-wheel specification -- the `NestedDSL` [`SystemFragment`](@ref) it is
+written as, the lowered `NestedSystemSpec`, its compiled `SheafTower`, and the agent
 index ranges for each ring/hub/pod (into `tower.agent_vertices`, in the order they were added --
 ring 1, ..., ring n, hub, pod 1, ..., pod n).
 
@@ -56,44 +58,41 @@ function build_wheel_spec(n::Int; m::Vector{Int}=fill(5, n), R_big::Real=3.0,
                           pin_scheme::Symbol=:redundant)
     @assert length(m) == n
     m_max = maximum(m)
-    rings = [LeafTeam(Symbol(:ring, i), :ring, m[i], escort_radius(n, R_big, m[i], m_max; safety=safety))
-             for i in 1:n]
-    hub = LeafTeam(:hub, :ring, n, hub_radius)
-    ## Single-agent pods use :path -- the only `kind` that accepts `n_agents == 1` (see
-    ## `build_escort_topology`); with one agent there's nothing to internally connect anyway.
-    pods = [LeafTeam(Symbol(:pod, i), :path, 1, 0.1) for i in 1:n]
+    ring_name(i) = Symbol(:ring, i)
+    pod_name(i) = Symbol(:pod, i)
 
-    children = AbstractSystemNode[rings; hub; pods]
-    ring_idx(i) = i
-    hub_idx = n + 1
-    pod_idx(i) = n + 1 + i
-
-    spoke_edges = SystemEdge[]
-    for i in 1:n
-        push!(spoke_edges, SystemEdge(ring_idx(i), pod_idx(i); src_map=centroid(), dst_map=project(1)))
-        push!(spoke_edges, SystemEdge(pod_idx(i), hub_idx; src_map=project(1), dst_map=project(i)))
-    end
-
-    root = RefinedSystem(:root, children, spoke_edges)
-    targets = [TargetSpec(Symbol(:t, i)) for i in 1:n]
-    observations = Observation[]
-    for i in 1:n
-        ks = pin_scheme == :redundant ? (1:2:m[i]) : (1:1)
-        for k in ks
-            system_map = pin_scheme == :redundant ? redundant_pin(m[i], D, k) : project(1)
-            push!(observations, Observation([ring_idx(i)], i; system_map=system_map))
+    ## One [`NestedDSL`](@ref) fragment, parameterized by `n`. Note `project(hub, i)` on the
+    ## second spoke edge: an endpoint may present *any* [`RestrictionSpec`](@ref), and here each
+    ## spoke deliberately grabs a different agent of the hub -- which is what makes the hub a
+    ## real wheel hub rather than a single shared point.
+    fragment = @nested_system begin
+        @dim D
+        for i in 1:n
+            @team $(ring_name(i)) = ring(m[i]; radius=escort_radius(n, R_big, m[i], m_max; safety=safety))
+        end
+        @team hub = ring(n; radius=hub_radius)
+        for i in 1:n
+            ## Single-agent pods use :path -- the only `kind` that accepts `n_agents == 1` (see
+            ## `build_escort_topology`); with one agent there's nothing to internally connect.
+            @team $(pod_name(i)) = path(1; radius=0.1)
+        end
+        for i in 1:n
+            @target $(Symbol(:t, i))
+            @link centroid($(ring_name(i))) => $(pod_name(i))
+            @link $(pod_name(i)) => project(hub, i)
+            for k in (pin_scheme == :redundant ? (1:2:m[i]) : (1:1))
+                @observe via($(ring_name(i)), pin_scheme == :redundant ?
+                             redundant_pin(m[i], D, k) : project(1)) => $(Symbol(:t, i))
+            end
         end
     end
-    spec = NestedSystemSpec(root, targets, observations, D, true)
-    tower = build_sheaf_tower(spec)
 
-    team_sizes = Int[m; n; fill(1, n)]
-    ranges = agent_index_ranges(team_sizes)
-    ring_ranges = ranges[1:n]
-    hub_range = ranges[n + 1]
-    pod_ranges = ranges[(n + 2):end]
+    system = compile_nested_system(fragment)
+    ring_ranges = [agent_range(system, ring_name(i)) for i in 1:n]
+    hub_range = agent_range(system, :hub)
+    pod_ranges = [agent_range(system, pod_name(i)) for i in 1:n]
 
-    return spec, tower, ring_ranges, hub_range, pod_ranges
+    return fragment, system.spec, system.tower, ring_ranges, hub_range, pod_ranges
 end
 
 const N = 5
@@ -102,7 +101,7 @@ const R_BIG = 3.0
 const HUB_RADIUS = 0.4
 const D = 4
 
-spec, tower, ring_ranges, hub_range, pod_ranges = build_wheel_spec(N; m=M, R_big=R_BIG, hub_radius=HUB_RADIUS)
+fragment, spec, tower, ring_ranges, hub_range, pod_ranges = build_wheel_spec(N; m=M, R_big=R_BIG, hub_radius=HUB_RADIUS)
 println("Ring radius: ", round(escort_radius(N, R_BIG, M[1], maximum(M)), digits=3), " m ",
        "  (chord = ", round(2R_BIG * sin(pi / N), digits=3), " m)")
 
@@ -193,9 +192,16 @@ R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
 K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10 * Q_lqr, R_lqr)
 K_soft = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 2 * Q_lqr, R_lqr)
 
-soft_overrides = Dict{Symbol,SystemBinding}(Symbol(:pod, i) => SystemBinding(K_lqr=K_soft) for i in 1:N)
-soft_overrides[:hub] = SystemBinding(K_lqr=K_soft)
-bindings = SystemBinding(dynamics=dyn, K_lqr=K, children=soft_overrides)
+## Declared in the same language as the topology, in a separate fragment merged onto it: the
+## gains only exist once `solve_dare` has run. `nested_bindings` resolves the cascade alone,
+## without rebuilding the tower.
+bindings = nested_bindings(merge(fragment, @nested_system begin
+    @bind dynamics=dyn K_lqr=K
+    @bind hub K_lqr=K_soft
+    for i in 1:N
+        @bind $(Symbol(:pod, i)) K_lqr=K_soft
+    end
+end))
 
 # ## Run the closed-loop simulation with full feedforward
 

@@ -50,6 +50,7 @@
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.NestedDSL
 using CellularSheaves.ControlSheaves.AgentControllers
 using LinearAlgebra
 using Plots
@@ -64,28 +65,33 @@ include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_h
 # ## Topology specification
 
 const D = 4   # SE(3) homogeneous: 3D translation + 1 homogeneous row
+const M_A, M_B = 4, 5
 
-ringA = LeafTeam(:ringA, :ring, 4, 1.0)
-ringB = LeafTeam(:ringB, :ring, 5, 1.0)
-mid = RefinedSystem(:mid, AbstractSystemNode[ringA, ringB],
-                    [SystemEdge(1, 2; src_map=centroid(), dst_map=centroid())])
-root = RefinedSystem(:root, AbstractSystemNode[mid])
-targets = [TargetSpec(:t1), TargetSpec(:t2)]
-
+## Written in the [`NestedDSL`](@ref) specification language. `@nested_system` *runs* its block,
+## so the redundant pin below is an ordinary Julia `for` loop rather than anything the DSL had
+## to grow a construct for -- and `via(...)` lets an arbitrary [`RestrictionSpec`](@ref), here
+## [`redundant_pin`](@ref), be presented on an edge.
+##
 ## Redundant pin: every other agent around each ring observes its own target, rather than the
 ## usual single representative -- see the topology note above. Only the first pin per ring uses
 ## plain `project`; the rest use `translation_pin`, which leaves the homogeneous coordinate alone
-## (see its docstring in `_nested_simulation.jl` -- letting several full D×D pins fight over the
-## same target drags the homogeneous row away from 1 and rescales the whole rigid body).
-observations = vcat(
-    [Observation([1, 1], 1; system_map=redundant_pin(ringA.n_agents, D, k)) for k in 1:2:ringA.n_agents],
-    [Observation([1, 2], 2; system_map=redundant_pin(ringB.n_agents, D, k)) for k in 1:2:ringB.n_agents],
-)
-spec = NestedSystemSpec(root, targets, observations, D, true)
-tower = build_sheaf_tower(spec)
-
-## Agents are assigned depth-first: ringA's 4 agents, then ringB's 5.
-ring_ranges = agent_index_ranges([ringA.n_agents, ringB.n_agents])
+## (letting several full D×D pins fight over the same target drags the homogeneous row away from
+## 1 and rescales the whole rigid body).
+topology = @nested_system begin
+    @dim D
+    @system mid begin
+        @team ringA = ring(M_A; radius=1.0)
+        @team ringB = ring(M_B; radius=1.0)
+        @link centroid(ringA) => centroid(ringB)
+    end
+    @target t1 t2
+    for k in 1:2:M_A
+        @observe via(mid.ringA, redundant_pin(M_A, D, k)) => t1
+    end
+    for k in 1:2:M_B
+        @observe via(mid.ringB, redundant_pin(M_B, D, k)) => t2
+    end
+end
 
 # ## Target motion: two targets spiraling apart
 #
@@ -119,7 +125,20 @@ Ad, Bd = CellularSheaves.AgentControllers.discrete_matrices(dyn, DT)
 Q_lqr = Matrix(Diagonal([500.0, 500.0, 500.0, 150.0, 150.0, 100.0, 100.0, 100.0, 5.0, 5.0]))
 R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
 K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10 * Q_lqr, R_lqr)
-bindings = homogeneous_binding(dyn; K_lqr=K)
+
+# The dynamics binding is written in the same language, but in a *separate* fragment merged onto
+# the topology above -- the gain `K` only exists after `solve_dare` runs, which is ordinary Julia
+# that has to happen first. Because a fragment is a first-class value, a specification never has
+# to be written all in one place, and DSL text can be interleaved freely with the Julia that
+# computes what it refers to.
+
+system = compile_nested_system(merge(topology, @nested_system begin
+    @bind dynamics=dyn K_lqr=K
+end))
+spec, tower, bindings = system.spec, system.tower, system.bindings
+
+## Agent index blocks, looked up by name rather than reconstructed by hand from team sizes.
+ring_ranges = [agent_range(system, "mid.ringA"), agent_range(system, "mid.ringB")]
 
 # ## Run the closed-loop simulation with full feedforward
 

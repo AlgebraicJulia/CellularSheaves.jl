@@ -51,6 +51,10 @@ include("NestedSystems.jl")
 import .NestedSystems
 export NestedSystems
 
+include("NestedDSL/NestedDSL.jl")
+import .NestedDSL
+export NestedDSL
+
 include("Layered.jl")
 import .Layered
 export Layered
