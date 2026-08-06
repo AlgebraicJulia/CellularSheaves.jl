@@ -464,8 +464,6 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
                 pbase, prefn, ppass, pstat, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s; ptol, ytol)
-                # entry residuals come back UNSCALED; re-scale to the recorded scaled units for the history.
-                ppres = ppres / (1 + s.ng[]); pdres = pdres / (1 + s.nc[])
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -481,8 +479,6 @@ function step!(s::IPMSolver{T}) where {T}
                 # where rd* is the corrected dual residual
                 #
                 cbase, crefn, cpass, cstat, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ; ptol, ytol)
-                # entry residuals come back UNSCALED; re-scale to the recorded scaled units for the history.
-                cpres = cpres / (1 + s.ng[]); cdres = cdres / (1 + s.nc[])
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -526,10 +522,10 @@ function step!(s::IPMSolver{T}) where {T}
 
                 if s.settings.policy == 1
                     # Tier 1: aggregate the predictor and corrector solves (worst case each end).
-                    αmin, αmax = augwindow1(s.α[], _nanmax(pfres, cfres), _nanmax(pdres, cdres), tol)
+                    αmin, αmax = augwindow1(s.α[], _nanmax(pfres, cfres), _nanmax(pdres, cdres), ptol, ytol)
                 else
-                    αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass), T(CTRL_BDG_IPM))
-                    αmax = augmax(s.α[], pdres, tol, state, pbase, T(CTRL_GAP_IPM))
+                    αmin = augmin(s.α[], pfres, ptol, state, pbase, max(ppass, cpass), T(CTRL_BDG_IPM))
+                    αmax = augmax(s.α[], pdres, ytol, state, pbase, T(CTRL_GAP_IPM))
                 end
 
                 if isstalled(s)

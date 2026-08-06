@@ -752,8 +752,6 @@ function step!(s::HSDSolver{T}) where {T}
                 status = nearstatus(s, NUMERICAL_FAILURE)
             else
                 wbase, wrefn, wpass, wstat, wfres, wpres, wdres = wtuple
-                # border entry residuals come back UNSCALED; re-scale to the recorded scaled units.
-                wpres = wpres / (1 + s.ng[]); wdres = wdres / (1 + s.nc[])
                 #
                 # solve for the Mehrota predictor direction
                 #
@@ -762,8 +760,6 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
                 #
                 pbase, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s, gap; ptol, ytol, τtol)
-                # entry residuals come back UNSCALED; re-scale to the recorded scaled units for the history.
-                ppres = ppres / (1 + s.ng[]); pdres = pdres / (1 + s.nc[])
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -778,8 +774,6 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
                 #
                 cbase, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
-                # entry residuals come back UNSCALED; re-scale to the recorded scaled units for the history.
-                cpres = cpres / (1 + s.ng[]); cdres = cdres / (1 + s.nc[])
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -838,10 +832,10 @@ function step!(s::HSDSolver{T}) where {T}
 
                 if s.settings.policy == 1
                     # Tier 1: aggregate the predictor, corrector, and Woodbury solves (worst case each end).
-                    αmin, αmax = augwindow1(s.α[], _nanmax(pfres, cfres, wfres), _nanmax(pdres, cdres, wdres), tol)
+                    αmin, αmax = augwindow1(s.α[], _nanmax(pfres, cfres, wfres), _nanmax(pdres, cdres, wdres), ptol, ytol)
                 else
-                    αmin = augmin(s.α[], pfres, tol, state, pbase, max(ppass, cpass, wpass), T(CTRL_BDG_HSD))
-                    αmax = augmax(s.α[], pdres, tol, state, pbase, T(CTRL_GAP_HSD))
+                    αmin = augmin(s.α[], pfres, ptol, state, pbase, max(ppass, cpass, wpass), T(CTRL_BDG_HSD))
+                    αmax = augmax(s.α[], pdres, ytol, state, pbase, T(CTRL_GAP_HSD))
                 end
 
                 if isstalled(s)
