@@ -102,6 +102,7 @@ makedocs(
         ],
       "Nested Systems Examples" => Any[
         "generated/nested/centroid_formation_tracking.md",
+        "generated/nested/wheel_formation.md",
         "generated/nested/n_ring_formation.md",
         "generated/nested/rescaling_formation.md",
         ],

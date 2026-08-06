@@ -10,6 +10,23 @@
 #
 # Watching the result, each ring sits *near* its own target but not exactly on it -- the next
 # section explains precisely why, with a direct measurement rather than a hand-wave.
+#
+# ## Why a cycle, and not a tree
+#
+# `wheel_formation.jl`, the previous page in this section, bridges `n` rings with `n` support pods
+# too -- but arranged as a **tree** (spokes into a shared, unanchored hub) rather than a cycle, and
+# gets noticeably tighter tracking as a result (own-target weight around `0.74`, against `0.6`
+# here). That's not an oversight in this page's design; it's a real structural limit.
+# `NestedSystemSpec`'s tree of `RefinedSystem`/`LeafTeam` nodes gives every node exactly one
+# parent, and `SystemEdge` only ever connects two direct children of the *same* parent. A bridge
+# between ring `i` and ring `i+1` needs both of them exposed to whatever bridges them -- fine for
+# one bridge, but ring `i` also needs to be exposed to the *previous* bridge (with ring `i-1`), and
+# a single node cannot be a child of two different parents at once. There is no way to make a
+# cyclic bridge structure a child of one shared parent the way the wheel's spokes can all share the
+# hub. Wiring the cycle's edges directly into `root`'s own `internal_edges`, as this page does, is
+# the only way to express "ring `i` bridges into both of its neighbors" at all -- and it's exactly
+# that direct, unmediated coupling between every adjacent pair that produces the worse cross-talk
+# measured below.
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
@@ -164,7 +181,8 @@ w = target_response_weights(tower, ring_ranges, 1, N)
 # pin scheme, is *why* the tracking-error panel further down never reaches zero: it's measuring
 # exactly this blend. See the "Design notes" section at the end of this page for how that split
 # compares to a plain single-pin ring, and why the redundant pin narrows it only modestly rather
-# than eliminating it.
+# than eliminating it -- and see `wheel_formation.jl` for how much of this blend is specifically a
+# cost of the cycle, versus a cost of having *any* bridge at all.
 
 # ## Target motion: a rigid n-gon orbiting the big circle
 

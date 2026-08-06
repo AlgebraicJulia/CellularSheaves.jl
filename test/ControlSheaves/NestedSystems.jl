@@ -453,6 +453,87 @@ end
     @test w_redundant[2] ≈ w_redundant[3] atol=1e-8   # symmetric under the cycle's own symmetry
 end
 
+@testset "quantitative Example D: hub-and-spoke tree beats cyclic coupling, but isn't cross-talk-free" begin
+    n, m, R_big = 5, fill(5, 5), 3.0
+
+    function build_wheel_tower(pin_scheme::Symbol)
+        m_max = maximum(m)
+        escort_radius(m_i) = 0.35 * R_big * sin(pi / n) * (m_i / m_max)
+        rings = [LeafTeam(Symbol(:ring, i), :ring, m[i], escort_radius(m[i])) for i in 1:n]
+        hub = LeafTeam(:hub, :ring, n, 0.4)
+        pods = [LeafTeam(Symbol(:pod, i), :path, 1, 0.1) for i in 1:n]
+        children = AbstractSystemNode[rings; hub; pods]
+        ring_idx(i) = i; hub_idx = n + 1; pod_idx(i) = n + 1 + i
+
+        edges = SystemEdge[]
+        for i in 1:n
+            push!(edges, SystemEdge(ring_idx(i), pod_idx(i); src_map=centroid(), dst_map=project(1)))
+            push!(edges, SystemEdge(pod_idx(i), hub_idx; src_map=project(1), dst_map=project(i)))
+        end
+        root = RefinedSystem(:root, children, edges)
+        targets = [TargetSpec(Symbol(:t, i)) for i in 1:n]
+        observations = Observation[]
+        for i in 1:n
+            ks = pin_scheme == :redundant ? (1:2:m[i]) : (1:1)
+            for k in ks
+                system_map = pin_scheme == :redundant ? redundant_pin(m[i], 4, k) : project(1)
+                push!(observations, Observation([ring_idx(i)], i; system_map=system_map))
+            end
+        end
+        spec = NestedSystemSpec(root, targets, observations, 4, true)
+        tower = build_sheaf_tower(spec)
+        team_sizes = Int[m; n; fill(1, n)]
+        ranges = agent_index_ranges(team_sizes)
+        return tower, ranges[1:n], ranges[n + 1], ranges[(n + 2):end]
+    end
+
+    tower, ring_ranges, hub_range, pod_ranges = build_wheel_tower(:redundant)
+
+    tv = [[R_big * cos(2π * (i - 1) / n), R_big * sin(2π * (i - 1) / n), 1.5, 1.0] for i in 1:n]
+    q = solve_hierarchical(tower, tv)[end]
+
+    ## Every pod has exactly two edges and nothing else -- both should be satisfied exactly, so
+    ## the pod lands exactly at the midpoint of its ring's centroid and its own hub agent.
+    for i in 1:n
+        rc = sum(q[v] for v in tower.agent_vertices[ring_ranges[i]]) / length(ring_ranges[i])
+        hub_v = tower.agent_vertices[hub_range[i]]
+        pod_v = tower.agent_vertices[only(pod_ranges[i])]
+        @test isapprox(q[pod_v], (rc .+ q[hub_v]) ./ 2; atol=1e-8)
+    end
+
+    function target_response_weights(tower, ring_ranges, ring_idx::Int)
+        base = fill([0.0, 0.0, 1.5, 1.0], n)
+        verts = tower.agent_vertices[ring_ranges[ring_idx]]
+        ring_centroid(tv_) = sum(solve_hierarchical(tower, tv_)[end][v] for v in verts) / length(verts)
+        c0 = ring_centroid(base)
+        h = 1.0
+        return [begin
+                    perturbed = copy(base)
+                    perturbed[j] = base[j] .+ [h, 0.0, 0.0, 0.0]
+                    (ring_centroid(perturbed)[1] - c0[1]) / h
+                end
+                for j in 1:n]
+    end
+
+    w = target_response_weights(tower, ring_ranges, 1)
+    @test sum(w) ≈ 1.0 atol=1e-8              # translation-invariance: weights must blend to 1
+    @test w[2] ≈ w[5] atol=1e-8                # symmetric under the wheel's own rotational symmetry
+    @test w[3] ≈ w[4] atol=1e-8
+    @test w[2] > w[3]                          # angularly nearer neighbors get more weight than farther ones
+
+    ## Own weight should sit strictly above the cyclic design's 0.6 (a tree with a shared hub
+    ## dilutes cross-talk across more branches than a cycle's two direct neighbors) but strictly
+    ## below 1.0 (the hub is still one unanchored consensus point shared by every spoke, so this
+    ## is *not* the same as fully independent rings).
+    @test w[1] > 0.6
+    @test w[1] < 1.0
+    @test isapprox(w[1], 0.74; atol=0.03)     # pinned regression value, verified while writing wheel_formation.jl
+
+    tower_single, ring_ranges_single, _, _ = build_wheel_tower(:single)
+    w_single = target_response_weights(tower_single, ring_ranges_single, 1)
+    @test w[1] > w_single[1]                   # redundant pin still measurably raises the own weight here too
+end
+
 @testset "quantitative Example C: full redundant pins rescale a rigid team, never shear it" begin
     n = 6
     ring = LeafTeam(:formation, :ring, n, 1.0)
