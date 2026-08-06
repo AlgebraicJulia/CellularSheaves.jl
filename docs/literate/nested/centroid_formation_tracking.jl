@@ -1,52 +1,62 @@
 # # Centroid-Coupled Formation Tracking
 #
-# This example demonstrates two `NestedSystems` features that have no equivalent in the flat
-# `Layered` pipeline, and along the way makes a point about hierarchical control that is easy to
-# miss: **consensus enforced at a coarse level can silently override tracking at the fine level,
-# even though every individual piece is behaving "correctly."**
+# **A consensus constraint at a coarse level can silently override tracking at the fine level,
+# with every individual piece still behaving correctly.**
 #
-# - **[`centroid`](@ref) restriction maps** (Issue 011) -- a subsystem can present the
-#   *unweighted average* of its own members on an edge, not just one representative agent.
-# - **[`approximation_gap`](@ref)** (Issue 010) -- the energy cost of forcing a hierarchy to
-#   stay rigid, measured against an unconstrained baseline.
+# Two rigid escort rings each track their own target. They are also tied to each other by a single
+# `centroid()` edge one level up. That edge wins: both rings converge on the midpoint between the
+# two targets and stay there, escorting neither -- while each ring stays perfectly rigid and the
+# solve stays exactly optimal for the specification as written.
+#
+# The page also introduces two `NestedSystems` features with no equivalent in the flat `Layered`
+# pipeline:
+#
+# - **[`centroid`](@ref) restriction maps** -- a subsystem can present the *unweighted average* of
+#   its members on an edge, not just one representative agent.
+# - **[`approximation_gap`](@ref)** -- the energy cost of forcing a hierarchy to stay rigid,
+#   measured against an unconstrained baseline.
 #
 # ## Topology
 #
-# Two rigid rings, `ringA` (4 agents) and `ringB` (5 agents -- deliberately different sizes, so
-# the two rings are visually distinguishable even when they land on top of each other, which is
-# exactly what happens here), are grouped under a single subsystem `mid`. `mid`'s *internal* edge
-# uses `centroid()` on both ends: it ties `ringA`'s own average position to `ringB`'s own average
-# position, not any single agent -- and because `mid` is a *single* coarsest-level vertex, this
-# isn't a soft preference, it's the defining constraint of `mid`'s own space of admissible
-# configurations. Both rings' centroids are forced to coincide, full stop.
+# `ringA` (4 agents) and `ringB` (5 agents) sit under one subsystem, `mid`. The sizes differ
+# deliberately: the rings end up on top of each other, and this keeps them distinguishable.
 #
-# Each ring still observes its **own** target -- but through *several* agents at once (every
-# other agent around the ring), not the usual single representative. Only the *first* of these
-# uses plain `project(1)`; the rest use `NestedSystems.translation_pin`, which pins only the
-# translation components and deliberately leaves the homogeneous coordinate
-# alone. That distinction matters: several full pins to the same target are mutually inconsistent
-# for a rigid body by construction (that inconsistency, distributed as a least-squares compromise
-# across the ring, is what rebalances a ring's "vote" against competing edges -- see
-# `n_ring_formation.jl` for where that actually matters). Left unmodified, that compromise doesn't
-# stay confined to translation -- it drags the homogeneous coordinate away from `1` too, which
-# rescales the entire rigid body, since these affine restriction maps only represent pure
-# translation correctly when it stays exactly `1`. `translation_pin` avoids that entirely, and
-# because it's deferred (no `H_N` representative, like `centroid()`), only the one true
-# `project(1)` pin per ring is visible to the *direct* baseline below -- so `solve_direct` reduces
-# to exactly the same "two independent rigid rings, zero energy" case as the original single-pin
-# design, uncomplicated by the redundancy.
+# `mid`'s internal edge uses `centroid()` at both ends, tying `ringA`'s average position to
+# `ringB`'s rather than to any single agent. Because `mid` is a *single* vertex at the coarsest
+# level, this is not a soft preference -- it *defines* which configurations of `mid` are
+# admissible. The two centroids are forced to coincide.
 #
-# ## The point
+# ## Pinning each ring to its target
 #
-# `mid`'s constraint means the hierarchical solve cannot place `ringA` at target 1 and `ringB` at
-# target 2 independently -- it must find the *one* shared point that best satisfies both target
-# pins at once, which lands **exactly** on the midpoint of the two targets (verified numerically),
-# not on either target itself. As the targets spiral apart below, watch both rings sit together
-# on that midpoint while their own targets move away in opposite directions -- individually "rigid
-# and correctly solved," yet visibly failing to escort either target. The gap panel quantifies
-# exactly what this costs, and the tracking-error panel shows the failure directly, growing with
-# separation instead
-# of settling to zero the way a properly independent ring would.
+# Each ring observes its own target through several agents at once -- every other agent around the
+# ring -- rather than through the usual single representative. [`redundant_pin`](@ref) splits the
+# work: the first pin is a plain `project(1)`, and every pin after it is a `translation_pin`.
+#
+# That distinction matters. Several *full* pins to one target are mutually inconsistent for a
+# rigid body by construction, and the inconsistency is the point: spread across the ring as a
+# least-squares compromise, it rebalances the ring's "vote" against competing edges elsewhere in
+# the tower (`n_ring_formation.jl` is where that pays off).
+#
+# But the compromise does not stay confined to translation. It also drags the affine homogeneous
+# coordinate away from `1`, and these restriction maps represent pure translation only while that
+# row is exactly `1` -- so the whole rigid body silently rescales. `translation_pin` pins the
+# translation components alone and leaves that row untouched.
+#
+# There is a useful side effect. `translation_pin` is *deferred* -- like `centroid()`, it has no
+# single representative vertex at the finest level -- so only the one `project(1)` pin per ring
+# reaches the *direct* baseline below. `solve_direct` therefore reduces to the same "two
+# independent rigid rings, zero energy" case a plain single-pin design would give, and the
+# redundancy does not muddy the comparison.
+#
+# ## What to watch
+#
+# The hierarchical solve cannot place `ringA` on target 1 and `ringB` on target 2 independently.
+# It must find the one shared point that best satisfies both pins at once, and that point is
+# **exactly** the midpoint of the two targets (verified numerically below).
+#
+# As the targets spiral apart, both rings sit together on that midpoint while their own targets
+# recede in opposite directions. The gap panel quantifies what this costs; the tracking-error
+# panel shows the failure directly, growing with separation instead of settling to zero.
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
@@ -56,10 +66,9 @@ using LinearAlgebra
 using Plots
 using Printf
 
-## `@__DIR__` resolves relative to Literate.jl's *output* location while a page is being
-## executed, not this file's own source directory -- so the plotting helpers are located from the
-## package root instead, which is stable regardless of how this script gets run. The simulation
-## driver and multi-pin helpers themselves live in `NestedSystems` (already `using`-ed above).
+## Located from the package root, not `@__DIR__`: while Literate.jl executes a page, `@__DIR__`
+## points at the *output* directory rather than at this file. The simulation driver and the
+## multi-pin helpers live in `NestedSystems`, already loaded above.
 include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_helpers.jl"))
 
 # ## Topology specification
@@ -67,16 +76,9 @@ include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_h
 const D = 4   # SE(3) homogeneous: 3D translation + 1 homogeneous row
 const M_A, M_B = 4, 5
 
-## Written in the [`NestedDSL`](@ref) specification language. `@nested_system` *runs* its block,
-## so the redundant pin below is an ordinary Julia `for` loop rather than anything the DSL had
-## to grow a construct for -- and `via(...)` lets an arbitrary [`RestrictionSpec`](@ref), here
-## [`redundant_pin`](@ref), be presented on an edge.
-##
-## Redundant pin: every other agent around each ring observes its own target, rather than the
-## usual single representative -- see the topology note above. Only the first pin per ring uses
-## plain `project`; the rest use `translation_pin`, which leaves the homogeneous coordinate alone
-## (letting several full D×D pins fight over the same target drags the homogeneous row away from
-## 1 and rescales the whole rigid body).
+## Written in the [`NestedDSL`](@ref) language. `@nested_system` *runs* its block, so the pin
+## loops below are ordinary Julia `for` loops rather than DSL constructs, and `via(...)` presents
+## an arbitrary [`RestrictionSpec`](@ref) -- here [`redundant_pin`](@ref) -- on an edge.
 topology = @nested_system begin
     @dim D
     @system mid begin
@@ -95,11 +97,12 @@ end
 
 # ## Target motion: two targets spiraling apart
 #
-# Both targets orbit a common center at angular rate `ω` while their shared radius `ρ(t) = ρ0 +
-# k t` grows -- so their pairwise separation `Δ(t) = 2ρ(t)` increases smoothly over the run,
-# sweeping the demonstration from a small gap up to a clearly-growing one within a single run.
-# Velocity/acceleration below are the exact analytic derivatives (standard polar product rule),
-# verified against finite differences before use -- not finite-differenced at runtime.
+# Both targets orbit a common centre at rate `ω`, while their shared radius `ρ(t) = ρ0 + k t`
+# grows. Their separation `Δ(t) = 2ρ(t)` therefore widens smoothly, sweeping the demonstration
+# from a small gap to a clearly growing one within a single run.
+#
+# The velocities and accelerations below are exact analytic derivatives (the polar product rule),
+# checked against finite differences beforehand rather than finite-differenced at runtime.
 
 const ρ0, k_sep, ω, h_alt = 0.5, 0.15, 0.4, 1.5
 
@@ -126,11 +129,10 @@ Q_lqr = Matrix(Diagonal([500.0, 500.0, 500.0, 150.0, 150.0, 100.0, 100.0, 100.0,
 R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
 K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10 * Q_lqr, R_lqr)
 
-# The dynamics binding is written in the same language, but in a *separate* fragment merged onto
-# the topology above -- the gain `K` only exists after `solve_dare` runs, which is ordinary Julia
-# that has to happen first. Because a fragment is a first-class value, a specification never has
-# to be written all in one place, and DSL text can be interleaved freely with the Julia that
-# computes what it refers to.
+# The dynamics binding is written in the same language, but as a *separate* fragment merged onto
+# the topology above. It has to be: the gain `K` does not exist until `solve_dare` runs, and that
+# is ordinary Julia which must come first. Because a fragment is a first-class value, one
+# specification can be assembled from pieces written wherever they belong.
 
 system = compile_nested_system(merge(topology, @nested_system begin
     @bind dynamics=dyn K_lqr=K
@@ -190,13 +192,10 @@ end
 const TOPDOWN_XLIM = (minimum(all_x) - 0.5, maximum(all_x) + 0.5)
 const TOPDOWN_YLIM = (minimum(all_y) - 0.5, maximum(all_y) + 0.5)
 
-## Panel 1 proper: a composite of the *whole* run, not just its final state. Every agent's full
-## path is drawn thin and faint (dt is far finer than a static plot needs, and overlapping,
-## low-alpha paths read as darker where multiple agents pass through the same region -- exactly
-## what makes the two rings' shared convergence near the midpoint visible). A handful of ring
-## outlines are drawn at sparse, evenly-spaced snapshots (not one per step) with alpha fading from
-## faint (early) to solid (final), so the ring's shape/position over time reads as a single image
-## rather than needing the animation.
+## Panel 1 proper: a composite of the *whole* run, not just its final state. Agent paths are drawn
+## thin and faint, so overlapping low-alpha paths darken where several agents pass through the
+## same region -- which is what makes the two rings' shared convergence on the midpoint visible.
+## Ring outlines are drawn at a few evenly spaced snapshots, fading faint (early) to solid (final).
 function top_down_composite(; n_snapshots::Int=8)
     snaps = snapshot_steps(STEPS, n_snapshots)
     p = plot(title="Top-Down View (full trajectory)", aspect_ratio=1,
@@ -239,9 +238,8 @@ end
 
 p1 = top_down_composite()
 
-## The animated version reuses the same per-step rendering logic in miniature -- current agent
-## positions and outline only, no accumulated trail (the composite above already shows the whole
-## run at once; the animation's job is to convey motion, not repeat the same information).
+## The animation reuses the same per-step rendering in miniature: current positions and outline
+## only, no accumulated trail. Its job is to convey motion; panel 1 already shows the whole run.
 function top_down_frame(step::Int)
     t = time_grid[step]
     p = plot(title=@sprintf("Top-Down View (t = %.2f s)", t), aspect_ratio=1,
@@ -285,7 +283,7 @@ for r in 1:2
     plot!(p3, time_grid[1:STEPS], track_err[r], color=colors[r], label=ring_names[r], linewidth=2)
 end
 
-## Panel 4: the approximation gap -- validates Issues 010+011 directly.
+## Panel 4: the approximation gap -- what the hierarchy's rigidity costs, over time.
 p4 = plot(title="Hierarchical vs. Direct Energy", xlabel="time (s)", ylabel="Dirichlet energy")
 plot!(p4, time_grid[1:STEPS], [g.hierarchical for g in gap_history], color=:darkorange,
      label="hierarchical", linewidth=2)
@@ -297,11 +295,13 @@ plot!(p4, time_grid[1:STEPS], [g.gap for g in gap_history], color=:forestgreen, 
 plot(p1, p2, p3, p4, layout=(2, 2), size=(1000, 800),
     plot_title="Centroid-Coupled Formation: Gap Opens as Targets Separate")
 
-# `direct` stays roughly flat -- it reflects only the cost of pinning several points of one
-# rigid ring to a single target simultaneously (unavoidable once more than one agent observes the
-# same point), which doesn't depend on how far apart the *two* targets are. `hierarchical` and
-# `gap` both grow with separation on top of that floor: the added cost of forcing `ringA` and
-# `ringB` onto the same shared point as their targets pull apart.
+# `direct` stays roughly flat. It reflects only the cost of pinning several points of one rigid
+# ring to a single target at once -- unavoidable as soon as more than one agent observes the same
+# point -- and that cost does not depend on how far apart the *two* targets are.
+#
+# `hierarchical` and `gap` both climb above that floor as the separation grows. The difference is
+# exactly what it costs to force `ringA` and `ringB` onto one shared point while their targets
+# pull apart.
 
 @printf("Final gap: %.4f  (hierarchical: %.4f, direct: %.4f)\n",
        gap_history[end].gap, gap_history[end].hierarchical, gap_history[end].direct)
