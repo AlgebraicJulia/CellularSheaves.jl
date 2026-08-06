@@ -41,9 +41,10 @@ using Plots
 using Printf
 
 ## `@__DIR__` resolves relative to Literate.jl's *output* location while a page is being
-## executed, not this file's own source directory -- so the shared driver is located from the
-## package root instead, which is stable regardless of how this script gets run.
-include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_nested_simulation.jl"))
+## executed, not this file's own source directory -- so the plotting helpers are located from the
+## package root instead, which is stable regardless of how this script gets run. The simulation
+## driver and multi-pin helpers themselves live in `NestedSystems` (already `using`-ed above).
+include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_helpers.jl"))
 
 # ## Escort radius scaling
 #
@@ -95,10 +96,10 @@ function build_n_ring_spec(n::Int; m::Vector{Int}=fill(5, n), R_big::Real=3.0,
     targets = [TargetSpec(Symbol(:t, i)) for i in 1:n]
     ## Redundant pin: every other agent around each ring observes its own target, rebalancing
     ## the vote count against the pod's two competing consensus edges -- see the note above. Only
-    ## the first pin per ring uses plain `project`; the rest use `translation_pin`, which leaves
-    ## the homogeneous coordinate alone (see its docstring in `_nested_simulation.jl` -- letting
-    ## several full D×D pins fight over the same target drags the homogeneous row away from 1 and
-    ## rescales the whole rigid body).
+    ## the first pin per ring uses plain `project`; the rest use `NestedSystems.translation_pin`,
+    ## which leaves the homogeneous coordinate alone (see its docstring -- letting several full
+    ## D×D pins fight over the same target drags the homogeneous row away from 1 and rescales the
+    ## whole rigid body).
     observations = Observation[]
     for i in 1:n, k in 1:2:m[i]
         push!(observations, Observation([2i - 1], i; system_map=redundant_pin(m[i], D, k)))

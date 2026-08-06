@@ -22,8 +22,8 @@
 #
 # Each ring still observes its **own** target -- but through *several* agents at once (every
 # other agent around the ring), not the usual single representative. Only the *first* of these
-# uses plain `project(1)`; the rest use `translation_pin` (defined in `_nested_simulation.jl`),
-# which pins only the translation components and deliberately leaves the homogeneous coordinate
+# uses plain `project(1)`; the rest use `NestedSystems.translation_pin`, which pins only the
+# translation components and deliberately leaves the homogeneous coordinate
 # alone. That distinction matters: several full pins to the same target are mutually inconsistent
 # for a rigid body by construction (that inconsistency, distributed as a least-squares compromise
 # across the ring, is what rebalances a ring's "vote" against competing edges -- see
@@ -56,9 +56,10 @@ using Plots
 using Printf
 
 ## `@__DIR__` resolves relative to Literate.jl's *output* location while a page is being
-## executed, not this file's own source directory -- so the shared driver is located from the
-## package root instead, which is stable regardless of how this script gets run.
-include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_nested_simulation.jl"))
+## executed, not this file's own source directory -- so the plotting helpers are located from the
+## package root instead, which is stable regardless of how this script gets run. The simulation
+## driver and multi-pin helpers themselves live in `NestedSystems` (already `using`-ed above).
+include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_helpers.jl"))
 
 # ## Topology specification
 

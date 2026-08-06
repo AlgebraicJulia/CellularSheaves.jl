@@ -4,6 +4,7 @@ using CellularSheaves.ControlSheaves.NestedSystems
 using CellularSheaves.ControlSheaves.AgentControllers
 using CellularSheaves.ControlSheaves.Layered
 using LinearAlgebra
+using Statistics
 using Graphs
 
 include("nested_system_test_specs.jl")
@@ -289,6 +290,165 @@ end
     r2 = resolve_dynamics(spec, SystemBinding(dynamics=dyn, K_lqr=K))
     @test all(a -> a.dynamics === dyn && a.K_lqr === K, r1)
     @test [a.initial_position for a in r1] == [a.initial_position for a in r2]
+end
+
+# ---------------------------------------------------------------------------
+# Simulation driver and multi-pin helpers (promoted from docs/literate/nested/)
+#
+# These also serve as quantitative regression tests for the three nested/ literate examples --
+# the same specs, closed forms, and thresholds verified numerically while writing them, pinned
+# here so their behavior doesn't silently drift and get caught only by eyeballing a plot.
+# ---------------------------------------------------------------------------
+
+@testset "translation_pin leaves the homogeneous row unconstrained" begin
+    r = translation_pin(4, 4, 2)
+    @test r isa RawRestriction
+    @test size(r.M) == (4, 16)
+    @test all(iszero, r.M[4, :])                       # homogeneous row entirely zero
+    @test r.M[1:3, 5:7] ≈ I(3)                          # member 2's translation block selected
+    @test all(iszero, r.M[1:3, setdiff(1:16, 5:7)])     # nothing else touched
+end
+
+@testset "redundant_pin: project(1) for k=1, translation_pin otherwise" begin
+    @test redundant_pin(4, 4, 1) isa ProjectMember
+    @test redundant_pin(4, 4, 1).member == 1
+    @test redundant_pin(4, 4, 3) isa RawRestriction
+end
+
+@testset "agent_index_ranges reconstructs contiguous blocks" begin
+    @test agent_index_ranges([3, 2, 4]) == [1:3, 4:5, 6:9]
+end
+
+@testset "run_nested_escort_simulation basic smoke test" begin
+    spec = two_level_spec()
+    tower = build_sheaf_tower(spec)
+    dyn = QuadrotorDynamics()
+    Ad, Bd = CellularSheaves.AgentControllers.discrete_matrices(dyn, 0.05)
+    K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, Matrix{Float64}(I, 10, 10), Matrix{Float64}(I, 3, 3))
+    bindings = homogeneous_binding(dyn; K_lqr=K)
+    tv = default_targets(spec)
+    trajs = [t -> tv[i] for i in eachindex(tv)]
+    prob = NestedEscortProblem(tower, bindings, trajs; dt=0.05, steps=5)
+    res = run_nested_escort_simulation(prob; use_feedforward=false)
+    @test length(res.sim_data) == 5
+    @test length(res.sim_data[1]) == length(tower.agent_vertices)
+    @test all(x -> all(isfinite, x), res.sim_data[end])
+end
+
+@testset "quantitative Example A: redundant pin gives exact midpoint, gap grows with separation" begin
+    ringA = LeafTeam(:ringA, :ring, 4, 1.0)
+    ringB = LeafTeam(:ringB, :ring, 5, 1.0)
+    mid = RefinedSystem(:mid, AbstractSystemNode[ringA, ringB],
+                        [SystemEdge(1, 2; src_map=centroid(), dst_map=centroid())])
+    root = RefinedSystem(:root, AbstractSystemNode[mid])
+    targets = [TargetSpec(:t1), TargetSpec(:t2)]
+    observations = vcat(
+        [Observation([1, 1], 1; system_map=redundant_pin(ringA.n_agents, 4, k)) for k in 1:2:ringA.n_agents],
+        [Observation([1, 2], 2; system_map=redundant_pin(ringB.n_agents, 4, k)) for k in 1:2:ringB.n_agents],
+    )
+    spec = NestedSystemSpec(root, targets, observations, 4, true)
+    tower = build_sheaf_tower(spec)
+
+    t1v, t2v = [3.0, 1.0, 1.5, 1.0], [-1.0, -2.0, 1.5, 1.0]
+    q = solve_hierarchical(tower, [t1v, t2v])[end]
+    cA = sum(q[v] for v in tower.agent_vertices[1:4]) / 4
+    cB = sum(q[v] for v in tower.agent_vertices[5:9]) / 5
+    midpoint = (t1v .+ t2v) ./ 2
+    @test cA ≈ cB atol=1e-8
+    @test cA[1:3] ≈ midpoint[1:3] atol=1e-8
+    @test all(q[v][4] ≈ 1.0 for v in tower.agent_vertices)   # homogeneous coordinate untouched
+
+    g_near = approximation_gap(tower, [[0.5, 0.0, 1.5, 1.0], [-0.5, 0.0, 1.5, 1.0]])
+    g_far = approximation_gap(tower, [[2.0, 0.0, 1.5, 1.0], [-2.0, 0.0, 1.5, 1.0]])
+    @test g_near.direct ≈ 0.0 atol=1e-8   # only the first, H_N-representable pin is visible to direct
+    @test g_far.direct ≈ 0.0 atol=1e-8
+    @test g_far.gap > g_near.gap
+end
+
+@testset "quantitative Example B: redundant pin measurably reduces cyclic-coupling tracking error" begin
+    n, m, R_big, support_m = 3, [5, 5, 5], 3.0, 2
+    escort_radius(m_i, m_max; safety=0.35) = safety * R_big * sin(pi / n) * (m_i / m_max)
+    m_max = maximum(m)
+
+    function build_cyclic_tower(observation_builder)
+        rings = [LeafTeam(Symbol(:ring, i), :ring, m[i], escort_radius(m[i], m_max)) for i in 1:n]
+        pods = [LeafTeam(Symbol(:pod, i), :path, support_m, 0.3 * escort_radius(m_max, m_max)) for i in 1:n]
+        children = AbstractSystemNode[]
+        for i in 1:n
+            push!(children, rings[i]); push!(children, pods[i])
+        end
+        cyc_edges = SystemEdge[]
+        for i in 1:n
+            push!(cyc_edges, SystemEdge(2i - 1, 2i; src_map=centroid(), dst_map=centroid()))
+        end
+        for i in 1:n
+            push!(cyc_edges, SystemEdge(2i, (2i % 2n) + 1; src_map=centroid(), dst_map=centroid()))
+        end
+        root = RefinedSystem(:root, children, cyc_edges)
+        targets = [TargetSpec(Symbol(:t, i)) for i in 1:n]
+        spec = NestedSystemSpec(root, targets, observation_builder(), 4, true)
+        return build_sheaf_tower(spec)
+    end
+
+    single_pin() = [Observation([2i - 1], i) for i in 1:n]
+    redundant() = [Observation([2i - 1], i; system_map=redundant_pin(m[i], 4, k))
+                  for i in 1:n for k in 1:2:m[i]]
+
+    tv = [[R_big * cos(2π * (i - 1) / n), R_big * sin(2π * (i - 1) / n), 1.5, 1.0] for i in 1:n]
+
+    function mean_tracking_error(tower)
+        q = solve_hierarchical(tower, tv)[end]
+        off, errs = 0, Float64[]
+        for i in 1:n
+            rng = tower.agent_vertices[(off + 1):(off + m[i])]
+            off += m[i] + support_m
+            c = sum(q[v] for v in rng) / m[i]
+            push!(errs, norm(c[1:2] .- tv[i][1:2]))
+        end
+        return sum(errs) / n
+    end
+
+    err_single = mean_tracking_error(build_cyclic_tower(single_pin))
+    err_redundant = mean_tracking_error(build_cyclic_tower(redundant))
+    @test err_redundant < err_single
+    ## Exact values verified numerically while writing n_ring_formation.jl; pinned as a
+    ## regression check, not just a directional one.
+    @test isapprox(err_single, 2.01; atol=0.05)
+    @test isapprox(err_redundant, 1.80; atol=0.05)
+end
+
+@testset "quantitative Example C: full redundant pins rescale a rigid team, never shear it" begin
+    n = 6
+    ring = LeafTeam(:formation, :ring, n, 1.0)
+    root = RefinedSystem(:root, AbstractSystemNode[ring])
+    targets = [TargetSpec(Symbol(:t, k)) for k in 1:n]
+    ## Deliberately full, untruncated project(k) pins -- the point is to let w drift.
+    observations = [Observation([1], k; system_map=project(k)) for k in 1:n]
+    spec = NestedSystemSpec(root, targets, observations, 4, true)
+    tower = build_sheaf_tower(spec)
+
+    h_alt, base_rate = 1.5, 0.4
+    scale_factor(k) = 0.6 + 0.8 * (k - 1) / (n - 1)
+    angle(k) = 2π * (k - 1) / n
+    target_traj(k, t) = [base_rate * scale_factor(k) * t * cos(angle(k)),
+                         base_rate * scale_factor(k) * t * sin(angle(k)), h_alt, 1.0]
+
+    for t in [1.0, 5.0, 10.0]
+        tv = [target_traj(k, t) for k in 1:n]
+        q = solve_hierarchical(tower, tv)[end]
+        ws = [q[v][4] for v in tower.agent_vertices]
+        @test all(w -> isapprox(w, ws[1]; atol=1e-8), ws)     # one shared homogeneous coordinate
+        @test !isapprox(ws[1], 1.0; atol=1e-3)                # it genuinely drifted -- the mechanism firing
+        positions = [q[v][1:3] for v in tower.agent_vertices]
+        c = sum(positions) / n
+        @test std([norm(p .- c) for p in positions]) < 1e-8   # perfectly regular: rescaled, not sheared
+    end
+
+    ## The same non-uniform divergence, tracked with no shape constraint at all, is measurably
+    ## irregular -- the "shear" this rigid formation avoids.
+    tv = [target_traj(k, 10.0) for k in 1:n]
+    c = sum(p[1:3] for p in tv) / n
+    @test std([norm(p[1:3] .- c) for p in tv]) > 0.5
 end
 
 end # testset NestedSystems

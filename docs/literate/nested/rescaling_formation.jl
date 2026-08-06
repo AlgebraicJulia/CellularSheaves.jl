@@ -36,9 +36,9 @@ using Plots
 using Printf
 
 ## `@__DIR__` resolves relative to Literate.jl's *output* location while a page is being
-## executed, not this file's own source directory -- so the shared driver is located from the
+## executed, not this file's own source directory -- so the plotting helpers are located from the
 ## package root instead, which is stable regardless of how this script gets run.
-include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_nested_simulation.jl"))
+include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_helpers.jl"))
 
 # ## Topology: one rigid ring, every agent individually pinned
 

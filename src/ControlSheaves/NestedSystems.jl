@@ -38,14 +38,17 @@ using ...NetworkSheaves.EuclideanSheaves: add_sheaf_edge!, harmonic_extension
 using ...NetworkSheaves.Formations: build_escort_topology
 using ...NetworkSheaves.GraphHomomorphisms: GraphHomomorphism, fiber_vertices
 using ...NetworkSheaves.Pushforwards: pushforward_sheaf, all_fiber_bases
-using ..AgentControllers: AbstractAgentDynamics, _default_initial_position
+using ..AgentControllers: AbstractAgentDynamics, _default_initial_position, AgentState, step_agent!,
+                          initial_state, position_indices
 
 export AbstractSystemNode, LeafTeam, RefinedSystem, TargetSpec, Observation, NestedSystemSpec,
        SheafTower, build_sheaf_tower, n_agents,
        solve_hierarchical, solve_direct, sheaf_energy, approximation_gap,
        RestrictionSpec, ProjectMember, Centroid, RawRestriction, project, centroid,
        materialize_restriction, SystemEdge,
-       AgentBinding, SystemBinding, ResolvedAgent, resolve_dynamics, homogeneous_binding
+       AgentBinding, SystemBinding, ResolvedAgent, resolve_dynamics, homogeneous_binding,
+       NestedEscortProblem, NestedEscortResult, run_nested_escort_simulation,
+       agent_index_ranges, translation_pin, redundant_pin
 
 # ---------------------------------------------------------------------------
 # Restriction-map declarations (Issue 011)
@@ -1126,6 +1129,184 @@ function _resolve_dynamics!(resolved::Vector{ResolvedAgent}, next_idx::Ref{Int},
         initial_position = something(b.initial_position, Some(_default_initial_position(b.dynamics, agent_index)))
         push!(resolved, ResolvedAgent(agent_index, [path; Symbol(i)], b.dynamics, K_lqr, initial_position))
     end
+end
+
+# ---------------------------------------------------------------------------
+# Multi-pin observation helpers
+# ---------------------------------------------------------------------------
+
+"""
+    translation_pin(n_members::Int, D::Int, k::Int) -> RawRestriction
+
+A restriction map pinning direct member `k`'s **translation** components (the first `D-1`
+coordinates) to a target, deliberately leaving the homogeneous row (`D`) unconstrained.
+
+Meant for every *redundant* pin beyond the first when several agents around a rigid team each
+observe the *same* target (see [`redundant_pin`](@ref)). [`project`](@ref) materializes as a full
+`D×D` identity block, homogeneous row included; a single such pin is fine (it unambiguously forces
+that row to `1`), but *several* pins to the same target are mutually inconsistent for a rigid body
+by construction — that inconsistency is the point, it rebalances the team's "vote" against
+competing edges elsewhere in a tower. Left unmodified, the least-squares compromise that
+inconsistency produces doesn't stay confined to translation: it drags the homogeneous row away
+from `1` too, which — because these affine restriction maps only represent *pure* translation
+correctly when that row is exactly `1` — rescales the entire rigid body's geometry.
+`translation_pin` avoids this by never contesting anything but translation, leaving only the first,
+unmodified [`project`](@ref)`(1)` pin responsible for anchoring the homogeneous row.
+
+This is the mechanism [`translation_pin`](@ref) exists to *suppress*; leaving pins full and
+untruncated on purpose is a legitimate, different construction — see the "emergent rescaling"
+literate example (`docs/literate/nested/rescaling_formation.jl`), where several agents are *each*
+pinned to a *different* target and the resulting homogeneous-coordinate drift is used deliberately
+to let a rigid team absorb divergent targets by uniform rescaling rather than shearing.
+"""
+function translation_pin(n_members::Int, D::Int, k::Int)
+    M = zeros(D, n_members * D)
+    for i in 1:(D - 1)
+        M[i, (k - 1) * D + i] = 1.0
+    end
+    return RawRestriction(M)
+end
+
+"""
+    redundant_pin(n_members::Int, D::Int, k::Int) -> RestrictionSpec
+
+[`project`](@ref)`(1)` for the first (`k == 1`) pin, [`translation_pin`](@ref) for every pin after
+that — the system-map to use for member `k` of a `1:2:n_members`-style redundant-pin scheme that
+lets several agents jointly vote on tracking one target without corrupting the homogeneous
+coordinate.
+"""
+redundant_pin(n_members::Int, D::Int, k::Int) = k == 1 ? project(1) : translation_pin(n_members, D, k)
+
+"""
+    agent_index_ranges(team_sizes::Vector{Int}) -> Vector{UnitRange{Int}}
+
+Contiguous index ranges into a [`SheafTower`](@ref)'s `agent_vertices` for a sequence of leaf
+teams of the given sizes, in the order those teams were added as children. Agent indices are
+assigned depth-first over the spec's tree (see `_assign_agent_ranges!`), so each leaf team
+occupies a contiguous block in visitation order — this reconstructs those blocks from the team
+sizes alone, without reaching into the tower's private bookkeeping.
+"""
+function agent_index_ranges(team_sizes::Vector{Int})
+    ranges = Vector{UnitRange{Int}}()
+    off = 0
+    for m in team_sizes
+        push!(ranges, (off + 1):(off + m))
+        off += m
+    end
+    return ranges
+end
+
+# ---------------------------------------------------------------------------
+# Closed-loop simulation driver
+# ---------------------------------------------------------------------------
+
+"""
+    NestedEscortProblem(tower, bindings, target_trajectories; target_velocities=nothing,
+                        target_accelerations=nothing, dt=0.05, steps=200)
+
+A closed-loop tracking problem over a [`SheafTower`](@ref): `tower` supplies the topology and
+per-timestep [`solve_hierarchical`](@ref) reference solve, `bindings` resolves per-agent
+dynamics/gain/initial state via [`resolve_dynamics`](@ref), and `target_trajectories[t]` is a
+function `time -> Vector{Float64}` giving target `t`'s `D`-dimensional world position.
+`target_velocities`/`target_accelerations`, if supplied, enable feedforward tracking (see
+[`run_nested_escort_simulation`](@ref)).
+
+Mirrors `Layered.LayeredEscortProblem` structurally, built on `NestedSystems`'s tree-shaped
+primitives instead of `LayeredEscortSpec`'s flat ones.
+"""
+struct NestedEscortProblem
+    tower::SheafTower
+    bindings::SystemBinding
+    target_trajectories::Vector{Any}
+    target_velocities::Union{Nothing,Vector{Any}}
+    target_accelerations::Union{Nothing,Vector{Any}}
+    dt::Float64
+    steps::Int
+end
+
+NestedEscortProblem(tower::SheafTower, bindings::SystemBinding, target_trajectories::Vector;
+                     target_velocities=nothing, target_accelerations=nothing,
+                     dt::Float64=0.05, steps::Int=200) =
+    NestedEscortProblem(tower, bindings, Vector{Any}(target_trajectories),
+                        target_velocities === nothing ? nothing : Vector{Any}(target_velocities),
+                        target_accelerations === nothing ? nothing : Vector{Any}(target_accelerations),
+                        dt, steps)
+
+"""
+    NestedEscortResult
+
+Output of [`run_nested_escort_simulation`](@ref). `sim_data[step][agent]` is the agent's raw
+dynamics state (length `state_dim(dyn)`); `qstar_history[step][agent]` is the `D`-dimensional
+hierarchical reference the agent was tracking that step (`tower.agent_vertices` order);
+`target_history[step][target]` is the target's `D`-dimensional world position that step.
+"""
+struct NestedEscortResult
+    problem::NestedEscortProblem
+    sim_data::Vector{Vector{Vector{Float64}}}
+    qstar_history::Vector{Vector{Vector{Float64}}}
+    target_history::Vector{Vector{Vector{Float64}}}
+end
+
+"""
+    run_nested_escort_simulation(prob::NestedEscortProblem; use_feedforward::Bool=false) -> NestedEscortResult
+
+Run a closed-loop simulation over `prob.tower`'s spec: at each step, solve the tower
+hierarchically for the current target positions, lift the result to per-agent references, and
+step each agent's `AgentState` toward that reference.
+
+`use_feedforward` toggles two things, exactly as in `Layered.run_layered_escort_simulation`:
+whether `AgentState` uses a joint (position+velocity) Tikhonov filter, and whether velocity/
+acceleration references are additionally solved for (via the same hierarchical machinery, on
+`prob.target_velocities`/`prob.target_accelerations`) and passed to `step_agent!` for
+differential-flatness feedforward.
+"""
+function run_nested_escort_simulation(prob::NestedEscortProblem; use_feedforward::Bool=false)
+    tower = prob.tower
+    resolved = resolve_dynamics(tower.spec, prob.bindings)   # tower.agent_vertices order (Issue 012)
+    agent_states = [AgentState(initial_state(r.dynamics, r.initial_position), r.dynamics,
+                                prob.dt, r.K_lqr, 0.02; use_velocity=use_feedforward)
+                    for r in resolved]
+
+    time_grid = 0:prob.dt:(prob.steps * prob.dt)
+    sim_data = Vector{Vector{Vector{Float64}}}()
+    qstar_history = Vector{Vector{Vector{Float64}}}()
+    target_history = Vector{Vector{Vector{Float64}}}()
+
+    for step in 1:prob.steps
+        t = time_grid[step]
+        p_targets = [traj(t) for traj in prob.target_trajectories]
+        q = solve_hierarchical(tower, p_targets)[end]
+        qstar_agents = [q[v] for v in tower.agent_vertices]
+        push!(qstar_history, qstar_agents)
+        push!(target_history, [q[v] for v in tower.target_vertices])
+
+        qdot_agents = qddot_agents = nothing
+        if use_feedforward && prob.target_velocities !== nothing
+            v = solve_hierarchical(tower, [vt(t) for vt in prob.target_velocities])[end]
+            qdot_agents = [v[vtx] for vtx in tower.agent_vertices]
+        end
+        if use_feedforward && prob.target_accelerations !== nothing
+            a = solve_hierarchical(tower, [at(t) for at in prob.target_accelerations])[end]
+            qddot_agents = [a[vtx] for vtx in tower.agent_vertices]
+        end
+
+        step_states = Vector{Vector{Float64}}()
+        for i in eachindex(agent_states)
+            pd = length(position_indices(agent_states[i].dyn))
+            q_ref = qstar_agents[i][1:pd]
+            if use_feedforward && qdot_agents !== nothing && qddot_agents !== nothing
+                step_agent!(agent_states[i], q_ref, qdot_agents[i][1:pd], qddot_agents[i][1:pd], prob.dt)
+            elseif use_feedforward && qdot_agents !== nothing
+                step_agent!(agent_states[i], q_ref, qdot_agents[i][1:pd], prob.dt)
+            else
+                step_agent!(agent_states[i], q_ref, prob.dt)
+            end
+            push!(step_states, copy(agent_states[i].x))
+        end
+        push!(sim_data, step_states)
+    end
+
+    return NestedEscortResult(prob, sim_data, qstar_history, target_history)
 end
 
 end # module NestedSystems
