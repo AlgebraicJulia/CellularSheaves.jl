@@ -157,11 +157,8 @@ end
 
 colors = [:steelblue, :crimson]
 
-## Panel 1: top-down view. `top_down_frame` renders one step -- ring *centroid* trails (not one
-## path per agent; individual-agent paths from the airstrip start would clutter the plot with a
-## transient that panels 2/3 already show cleanly) up to that step, the ring's current agent
-## positions with a dashed outline, and each target's trail-and-marker up to that step. Reused
-## below to build the animated version, so both stay visually consistent.
+## Panel 1: top-down view, and the animated version below both need consistent axis limits --
+## computed once, from every agent and target position across the whole run.
 all_x = Float64[]; all_y = Float64[]
 for rng in ring_ranges, i in rng, step in 1:STEPS
     push!(all_x, res.sim_data[step][i][1]); push!(all_y, res.sim_data[step][i][2])
@@ -173,6 +170,58 @@ end
 const TOPDOWN_XLIM = (minimum(all_x) - 0.5, maximum(all_x) + 0.5)
 const TOPDOWN_YLIM = (minimum(all_y) - 0.5, maximum(all_y) + 0.5)
 
+## Panel 1 proper: a composite of the *whole* run, not just its final state. Every agent's full
+## path is drawn thin and faint (dt is far finer than a static plot needs, and overlapping,
+## low-alpha paths read as darker where multiple agents pass through the same region -- exactly
+## what makes the two rings' shared convergence near the midpoint visible). A handful of ring
+## outlines are drawn at sparse, evenly-spaced snapshots (not one per step) with alpha fading from
+## faint (early) to solid (final), so the ring's shape/position over time reads as a single image
+## rather than needing the animation.
+function top_down_composite(; n_snapshots::Int=8)
+    snaps = snapshot_steps(STEPS, n_snapshots)
+    p = plot(title="Top-Down View (full trajectory)", aspect_ratio=1,
+            xlabel="x (m)", ylabel="y (m)", xlims=TOPDOWN_XLIM, ylims=TOPDOWN_YLIM,
+            legend=:topright, size=(600, 500))
+    for (r, rng) in enumerate(ring_ranges)
+        for i in rng
+            px = [res.sim_data[s][i][1] for s in 1:STEPS]
+            py = [res.sim_data[s][i][2] for s in 1:STEPS]
+            plot!(p, px, py, color=colors[r], alpha=0.12, linewidth=1, label="")
+        end
+        for (si, s) in enumerate(snaps)
+            a = fade_alpha(si, length(snaps))
+            fx = [res.sim_data[s][i][1] for i in rng]
+            fy = [res.sim_data[s][i][2] for i in rng]
+            plot!(p, [fx; fx[1]], [fy; fy[1]], color=colors[r], linestyle=:dash, alpha=a,
+                 label=(s == snaps[end] ? ring_names[r] : ""))
+            scatter!(p, fx, fy, color=colors[r], markersize=3, alpha=a, label="")
+        end
+    end
+    for (r, traj) in enumerate([target1, target2])
+        tp = [traj(t) for t in time_grid[1:STEPS]]
+        plot!(p, [q[1] for q in tp], [q[2] for q in tp], color=colors[r], linestyle=:dot, alpha=0.5, label="")
+        for (si, s) in enumerate(snaps)
+            pt = traj(time_grid[s])
+            a = fade_alpha(si, length(snaps))
+            scatter!(p, [pt[1]], [pt[2]], marker=:star5, markersize=(s == snaps[end] ? 10 : 5),
+                    color=colors[r], alpha=a, label=(s == snaps[end] ? "target $r" : ""))
+        end
+    end
+
+    ## The midpoint of the two targets -- direct visual proof that the rings are converging on
+    ## this shared point rather than on either target.
+    mp = [(target1(t) .+ target2(t)) ./ 2 for t in time_grid[1:STEPS]]
+    plot!(p, [q[1] for q in mp], [q[2] for q in mp], color=:black, linestyle=:dot, alpha=0.4, label="")
+    scatter!(p, [mp[end][1]], [mp[end][2]], marker=:xcross, markersize=8, color=:black,
+            label="target midpoint")
+    return p
+end
+
+p1 = top_down_composite()
+
+## The animated version reuses the same per-step rendering logic in miniature -- current agent
+## positions and outline only, no accumulated trail (the composite above already shows the whole
+## run at once; the animation's job is to convey motion, not repeat the same information).
 function top_down_frame(step::Int)
     t = time_grid[step]
     p = plot(title=@sprintf("Top-Down View (t = %.2f s)", t), aspect_ratio=1,
@@ -203,8 +252,6 @@ function top_down_frame(step::Int)
             label="target midpoint")
     return p
 end
-
-p1 = top_down_frame(STEPS)
 
 ## Panel 2: formation radius error over time.
 p2 = plot(title="Formation Radius Error", xlabel="time (s)", ylabel="error (m)")

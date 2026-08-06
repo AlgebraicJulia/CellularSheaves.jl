@@ -190,9 +190,8 @@ end
 cs = palette(:tab10)
 ring_color(i) = cs[mod1(i, 10)]
 
-## Panel 1: top-down view. `top_down_frame` renders one step -- current ring and pod agent
-## positions with dashed ring outlines, and each target's trail-and-marker up to that step.
-## Reused below for the animated version, so both stay visually consistent.
+## Panel 1: top-down view, and the animated version below both need consistent axis limits --
+## computed once, from every agent and target position across the whole run.
 all_x = Float64[]; all_y = Float64[]
 for rngs in (ring_ranges, pod_ranges), rng in rngs, a in rng, step in 1:STEPS
     push!(all_x, res.sim_data[step][a][1]); push!(all_y, res.sim_data[step][a][2])
@@ -204,6 +203,50 @@ end
 const TOPDOWN_XLIM = (minimum(all_x) - 0.5, maximum(all_x) + 0.5)
 const TOPDOWN_YLIM = (minimum(all_y) - 0.5, maximum(all_y) + 0.5)
 
+## Panel 1 proper: a composite of the whole run. Every agent's full path is drawn thin and faint
+## (dt is far finer than a static plot needs); ring/pod outlines are drawn at sparse, evenly-spaced
+## snapshots (not one per step) with alpha fading from faint (early) to solid (final).
+function top_down_composite(; n_snapshots::Int=8)
+    snaps = snapshot_steps(STEPS, n_snapshots)
+    p = plot(title="Top-Down View (full trajectory)", aspect_ratio=1,
+            xlabel="x (m)", ylabel="y (m)", xlims=TOPDOWN_XLIM, ylims=TOPDOWN_YLIM,
+            legend=:outertopright)
+    for i in 1:N
+        for a in ring_ranges[i]
+            px = [res.sim_data[s][a][1] for s in 1:STEPS]
+            py = [res.sim_data[s][a][2] for s in 1:STEPS]
+            plot!(p, px, py, color=ring_color(i), alpha=0.1, linewidth=1, label="")
+        end
+        for (si, s) in enumerate(snaps)
+            a = fade_alpha(si, length(snaps))
+            fx = [res.sim_data[s][v][1] for v in ring_ranges[i]]
+            fy = [res.sim_data[s][v][2] for v in ring_ranges[i]]
+            plot!(p, [fx; fx[1]], [fy; fy[1]], color=ring_color(i), linestyle=:dash, alpha=a,
+                 label=(s == snaps[end] ? "ring$i" : ""))
+            scatter!(p, fx, fy, color=ring_color(i), markersize=3, alpha=a, label="")
+
+            px = [res.sim_data[s][v][1] for v in pod_ranges[i]]
+            py = [res.sim_data[s][v][2] for v in pod_ranges[i]]
+            scatter!(p, px, py, color=:gray40, markersize=3, marker=:diamond, alpha=a,
+                    label=(i == 1 && s == snaps[end] ? "pods" : ""))
+        end
+
+        tp = [target_trajectories[i](t) for t in time_grid[1:STEPS]]
+        plot!(p, [q[1] for q in tp], [q[2] for q in tp], color=ring_color(i), linestyle=:dot, alpha=0.5, label="")
+        for (si, s) in enumerate(snaps)
+            pt = target_trajectories[i](time_grid[s])
+            a = fade_alpha(si, length(snaps))
+            scatter!(p, [pt[1]], [pt[2]], marker=:star5, markersize=(s == snaps[end] ? 9 : 5),
+                    color=ring_color(i), alpha=a, label=(s == snaps[end] ? "target$i" : ""))
+        end
+    end
+    return p
+end
+
+p1 = top_down_composite()
+
+## The animated version reuses the same per-step rendering in miniature -- current positions and
+## outline only, no accumulated trail (the composite above already shows the whole run at once).
 function top_down_frame(step::Int)
     t = time_grid[step]
     p = plot(title=@sprintf("Top-Down View (t = %.2f s)", t), aspect_ratio=1,
@@ -227,8 +270,6 @@ function top_down_frame(step::Int)
     return p
 end
 
-p1 = top_down_frame(STEPS)
-
 ## Panel 2: per-ring formation radius error.
 p2 = plot(title="Formation Radius Error", xlabel="time (s)", ylabel="error (m)")
 for i in 1:N
@@ -242,21 +283,35 @@ for i in 1:N
     plot!(p3, time_grid[1:STEPS], track_err[i], color=ring_color(i), label="ring$i", linewidth=2)
 end
 
-## Panel 4: high-level topology snapshot -- ring/pod centroids connected in cycle order, to
-## directly validate that the centroid()-wired cycle closes the way it was declared.
-p4 = plot(title="High-Level Topology (Ring/Pod Centroids)", aspect_ratio=1, xlabel="x (m)", ylabel="y (m)")
-node_xy = Vector{Tuple{Float64,Float64}}()
-for i in 1:N
-    rc = sum(res.sim_data[end][a][1:2] for a in ring_ranges[i]) / length(ring_ranges[i])
-    push!(node_xy, (rc[1], rc[2]))
-    scatter!(p4, [rc[1]], [rc[2]], color=ring_color(i), markersize=8, label=(i == 1 ? "ring centroid" : ""))
-    pc = sum(res.sim_data[end][a][1:2] for a in pod_ranges[i]) / length(pod_ranges[i])
-    push!(node_xy, (pc[1], pc[2]))
-    scatter!(p4, [pc[1]], [pc[2]], color=:gray40, marker=:diamond, markersize=6, label=(i == 1 ? "pod centroid" : ""))
+## Panel 4: high-level topology over time -- ring/pod centroids connected in cycle order, at the
+## same sparse snapshots as panel 1 (fading faint-to-solid), so the coarse topology's own arc
+## through time is visible directly, not just its final shape. Directly validates that the
+## centroid()-wired cycle closes the way it was declared, at every snapshot, not only the last.
+p4 = plot(title="High-Level Topology Over Time (Ring/Pod Centroids)", aspect_ratio=1,
+         xlabel="x (m)", ylabel="y (m)")
+## Skip the very start of the run: agents begin from the airstrip layout (see
+## `_default_initial_position`), and that convergence transient is already covered by panels 2/3
+## -- including it here would just stretch this panel's axes around one uninformative outlier.
+topo_snaps = snapshot_steps(STEPS, 9)[2:end]
+for (si, s) in enumerate(topo_snaps)
+    a = fade_alpha(si, length(topo_snaps))
+    node_xy = Vector{Tuple{Float64,Float64}}()
+    for i in 1:N
+        rc = sum(res.sim_data[s][v][1:2] for v in ring_ranges[i]) / length(ring_ranges[i])
+        push!(node_xy, (rc[1], rc[2]))
+        scatter!(p4, [rc[1]], [rc[2]], color=ring_color(i), markersize=(s == topo_snaps[end] ? 8 : 4),
+                alpha=a, label=(i == 1 && s == topo_snaps[end] ? "ring centroid" : ""))
+        pc = sum(res.sim_data[s][v][1:2] for v in pod_ranges[i]) / length(pod_ranges[i])
+        push!(node_xy, (pc[1], pc[2]))
+        scatter!(p4, [pc[1]], [pc[2]], color=:gray40, marker=:diamond,
+                markersize=(s == topo_snaps[end] ? 6 : 3), alpha=a,
+                label=(i == 1 && s == topo_snaps[end] ? "pod centroid" : ""))
+    end
+    cyc_x = [pt[1] for pt in node_xy]; push!(cyc_x, node_xy[1][1])
+    cyc_y = [pt[2] for pt in node_xy]; push!(cyc_y, node_xy[1][2])
+    plot!(p4, cyc_x, cyc_y, color=:black, linewidth=(s == topo_snaps[end] ? 1.5 : 1.0), alpha=a * 0.7,
+         label=(s == topo_snaps[end] ? "cycle" : ""))
 end
-cyc_x = [p[1] for p in node_xy]; push!(cyc_x, node_xy[1][1])
-cyc_y = [p[2] for p in node_xy]; push!(cyc_y, node_xy[1][2])
-plot!(p4, cyc_x, cyc_y, color=:black, linewidth=1.5, alpha=0.6, label="cycle")
 
 plot(p1, p2, p3, p4, layout=(2, 2), size=(1100, 900),
     plot_title="$N-Ring Cyclic Escort Formation (centroid-wired)")
