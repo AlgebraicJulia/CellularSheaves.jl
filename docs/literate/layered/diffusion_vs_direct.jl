@@ -65,6 +65,18 @@ fmt_bytes(b) = b >= 1_048_576 ? @sprintf("%.1f MB", b / 1_048_576) :
 
 # Winning cells are shaded green in every table below.
 
+## The tables are emitted through a `text/markdown` show method rather than as an
+## `HTML` object. The documentation is generated with Literate's `documenter=false`,
+## under which an `HTML` return value is printed as its own representation instead
+## of being passed through, so the table would render as escaped source. Writing a
+## `@raw html` fence to the markdown stream reaches Documenter intact.
+struct RawHTML
+    html::String
+end
+
+Base.show(io::IO, ::MIME"text/markdown", r::RawHTML) =
+    print(io, "```@raw html\n", r.html, "\n```")
+
 function bench_table(headers, rows)
     io = IOBuffer()
     print(io, "<table class=\"bench\"><thead><tr>")
@@ -80,7 +92,7 @@ function bench_table(headers, rows)
         print(io, "</tr>")
     end
     print(io, "</tbody></table>")
-    return HTML(String(take!(io)))
+    return RawHTML(String(take!(io)))
 end
 
 nowin(n) = falses(n)
