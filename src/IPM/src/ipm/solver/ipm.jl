@@ -461,9 +461,13 @@ function step!(s::IPMSolver{T}) where {T}
                 if mode == 0
                     force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
                 elseif mode == 2
-                    force_tol = s.settings.delta * pres   # gnorm: ‖g−BΔp‖ ≤ δ‖g‖ (g = rp, so δ·pres)
+                    force_tol = max(s.settings.delta * pres, s.settings.feas_tol)   # gnorm: δ·‖g‖, floored at feas_tol
+                elseif mode == 3
+                    # vfloor: vartol relative target, but never tighter than feas_tol
+                    ηv = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0))
+                    force_tol = max(ηv * max(pres, dres), s.settings.feas_tol)
                 elseif mode == 4
-                    force_tol = s.settings.abstol   # fixtol: fixed (reachable) target every iteration
+                    force_tol = s.settings.feas_tol   # fixtol: solve to feas_tol every iteration
                 else                        # vartol: relative target η·R0, passed as the −η sentinel
                     force_tol = -max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0))
                 end
