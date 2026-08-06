@@ -68,7 +68,7 @@ function initkkt!(
     #
     # cache the capacitance scalar S and border row aτ = c - 2Qp/τ (stable split form)
     #
-    bw.S[] = capacitance!(bw.QΔp2, bw.aτ, τ, κ, bw.Δp2, c, Qp, p, Hc, Q)
+    bw.S[] = capacitance!(bw.QΔp2, bw.aτ, τ, κ, bw.Δp2, bw.Δy2, c, g, Qp, p, Hc, Q)
     return ok, ρ, wtuple
 end
 
@@ -116,33 +116,49 @@ function capacitance!(
         τ::T,
         κ::T,
         Δp2::AbstractVector{T},
+        Δy2::AbstractVector{T},
         c::AbstractVector{T},
+        g::AbstractVector{T},
         Qp::AbstractVector{T},
         p::AbstractVector{T},
         W::BlockSparseMatrix{T},
         Q::BlockSparseMatrix{T},
     ) where {T}
     #
-    # compute aτ = c - 2Qp/τ
+    # compute aτ = c - 2Qp/τ  (the border row; used by the Schur lift in newton!/refinehsd!)
     #
     copyto!(aτ, c)
     axpby!(-2 / τ, Qp, one(T), aτ)
     #
-    # compute Q Δp2
+    # Woodbury capacitance by inner product (units spec, HSD bordered §1):
     #
-    mul!(QΔp2, Symmetric(Q, :L), Δp2)
+    #   S = aτᵀΔp2 + gᵀΔy2 + δ,   δ = pᵀQp/τ² + κ/τ
     #
-    # compute the Woodbury capacitance scalar
+    # This is the Schur complement of the τ row and is ALGEBRAICALLY identical to the quadratic form
+    # S = Δp2ᵀWΔp2 + (Δp2-p/τ)ᵀQ(Δp2-p/τ) + κ/τ (cross terms cancel via HΔp2-BᵀΔy2=c, BΔp2=g, W=H-Q).
+    # Numerically it is BETTER: the same aτᵀΔp2/gᵀΔy2 rounding appears here and in the lift's numerator
+    # num = fτ - aτᵀΔp0 - gᵀΔy0, so they cancel and the τ row is satisfied to machine precision regardless
+    # of how loosely the Woodbury column was solved. It is also cheaper (two dot products, no matvecs).
     #
-    #   S = Δp2ᵀ W Δp2 + (Δp2 - p/τ)ᵀ Q (Δp2 - p/τ) + κ/τ
+    δ = dot(p, Qp) / τ^2 + κ / τ
+    S = dot(aτ, Δp2) + dot(g, Δy2) + δ
     #
-    S = dot(Δp2, Symmetric(W, :L), Δp2) + κ / τ
-
-    @inbounds for i in eachindex(Δp2)
-        S += (Δp2[i] - p[i] / τ) * (QΔp2[i] - Qp[i] / τ)
+    # guard: S is divided by (the Schur lift dτ = num/S). The true capacitance is ≥ κ/τ — the quadratic
+    # form is Δp2ᵀWΔp2 + (Δp2-p/τ)ᵀQ(Δp2-p/τ) + κ/τ, a sum of PSD terms plus κ/τ (W, Q ⪰ 0). So an inner
+    # product landing below that floor has been corrupted by cancellation; fall back to the manifestly
+    # positive quadratic form. Above the floor the inner product is used, keeping the τ-row exact.
+    #
+    if S > κ / τ
+        return S
     end
 
-    return S
+    mul!(QΔp2, Symmetric(Q, :L), Δp2)
+    Sq = dot(Δp2, Symmetric(W, :L), Δp2) + κ / τ
+    @inbounds for i in eachindex(Δp2)
+        Sq += (Δp2[i] - p[i] / τ) * (QΔp2[i] - Qp[i] / τ)
+    end
+
+    return Sq
 end
 
 ############################################################################################
