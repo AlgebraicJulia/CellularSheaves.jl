@@ -528,9 +528,9 @@ function isoptimal(s::HSDSolver{T}, μ::T, pres::T, dres::T) where {T}
 
     pQp = dot(s.p, w.Qp) / τ^2
     pobj = pQp / 2 - dot(s.c, s.p) / τ
-    dobj = dot(s.g, s.y) / τ - pQp / 2
-
-    max(pres, dres) < s.settings.feas_tol && (μ < s.settings.gap_tol * τ^2 || pobj - dobj < s.settings.gap_tol * (1 + abs(pobj) + abs(dobj)))
+    # Gondzio (IPM 2025) stopping test: relative complementarity μ/(1+|cᵀx|) ≤ ε_o. The embedded μ carries a
+    # τ² factor to de-homogenize into original-problem units; pobj is already de-homogenized (÷τ).
+    max(pres, dres) < s.settings.feas_tol && μ < s.settings.gap_tol * τ^2 * (1 + abs(pobj))
 end
 
 function isprimalinfeasible(w, τ, κ, B, d, g, y, ng, rtol, atol)

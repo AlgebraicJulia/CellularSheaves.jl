@@ -345,8 +345,9 @@ end
 function isoptimal(s::IPMSolver{T}, μ::T, pres::T, dres::T) where {T}
     pQp = dot(s.p, Symmetric(s.Q, :L), s.p)
     pobj = pQp / 2 - dot(s.c, s.p)
-    dobj = dot(s.g, s.y) - pQp / 2
-    return max(pres, dres) < s.settings.feas_tol && (iszero(s.ν) || μ < s.settings.gap_tol || pobj - dobj < s.settings.gap_tol * (1 + abs(pobj) + abs(dobj)))
+    # Gondzio (IPM 2025) stopping test: relative complementarity μ/(1+|cᵀx|) ≤ ε_o, where μ = xᵀs/ν is the
+    # mean pairwise complementarity and pobj is the QP's primal objective (the cᵀx analog).
+    return max(pres, dres) < s.settings.feas_tol && (iszero(s.ν) || μ < s.settings.gap_tol * (1 + abs(pobj)))
 end
 
 function nearstatus(s::IPMSolver, status::IPMStatus)
