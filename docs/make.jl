@@ -100,6 +100,10 @@ makedocs(
         "generated/layered/escort_feedforward.md",
         "generated/layered/multilayer_escort.md",
         ],
+      "Nested Systems Examples" => Any[
+        "generated/nested/centroid_formation_tracking.md",
+        "generated/nested/n_ring_formation.md",
+        ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
         "generated/asynch/step_size_comparison.md",
