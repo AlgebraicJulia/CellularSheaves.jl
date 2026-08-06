@@ -16,10 +16,6 @@
     raug::T = 1e7       # relative augmentation, in initial-problem units (the anchored knob)
     fix_alpha::Bool = false   # ORACLE ONLY: setaug! becomes a no-op so a caller-injected α survives step!
     policy::Int = 0     # α policy: 0 = current (fudged window + cap), 1 = policies_1_and_2.md Policy 1
-    vartol::Bool = false   # DEPRECATED (maps to forcing=1 when forcing=0); use `forcing`
-    forcing::Int = 0    # 0=absolute μ-schedule, 1=vartol (η·R0), 2=gnorm, 3=vfloor(max(vartol,feas_tol)), 4=fixtol (floor)
-    tol0::T = 1e-3      # vartol: relative reduction target (Z&G tune 1e-3..1e-2 per problem class)
-    delta::T = 0.05     # gnorm: relative primal-residual reduction ‖g−BΔp‖ ≤ δ·‖g‖ (fixed constant)
     elim::E = DEFAULT_ELIMINATION_ALGORITHM   # KKT elimination ordering (construction-time)
 end
 

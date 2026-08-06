@@ -448,28 +448,12 @@ function step!(s::IPMSolver{T}) where {T}
                     μ1 = first(s.hist.μ)
                 end
 
-                # forcing term η (vartol / EW Choice 2). vartol uses the positive shared-R0 proxy
-                # force_tol = η·max(pres,dres); mode 0 = absolute μ-schedule. force_tol/floor_tol are
-                # combined into tol below, then converted to the solver's absolute ptol/ytol targets.
+                # forcing (absolute μ-schedule) and accuracy floor, combined into tol, then converted to
+                # the solver's absolute residual targets ptol (primal) / ytol (dual).
+                #
+                force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
                 floor_tol = 100eps(T) * (1 + max(norm(w.rp) / (1 + s.ng[]),
                                                  norm(w.rd) / (1 + s.nc[])))
-                mode = s.settings.forcing == 0 && s.settings.vartol ? 1 : s.settings.forcing
-                if mode == 0
-                    force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
-                elseif mode == 2
-                    force_tol = max(s.settings.delta * pres, s.settings.feas_tol)   # gnorm: δ·‖g‖, floored at feas_tol
-                elseif mode == 3
-                    # vfloor: vartol relative target, but never tighter than feas_tol
-                    ηv = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0))
-                    force_tol = max(ηv * max(pres, dres), s.settings.feas_tol)
-                elseif mode == 4
-                    force_tol = s.settings.feas_tol   # fixtol: solve to feas_tol every iteration
-                else                        # vartol: relative target η·max(pres,dres) (shared-R0 proxy)
-                    force_tol = max(T(0.01) * s.settings.feas_tol, min(s.settings.tol0 * μ / μ1, s.settings.tol0)) * max(pres, dres)
-                end
-                #
-                # convert to the KKT solver's absolute residual targets: ptol (primal) / ytol (dual).
-                #
                 tol = max(force_tol, floor_tol)
                 ptol = tol * (1 + s.ng[])
                 ytol = tol * (1 + s.nc[])
