@@ -103,6 +103,7 @@ makedocs(
       "Nested Systems Examples" => Any[
         "generated/nested/centroid_formation_tracking.md",
         "generated/nested/n_ring_formation.md",
+        "generated/nested/rescaling_formation.md",
         ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
