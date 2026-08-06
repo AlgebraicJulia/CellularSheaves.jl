@@ -415,6 +415,42 @@ end
     ## regression check, not just a directional one.
     @test isapprox(err_single, 2.01; atol=0.05)
     @test isapprox(err_redundant, 1.80; atol=0.05)
+
+    ## Why the tracking error never reaches zero: because the pods have no target of their own,
+    ## each ring's actual position is an exact linear blend of *every* target, not just its own --
+    ## measured directly by perturbing one target at a time. This was caught by exactly this kind
+    ## of direct, index-checked measurement after the docs page's own version of this computation
+    ## initially used the wrong indexing convention (`agent_index_ranges`'s *local* agent-position
+    ## ranges directly against `solve_hierarchical`'s *actual-vertex-numbered* output) and silently
+    ## produced a plausible-looking but wrong number -- worth a regression test on its own.
+    function target_response_weights(tower, ring_idx::Int)
+        off = 0
+        verts = Int[]
+        for i in 1:n
+            rng = tower.agent_vertices[(off + 1):(off + m[i])]
+            i == ring_idx && (verts = rng)
+            off += m[i] + support_m
+        end
+        base = fill([0.0, 0.0, 1.5, 1.0], n)
+        ring_centroid(tv) = sum(solve_hierarchical(tower, tv)[end][v] for v in verts) / length(verts)
+        c0 = ring_centroid(base)
+        h = 1.0
+        return [begin
+                    perturbed = copy(base)
+                    perturbed[j] = base[j] .+ [h, 0.0, 0.0, 0.0]
+                    (ring_centroid(perturbed)[1] - c0[1]) / h
+                end
+                for j in 1:n]
+    end
+
+    w_single = target_response_weights(build_cyclic_tower(single_pin), 1)
+    w_redundant = target_response_weights(build_cyclic_tower(redundant), 1)
+    @test sum(w_single) ≈ 1.0 atol=1e-8      # translation-invariance: weights must blend to 1
+    @test sum(w_redundant) ≈ 1.0 atol=1e-8
+    @test isapprox(w_single[1], 0.5558; atol=1e-3)
+    @test isapprox(w_redundant[1], 0.6; atol=1e-8)
+    @test w_redundant[1] > w_single[1]        # redundant pin measurably raises the own-target weight
+    @test w_redundant[2] ≈ w_redundant[3] atol=1e-8   # symmetric under the cycle's own symmetry
 end
 
 @testset "quantitative Example C: full redundant pins rescale a rigid team, never shear it" begin
