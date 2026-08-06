@@ -30,6 +30,7 @@
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.NestedDSL
 using CellularSheaves.ControlSheaves.AgentControllers
 using LinearAlgebra
 using Statistics
@@ -58,7 +59,8 @@ escort_radius(n::Int, R_big::Real, m_i::Int, m_max::Int; safety::Real=0.35) =
 """
     build_n_ring_spec(n; m=fill(5, n), R_big=3.0, support_m=2, safety=0.35, D=4, pin_scheme=:redundant)
 
-Build the `n`-ring cyclic escort `NestedSystemSpec`, its compiled `SheafTower`, and the agent
+Build the `n`-ring cyclic escort specification -- the `NestedDSL` [`SystemFragment`](@ref) it is
+written as, the lowered `NestedSystemSpec`, its compiled `SheafTower`, and the agent
 index ranges for each ring/pod (into `tower.agent_vertices`, in the order the rings/pods were
 added -- ring 1, pod 1, ring 2, pod 2, ..., matching `NestedSystems`'s depth-first agent
 assignment).
@@ -74,49 +76,40 @@ function build_n_ring_spec(n::Int; m::Vector{Int}=fill(5, n), R_big::Real=3.0,
                            pin_scheme::Symbol=:redundant)
     @assert length(m) == n
     m_max = maximum(m)
-    rings = [LeafTeam(Symbol(:ring, i), :ring, m[i], escort_radius(n, R_big, m[i], m_max; safety=safety))
-             for i in 1:n]
-    ## 2-agent pods use :path (one edge) rather than :ring, to avoid the degenerate parallel-edge
-    ## 2-cycle a :ring topology gives for exactly 2 agents.
-    pods = [LeafTeam(Symbol(:pod, i), :path, support_m, 0.3 * escort_radius(n, R_big, m_max, m_max; safety=safety))
-            for i in 1:n]
+    ring_name(i) = Symbol(:ring, i)
+    pod_name(i) = Symbol(:pod, i)
+    pod_radius = 0.3 * escort_radius(n, R_big, m_max, m_max; safety=safety)
 
-    children = AbstractSystemNode[]
-    for i in 1:n
-        push!(children, rings[i])
-        push!(children, pods[i])
-    end
-
-    cyc_edges = SystemEdge[]
-    for i in 1:n
-        push!(cyc_edges, SystemEdge(2i - 1, 2i; src_map=centroid(), dst_map=centroid()))          # ring_i -- pod_i
-    end
-    for i in 1:n
-        push!(cyc_edges, SystemEdge(2i, (2i % 2n) + 1; src_map=centroid(), dst_map=centroid()))   # pod_i -- ring_{i+1}
-    end
-
-    root = RefinedSystem(:root, children, cyc_edges)
-    targets = [TargetSpec(Symbol(:t, i)) for i in 1:n]
-    observations = Observation[]
-    for i in 1:n
-        ks = pin_scheme == :redundant ? (1:2:m[i]) : (1:1)
-        for k in ks
-            system_map = pin_scheme == :redundant ? redundant_pin(m[i], D, k) : project(1)
-            push!(observations, Observation([2i - 1], i; system_map=system_map))
+    ## The whole cyclic topology is one [`NestedDSL`](@ref) fragment. Every loop below is Julia's
+    ## own -- `@nested_system` executes its block rather than quoting it -- so the spec scales
+    ## with `n` without the language needing any iteration construct of its own, and the `if`
+    ## selecting a pin scheme is likewise just an `if`.
+    fragment = @nested_system begin
+        @dim D
+        for i in 1:n
+            @team $(ring_name(i)) = ring(m[i]; radius=escort_radius(n, R_big, m[i], m_max; safety=safety))
+            ## 2-agent pods use :path (one edge) rather than :ring, to avoid the degenerate
+            ## parallel-edge 2-cycle a :ring topology gives for exactly 2 agents.
+            @team $(pod_name(i)) = path(support_m; radius=pod_radius)
+            @target $(Symbol(:t, i))
+        end
+        for i in 1:n
+            @link centroid($(ring_name(i))) => centroid($(pod_name(i)))                # ring_i -- pod_i
+            @link centroid($(pod_name(i))) => centroid($(ring_name(mod1(i + 1, n))))   # pod_i -- ring_{i+1}
+        end
+        for i in 1:n
+            for k in (pin_scheme == :redundant ? (1:2:m[i]) : (1:1))
+                @observe via($(ring_name(i)), pin_scheme == :redundant ?
+                             redundant_pin(m[i], D, k) : project(1)) => $(Symbol(:t, i))
+            end
         end
     end
-    spec = NestedSystemSpec(root, targets, observations, D, true)
-    tower = build_sheaf_tower(spec)
 
-    team_sizes = Int[]
-    for i in 1:n
-        push!(team_sizes, m[i]); push!(team_sizes, support_m)
-    end
-    ranges = agent_index_ranges(team_sizes)
-    ring_ranges = [ranges[2i - 1] for i in 1:n]
-    pod_ranges = [ranges[2i] for i in 1:n]
+    system = compile_nested_system(fragment)
+    ring_ranges = [agent_range(system, ring_name(i)) for i in 1:n]
+    pod_ranges = [agent_range(system, pod_name(i)) for i in 1:n]
 
-    return spec, tower, ring_ranges, pod_ranges
+    return fragment, system.spec, system.tower, ring_ranges, pod_ranges
 end
 
 const N = 3
@@ -125,7 +118,7 @@ const R_BIG = 3.0
 const SUPPORT_M = 2
 const D = 4
 
-spec, tower, ring_ranges, pod_ranges = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M)
+fragment, spec, tower, ring_ranges, pod_ranges = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M)
 println("Ring radius: ", round(escort_radius(N, R_BIG, M[1], maximum(M)), digits=3), " m ",
        "  (chord = ", round(2R_BIG * sin(pi / N), digits=3), " m)")
 
@@ -214,8 +207,16 @@ R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
 K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10 * Q_lqr, R_lqr)
 K_soft = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 2 * Q_lqr, R_lqr)
 
-pod_overrides = Dict(Symbol(:pod, i) => SystemBinding(K_lqr=K_soft) for i in 1:N)
-bindings = SystemBinding(dynamics=dyn, K_lqr=K, children=pod_overrides)
+## The cascade is declared in the same language as the topology, in a separate fragment merged
+## onto it -- the gains only exist once `solve_dare` has run, and a fragment being a first-class
+## value means the specification never has to be written all in one place. `nested_bindings`
+## resolves just the binding cascade, without rebuilding the tower.
+bindings = nested_bindings(merge(fragment, @nested_system begin
+    @bind dynamics=dyn K_lqr=K
+    for i in 1:N
+        @bind $(Symbol(:pod, i)) K_lqr=K_soft
+    end
+end))
 
 # ## Run the closed-loop simulation with full feedforward
 
@@ -414,7 +415,7 @@ println("N-ring cyclic escort formation example complete.")
 # strengthening one ring's own pin removes that path. To see the size of the effect the redundant
 # pin *does* buy, compare against a plain single pin on the same topology:
 
-_, tower_single, ring_ranges_single, _ = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M,
+_, _, tower_single, ring_ranges_single, _ = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M,
                                                             pin_scheme=:single)
 w_single = target_response_weights(tower_single, ring_ranges_single, 1, N)
 @printf("single pin:    own=%.3f, neighbors=%.3f/%.3f\n", w_single[1], w_single[2], w_single[3])

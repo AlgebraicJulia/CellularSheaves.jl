@@ -307,12 +307,23 @@ introduces. Do not parallelize.
 | 4b | `012-nested-dynamics-context-and-cascade.md` | Nested dynamics context with most-specific-wins cascade (§4.7). **Independent of 3 and 4** — may run in parallel once 2 lands. | 2 |
 | 4c | `013-retire-dynamics-trichotomy.md` | Delete `HomogeneousDynamics`/`TeamHomogeneousDynamics`/`IndividualizedDynamics`, porting the flat `Layered` path onto `SystemBinding`. | 4b |
 | — | `014-align-docs-module-coverage.md` | Add the missing `Formations` API page and align `makedocs(modules=...)` with the modules that actually have `@autodocs` blocks. Independent of this chain, but **touches `docs/make.jl`**, so do not run it concurrently with an issue that also edits that file. | none |
-| 5 | *(not yet written)* | DSL `ADT.jl` + `Parser.jl`, targeting the API from 2–4b. | 4, 4b |
-| 6 | *(not yet written)* | DSL `Validator.jl` + `Resolver.jl` + `Lowering.jl`. | 5 |
+| 5 | — | DSL `ADT.jl` + `Parser.jl`, targeting the API from 2–4b. **Done** (`src/ControlSheaves/NestedDSL/`). | 4, 4b |
+| 6 | — | DSL `Validator.jl` + `Lowering.jl`. **Done** (`src/ControlSheaves/NestedDSL/`). | 5 |
 
-Issues 5–6 remain unwritten by choice, not by blockage: the DSL's compilation target is the API
-built in 2–4b, and specifying its lowering before that API stabilizes would be speculative. Write
-them once Issue 4 lands.
+Issues 5–6 were deliberately left unwritten until the compilation target stabilized; they have
+now landed together as the `NestedDSL` module. Two decisions there depart from §5's sketch, both
+because the problems being specified turned out to be combinatorial rather than declarative:
+
+- **No `Resolver.jl`.** §5 planned a resolve stage binding values from a late-supplied `ctx`,
+  mirroring `TrackingDSL`. `NestedDSL` instead *executes* its block, so every numeric value is
+  evaluated by ordinary Julia in the caller's own scope at the point the declaration runs and
+  there is nothing left to resolve. `@bind` still expresses §4.7's cascade in full; what
+  disappeared is the dict of names to look values up in.
+- **Fragments are first-class.** `@nested_system` returns a `SystemFragment` describing one node,
+  with relative paths that lowering rewrites against wherever it lands. Composition —
+  `merge`, `@include`, `@system name = fragment` — replaces the DSL-level iteration and
+  abstraction §4.6 would otherwise have needed, and lets specification text interleave freely
+  with the Julia that computes what it refers to.
 
 ---
 

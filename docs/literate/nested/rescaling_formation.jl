@@ -30,6 +30,7 @@
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.NestedDSL
 using LinearAlgebra
 using Statistics
 using Plots
@@ -46,15 +47,22 @@ const N = 6
 const D = 4
 const h_alt = 1.5
 
-ring = LeafTeam(:formation, :ring, N, 1.0)
-root = RefinedSystem(:root, AbstractSystemNode[ring])
-targets = [TargetSpec(Symbol(:t, k)) for k in 1:N]
-
-## Deliberately full, untruncated `project(k)` pins -- no `redundant_pin`/`translation_pin` here,
-## since the whole point is to let the homogeneous coordinate drift.
-observations = [Observation([1], k; system_map=project(k)) for k in 1:N]
-spec = NestedSystemSpec(root, targets, observations, D, true)
-tower = build_sheaf_tower(spec)
+## Written in the [`NestedDSL`](@ref) specification language. The `for` loop is Julia's own --
+## `@nested_system` runs its block rather than quoting it, so declaring one target and one pin
+## per agent needs no iteration construct in the DSL itself. `$(...)` marks a name that is
+## computed rather than written literally.
+##
+## Deliberately full, untruncated `project(formation, k)` pins -- no `redundant_pin`/
+## `translation_pin` here, since the whole point is to let the homogeneous coordinate drift.
+system = compile_nested_system(@nested_system begin
+    @dim D
+    @team formation = ring(N; radius=1.0)
+    for k in 1:N
+        @target $(Symbol(:t, k))
+        @observe project(formation, k) => $(Symbol(:t, k))
+    end
+end)
+spec, tower = system.spec, system.tower
 
 # ## Target motion: a common origin, diverging at six different rates
 #
