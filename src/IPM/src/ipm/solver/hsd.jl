@@ -177,7 +177,7 @@ end
 #
 function solvepredictor!(s::HSDSolver{T}, gap::T; ptol::T, ytol::T, τtol::T) where {T}
     return solvepredictor!(
-        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.d,
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.ng[], s.d,
         s.τ[], s.κ[], gap;
         ptol, ytol, τtol,
     )
@@ -192,6 +192,7 @@ function solvepredictor!(
         Q::BlockSparseMatrix{T},
         c::AbstractVector{T},
         g::AbstractVector{T},
+        ng::T,
         d::AbstractVector{T},
         τ::T,
         κ::T,
@@ -210,7 +211,7 @@ function solvepredictor!(
     #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
     pbase, prefn, ppass, pstat, pfres, ppres, pdres, Δτa = solvekkt!(
-        kkt, w.Δpa, w.Δya, H, B, c, g, w.f, w.rp, gap;
+        kkt, w.Δpa, w.Δya, H, B, c, g, ng, w.f, w.rp, gap;
         ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
@@ -244,7 +245,7 @@ end
 #
 function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T; ptol::T, ytol::T, τtol::T) where {T}
     return solvecorrector!(
-        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.K, s.p, s.d,
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.ng[], s.K, s.p, s.d,
         s.caches, s.conewrk, s.ν, s.τ[], s.κ[],
         μ, gap, Δτa, Δκa;
         ptol, ytol, τtol,
@@ -260,6 +261,7 @@ function solvecorrector!(
         Q::BlockSparseMatrix{T},
         c::AbstractVector{T},
         g::AbstractVector{T},
+        ng::T,
         K::AbstractVector,
         p::AbstractVector{T},
         d::AbstractVector{T},
@@ -351,7 +353,7 @@ function solvecorrector!(
     #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
     cbase, crefn, cpass, cstat, cfres, cpres, cdres, Δτ = solvekkt!(
-        kkt, w.Δp, w.Δy, H, B, c, g, w.f, w.rp, fτ, w.Δya;
+        kkt, w.Δp, w.Δy, H, B, c, g, ng, w.f, w.rp, fτ, w.Δya;
         ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #

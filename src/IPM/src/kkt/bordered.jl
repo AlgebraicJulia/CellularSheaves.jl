@@ -108,6 +108,7 @@ function solvekkt!(
         B::BlockSparseMatrix{T},
         c::AbstractVector{T},
         g::AbstractVector{T},
+        ng::T,                 # cached ‖g‖ (solver-lifetime constant)
         f::AbstractVector{T},
         rp::AbstractVector{T},
         fτ::T,
@@ -145,15 +146,20 @@ function solvekkt!(
     #   r₂   = ‖ g - B Δp2 ‖
     #   r_d2 = ‖ H Δp2 - Bᵀ Δy2 - c ‖
     #
-    # tightening the column moves Δp2, Δy2 → S → the targets, so recompute S and re-check (≤ 6 passes). An
-    # unreachable target simply exhausts the inner solve (its own stall/itmax) and refinehsd! absorbs the rest.
+    # tightening the column moves Δp2, Δy2 → S → the targets, so recompute S and re-check (≤ 6 passes). The
+    # targets are clamped to r₂'s roundoff floor so the column is never asked for an unreachable accuracy.
     #
     for _ in 1:6
-        dt   = num / bw.S[]
-        ptgt = (ptol - rb) / abs(dt)
-        ytgt = ytol / abs(dt)
+        dt = num / bw.S[]
 
         mulkkt!(sd, sp, H, B, bw.Δp2, bw.Δy2)
+        #
+        # r₂ = ‖g - B Δp2‖ cannot fall below the roundoff of forming that difference, ~ u (‖g‖ + ‖B Δp2‖);
+        # clamp both targets to that floor.
+        #
+        flr  = 100 * eps(T) * (ng + norm(sp))
+        ptgt = max((ptol - rb) / abs(dt), flr)
+        ytgt = max(ytol / abs(dt), flr)
         axpby!(one(T), g, -one(T), sp)
         axpy!(-one(T), c, sd)
         r2   = norm(sp)
