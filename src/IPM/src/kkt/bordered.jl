@@ -137,18 +137,27 @@ function refinebdr!(
 
     dt = num / bw.S[]
     #
-    # lift the assembled direction and form its residual (mulkkt! gives H Δp - Bᵀ Δy and B Δp in one pass)
+    # lift the assembled direction and form its residual with the three matvecs kept SEPARATE. Each row's
+    # roundoff floor is u × the sum of the magnitudes differenced to form it — and the dual's ‖H Δp‖ is
+    # H-amplified (‖H‖ ~1e13 in the endgame) yet cancels against ‖Bᵀ Δy‖ in H Δp - Bᵀ Δy (their difference
+    # is O(1): the dual row is f + c Δτ at the solution), so the FUSED norm ‖H Δp - Bᵀ Δy‖ would hide the
+    # very term the floor exists to catch. dp holds Bᵀ Δy just long enough to floor and reassemble; the
+    # column tighten below overwrites it.
     #
     @. Δp = bw.Δp0 + dt * bw.Δp2
     @. Δy = bw.Δy0 + dt * bw.Δy2
-    mulkkt!(sd, sp, H, B, Δp, Δy)                       # sd = H Δp - Bᵀ Δy ,  sp = B Δp
-    axpby!(one(T), f,  -one(T), sd); axpy!(dt, c, sd)   # sd = f  - H Δp + Bᵀ Δy + c Δτ
-    axpby!(one(T), rp, -one(T), sp); axpy!(dt, g, sp)   # sp = rp - B Δp + g Δτ
+    mul!(sp, B, Δp)                  # sp = B Δp
+    mul!(sd, Symmetric(H, :L), Δp)   # sd = H Δp
+    mul!(dp, B', Δy)                 # dp = Bᵀ Δy
+    pfloor = max(ptol, 100 * eps(T) * (norm(rp) + norm(sp) + abs(dt) * ng))
+    dfloor = max(ytol, 100 * eps(T) * (norm(f) + norm(sd) + norm(dp) + abs(dt) * norm(c)))
+    axpby!(one(T), rp, -one(T), sp); axpy!(dt, g, sp)                        # sp = rp - B Δp + g Δτ
+    axpby!(one(T), f, -one(T), sd); axpy!(one(T), dp, sd); axpy!(dt, c, sd)  # sd = f - H Δp + Bᵀ Δy + c Δτ
     pres = norm(sp); dres = norm(sd)
 
-    res = pres / ptol
-    res ≤ one(T)                && return REACHED, pres, dres, 0
-    res > stall * (pprv / ptol) && return REFINE_STALLED, pres, dres, 0
+    res = max(pres / pfloor, dres / dfloor)
+    res ≤ one(T)                                    && return REACHED, pres, dres, 0
+    res > stall * max(pprv / pfloor, dprv / dfloor) && return REFINE_STALLED, pres, dres, 0
     #
     # column residual (solveuzw! RHS sign) and target; ONE warm correction toward tgt, then refresh S:
     #
