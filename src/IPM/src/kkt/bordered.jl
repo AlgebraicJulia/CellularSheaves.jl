@@ -9,6 +9,8 @@ struct BorderedSolver{T, W <: KKTSolver{T}} <: KKTSolver{T}
     inner::W          # the 2-row solver (factor + base solve primitive)
     Δp2::FVector{T}    # cached Woodbury column, primal part (n)
     Δy2::FVector{T}    # cached Woodbury column, dual part (m)
+    Δp0::FVector{T}    # base solve primal Δp₀, preserved so the column loop re-lifts from it (n)
+    Δy0::FVector{T}    # base solve dual   Δy₀ (m)
     aτ::FVector{T}     # cached border row c - 2Qp/τ (n)
     S::FScalar{T}      # cached capacitance scalar
     δ::FScalar{T}      # cached τ-row diagonal pᵀQp/τ² + κ/τ
@@ -19,6 +21,7 @@ function BorderedSolver(inner::W, B::BlockSparseMatrix{T, I}) where {T, I, W <: 
     S = FScalar{T}(undef); S[] = one(T)
     δ = FScalar{T}(undef); δ[] = zero(T)
     return BorderedSolver(inner, FVector{T}(undef, n), FVector{T}(undef, m),
+                          FVector{T}(undef, n), FVector{T}(undef, m),
                           FVector{T}(undef, n), S, δ)
 end
 
@@ -84,6 +87,87 @@ function initkkt!(
 end
 
 #
+# One iteration of the bordered column
+# refinement, on the ASSEMBLED direction. Lift
+# Δp = Δp₀ + Δτ Δp2, Δy = Δy₀ + Δτ Δy2 with
+# Δτ = num/S, then form the residual the 3-row
+# system actually has to make small:
+#
+#   sp = rp - B Δp + g Δτ          (primal row)
+#   sd = f  - H Δp + Bᵀ Δy + c Δτ   (dual row)
+#
+# This is the real assembled residual, not the
+# |Δτ|·r₂ ≤ ptol-rb prediction — the target and
+# the test no longer share S's error, and the
+# triangle-inequality slack is gone. If both
+# rows are within (ptol, ytol), REACHED. If the
+# residual has stopped shrinking (res >
+# stall·prev), REFINE_STALLED. Else drive ONE
+# warm solveuzw! correction into (Δp2, Δy2)
+# toward tgt = (ptol-rb)/(2|Δτ|) (floored at
+# roundoff), refresh S, and report
+# REFINE_CONTINUE — a single base-quality
+# correction, NOT a nested solvekkt!; the outer
+# loop iterates it. Returns (status, pres, dres,
+# n): the assembled residual norms feed the next
+# pass's stall test; n is the correction's craig
+# count (0 on a non-tightening exit).
+#
+function refinebdr!(
+        bw::BorderedSolver{T},
+        Δp::AbstractVector{T},
+        Δy::AbstractVector{T},
+        H::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        c::AbstractVector{T},
+        g::AbstractVector{T},
+        ng::T,
+        f::AbstractVector{T},
+        rp::AbstractVector{T},
+        num::T,
+        rb::T,
+        pprv::T,
+        dprv::T;
+        ptol::T,
+        ytol::T,
+        stall::T,
+    ) where {T}
+    inner = bw.inner
+    sd = inner.sd; sp = inner.sp; dp = inner.dp; dy = inner.dy
+
+    dt = num / bw.S[]
+    #
+    # lift the assembled direction and form its residual (mulkkt! gives H Δp - Bᵀ Δy and B Δp in one pass)
+    #
+    @. Δp = bw.Δp0 + dt * bw.Δp2
+    @. Δy = bw.Δy0 + dt * bw.Δy2
+    mulkkt!(sd, sp, H, B, Δp, Δy)                       # sd = H Δp - Bᵀ Δy ,  sp = B Δp
+    axpby!(one(T), f,  -one(T), sd); axpy!(dt, c, sd)   # sd = f  - H Δp + Bᵀ Δy + c Δτ
+    axpby!(one(T), rp, -one(T), sp); axpy!(dt, g, sp)   # sp = rp - B Δp + g Δτ
+    pres = norm(sp); dres = norm(sd)
+
+    res = pres / ptol
+    res ≤ one(T)                && return REACHED, pres, dres, 0
+    res > stall * (pprv / ptol) && return REFINE_STALLED, pres, dres, 0
+    #
+    # column residual (solveuzw! RHS sign) and target; ONE warm correction toward tgt, then refresh S:
+    #
+    #   r_col = [ c - H Δp2 + Bᵀ Δy2 ;  g - B Δp2 ]
+    #   tgt   = max( (ptol - rb) / (2|Δτ|) , 100u(‖g‖ + ‖B Δp2‖) )
+    #
+    mulkkt!(sd, sp, H, B, bw.Δp2, bw.Δy2)              # sd = H Δp2 - Bᵀ Δy2 ,  sp = B Δp2
+    tgt = max((ptol - rb) / abs(dt), 100 * eps(T) * (ng + norm(sp)))
+    axpby!(one(T), c, -one(T), sd)                     # sd = c - H Δp2 + Bᵀ Δy2
+    axpby!(one(T), g, -one(T), sp)                     # sp = g - B Δp2
+    n, _ = solveuzw!(inner.divwrk, inner.itrwrk, dp, dy, inner.r, inner.F, H, B, sd, sp, inner.α[]; atol = tgt)
+    axpy!(one(T), dp, bw.Δp2)
+    axpy!(one(T), dy, bw.Δy2)
+    bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
+
+    return REFINE_CONTINUE, pres, dres, n
+end
+
+#
 # Solve the 3-row HSD bordered system
 #
 #   [ H    -Bᵀ  -c ] [ Δp ]   [ f  ]
@@ -132,6 +216,12 @@ function solvekkt!(
     nb, nr, _, _, fres, _, _ = solvekkt!(inner, Δp, Δy, H, B, f, rp; pwarm, ywarm, ptol, ytol, stall, itmax)
     nbase = nb + nr
     #
+    # preserve the base solve Δp₀, Δy₀: the column loop re-lifts Δp = Δp₀ + Δτ Δp2 from them every pass, so
+    # they must survive the in-place lift into (Δp, Δy).
+    #
+    copyto!(bw.Δp0, Δp)
+    copyto!(bw.Δy0, Δy)
+    #
     # the base solve's primal budget rb and the τ-row numerator num (both column-free):
     #
     #   rb  = ‖ rp - B Δp₀ ‖
@@ -142,49 +232,28 @@ function solvekkt!(
     rb  = norm(sp)
     num = fτ - dot(bw.aτ, Δp) - dot(g, Δy)
     #
-    # column loop: the lift Δτ = num/S injects Δτ r₂ into the primal row and -Δτ r_d2 into the dual row, so
-    # the column must reach r₂ ≤ (ptol - rb)/|Δτ| and r_d2 ≤ ytol/|Δτ|, where
+    # column loop (one honest refinement loop): each pass lifts the assembled direction (Δp, Δy, Δτ = num/S)
+    # and tests the residual it actually has to make small — ‖rp - B Δp + g Δτ‖ ≤ ptol on the primal row and
+    # ‖f - H Δp + Bᵀ Δy + c Δτ‖ ≤ ytol on the dual — not a prediction from S. Until both hold, tighten the
+    # column with ONE warm solveuzw! toward (ptol-rb)/(2|Δτ|) and refresh S. Bails early on stall; caps at
+    # itmax.
     #
-    #   r₂   = ‖ g - B Δp2 ‖
-    #   r_d2 = ‖ H Δp2 - Bᵀ Δy2 - c ‖
-    #
-    # tightening the column moves Δp2, Δy2 → S → the targets, so recompute S and re-check (≤ 6 passes). The
-    # targets are clamped to r₂'s roundoff floor so the column is never asked for an unreachable accuracy.
-    #
-    for _ in 1:6
-        dt = num / bw.S[]
-
-        mulkkt!(sd, sp, H, B, bw.Δp2, bw.Δy2)
-        #
-        # r₂ = ‖g - B Δp2‖ cannot fall below the roundoff of forming that difference, ~ u (‖g‖ + ‖B Δp2‖);
-        # clamp both targets to that floor.
-        #
-        flr  = 100 * eps(T) * (ng + norm(sp))
-        ptgt = max((ptol - rb) / abs(dt), flr)
-        ytgt = max(ytol / abs(dt), flr)
-        axpby!(one(T), g, -one(T), sp)
-        axpy!(-one(T), c, sd)
-        r2   = norm(sp)
-        r_d2 = norm(sd)
-
-        (r2 ≤ ptgt && r_d2 ≤ ytgt) && break
-
-        # Δp2, Δy2 already hold the current column — warm-start the re-solve from it (the buffers ARE the seed).
-        nb2, nr2, _, _, _, _, _ = solvekkt!(inner, bw.Δp2, bw.Δy2, H, B, c, g; pwarm=true, ywarm=true, ptol=ptgt, ytol=ytgt, stall, itmax)
-        nbase += nb2 + nr2
-        bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
+    pprv = typemax(T); dprv = typemax(T)
+    for _ in 1:itmax
+        st, pres, dres, n = refinebdr!(bw, Δp, Δy, H, B, c, g, ng, f, rp, num, rb, pprv, dprv; ptol, ytol, stall)
+        nbase += n
+        st == REFINE_CONTINUE || break
+        pprv = pres; dprv = dres
     end
     #
-    # Schur lift — Δτ paired with the final S (Change 1's τ-row exactness needs S formed from the same
-    # Δp2, Δy2 the lift adds):
+    # final lift with the converged S — Δp, Δy already carry it on a satisfied/stalled exit; this makes them
+    # consistent with S on an itmax exit too. Δτ pairs with the same S (τ-row exactness):
     #
-    #   Δτ ← num / S
-    #   Δp ← Δp₀ + Δτ Δp2
-    #   Δy ← Δy₀ + Δτ Δy2
+    #   Δτ ← num / S ,   Δp ← Δp₀ + Δτ Δp2 ,   Δy ← Δy₀ + Δτ Δy2
     #
     Δτ = num / bw.S[]
-    axpy!(Δτ, bw.Δp2, Δp)
-    axpy!(Δτ, bw.Δy2, Δy)
+    copyto!(Δp, bw.Δp0); axpy!(Δτ, bw.Δp2, Δp)
+    copyto!(Δy, bw.Δy0); axpy!(Δτ, bw.Δy2, Δy)
     #
     # 3-row refinement net (a single verifying pass when both column targets were met):
     #
