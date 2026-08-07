@@ -209,20 +209,32 @@ function solvekkt!(
     # (rtol = 0) solveuzw!, folded back in. Both are the same solveuzw!: with a zeroed buffer the residual
     # is (f, rp) bitwise, so the direct form is identical and just skips a matvec on zero.
     #
-    if pwarm || ywarm
-        pwarm || fill!(Δp, zero(T))
-        ywarm || fill!(Δy, zero(T))
-        mulkkt!(sd, sp, A, B, Δp, Δy)
-        axpby!(one(T), f,  -one(T), sd)
-        axpby!(one(T), rp, -one(T), sp)
-        nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
-                                 sd, sp, wrk.α[]; atol)
+    copyto!(sd, f)
+    copyto!(sp, rp)
+
+    if pwarm
+        mul!(sd, Symmetric(A, :L), Δp, -one(T), one(T))
+        mul!(sp,           B,      Δp, -one(T), one(T))
+    end
+
+    if ywarm
+        mul!(sd, B', Δy, one(T), one(T))
+    end
+
+    nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B, sd, sp, wrk.α[]; atol)
+
+    if pwarm
         axpy!(one(T), dp, Δp)
+    else
+        copyto!(Δp, dp)
+    end
+
+    if ywarm
         axpy!(one(T), dy, Δy)
     else
-        nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.F, A, B,
-                                 f, rp, wrk.α[]; atol)
+        copyto!(Δy, dy)
     end
+
     #
     # iterative refinement of the 2-row residual
     #
