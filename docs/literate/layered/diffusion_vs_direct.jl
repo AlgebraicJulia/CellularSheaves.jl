@@ -51,7 +51,6 @@ using CellularSheaves.ControlSheaves.CoordinationBenchmarks
 using CellularSheaves.ControlSheaves.CoordinationProfiling
 using LinearAlgebra
 using Markdown
-using PrettyTables
 using Printf
 using Plots
 
@@ -64,18 +63,36 @@ comma(v) = replace(string(v), r"(?<=\d)(?=(\d{3})+$)" => ",")
 fmt_bytes(b) = b >= 1_048_576 ? @sprintf("%.1f MB", b / 1_048_576) :
                b >= 1024 ? @sprintf("%.1f kB", b / 1024) : "$(comma(b)) B"
 
-## Tables are rendered by PrettyTables into ordinary markdown, which Documenter
-## then lays out with the same styling as every other table in the manual. The
-## winning entry of each comparison is set in bold.
+# Winning cells are shaded green in every table below.
+
+## The tables are emitted through a `text/markdown` show method rather than as an
+## `HTML` object. The documentation is generated with Literate's `documenter=false`,
+## under which an `HTML` return value is printed as its own representation instead
+## of being passed through, so the table would render as escaped source. Writing a
+## `@raw html` fence to the markdown stream reaches Documenter intact.
+struct RawHTML
+    html::String
+end
+
+Base.show(io::IO, ::MIME"text/markdown", r::RawHTML) =
+    print(io, "```@raw html\n", r.html, "\n```")
+
 function bench_table(headers, rows)
-    data = Matrix{String}(undef, length(rows), length(headers))
-    for (i, (cells, wins)) in enumerate(rows)
-        for (j, (cell, won)) in enumerate(zip(cells, wins))
-            data[i, j] = won ? string("**", cell, "**") : string(cell)
-        end
+    io = IOBuffer()
+    print(io, "<table class=\"bench\"><thead><tr>")
+    for h in headers
+        print(io, "<th>", h, "</th>")
     end
-    return Markdown.parse(pretty_table(String, data;
-        column_labels = [collect(headers)], backend = :markdown))
+    print(io, "</tr></thead><tbody>")
+    for (cells, wins) in rows
+        print(io, "<tr>")
+        for (c, w) in zip(cells, wins)
+            print(io, w ? "<td class=\"win\">" : "<td>", c, "</td>")
+        end
+        print(io, "</tr>")
+    end
+    print(io, "</tbody></table>")
+    return RawHTML(String(take!(io)))
 end
 
 nowin(n) = falses(n)
