@@ -104,6 +104,64 @@ function inituzw!(
 end
 
 #
+# One iteration of the 2-row iterative-
+# refinement loop. Forms the residual of
+# (Δp, Δy)
+#
+#   [ sd ] = [ f  ] - [ A -Bᵀ ] [ Δp ]
+#   [ sp ]   [ rp ]   [ B  0  ] [ Δy ]
+#
+# and, unless it already meets (ptol, ytol) or
+# has stalled against the previous residual
+# norms (pprv, dprv), solves the correction
+#
+#   [ A -Bᵀ ] [ dp ] = [ sd ]
+#   [ B  0  ] [ dy ]   [ sp ]
+#
+# to θ·(its entry residual) and folds it in.
+# Returns (status, pres, dres, n): REACHED or
+# REFINE_STALLED (no correction, n = 0), or
+# REFINE_CONTINUE (corrected, n = craig count).
+# The stall test compares res = max(pres/ptol,
+# dres/ytol) against its previous value rebuilt
+# from (pprv, dprv).
+#
+function refinekkt!(
+        wrk::UzawaSolver{UPLO, T},
+        Δp::AbstractVector{T},
+        Δy::AbstractVector{T},
+        A::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        f::AbstractVector{T},
+        rp::AbstractVector{T},
+        pprv::T,
+        dprv::T;
+        ptol::T,
+        ytol::T,
+        stall::T,
+    ) where {UPLO, T}
+    sd = wrk.sd; sp = wrk.sp; dp = wrk.dp; dy = wrk.dy
+
+    mulkkt!(sd, sp, A, B, Δp, Δy)
+    axpby!(one(T), f,  -one(T), sd)
+    axpby!(one(T), rp, -one(T), sp)
+
+    dres = norm(sd)
+    pres = norm(sp)
+    res  = max(pres / ptol, dres / ytol)
+
+    res ≤ one(T)                                && return REACHED, pres, dres, 0
+    res > stall * max(pprv / ptol, dprv / ytol) && return REFINE_STALLED, pres, dres, 0
+
+    n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
+                     sd, sp, wrk.α[]; atol = ptol, rtol = T(INTERIOR_THETA))
+    axpy!(one(T), dp, Δp)
+    axpy!(one(T), dy, Δy)
+
+    return REFINE_CONTINUE, pres, dres, n
+end
+
+#
 # Solve the 2-row KKT system
 #
 #   [ A  -Bᵀ ] [ Δp ]   [ f  ]
@@ -171,50 +229,28 @@ function solvekkt!(
     nrefine = 0
     npass = 0
     status = REFINE_ITMAX
-    prv = typemax(T)
+    pprv = typemax(T)
+    dprv = typemax(T)
     pres1 = T(NaN)
     dres1 = T(NaN)
 
     for i in 1:itmax
-        #
-        #   [ sd ] = [ f  ] - [ A -Bᵀ ] [ Δp ]
-        #   [ sp ]   [ rp ]   [ B  0  ] [ Δy ]
-        #
-        mulkkt!(sd, sp, A, B, Δp, Δy)
-        axpby!(one(T), f,  -one(T), sd)
-        axpby!(one(T), rp, -one(T), sp)
-
-        dres = norm(sd)
-        pres = norm(sp)
-        res = max(pres / ptol, dres / ytol)
+        st, pres, dres, n = refinekkt!(wrk, Δp, Δy, A, B, f, rp, pprv, dprv; ptol, ytol, stall)
 
         if isone(i)
             pres1 = pres
             dres1 = dres
         end
 
-        if res ≤ one(T)
-            status = REACHED
+        if st != REFINE_CONTINUE
+            status = st
             break
         end
 
-        if res > stall * prv
-            status = REFINE_STALLED
-            break
-        end
-
-        prv = res
-        #
-        #   [ A -Bᵀ ] [ dp ] = [ sd ]
-        #   [ B  0  ] [ dy ]   [ sp ]
-        #
-        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
-                          sd, sp, wrk.α[]; atol, rtol = T(INTERIOR_THETA))
+        pprv = pres
+        dprv = dres
         nrefine += n
         npass += 1
-
-        axpy!(one(T), dp, Δp)
-        axpy!(one(T), dy, Δy)
     end
 
     return nbase, nrefine, npass, status, fres, pres1, dres1

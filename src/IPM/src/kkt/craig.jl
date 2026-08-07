@@ -57,6 +57,87 @@ function craig!(wrk::CraigWorkspace{T}, B, F, divwrk, x, y, g; kwargs...) where 
     return craig!(wrk.u, wrk.v, wrk.w, B, F, divwrk, x, y, g; kwargs...)
 end
 
+#
+# One Golub–Kahan (CRAIG) iteration: advance the bidiagonalization and the solution recurrences by one
+# step. The scalar recurrence state (ng, ξ, pnu, nB², nx²) — the lower-bidiagonal entry, solution weight,
+# previous nu, and running ‖B‖²/‖x‖² estimates — is passed in and out as individual arguments; the GK
+# vectors (u, v, w), primal x, dual y, and u-side g are mutated in place. Iteration counting and the itmax
+# cap belong to the caller (craig!'s loop). Returns (status, ng, ξ, pnu, nB², nx²): CRAIG_CONTINUE, or a
+# terminal CRAIG_SOLVED / CRAIG_STAGNATED / CRAIG_NUMERICAL_FAILURE.
+#
+function craigstep!(
+        u::AbstractVector{T},
+        v::AbstractVector{T},
+        w::AbstractVector{T},
+        B::AbstractMatrix{T},
+        F::AbstractMatrix{T},
+        divwrk,
+        x::AbstractVector{T},
+        y::AbstractVector{T},
+        g::AbstractVector{T},
+        ng::T, ξ::T, pnu::T, nB²::T, nx²::T,
+        ng0²::T,
+        atol::T,
+    ) where {T}
+    #
+    # v-side bidiagonalization step (M = B F⁻ᵀ):
+    #
+    #   v  ← F⁻¹ Bᵀ g
+    #   u  ← v - ng u,   nu ← ‖ u ‖
+    #
+    mul!(v, B', g)
+    ldiv!(divwrk, F, v)
+    axpby!(one(T), v, -ng, u)
+    nu² = dot(u, u); nu = sqrt(nu²)
+
+    iszero(nu) && return CRAIG_NUMERICAL_FAILURE, ng, ξ, pnu, nB², nx²
+    #
+    # advance the solution recurrences (v = F⁻ᵀ u is the primal direction):
+    #
+    #   u  ← u / nu
+    #   ξ  ← -ng/nu ξ
+    #   x  ← x + ξ v
+    #   w  ← g - ng/pnu w,   y ← y + ξ/nu w
+    #
+    rdiv!(u, nu)
+    ξ *= -ng / nu
+
+    copyto!(v, u)
+    ldiv!(divwrk, F', v)
+    axpy!(ξ, v, x)
+    axpby!(one(T), g, -ng / pnu, w)
+    axpy!(ξ / nu, w, y)
+    #
+    # u-side bidiagonalization step, and accumulate the norm estimates:
+    #
+    #   g   ← B v - nu g,   ng ← ‖ g ‖,   g ← g / ng
+    #   nB² ← nB² + nu² + ng²,   nx² ← nx² + ξ²
+    #
+    mul!(g, B, v, one(T), -nu)
+    ng² = dot(g, g);   ng = sqrt(ng²)
+    nB² += nu² + ng²
+    nx² += ξ * ξ
+
+    if !iszero(ng)
+        rdiv!(g, ng)
+    end
+    #
+    # residual norm and normwise backward error (Rigal–Gaches):
+    #
+    #   nr ← ng |ξ| = ‖ g - B x ‖
+    #   η  ← nr / √(ng0² + nB² nx²)
+    #
+    nr = ng * abs(ξ)
+    η = nr / sqrt(ng0² + nB² * nx²)
+    pnu = nu
+    #
+    # solved (nr ≤ atol) or stagnated (1 + η ≤ 1, i.e. η below 1's ULP)
+    #
+    nr ≤ atol           && return CRAIG_SOLVED, ng, ξ, pnu, nB², nx²
+    one(T) + η ≤ one(T) && return CRAIG_STAGNATED, ng, ξ, pnu, nB², nx²
+    return CRAIG_CONTINUE, ng, ξ, pnu, nB², nx²
+end
+
 function craig!(
         u::AbstractVector{T},
         v::AbstractVector{T},
@@ -88,9 +169,6 @@ function craig!(
     # residual) untouched. Used for a bare backsolve. ng0 ≤ atol is likewise already converged.
     #
     if itmax > 0 && ng0 > atol
-        ng = ng0
-        ξ = -one(T)
-        pnu = one(T)
         #
         # normalize the Golub–Kahan u-side (u ≡ g); ng0 > atol > 0 here, so this is safe
         #
@@ -99,79 +177,20 @@ function craig!(
         rdiv!(g, ng0)
         fill!(u, zero(T))
         fill!(w, zero(T))
-
-        nB² = zero(T); nB = zero(T)
-        nx² = zero(T); nx = zero(T)
-
-        η = one(T)
+        #
+        # recurrence state, carried through the loop as individual scalars
+        #
+        ng, ξ, pnu, nB², nx² = ng0, -one(T), one(T), zero(T), zero(T)
         status = CRAIG_CONTINUE
 
         while status == CRAIG_CONTINUE
+            status, ng, ξ, pnu, nB², nx² =
+                craigstep!(u, v, w, B, F, divwrk, x, y, g, ng, ξ, pnu, nB², nx², ng0², atol)
             #
-            # v-side bidiagonalization step (M = B F⁻ᵀ):
+            # iteration count and the itmax cap live here, not in the step
             #
-            #   v  ← F⁻¹ Bᵀ g
-            #   u  ← v - ng u,   nu ← ‖ u ‖
-            #
-            mul!(v, B', g)
-            ldiv!(divwrk, F, v)
-            axpby!(one(T), v, -ng, u)
-            nu² = dot(u, u); nu = sqrt(nu²)
-
-            if iszero(nu)
-                status = CRAIG_NUMERICAL_FAILURE
-            else
-                #
-                # advance the solution recurrences (v = F⁻ᵀ u is the primal direction):
-                #
-                #   u  ← u / nu
-                #   ξ  ← -ng/nu ξ
-                #   x  ← x + ξ v
-                #   w  ← g - ng/pnu w,   y ← y + ξ/nu w
-                #
-                rdiv!(u, nu)
-                ξ *= -ng / nu
-
-                copyto!(v, u)
-                ldiv!(divwrk, F', v)
-                axpy!(ξ, v, x)
-                axpby!(one(T), g, -ng / pnu, w)
-                axpy!(ξ / nu, w, y)
-                #
-                # u-side bidiagonalization step, and accumulate the norm estimates:
-                #
-                #   g   ← B v - nu g,   ng ← ‖ g ‖,   g ← g / ng
-                #   nB  ← √(nB² + nu² + ng²),   nx ← √(nx² + ξ²)
-                #
-                mul!(g, B, v, one(T), -nu)
-                ng² = dot(g, g);  ng = sqrt(ng²)
-                nB² += nu² + ng²; nB = sqrt(nB²)
-                nx² += ξ * ξ;     nx = sqrt(nx²)
-
-                if !iszero(ng)
-                    rdiv!(g, ng)
-                end
-                #
-                # residual norm and normwise backward error (Rigal–Gaches):
-                #
-                #   nr ← ng |ξ| = ‖ g - B x ‖
-                #   η  ← nr / √(ng0² + nB² nx²)
-                #
-                nr = ng * abs(ξ)
-                iter += 1
-                η = nr / sqrt(ng0² + nB² * nx²)
-                pnu = nu
-                #
-                # solved (nr ≤ atol), stagnated (1 + η ≤ 1, i.e. η below 1's ULP), or out of iterations
-                #
-                if nr ≤ atol
-                    status = CRAIG_SOLVED
-                elseif one(T) + η ≤ one(T)
-                    status = CRAIG_STAGNATED
-                elseif iter ≥ itmax
-                    status = CRAIG_ITMAX
-                end
-            end
+            status == CRAIG_NUMERICAL_FAILURE || (iter += 1)
+            status == CRAIG_CONTINUE && iter ≥ itmax && (status = CRAIG_ITMAX)
         end
         #
         # write the residual back into g (u holds the final GK u-side):
