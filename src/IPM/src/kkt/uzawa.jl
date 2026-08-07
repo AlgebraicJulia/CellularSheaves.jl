@@ -111,7 +111,8 @@ end
 #   [ sd ] = [ f  ] - [ A -Bᵀ ] [ Δp ]
 #   [ sp ]   [ rp ]   [ B  0  ] [ Δy ]
 #
-# and, unless it already meets (ptol, ytol) or
+# and, unless it already meets its per-row floor
+# (ptol/ytol raised to the terms' roundoff) or
 # has stalled against the previous residual
 # norms (pprv, dprv), solves the correction
 #
@@ -122,8 +123,8 @@ end
 # Returns (status, pres, dres, n): REACHED or
 # REFINE_STALLED (no correction, n = 0), or
 # REFINE_CONTINUE (corrected, n = craig count).
-# The stall test compares res = max(pres/ptol,
-# dres/ytol) against its previous value rebuilt
+# The stall test compares res = max(pres/pfloor,
+# dres/dfloor) against its previous value rebuilt
 # from (pprv, dprv).
 #
 function refinekkt!(
@@ -142,16 +143,28 @@ function refinekkt!(
     ) where {UPLO, T}
     sd = wrk.sd; sp = wrk.sp; dp = wrk.dp; dy = wrk.dy
 
-    mulkkt!(sd, sp, A, B, Δp, Δy)
-    axpby!(one(T), f,  -one(T), sd)
-    axpby!(one(T), rp, -one(T), sp)
+    #
+    # form the residual with the three matvecs kept SEPARATE so each row can be floored at its own
+    # evaluation limit — u × the sum of the magnitudes differenced to form it. ‖A Δp‖ is H-amplified but
+    # cancels against ‖Bᵀ Δy‖ in A Δp - Bᵀ Δy, so a fused ‖A Δp - Bᵀ Δy‖ floor would undercount exactly when
+    # it matters (see refinebdr!). dp holds Bᵀ Δy just long enough to floor and reassemble; the correction
+    # below overwrites it. The floors are the linear solve's own — the IPM passes force_tol, not a guessed
+    # floor_tol.
+    #
+    mul!(sp, B, Δp)                  # sp = B Δp
+    mul!(sd, Symmetric(A, :L), Δp)   # sd = A Δp
+    mul!(dp, B', Δy)                 # dp = Bᵀ Δy
+    pfloor = max(ptol, 100 * eps(T) * (norm(rp) + norm(sp)))
+    dfloor = max(ytol, 100 * eps(T) * (norm(f) + norm(sd) + norm(dp)))
+    axpby!(one(T), rp, -one(T), sp)                        # sp = rp - B Δp
+    axpby!(one(T), f, -one(T), sd); axpy!(one(T), dp, sd)  # sd = f - A Δp + Bᵀ Δy
 
     dres = norm(sd)
     pres = norm(sp)
-    res  = max(pres / ptol, dres / ytol)
+    res  = max(pres / pfloor, dres / dfloor)
 
-    res ≤ one(T)                                && return REACHED, pres, dres, 0
-    res > stall * max(pprv / ptol, dprv / ytol) && return REFINE_STALLED, pres, dres, 0
+    res ≤ one(T)                                    && return REACHED, pres, dres, 0
+    res > stall * max(pprv / pfloor, dprv / dfloor) && return REFINE_STALLED, pres, dres, 0
 
     n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
                      sd, sp, wrk.α[]; atol = ptol, rtol = T(INTERIOR_THETA))

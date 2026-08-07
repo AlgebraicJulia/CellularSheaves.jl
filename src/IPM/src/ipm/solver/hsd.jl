@@ -688,17 +688,15 @@ function step!(s::HSDSolver{T}) where {T}
             # compute the KKT-solve tolerances (the border w₂ solve inside initkkt! needs them)
             #
             #   force: min(θ μ/μ₁, ceil)
-            #   floor: 100ϵ (1 + max(‖rp‖₂/(1+ng), ‖rd‖₂/(1+nc)))  — same scaled-2-norm units as res
             #
             μ1 = isempty(s.hist.μ) ? μ : first(s.hist.μ)
-            # forcing (absolute μ-schedule) and accuracy floor, combined into tol, then converted to the
-            # solver's absolute residual targets ptol (primal) / ytol (dual). The homogeneous τ is NOT
-            # folded in here — it lives in the HSD residual scaling, not the KKT solve.
+            # forcing (absolute μ-schedule) converted to the solver's absolute residual targets ptol
+            # (primal) / ytol (dual). No accuracy floor here: the KKT solve computes its own per-row
+            # roundoff floor from the terms it actually differences (refinekkt!/refinebdr!) — the floor is
+            # a property of the linear solve, not the Newton step. The homogeneous τ is NOT folded in here —
+            # it lives in the HSD residual scaling, not the KKT solve.
             #
-            force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
-            floor_tol = 100eps(T) * (1 + max(norm(w.rp) / (1 + s.ng[]),
-                                             norm(w.rd) / (1 + s.nc[])))
-            tol = max(force_tol, floor_tol)
+            tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
             ptol = tol * (1 + s.ng[])
             ytol = tol * (1 + s.nc[])
             τtol = tol * (1 + s.ng[] + s.nc[])   # border-row target (bordered predictor/corrector only)

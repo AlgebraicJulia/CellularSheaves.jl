@@ -451,13 +451,12 @@ function step!(s::IPMSolver{T}) where {T}
                     μ1 = first(s.hist.μ)
                 end
 
-                # forcing (absolute μ-schedule) and accuracy floor, combined into tol, then converted to
-                # the solver's absolute residual targets ptol (primal) / ytol (dual).
+                # forcing (absolute μ-schedule) converted to the solver's absolute residual targets ptol
+                # (primal) / ytol (dual). No accuracy floor here: the KKT solve computes its own per-row
+                # roundoff floor from the terms it differences (refinekkt!) — the floor is a property of
+                # the linear solve, not the Newton step.
                 #
-                force_tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
-                floor_tol = 100eps(T) * (1 + max(norm(w.rp) / (1 + s.ng[]),
-                                                 norm(w.rd) / (1 + s.nc[])))
-                tol = max(force_tol, floor_tol)
+                tol = min(s.settings.forcing_frac * μ / μ1, s.settings.forcing_ceil)
                 ptol = tol * (1 + s.ng[])
                 ytol = tol * (1 + s.nc[])
                 #
