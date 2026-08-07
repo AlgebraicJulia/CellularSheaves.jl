@@ -130,8 +130,9 @@ function solvekkt!(
     A::BlockSparseMatrix{T},
     B::BlockSparseMatrix{T},
     f::AbstractVector{T},
-    rp::AbstractVector{T},
-    y0 = nothing;
+    rp::AbstractVector{T};
+    pwarm::Bool = false,
+    ywarm::Bool = false,
     ptol::T,
     ytol::T,
     stall::T,
@@ -143,15 +144,30 @@ function solvekkt!(
     # bare tolerance. Only ptol appears: craig owns the primal row; the dual row is craig-independent.
     #
     atol = ptol
+    sd = wrk.sd; sp = wrk.sp; dp = wrk.dp; dy = wrk.dy
     #
-    # base solve
+    # base solve. pwarm/ywarm declare whether Δp/Δy already hold a live seed. A cold buffer is zeroed and
+    # the base runs directly on (f, rp); a warm buffer is corrected — its residual drives one base-quality
+    # (rtol = 0) solveuzw!, folded back in. Both are the same solveuzw!: with a zeroed buffer the residual
+    # is (f, rp) bitwise, so the direct form is identical and just skips a matvec on zero.
     #
-    nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.F, A, B,
-                             f, rp, wrk.α[], y0; atol)
+    if pwarm || ywarm
+        pwarm || fill!(Δp, zero(T))
+        ywarm || fill!(Δy, zero(T))
+        mulkkt!(sd, sp, A, B, Δp, Δy)
+        axpby!(one(T), f,  -one(T), sd)
+        axpby!(one(T), rp, -one(T), sp)
+        nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
+                                 sd, sp, wrk.α[]; atol)
+        axpy!(one(T), dp, Δp)
+        axpy!(one(T), dy, Δy)
+    else
+        nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.F, A, B,
+                                 f, rp, wrk.α[]; atol)
+    end
     #
     # iterative refinement of the 2-row residual
     #
-    sd = wrk.sd; sp = wrk.sp; dp = wrk.dp; dy = wrk.dy
     nrefine = 0
     npass = 0
     status = REFINE_ITMAX

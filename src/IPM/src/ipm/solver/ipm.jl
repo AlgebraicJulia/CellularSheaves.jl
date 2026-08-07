@@ -216,9 +216,11 @@ function solvecorrector!(
     #   [ H  -Bᵀ ] [ Δp ]   [ rd* ]
     #   [ B   0  ] [ Δy ] = [ rp  ]
     #
+    copyto!(w.Δp, w.Δpa)
+    copyto!(w.Δy, w.Δya)
     cbase, crefn, cpass, cstat, cfres, cpres, cdres = solvekkt!(
-        kkt, w.Δp, w.Δy, H, B, w.f, w.rp, w.Δya;
-        ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
+        kkt, w.Δp, w.Δy, H, B, w.f, w.rp;
+        pwarm=true, ywarm=true, ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δd:

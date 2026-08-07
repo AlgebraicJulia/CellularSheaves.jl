@@ -111,8 +111,9 @@ function solvekkt!(
         ng::T,                 # cached ‖g‖ (solver-lifetime constant)
         f::AbstractVector{T},
         rp::AbstractVector{T},
-        fτ::T,
-        y0 = nothing;
+        fτ::T;
+        pwarm::Bool = false,
+        ywarm::Bool = false,
         ptol::T,
         ytol::T,
         τtol::T,
@@ -122,12 +123,13 @@ function solvekkt!(
     inner = bw.inner
     sp = inner.sp; sd = inner.sd
     #
-    # base solve for the column-free part Δp₀, Δy₀ — the 2-row system to (ptol, ytol):
+    # base solve for the column-free part Δp₀, Δy₀ — the 2-row system to (ptol, ytol). pwarm/ywarm just
+    # forward to the inner solver: a warm caller has pre-seeded Δp/Δy, a cold one gets them zeroed.
     #
     #   [ H  -Bᵀ ] [ Δp₀ ]   [ f  ]
     #   [ B   0  ] [ Δy₀ ] = [ rp ]
     #
-    nb, nr, _, _, fres, _, _ = solvekkt!(inner, Δp, Δy, H, B, f, rp, y0; ptol, ytol, stall, itmax)
+    nb, nr, _, _, fres, _, _ = solvekkt!(inner, Δp, Δy, H, B, f, rp; pwarm, ywarm, ptol, ytol, stall, itmax)
     nbase = nb + nr
     #
     # the base solve's primal budget rb and the τ-row numerator num (both column-free):

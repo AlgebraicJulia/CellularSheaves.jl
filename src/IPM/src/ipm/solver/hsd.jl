@@ -343,8 +343,16 @@ function solvecorrector!(
     end
 
     axpy!(1, w.rd, w.f)
-
-    axpy!(-Δτa, kkt.Δy2, w.Δya)
+    #
+    # warm-start the corrector from the predictor's column-free directions
+    #
+    #   Δp₀a = Δpa - Δτa Δp2,   Δy₀a = Δya - Δτa Δy2
+    #
+    # (the 2-row base's answer differs from these only by the corrector's second-order RHS) — seed both
+    # into the output buffers and let the base refine from there.
+    #
+    copyto!(w.Δp, w.Δpa); axpy!(-Δτa, kkt.Δp2, w.Δp)
+    copyto!(w.Δy, w.Δya); axpy!(-Δτa, kkt.Δy2, w.Δy)
     #
     # solve for the directions Δp, Δy, and Δτ
     #
@@ -353,8 +361,8 @@ function solvecorrector!(
     #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
     cbase, crefn, cpass, cstat, cfres, cpres, cdres, Δτ = solvekkt!(
-        kkt, w.Δp, w.Δy, H, B, c, g, ng, w.f, w.rp, fτ, w.Δya;
-        ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
+        kkt, w.Δp, w.Δy, H, B, c, g, ng, w.f, w.rp, fτ;
+        pwarm=true, ywarm=true, ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
     # recover Δd:
