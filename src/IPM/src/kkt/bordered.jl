@@ -88,48 +88,42 @@ end
 
 #
 # One iteration of the bordered column
-# refinement, on the ASSEMBLED direction. Lift
-# Δp = Δp₀ + Δτ Δp2, Δy = Δy₀ + Δτ Δy2 with
-# Δτ = num/S, then form the residual the 3-row
-# system actually has to make small:
+# refinement, on the PRIMAL of the assembled
+# direction only. Lift Δp = Δp₀ + Δτ Δp2 with
+# Δτ = num/S, then form the primal residual
 #
-#   sp = rp - B Δp + g Δτ          (primal row)
-#   sd = f  - H Δp + Bᵀ Δy + c Δτ   (dual row)
+#   sp = rp - B Δp + g Δτ
 #
-# This is the real assembled residual, not the
-# |Δτ|·r₂ ≤ ptol-rb prediction — the target and
-# the test no longer share S's error, and the
-# triangle-inequality slack is gone. If both
-# rows are within (ptol, ytol), KKT_SOLVED. If the
-# residual has stopped shrinking (res >
-# stall·prev), KKT_STAGNATED. Else drive ONE
-# warm solveuzw! correction into (Δp2, Δy2)
-# toward tgt = (ptol-rb)/(2|Δτ|) (floored at
-# roundoff), refresh S, and report
-# KKT_CONTINUE — a single base-quality
+# and drive only that. The assembled DUAL row is
+# refinehsd!'s job (it is the binding row on ~86%
+# of its passes and clears both the base dual and
+# the column's dt·r_d2 injection for free), so the
+# column loop never forms it — no H·Δp / Bᵀ·Δy.
+# If sp is within its floor, KKT_SOLVED (met ptol)
+# or KKT_STAGNATED (roundoff-limited short of it).
+# If it has stopped shrinking (res > stall·prev),
+# KKT_STAGNATED. Else drive ONE warm solveuzw!
+# correction into (Δp2, Δy2) toward
+# tgt = (ptol-rb)/|Δτ| (floored), refresh S, and
+# report KKT_CONTINUE — a single base-quality
 # correction, NOT a nested solvekkt!; the outer
-# loop iterates it. Returns (status, pres, dres,
-# n): the assembled residual norms feed the next
-# pass's stall test; n is the correction's craig
-# count (0 on a non-tightening exit).
+# loop iterates it. Returns (status, pres, n): the
+# primal residual feeds the next pass's stall
+# test; n is the correction's craig count.
 #
 function refinebdr!(
         bw::BorderedSolver{T},
         Δp::AbstractVector{T},
-        Δy::AbstractVector{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         c::AbstractVector{T},
         g::AbstractVector{T},
         ng::T,
-        f::AbstractVector{T},
         rp::AbstractVector{T},
         num::T,
         rb::T,
-        pprv::T,
-        dprv::T;
+        pprv::T;
         ptol::T,
-        ytol::T,
         stall::T,
     ) where {T}
     inner = bw.inner
@@ -137,31 +131,26 @@ function refinebdr!(
 
     dt = num / bw.S[]
     #
-    # lift the assembled direction and form its residual with the three matvecs kept SEPARATE. Each row's
-    # roundoff floor is u × the sum of the magnitudes differenced to form it — and the dual's ‖H Δp‖ is
-    # H-amplified (‖H‖ ~1e13 in the endgame) yet cancels against ‖Bᵀ Δy‖ in H Δp - Bᵀ Δy (their difference
-    # is O(1): the dual row is f + c Δτ at the solution), so the FUSED norm ‖H Δp - Bᵀ Δy‖ would hide the
-    # very term the floor exists to catch. dp holds Bᵀ Δy just long enough to floor and reassemble; the
-    # column tighten below overwrites it.
+    # lift and check the PRIMAL of the assembled direction only. The assembled dual residual is
+    # base_dual + dt·r_d2, and both halves are refinehsd!'s job: the base dual is the pile it is already
+    # clocked to clear (measured — the dual is the binding row on ~86% of its passes), and the injected
+    # dt·r_d2 just rides those passes for free. Driving the column's dual here is redundant. The column loop
+    # keeps only the primal at ptol, so the lift's dt·r₂ injection cannot knock the primal off tolerance and
+    # manufacture an extra refinehsd! pass. This also drops the H·Δp / Bᵀ·Δy matvecs — the dual never forms.
     #
     @. Δp = bw.Δp0 + dt * bw.Δp2
-    @. Δy = bw.Δy0 + dt * bw.Δy2
-    mul!(sp, B, Δp)                  # sp = B Δp
-    mul!(sd, Symmetric(H, :L), Δp)   # sd = H Δp
-    mul!(dp, B', Δy)                 # dp = Bᵀ Δy
+    mul!(sp, B, Δp)                                     # sp = B Δp
     pfloor = max(ptol, 100 * eps(T) * (norm(rp) + norm(sp) + abs(dt) * ng))
-    dfloor = max(ytol, 100 * eps(T) * (norm(f) + norm(sd) + norm(dp) + abs(dt) * norm(c)))
-    axpby!(one(T), rp, -one(T), sp); axpy!(dt, g, sp)                        # sp = rp - B Δp + g Δτ
-    axpby!(one(T), f, -one(T), sd); axpy!(one(T), dp, sd); axpy!(dt, c, sd)  # sd = f - H Δp + Bᵀ Δy + c Δτ
-    pres = norm(sp); dres = norm(sd)
+    axpby!(one(T), rp, -one(T), sp); axpy!(dt, g, sp)   # sp = rp - B Δp + g Δτ  (assembled primal residual)
+    pres = norm(sp)
 
-    res = max(pres / pfloor, dres / dfloor)
+    res = pres / pfloor
     if res ≤ one(T)
         # SOLVED iff the floor met was the requested tol, else STAGNATED (roundoff-limited short of tol)
-        st = (pres ≤ ptol && dres ≤ ytol) ? KKT_SOLVED : KKT_STAGNATED
-        return st, pres, dres, 0
+        st = pres ≤ ptol ? KKT_SOLVED : KKT_STAGNATED
+        return st, pres, 0
     end
-    res > stall * max(pprv / pfloor, dprv / dfloor) && return KKT_STAGNATED, pres, dres, 0
+    res > stall * (pprv / pfloor) && return KKT_STAGNATED, pres, 0
     #
     # column residual (solveuzw! RHS sign) and target; ONE warm correction toward tgt, then refresh S:
     #
@@ -177,7 +166,7 @@ function refinebdr!(
     axpy!(one(T), dy, bw.Δy2)
     bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
 
-    return KKT_CONTINUE, pres, dres, n
+    return KKT_CONTINUE, pres, n
 end
 
 #
@@ -245,18 +234,16 @@ function solvekkt!(
     rb  = norm(sp)
     num = fτ - dot(bw.aτ, Δp) - dot(g, Δy)
     #
-    # column loop (one honest refinement loop): each pass lifts the assembled direction (Δp, Δy, Δτ = num/S)
-    # and tests the residual it actually has to make small — ‖rp - B Δp + g Δτ‖ ≤ ptol on the primal row and
-    # ‖f - H Δp + Bᵀ Δy + c Δτ‖ ≤ ytol on the dual — not a prediction from S. Until both hold, tighten the
-    # column with ONE warm solveuzw! toward (ptol-rb)/(2|Δτ|) and refresh S. Bails early on stall; caps at
-    # itmax.
+    # column loop (one honest refinement loop): each pass lifts the assembled primal ‖rp - B Δp + g Δτ‖ and
+    # tightens the column toward ptol (Δτ = num/S) until it holds — not a prediction from S. The dual is not
+    # tested here; refinehsd! owns it. Bails early on stall; caps at itmax.
     #
-    pprv = typemax(T); dprv = typemax(T)
+    pprv = typemax(T)
     for _ in 1:itmax
-        st, pres, dres, n = refinebdr!(bw, Δp, Δy, H, B, c, g, ng, f, rp, num, rb, pprv, dprv; ptol, ytol, stall)
+        st, pres, n = refinebdr!(bw, Δp, H, B, c, g, ng, rp, num, rb, pprv; ptol, stall)
         nbase += n
         st == KKT_CONTINUE || break
-        pprv = pres; dprv = dres
+        pprv = pres
     end
     #
     # final lift with the converged S — Δp, Δy already carry it on a satisfied/stalled exit; this makes them
