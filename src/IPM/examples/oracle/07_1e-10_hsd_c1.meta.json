@@ -1,0 +1,1 @@
+{"problem":"07","solver":"hsd","tol":"1e-10","git":"e344d906","m":1096,"n":1452,"normB":47.53055978398937,"resolved_rgmin":2.5081649128504275e-13,"feas_tol":1.0e-10,"gap_tol":1.0e-10,"refine_itmax":10,"refine_stall":0.5,"final_status":"NEAR_OPTIMAL","niter":22,"nrows":814}
