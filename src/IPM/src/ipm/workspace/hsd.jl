@@ -32,7 +32,6 @@ struct HSDWorkspace{T} <: AbstractWorkspace{T}
     #
     Δp2::FVector{T}  # border direction primal
     Δy2::FVector{T}  # border direction dual
-    QΔp2::FVector{T} # Q·Δp2 for Schur complement
     aτ::FVector{T}   # border row: c - 2Qp/τ
     Qp::FVector{T}   # cached Q*p
 end
@@ -54,7 +53,6 @@ function HSDWorkspace{T}(m::Integer, n::Integer) where {T}
         FVector{T}(undef, m),  # dy
         FVector{T}(undef, n),  # Δp2
         FVector{T}(undef, m),  # Δy2
-        FVector{T}(undef, n),  # QΔp2
         FVector{T}(undef, n),  # aτ
         FVector{T}(undef, n),  # Qp
     )

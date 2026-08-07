@@ -1,19 +1,36 @@
 #
-# CRAIG — minimum-norm least-squares by Golub–Kahan bidiagonalization
+# CRAIG — minimum-norm least-squares by
+# Golub–Kahan bidiagonalization
 #
-#   minimize ‖δx‖_{FFᵀ}   subject to   B δx = g,    F Fᵀ = β A + Bᵀ B
+#   min ‖δx‖_{FFᵀ}  s.t.  B δx = g,
+#   FFᵀ = β A + Bᵀ B
 #
-# Split-preconditioned form: bidiagonalize M = B F⁻ᵀ directly (the v-side coefficient is then a plain
-# 2-norm nu = ‖u‖₂) rather than applying (F Fᵀ)⁻¹ as an operator. Same iterates as the operator form up to
-# floating-point rearrangement — A/B-validated, no conditioning advantage, kept for taste. Vendored from
-# Krylov.jl (λ = 0, left preconditioner M = I, no warm start / timing / logging / callbacks).
+# Split-preconditioned form: bidiagonalize
+# M = B F⁻ᵀ directly (the v-side coefficient
+# is then a plain 2-norm nu = ‖u‖₂) rather
+# than applying (FFᵀ)⁻¹ as an operator. Same
+# iterates as the operator form up to
+# floating-point rearrangement — A/B-
+# validated, no conditioning advantage, kept
+# for taste. Vendored from Krylov.jl (λ = 0,
+# left preconditioner M = I, no warm start /
+# timing / logging / callbacks).
 #
-# x accumulates δx onto the base solution passed in; y is overwritten with the min-norm δy; g is in/out —
-# the RHS on entry, the residual g − B x on exit (one length-m scale, so the caller recovers y without a
-# matvec). atol is the only tolerance: an absolute bound on ‖g − B x‖₂. Terminates SOLVED (‖r‖ ≤ atol),
-# STAGNATED (‖r‖ at the machine floor), ITMAX (dimension cap), or NUMERICAL_FAILURE (breakdown, nu = 0).
-# CRAIG assumes a consistent system (full-row-rank B); it does not detect inconsistency (a stalled residual,
-# not nu = 0), so an inconsistent RHS yields a garbage x under a SOLVED/STAGNATED label — see §10.4.
+# x accumulates δx onto the base solution; y
+# is overwritten with the min-norm δy; g is
+# in/out — the RHS on entry, the residual
+# g − B x on exit (one length-m scale, so the
+# caller recovers y without a matvec). atol
+# bounds ‖g − B x‖₂; itmax = 0 skips the
+# iteration entirely (y = 0, g untouched).
+# Terminates SOLVED (‖r‖ ≤ atol), STAGNATED
+# (machine floor), ITMAX (dimension cap), or
+# NUMERICAL_FAILURE (breakdown, nu = 0).
+# CRAIG assumes a consistent system (full-
+# row-rank B); it does not detect
+# inconsistency, so an inconsistent RHS
+# yields garbage x under a SOLVED/STAGNATED
+# label — see §10.4.
 #
 
 # CRAIG_CONTINUE is the in-progress sentinel — the loop runs `while status == CRAIG_CONTINUE` and writes a
@@ -65,10 +82,12 @@ function craig!(
     #
     ng0² = dot(g, g); ng0 = sqrt(ng0²)
     iter = 0
-
-    if ng0 ≤ atol
-        status = CRAIG_SOLVED
-    else
+    status = CRAIG_SOLVED
+    #
+    # itmax = 0 skips the iteration entirely — the base solution x is returned with y = 0 and g (the
+    # residual) untouched. Used for a bare backsolve. ng0 ≤ atol is likewise already converged.
+    #
+    if itmax > 0 && ng0 > atol
         ng = ng0
         ξ = -one(T)
         pnu = one(T)

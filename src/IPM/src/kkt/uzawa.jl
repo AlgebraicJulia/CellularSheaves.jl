@@ -103,11 +103,26 @@ function inituzw!(
     return false, ρ
 end
 
-# Solve the 2-row KKT system to the absolute residual targets ptol (primal) / ytol (dual): a base solve
-# plus the solver-owned iterative-refinement loop, returning a typed exit (Govaerts–Pryce BE+1). This is
-# the guarantee — the residual is driven so that ‖sp‖ ≤ ptol ∧ ‖sd‖ ≤ ytol (status REACHED) or the exit
-# says why not (stalled / itmax). Refinement scratch is workspace-resident.
-# Returns (nbase, nrefine, npass, status, fres, entry_pres, entry_dres).
+#
+# Solve the 2-row KKT system
+#
+#   [ A  -Bᵀ ] [ Δp ]   [ f  ]
+#   [ B   0  ] [ Δy ] = [ rp ]
+#
+# to the caller's residual targets, via one
+# base solve (solveuzw!) plus the solver-
+# owned iterative-refinement loop (Govaerts–
+# Pryce BE+1). Drives
+#
+#   ‖ rp - B Δp ‖        ≤ ptol
+#   ‖ f - A Δp + Bᵀ Δy ‖ ≤ ytol
+#
+# and returns a typed exit: REACHED, or
+# REFINE_STALLED / REFINE_ITMAX saying why
+# not. Refinement scratch is workspace-
+# resident. Returns (nbase, nrefine, npass,
+# status, fres, entry_pres, entry_dres).
+#
 function solvekkt!(
     wrk::UzawaSolver{UPLO, T},
     Δp::AbstractVector{T},
@@ -132,7 +147,7 @@ function solvekkt!(
     # base solve
     #
     nbase, fres = solveuzw!(wrk.divwrk, wrk.itrwrk, Δp, Δy, wrk.r, wrk.F, A, B,
-                             f, rp, wrk.α[], atol, y0)
+                             f, rp, wrk.α[], y0; atol)
     #
     # iterative refinement of the 2-row residual
     #
@@ -178,7 +193,7 @@ function solvekkt!(
         #   [ B  0  ] [ dy ]   [ sp ]
         #
         n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
-                          sd, sp, wrk.α[], atol; θ = T(INTERIOR_THETA))
+                          sd, sp, wrk.α[]; atol, rtol = T(INTERIOR_THETA))
         nrefine += n
         npass += 1
 
@@ -195,6 +210,22 @@ end
 #   [ A -Bᵀ ] [ x ] = [ f ]
 #   [ B  0  ] [ y ]   [ g ]
 #
+# where A is a n x n positive-definite
+# matrix and B is a m × n matrix, α is a
+# positive number, and L is the n × n
+# Cholesky factor of the augmented matrix
+#
+#   1/α A + Bᵀ B = L Lᵀ.
+#
+# The solution (x, y) meets the
+# following tolerances
+#
+#   ‖ f - A x + Bᵀ y ‖ ≤ c ( α ‖ |L| |Lᵀ| |x| ‖ + ‖ |A| |x| + |Bᵀ| |y| + |f| ‖ )
+#   ‖ Bx - g ‖         ≤ ϵ
+#
+# where ϵ is a specified tolerance (`atol`) and c
+# is a small constant depending on m and n.
+#
 function solveuzw!(
         divwrk::DivisionWorkspace{T},
         itrwrk::CraigWorkspace{T},
@@ -207,10 +238,10 @@ function solveuzw!(
         f::AbstractVector{T},
         g::AbstractVector{T},
         α::T,
-        atol::T,
         y0 = nothing;
-        θ::T = zero(T),
-        craig::Bool = true,
+        atol::T = √eps(T),
+        rtol::T = zero(T),
+        itmax::Int = sum(size(B)),
     ) where {UPLO, T}
     m, n = size(B)
 
@@ -261,15 +292,8 @@ function solveuzw!(
     #   x ← x +   δx
     #   r ← r - B δx
     #
-    # bare backsolve (craig=false): skip the CRAIG correction — x is the base F-apply, y is recovered from
-    # the raw residual r. One application, returns nr0 as the residual. Used for the Woodbury column, whose
-    # accuracy is set by the consumer's targets, not solved up front (bordered.jl §Change 2).
-    if craig
-        nc, _ = craig!(itrwrk, B, F, divwrk, x, y, r; atol = max(atol, θ * nr0))
-        niter += nc
-    else
-        fill!(y, zero(T))   # no CRAIG correction (δy = 0); craig! is what writes y, so zero it explicitly
-    end
+    nc, _ = craig!(itrwrk, B, F, divwrk, x, y, r; atol = max(atol, rtol * nr0), itmax)
+    niter += nc
     #
     # recover y:
     #
@@ -283,20 +307,4 @@ function solveuzw!(
     end
 
     return niter, nr0
-end
-
-# Bare backsolve of the 2-row KKT system: one F-apply, no CRAIG, no refinement. Returns (napp=1, nr0)
-# where nr0 = ‖g − B x‖. The Woodbury column uses this — its accuracy is driven later, against the
-# consumer's targets, rather than solved up front (bordered.jl Change 2).
-function backsolve!(
-        wrk::UzawaSolver{UPLO, T},
-        x::AbstractVector{T},
-        y::AbstractVector{T},
-        A::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        f::AbstractVector{T},
-        g::AbstractVector{T},
-        y0 = nothing,
-    ) where {UPLO, T}
-    return solveuzw!(wrk.divwrk, wrk.itrwrk, x, y, wrk.r, wrk.F, A, B, f, g, wrk.α[], zero(T), y0; craig=false)
 end

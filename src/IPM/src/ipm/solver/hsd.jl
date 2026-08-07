@@ -628,12 +628,10 @@ end
 # HSD bordered do-once: factor F and solve/cache the Woodbury column + capacitance. The border w₂ solve
 # needs the refinement tolerances, so step! computes them before calling this. Updates the running ρ-floor
 # and the warm start s.Δy0. Returns (ok, ρ, wtuple) where wtuple carries the border solve's counts.
-function initkkt!(s::HSDSolver{T}; ptol::T, ytol::T) where {T}
-    w = s.wrk; set = s.settings
+function initkkt!(s::HSDSolver{T}) where {T}
     flag, ρ, wtuple = initkkt!(
-        s.kkt, s.H, s.Hc, s.B, s.c, s.g, s.Q;
-        α=s.α[], rgmin=s.ρ[], p=s.p, τ=s.τ[], κ=s.κ[], Qp=w.Qp, y0=s.Δy0,
-        ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
+        s.kkt, s.H, s.B, s.c, s.g;
+        α=s.α[], rgmin=s.ρ[], p=s.p, τ=s.τ[], κ=s.κ[], Qp=s.wrk.Qp, y0=s.Δy0,
     )
     s.ρ[] = max(s.ρ[], ρ)
     flag && copyto!(s.Δy0, s.kkt.Δy2)   # warm start for next iteration's w₂ solve
@@ -743,7 +741,7 @@ function step!(s::HSDSolver{T}) where {T}
             #   [ H  -Bᵀ ] [ Δp2 ]   [ c ]
             #   [ B   0  ] [ Δy2 ] = [ g ] ,   S = Δp2ᵀ W Δp2 + (Δp2 - p/τ)ᵀ Q (Δp2 - p/τ) + κ/τ
             #
-            initok, ρ, wtuple = @timeit s.timers "initkkt" initkkt!(s; ptol, ytol)
+            initok, ρ, wtuple = @timeit s.timers "initkkt" initkkt!(s)
             if !initok
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
