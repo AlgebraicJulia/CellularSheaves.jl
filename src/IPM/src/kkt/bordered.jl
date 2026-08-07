@@ -169,7 +169,8 @@ function solvekkt!(
 
         (r2 ≤ ptgt && r_d2 ≤ ytgt) && break
 
-        nb2, nr2, _, _, _, _, _ = solvekkt!(inner, bw.Δp2, bw.Δy2, H, B, c, g; ptol=ptgt, ytol=ytgt, stall, itmax)
+        # Δp2, Δy2 already hold the current column — warm-start the re-solve from it (the buffers ARE the seed).
+        nb2, nr2, _, _, _, _, _ = solvekkt!(inner, bw.Δp2, bw.Δy2, H, B, c, g; pwarm=true, ywarm=true, ptol=ptgt, ytol=ytgt, stall, itmax)
         nbase += nb2 + nr2
         bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
     end
