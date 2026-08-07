@@ -319,8 +319,7 @@ function solveuzw!(
         B::BlockSparseMatrix{T},
         f::AbstractVector{T},
         g::AbstractVector{T},
-        α::T,
-        y0 = nothing;
+        α::T;
         atol::T = √eps(T),
         rtol::T = zero(T),
         itmax::Int = sum(size(B)),
@@ -338,14 +337,9 @@ function solveuzw!(
     #
     # solve for x:
     #
-    #   (β A + Bᵀ B) x =  β f + Bᵀ (g + β y₀)
+    #   (1/α A + Bᵀ B) x =  1/α f + Bᵀ g
     #
     copyto!(r, g)
-
-    if !isnothing(y0)
-        axpy!(β, y0, r)
-    end
-
     copyto!(x, f)
     mul!(x, B', r, one(T), β)
     ldiv!(divwrk, F,  x)
@@ -366,8 +360,8 @@ function solveuzw!(
     #
     # solve for δx and δy:
     #
-    #   [ β A + Bᵀ B  -Bᵀ ] [ δx ] = [ 0 ]
-    #   [ B            0  ] [ δy ]   [ r ]
+    #   [ 1/α A + Bᵀ B  -Bᵀ ] [ δx ] = [ 0 ]
+    #   [            B   0  ] [ δy ]   [ r ]
     #
     # and update
     #
@@ -379,14 +373,10 @@ function solveuzw!(
     #
     # recover y:
     #
-    #   y = y₀ + 1/β (δy + r)
+    #   y = α (δy + r)
     #
     axpy!(one(T), r, y)
     lmul!(α, y)
-
-    if !isnothing(y0)
-        axpy!(one(T), y0, y)
-    end
 
     return niter, nr0
 end
