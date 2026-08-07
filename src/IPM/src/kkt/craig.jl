@@ -156,49 +156,44 @@ function craig!(
     @assert size(F, 1) == size(B, 2)
 
     fill!(y, zero(T))
+    iter = 0
     #
-    # entry residual norm (the residual at x = base is g itself):
+    # itmax = 0 (bare backsolve) or atol = Inf (any residual accepted) skips the iteration entirely — the
+    # base solution x is returned with y = 0 and g (the residual) untouched. Guarded before ng0² so a bare
+    # backsolve pays for no norm.
     #
-    #   ng0 = ‖ g ‖
+    (itmax > 0 && !isinf(atol)) || return iter, CRAIG_SOLVED
+    #
+    # entry residual norm (the residual at x = base is g itself):  ng0 = ‖ g ‖. ng0 ≤ atol is already
+    # converged — return the base solution, g untouched.
     #
     ng0² = dot(g, g); ng0 = sqrt(ng0²)
-    iter = 0
-    status = CRAIG_SOLVED
+    ng0 ≤ atol && return iter, CRAIG_SOLVED
     #
-    # itmax = 0 skips the iteration entirely — the base solution x is returned with y = 0 and g (the
-    # residual) untouched. Used for a bare backsolve. ng0 ≤ atol is likewise already converged.
+    # normalize the Golub–Kahan u-side (u ≡ g); ng0 > atol > 0 here, so this is safe:  g ← g / ng0
     #
-    if itmax > 0 && ng0 > atol
-        #
-        # normalize the Golub–Kahan u-side (u ≡ g); ng0 > atol > 0 here, so this is safe
-        #
-        #   g ← g / ng0
-        #
-        rdiv!(g, ng0)
-        fill!(u, zero(T))
-        fill!(w, zero(T))
-        #
-        # recurrence state, carried through the loop as individual scalars
-        #
-        ng, ξ, pnu, nB², nx² = ng0, -one(T), one(T), zero(T), zero(T)
-        status = CRAIG_CONTINUE
+    rdiv!(g, ng0)
+    fill!(u, zero(T))
+    fill!(w, zero(T))
+    #
+    # recurrence state, carried through the loop as individual scalars
+    #
+    ng, ξ, pnu, nB², nx² = ng0, -one(T), one(T), zero(T), zero(T)
+    status = CRAIG_CONTINUE
 
-        while status == CRAIG_CONTINUE
-            status, ng, ξ, pnu, nB², nx² =
-                craigstep!(u, v, w, B, F, divwrk, x, y, g, ng, ξ, pnu, nB², nx², ng0², atol)
-            #
-            # iteration count and the itmax cap live here, not in the step
-            #
-            status == CRAIG_NUMERICAL_FAILURE || (iter += 1)
-            status == CRAIG_CONTINUE && iter ≥ itmax && (status = CRAIG_ITMAX)
-        end
+    while status == CRAIG_CONTINUE
+        status, ng, ξ, pnu, nB², nx² =
+            craigstep!(u, v, w, B, F, divwrk, x, y, g, ng, ξ, pnu, nB², nx², ng0², atol)
         #
-        # write the residual back into g (u holds the final GK u-side):
+        # iteration count and the itmax cap live here, not in the step
         #
-        #   g ← -ng ξ g = g - B x
-        #
-        rmul!(g, -ng * ξ)
+        status == CRAIG_NUMERICAL_FAILURE || (iter += 1)
+        status == CRAIG_CONTINUE && iter ≥ itmax && (status = CRAIG_ITMAX)
     end
+    #
+    # write the residual back into g (u holds the final GK u-side):  g ← -ng ξ g = g - B x
+    #
+    rmul!(g, -ng * ξ)
 
     return iter, status
 end

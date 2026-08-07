@@ -1,6 +1,6 @@
 const IPMHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, α::T, ρ::T,
-    pbase::Int, prefn::Int, ppass::Int, pstat::RefStatus,
-    cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus,
+    pbase::Int, prefn::Int, ppass::Int, pstat::KKTStatus,
+    cbase::Int, crefn::Int, cpass::Int, cstat::KKTStatus,
     pfres::T, ppres::T, pdres::T, cfres::T, cpres::T, cdres::T, αmin::T, αmax::T}
 
 struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
@@ -13,11 +13,11 @@ struct IPMHistory{T} <: AbstractVector{IPMHistoryRow{T}}
     pbase::Vector{Int}
     prefn::Vector{Int}
     ppass::Vector{Int}
-    pstat::Vector{RefStatus}
+    pstat::Vector{KKTStatus}
     cbase::Vector{Int}
     crefn::Vector{Int}
     cpass::Vector{Int}
-    cstat::Vector{RefStatus}
+    cstat::Vector{KKTStatus}
     pfres::Vector{T}
     ppres::Vector{T}
     pdres::Vector{T}
@@ -30,8 +30,8 @@ end
 
 function IPMHistory{T}() where {T}
     return IPMHistory{T}(T[], T[], T[], T[], T[], T[],
-        Int[], Int[], Int[], RefStatus[],
-        Int[], Int[], Int[], RefStatus[],
+        Int[], Int[], Int[], KKTStatus[],
+        Int[], Int[], Int[], KKTStatus[],
         T[], T[], T[], T[], T[], T[], T[], T[])
 end
 

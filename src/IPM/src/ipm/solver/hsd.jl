@@ -611,7 +611,7 @@ function step!(s::HSDSolver{T}) where {T}
     pbase = cbase = wbase = 0   # base-solve CRAIG per role (woodbury counted into craig1, archive-wins)
     prefn = crefn = wrefn = 0   # refinement CRAIG per role
     ppass = cpass = wpass = 0   # refinement passes per role
-    pstat = cstat = wstat = REACHED   # refinement exit status per role
+    pstat = cstat = wstat = KKT_SOLVED   # refinement exit status per role
 
     step = zero(T)
     pfres = ppres = pdres = T(NaN)
@@ -744,7 +744,7 @@ function step!(s::HSDSolver{T}) where {T}
                     end
                 end
 
-                if s.settings.verbose > 1 && (pstat !== REACHED || cstat !== REACHED || wstat !== REACHED)
+                if s.settings.verbose > 1 && (pstat !== KKT_SOLVED || cstat !== KKT_SOLVED || wstat !== KKT_SOLVED)
                     @info "KKT solve above target tolerance" pstat cstat wstat
                 end
                 #
@@ -788,9 +788,9 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 #   α* ∈ [αmin, αmax]
                 #
-                pok = pstat === REACHED
-                cok = cstat === REACHED
-                wok = wstat === REACHED
+                pok = pstat === KKT_SOLVED
+                cok = cstat === KKT_SOLVED
+                wok = wstat === KKT_SOLVED
                 state = pok && cok && wok
 
                 if s.settings.policy == 1

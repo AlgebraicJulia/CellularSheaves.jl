@@ -20,7 +20,7 @@
 
 using LinearAlgebra: norm, Symmetric
 using Printf: @sprintf
-using CellularSheaves.IPM: step!, mu, CONTINUE, REACHED,
+using CellularSheaves.IPM: step!, mu, CONTINUE, KKT_SOLVED,
     getaug, CTRL_CAP_IPM, CTRL_CAP_HSD, IPMSolver, HSDSolver
 
 # The controller cap the live setaug! would use, per solver kind.
@@ -29,7 +29,7 @@ _ctrl_cap(::HSDSolver) = CTRL_CAP_HSD
 
 const DEFAULT_ALPHA_GRID = [round(10.0^e, sigdigits=4) for e in 0.0:0.5:18.0]   # half-decades 1e0..1e18 (37 pts)
 
-_reached(st) = st === REACHED
+_reached(st) = st === KKT_SOLVED
 
 function _oracle_state(row)
     r = _reached(row.pstat) && _reached(row.cstat)
@@ -122,6 +122,10 @@ function solve_logged(s0, grid = DEFAULT_ALPHA_GRID; itmax::Integer = s0.setting
         if beststatus !== CONTINUE && iter_recs[bestidx].ncraig == 0
             break
         end
+        # still iterating, but no α drove every role to tol (best state ≠ 0 ⇒ all candidates STAGNATED):
+        # the iterate is at its arithmetic accuracy limit. Stop here rather than record a non-converged
+        # step and march α out chasing a tol the KKT solve can never reach.
+        beststatus === CONTINUE && bestscore[1] != 0 && break
         iter_recs[bestidx] = merge(iter_recs[bestidx], (chosen = true,))
         append!(records, iter_recs)
         s = best

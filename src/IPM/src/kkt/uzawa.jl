@@ -120,9 +120,9 @@ end
 #   [ B  0  ] [ dy ]   [ sp ]
 #
 # to θ·(its entry residual) and folds it in.
-# Returns (status, pres, dres, n): REACHED or
-# REFINE_STALLED (no correction, n = 0), or
-# REFINE_CONTINUE (corrected, n = craig count).
+# Returns (status, pres, dres, n): KKT_SOLVED or
+# KKT_STAGNATED (no correction, n = 0), or
+# KKT_CONTINUE (corrected, n = craig count).
 # The stall test compares res = max(pres/pfloor,
 # dres/dfloor) against its previous value rebuilt
 # from (pprv, dprv).
@@ -163,15 +163,20 @@ function refinekkt!(
     pres = norm(sp)
     res  = max(pres / pfloor, dres / dfloor)
 
-    res ≤ one(T)                                    && return REACHED, pres, dres, 0
-    res > stall * max(pprv / pfloor, dprv / dfloor) && return REFINE_STALLED, pres, dres, 0
+    if res ≤ one(T)
+        # met the floor: SOLVED iff that floor was the requested tol, else STAGNATED (bottomed out at
+        # roundoff short of tol — the direction is as accurate as arithmetic allows, but not to tol).
+        st = (pres ≤ ptol && dres ≤ ytol) ? KKT_SOLVED : KKT_STAGNATED
+        return st, pres, dres, 0
+    end
+    res > stall * max(pprv / pfloor, dprv / dfloor) && return KKT_STAGNATED, pres, dres, 0
 
     n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
                      sd, sp, wrk.α[]; atol = ptol, rtol = T(INTERIOR_THETA))
     axpy!(one(T), dp, Δp)
     axpy!(one(T), dy, Δy)
 
-    return REFINE_CONTINUE, pres, dres, n
+    return KKT_CONTINUE, pres, dres, n
 end
 
 #
@@ -188,8 +193,8 @@ end
 #   ‖ rp - B Δp ‖        ≤ ptol
 #   ‖ f - A Δp + Bᵀ Δy ‖ ≤ ytol
 #
-# and returns a typed exit: REACHED, or
-# REFINE_STALLED / REFINE_ITMAX saying why
+# and returns a typed exit: KKT_SOLVED, or
+# KKT_STAGNATED / KKT_ITMAX saying why
 # not. Refinement scratch is workspace-
 # resident. Returns (nbase, nrefine, npass,
 # status, fres, entry_pres, entry_dres).
@@ -253,7 +258,7 @@ function solvekkt!(
     #
     nrefine = 0
     npass = 0
-    status = REFINE_ITMAX
+    status = KKT_ITMAX
     pprv = typemax(T)
     dprv = typemax(T)
     pres1 = T(NaN)
@@ -267,7 +272,7 @@ function solvekkt!(
             dres1 = dres
         end
 
-        if st != REFINE_CONTINUE
+        if st != KKT_CONTINUE
             status = st
             break
         end

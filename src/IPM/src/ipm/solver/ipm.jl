@@ -370,7 +370,7 @@ function step!(s::IPMSolver{T}) where {T}
     pbase = cbase = 0       # base-solve CRAIG per role
     prefn = crefn = 0       # refinement CRAIG per role
     ppass = cpass = 0       # refinement passes per role
-    pstat = cstat = REACHED   # refinement exit status per role
+    pstat = cstat = KKT_SOLVED   # refinement exit status per role
     step = zero(T)
     pfres = ppres = pdres = T(NaN)
     cfres = cpres = cdres = T(NaN)
@@ -488,7 +488,7 @@ function step!(s::IPMSolver{T}) where {T}
                     end
                 end
 
-                if s.settings.verbose > 1 && (pstat !== REACHED || cstat !== REACHED)
+                if s.settings.verbose > 1 && (pstat !== KKT_SOLVED || cstat !== KKT_SOLVED)
                     @info "KKT solve above target tolerance" pstat cstat
                 end
                 #
@@ -518,8 +518,8 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 #   α* ∈ [αmin, αmax]
                 #
-                pok = pstat === REACHED
-                cok = cstat === REACHED
+                pok = pstat === KKT_SOLVED
+                cok = cstat === KKT_SOLVED
                 state = pok && cok
 
                 if s.settings.policy == 1

@@ -62,7 +62,7 @@ function initkkt!(
         y0,
     ) where {T}
     ok, ρ = initkkt!(bw.inner, H; α, rgmin)
-    ok || return ok, ρ, (0, 0, 0, REFINE_ITMAX, T(NaN), T(NaN), T(NaN))
+    ok || return ok, ρ, (0, 0, 0, KKT_ITMAX, T(NaN), T(NaN), T(NaN))
     #
     # bare backsolve for the Woodbury column [ H -Bᵀ; B 0 ][Δp2; Δy2] = [c; g] — ONE application (itmax=0
     # skips CRAIG), no refinement (Change 2). The column is not solved to a tolerance here: its required
@@ -83,7 +83,7 @@ function initkkt!(
     copyto!(bw.aτ, c)
     axpby!(-2 / τ, Qp, one(T), bw.aτ)
     bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
-    return ok, ρ, (napp, 0, 0, REACHED, r2, r2, T(NaN))
+    return ok, ρ, (napp, 0, 0, KKT_SOLVED, r2, r2, T(NaN))
 end
 
 #
@@ -100,13 +100,13 @@ end
 # |Δτ|·r₂ ≤ ptol-rb prediction — the target and
 # the test no longer share S's error, and the
 # triangle-inequality slack is gone. If both
-# rows are within (ptol, ytol), REACHED. If the
+# rows are within (ptol, ytol), KKT_SOLVED. If the
 # residual has stopped shrinking (res >
-# stall·prev), REFINE_STALLED. Else drive ONE
+# stall·prev), KKT_STAGNATED. Else drive ONE
 # warm solveuzw! correction into (Δp2, Δy2)
 # toward tgt = (ptol-rb)/(2|Δτ|) (floored at
 # roundoff), refresh S, and report
-# REFINE_CONTINUE — a single base-quality
+# KKT_CONTINUE — a single base-quality
 # correction, NOT a nested solvekkt!; the outer
 # loop iterates it. Returns (status, pres, dres,
 # n): the assembled residual norms feed the next
@@ -156,8 +156,12 @@ function refinebdr!(
     pres = norm(sp); dres = norm(sd)
 
     res = max(pres / pfloor, dres / dfloor)
-    res ≤ one(T)                                    && return REACHED, pres, dres, 0
-    res > stall * max(pprv / pfloor, dprv / dfloor) && return REFINE_STALLED, pres, dres, 0
+    if res ≤ one(T)
+        # SOLVED iff the floor met was the requested tol, else STAGNATED (roundoff-limited short of tol)
+        st = (pres ≤ ptol && dres ≤ ytol) ? KKT_SOLVED : KKT_STAGNATED
+        return st, pres, dres, 0
+    end
+    res > stall * max(pprv / pfloor, dprv / dfloor) && return KKT_STAGNATED, pres, dres, 0
     #
     # column residual (solveuzw! RHS sign) and target; ONE warm correction toward tgt, then refresh S:
     #
@@ -173,7 +177,7 @@ function refinebdr!(
     axpy!(one(T), dy, bw.Δy2)
     bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
 
-    return REFINE_CONTINUE, pres, dres, n
+    return KKT_CONTINUE, pres, dres, n
 end
 
 #
@@ -251,7 +255,7 @@ function solvekkt!(
     for _ in 1:itmax
         st, pres, dres, n = refinebdr!(bw, Δp, Δy, H, B, c, g, ng, f, rp, num, rb, pprv, dprv; ptol, ytol, stall)
         nbase += n
-        st == REFINE_CONTINUE || break
+        st == KKT_CONTINUE || break
         pprv = pres; dprv = dres
     end
     #
@@ -289,7 +293,7 @@ end
 # solves the 2-row correction (solveuzw!),
 # Schur-lifts dτ = (sτ - aτᵀdp - gᵀdy)/S,
 # and updates — until ‖sp‖ ≤ ptol ∧
-# ‖sd‖ ≤ ytol ∧ |sτ| ≤ τtol (REACHED), or it
+# ‖sd‖ ≤ ytol ∧ |sτ| ≤ τtol (KKT_SOLVED), or it
 # stalls / runs out of passes. Scratch
 # (sp, sd, dp, dy) is the caller's. Returns
 # (npass, nrefine, status, Δτ, entry_pres,
@@ -331,7 +335,7 @@ function refinehsd!(
     # correct first-order translation, not an equality. Only ptol — the dual row is border-free.
     #
     atol = ptol
-    status = REFINE_ITMAX
+    status = KKT_ITMAX
     prv = typemax(T)
     pres1 = T(NaN)
     dres1 = T(NaN)
@@ -366,12 +370,12 @@ function refinehsd!(
         res = max(pres / ptol, dres / ytol, τres / τtol)
 
         if res ≤ one(T)
-            status = REACHED
+            status = KKT_SOLVED
             break
         end
 
         if res > stall * prv
-            status = REFINE_STALLED
+            status = KKT_STAGNATED
             break
         end
 

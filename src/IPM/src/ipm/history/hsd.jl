@@ -1,7 +1,7 @@
 const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, gap::T, α::T, ρ::T, τ::T, κ::T,
-    pbase::Int, prefn::Int, ppass::Int, pstat::RefStatus,
-    cbase::Int, crefn::Int, cpass::Int, cstat::RefStatus,
-    wbase::Int, wrefn::Int, wpass::Int, wstat::RefStatus,
+    pbase::Int, prefn::Int, ppass::Int, pstat::KKTStatus,
+    cbase::Int, crefn::Int, cpass::Int, cstat::KKTStatus,
+    wbase::Int, wrefn::Int, wpass::Int, wstat::KKTStatus,
     pfres::T, ppres::T, pdres::T, cfres::T, cpres::T, cdres::T, wfres::T, wpres::T, wdres::T, αmin::T, αmax::T}
 
 struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
@@ -17,15 +17,15 @@ struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     pbase::Vector{Int}
     prefn::Vector{Int}
     ppass::Vector{Int}
-    pstat::Vector{RefStatus}
+    pstat::Vector{KKTStatus}
     cbase::Vector{Int}
     crefn::Vector{Int}
     cpass::Vector{Int}
-    cstat::Vector{RefStatus}
+    cstat::Vector{KKTStatus}
     wbase::Vector{Int}
     wrefn::Vector{Int}
     wpass::Vector{Int}
-    wstat::Vector{RefStatus}
+    wstat::Vector{KKTStatus}
     pfres::Vector{T}
     ppres::Vector{T}
     pdres::Vector{T}
@@ -41,9 +41,9 @@ end
 
 function HSDHistory{T}() where {T}
     return HSDHistory{T}(T[], T[], T[], T[], T[], T[], T[], T[], T[],
-        Int[], Int[], Int[], RefStatus[],
-        Int[], Int[], Int[], RefStatus[],
-        Int[], Int[], Int[], RefStatus[],
+        Int[], Int[], Int[], KKTStatus[],
+        Int[], Int[], Int[], KKTStatus[],
+        Int[], Int[], Int[], KKTStatus[],
         T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[])
 end
 
