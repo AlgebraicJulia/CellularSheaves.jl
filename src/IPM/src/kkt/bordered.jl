@@ -11,14 +11,15 @@ struct BorderedSolver{T, W <: KKTSolver{T}} <: KKTSolver{T}
     Δy2::FVector{T}    # cached Woodbury column, dual part (m)
     aτ::FVector{T}     # cached border row c - 2Qp/τ (n)
     S::FScalar{T}      # cached capacitance scalar
+    δ::FScalar{T}      # cached τ-row diagonal pᵀQp/τ² + κ/τ
 end
 
 function BorderedSolver(inner::W, B::BlockSparseMatrix{T, I}) where {T, I, W <: KKTSolver{T}}
     m, n = size(B)
-    S = FScalar{T}(undef)
-    S[] = one(T)
+    S = FScalar{T}(undef); S[] = one(T)
+    δ = FScalar{T}(undef); δ[] = zero(T)
     return BorderedSolver(inner, FVector{T}(undef, n), FVector{T}(undef, m),
-                          FVector{T}(undef, n), S)
+                          FVector{T}(undef, n), S, δ)
 end
 
 ############################################################################################
@@ -75,10 +76,10 @@ function initkkt!(
     # by inner product rather than the algebraically-equal quadratic form: sharing the aτᵀΔp2, gᵀΔy2
     # rounding with the lift's numerator keeps the τ row exact however loosely the column was solved.
     #
-    δ = dot(p, Qp) / τ^2 + κ / τ
+    bw.δ[] = dot(p, Qp) / τ^2 + κ / τ
     copyto!(bw.aτ, c)
     axpby!(-2 / τ, Qp, one(T), bw.aτ)
-    bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + δ
+    bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
     return ok, ρ, (napp, 0, 0, REACHED, r2, r2, T(NaN))
 end
 
@@ -107,10 +108,6 @@ function solvekkt!(
         B::BlockSparseMatrix{T},
         c::AbstractVector{T},
         g::AbstractVector{T},
-        Qp::AbstractVector{T},
-        p::AbstractVector{T},
-        τ::T,
-        κ::T,
         f::AbstractVector{T},
         rp::AbstractVector{T},
         fτ::T,
@@ -148,18 +145,13 @@ function solvekkt!(
     #   r₂   = ‖ g - B Δp2 ‖
     #   r_d2 = ‖ H Δp2 - Bᵀ Δy2 - c ‖
     #
-    # tightening the column moves Δp2, Δy2 → S → the targets, so recompute S and re-check (≤ 6 passes). A
-    # target below the CRAIG floor is unreachable; break and let the refinement net take the residual.
+    # tightening the column moves Δp2, Δy2 → S → the targets, so recompute S and re-check (≤ 6 passes). An
+    # unreachable target simply exhausts the inner solve (its own stall/itmax) and refinehsd! absorbs the rest.
     #
-    δ   = dot(p, Qp) / τ^2 + κ / τ
-    flr = eps(T) * (norm(c) + norm(g)) * κ
-
     for _ in 1:6
         dt   = num / bw.S[]
         ptgt = (ptol - rb) / abs(dt)
         ytgt = ytol / abs(dt)
-
-        (ptgt < flr || ytgt < flr) && break
 
         mulkkt!(sd, sp, H, B, bw.Δp2, bw.Δy2)
         axpby!(one(T), g, -one(T), sp)
@@ -171,7 +163,7 @@ function solvekkt!(
 
         nb2, nr2, _, _, _, _, _ = solvekkt!(inner, bw.Δp2, bw.Δy2, H, B, c, g; ptol=ptgt, ytol=ytgt, stall, itmax)
         nbase += nb2 + nr2
-        bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + δ
+        bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
     end
     #
     # Schur lift — Δτ paired with the final S (Change 1's τ-row exactness needs S formed from the same
@@ -188,7 +180,7 @@ function solvekkt!(
     # 3-row refinement net (a single verifying pass when both column targets were met):
     #
     npass, nrefine, status, Δτ, pres1, dres1 = refinehsd!(
-        Δp, Δy, Δτ, inner, H, B, c, g, Qp, p, bw.aτ, τ, κ, rp, f, fτ, bw.Δp2, bw.Δy2, bw.S[],
+        Δp, Δy, Δτ, inner, H, B, c, g, bw.aτ, bw.δ[], rp, f, fτ, bw.Δp2, bw.Δy2, bw.S[],
         sp, sd, inner.dp, inner.dy;
         itmax, ptol, ytol, τtol, stall,
     )
@@ -225,11 +217,8 @@ function refinehsd!(
     B::BlockSparseMatrix{T},
     c::AbstractVector{T},
     g::AbstractVector{T},
-    Qp::AbstractVector{T},
-    p::AbstractVector{T},
     aτ::AbstractVector{T}, # border row: c - 2Qp/τ
-    τ::T,
-    κ::T,
+    δ::T,                  # τ-row diagonal pᵀQp/τ² + κ/τ
     rp::AbstractVector{T},  # RHS for row P
     f::AbstractVector{T},   # RHS for row D
     fτ::T,                  # RHS for row T
@@ -257,12 +246,6 @@ function refinehsd!(
     atol = ptol
     status = REFINE_ITMAX
     prv = typemax(T)
-    #
-    # compute the sum
-    #
-    #   1/τ pᵀQp + κ
-    #
-    pQpτκ = dot(p, Qp) / τ + κ
     pres1 = T(NaN)
     dres1 = T(NaN)
 
@@ -270,19 +253,16 @@ function refinehsd!(
         #
         # compute the residuals
         #
-        #   [ sd ]   [ f  ]   [ H  -Bᵀ  -c ] [ Δp ]
-        #   [ sp ] = [ rp ] - [ B   0   -g ] [ Δy ]
-        #   [ sτ ]   [ fτ ]   [ cᵀ  gᵀ   0 ] [ Δτ ]
+        #   [ sd ]   [ f  ]   [ H    -Bᵀ  -c ] [ Δp ]
+        #   [ sp ] = [ rp ] - [ B     0   -g ] [ Δy ]
+        #   [ sτ ]   [ fτ ]   [ aτᵀ   gᵀ   δ ] [ Δτ ]
         #
-        sτ = fτ - mulhsd!(sd, sp, H, B, c, g, Δp, Δy, Δτ)
+        mulkkt!(sd, sp, H, B, Δp, Δy)
+        axpy!(-Δτ, c, sd)
+        axpy!(-Δτ, g, sp)
         axpby!(one(T), f,  -one(T), sd)
         axpby!(one(T), rp, -one(T), sp)
-        #
-        # correct sτ:
-        #
-        #   sτ ← sτ + 2pᵀQΔp/τ - (pᵀQp/τ² + κ/τ) Δτ
-        #
-        sτ += (2dot(Qp, Δp) - Δτ * pQpτκ) / τ
+        sτ = fτ - dot(aτ, Δp) - dot(g, Δy) - δ * Δτ
 
         pres = norm(sp)
         dres = norm(sd)

@@ -99,51 +99,6 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
 end
 
 ############################################################################################
-# mulhsd!
-############################################################################################
-
-#
-# compute the matrix-vector product
-#
-#   [ u ]   [ H   -Bᵀ  -c ] [ x ]
-#   [ v ] = [ B    0   -g ] [ y ]
-#   [ w ]   [ cᵀ   gᵀ   0 ] [ z ]
-#
-function mulhsd!(
-        u::AbstractVector{T},
-        v::AbstractVector{T},
-        H::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        c::AbstractVector{T},
-        g::AbstractVector{T},
-        x::AbstractVector{T},
-        y::AbstractVector{T},
-        z::T,
-    ) where {T}
-    #
-    # compute the matrix-vector product
-    #
-    #   [ u ] ← [ H  -Bᵀ ] [ x ]
-    #   [ v ]   [ B   0  ] [ y ]
-    #
-    mulkkt!(u, v, H, B, x, y)
-    #
-    # subtract cz and gz:
-    #
-    #   u ← u - cz
-    #   v ← v - gz
-    #
-    axpy!(-z, c, u)
-    axpy!(-z, g, v)
-    #
-    # compute w:
-    #
-    #   w ← cᵀx + gᵀy
-    #
-    return dot(c, x) + dot(g, y)
-end
-
-############################################################################################
 # residuals!
 ############################################################################################
 
@@ -179,12 +134,15 @@ function residuals!(
     #   [ rp ] = [ B    0   -g ] [ y ]
     #   [ rτ ]   [ cᵀ   gᵀ   0 ] [ τ ]
     #
-    rτ = mulhsd!(rd, rp, Q, B, c, g, p, y, τ)
+    mulkkt!(rd, rp, Q, B, p, y)
+    axpy!(-τ, c, rd)
+    axpy!(-τ, g, rp)
+    rτ = dot(c, p) + dot(g, y)
     #
     # correct rd and rp
     #
     #   rd ← -rd + d
-    #   rp ← -rp  
+    #   rp ← -rp
     #
     axpby!(one(T), d, -one(T), rd)
     lmul!(-one(T), rp)
@@ -219,7 +177,7 @@ end
 #
 function solvepredictor!(s::HSDSolver{T}, gap::T; ptol::T, ytol::T, τtol::T) where {T}
     return solvepredictor!(
-        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.p, s.d,
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.c, s.g, s.d,
         s.τ[], s.κ[], gap;
         ptol, ytol, τtol,
     )
@@ -234,7 +192,6 @@ function solvepredictor!(
         Q::BlockSparseMatrix{T},
         c::AbstractVector{T},
         g::AbstractVector{T},
-        p::AbstractVector{T},
         d::AbstractVector{T},
         τ::T,
         κ::T,
@@ -253,7 +210,7 @@ function solvepredictor!(
     #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
     pbase, prefn, ppass, pstat, pfres, ppres, pdres, Δτa = solvekkt!(
-        kkt, w.Δpa, w.Δya, H, B, c, g, w.Qp, p, τ, κ, w.f, w.rp, gap;
+        kkt, w.Δpa, w.Δya, H, B, c, g, w.f, w.rp, gap;
         ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
@@ -394,7 +351,7 @@ function solvecorrector!(
     #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
     cbase, crefn, cpass, cstat, cfres, cpres, cdres, Δτ = solvekkt!(
-        kkt, w.Δp, w.Δy, H, B, c, g, w.Qp, p, τ, κ, w.f, w.rp, fτ, w.Δya;
+        kkt, w.Δp, w.Δy, H, B, c, g, w.f, w.rp, fτ, w.Δya;
         ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
     #
