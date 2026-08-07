@@ -7,9 +7,11 @@
 # capacitance; solvekkt! does the 2-row base solve + column loop + Schur lift + 3-row refinement net.
 struct BorderedSolver{T, W <: KKTSolver{T}} <: KKTSolver{T}
     inner::W          # the 2-row solver (factor + base solve primitive)
-    Δp2::FVector{T}    # cached Woodbury column, primal part (n)
-    Δy2::FVector{T}    # cached Woodbury column, dual part (m)
-    Δp0::FVector{T}    # base solve primal Δp₀, preserved so the column loop re-lifts from it (n)
+    Δp2::FVector{T}    # cached Woodbury column, primal part — CRAIG accumulates δx into it (n)
+    Δy2::FVector{T}    # cached Woodbury column, dual part — re-recovered per consumer (m)
+    dya::FVector{T}    # accumulated RAW CRAIG dual Σδyᵢ across the column's continued solves (m)
+    yseed::FVector{T}  # cross-iteration multiplier seed y0 (= s.Δy0), used by the dual recovery (m)
+    Δp0::FVector{T}    # base solve primal Δp₀ (n)
     Δy0::FVector{T}    # base solve dual   Δy₀ (m)
     aτ::FVector{T}     # cached border row c - 2Qp/τ (n)
     S::FScalar{T}      # cached capacitance scalar
@@ -20,9 +22,11 @@ function BorderedSolver(inner::W, B::BlockSparseMatrix{T, I}) where {T, I, W <: 
     m, n = size(B)
     S = FScalar{T}(undef); S[] = one(T)
     δ = FScalar{T}(undef); δ[] = zero(T)
-    return BorderedSolver(inner, FVector{T}(undef, n), FVector{T}(undef, m),
-                          FVector{T}(undef, n), FVector{T}(undef, m),
-                          FVector{T}(undef, n), S, δ)
+    return BorderedSolver(inner,
+                          FVector{T}(undef, n), FVector{T}(undef, m),   # Δp2, Δy2
+                          FVector{T}(undef, m), FVector{T}(undef, m),   # dya, yseed
+                          FVector{T}(undef, n), FVector{T}(undef, m),   # Δp0, Δy0
+                          FVector{T}(undef, n), S, δ)                   # aτ, S, δ
 end
 
 ############################################################################################
@@ -70,7 +74,29 @@ function initkkt!(
     # Solving it up front to the Newton tolerances over-solves fixed data (c,g) by up to 10 decades late.
     #
     inr = bw.inner
-    napp, r2 = solveuzw!(inr.divwrk, inr.itrwrk, bw.Δp2, bw.Δy2, inr.r, inr.F, H, B, c, g, inr.α[], y0; itmax=0)
+    β = inv(inr.α[]); r = inr.r
+    #
+    # base solve of the column — the inlined `solveuzw!` base (no CRAIG here; itmax=0). solvekkt! continues
+    # this same CRAIG per consumer, to the accuracy the lift needs. The cross-iteration seed y0 enters both
+    # the RHS and the dual recovery; stash it (yseed) for solvekkt!, and reset the δy accumulator.
+    #
+    #   G·Δp2 = β·c + Bᵀ(g + β·y0) ,   G = βH + BᵀB = F Fᵀ
+    #   r     = g - B·Δp2
+    #   Δy2   = y0 + α·r            (base: δy_total = 0)
+    #
+    copyto!(r, g)
+    isnothing(y0) || axpy!(β, y0, r)
+    copyto!(bw.Δp2, c)
+    mul!(bw.Δp2, B', r, one(T), β)
+    ldiv!(inr.divwrk, inr.F,  bw.Δp2)
+    ldiv!(inr.divwrk, inr.F', bw.Δp2)
+    copyto!(r, g)
+    mul!(r, B, bw.Δp2, -one(T), one(T))
+    r2 = norm(r)
+    copyto!(bw.Δy2, r); lmul!(inr.α[], bw.Δy2)
+    isnothing(y0) || axpy!(one(T), y0, bw.Δy2)
+    fill!(bw.dya, zero(T))
+    isnothing(y0) ? fill!(bw.yseed, zero(T)) : copyto!(bw.yseed, y0)
     #
     # cache the border row aτ = c - 2Qp/τ and the capacitance — the Schur complement of the τ row,
     #
@@ -83,90 +109,7 @@ function initkkt!(
     copyto!(bw.aτ, c)
     axpby!(-2 / τ, Qp, one(T), bw.aτ)
     bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
-    return ok, ρ, (napp, 0, 0, KKT_SOLVED, r2, r2, T(NaN))
-end
-
-#
-# One iteration of the bordered column
-# refinement, on the PRIMAL of the assembled
-# direction only. Lift Δp = Δp₀ + Δτ Δp2 with
-# Δτ = num/S, then form the primal residual
-#
-#   sp = rp - B Δp + g Δτ
-#
-# and drive only that. The assembled DUAL row is
-# refinehsd!'s job (it is the binding row on ~86%
-# of its passes and clears both the base dual and
-# the column's dt·r_d2 injection for free), so the
-# column loop never forms it — no H·Δp / Bᵀ·Δy.
-# If sp is within its floor, KKT_SOLVED (met ptol)
-# or KKT_STAGNATED (roundoff-limited short of it).
-# If it has stopped shrinking (res > stall·prev),
-# KKT_STAGNATED. Else drive ONE warm solveuzw!
-# correction into (Δp2, Δy2) toward
-# tgt = (ptol-rb)/|Δτ| (floored), refresh S, and
-# report KKT_CONTINUE — a single base-quality
-# correction, NOT a nested solvekkt!; the outer
-# loop iterates it. Returns (status, pres, n): the
-# primal residual feeds the next pass's stall
-# test; n is the correction's craig count.
-#
-function refinebdr!(
-        bw::BorderedSolver{T},
-        Δp::AbstractVector{T},
-        H::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        c::AbstractVector{T},
-        g::AbstractVector{T},
-        ng::T,
-        rp::AbstractVector{T},
-        num::T,
-        rb::T,
-        pprv::T;
-        ptol::T,
-        stall::T,
-    ) where {T}
-    inner = bw.inner
-    sd = inner.sd; sp = inner.sp; dp = inner.dp; dy = inner.dy
-
-    dt = num / bw.S[]
-    #
-    # lift and check the PRIMAL of the assembled direction only. The assembled dual residual is
-    # base_dual + dt·r_d2, and both halves are refinehsd!'s job: the base dual is the pile it is already
-    # clocked to clear (measured — the dual is the binding row on ~86% of its passes), and the injected
-    # dt·r_d2 just rides those passes for free. Driving the column's dual here is redundant. The column loop
-    # keeps only the primal at ptol, so the lift's dt·r₂ injection cannot knock the primal off tolerance and
-    # manufacture an extra refinehsd! pass. This also drops the H·Δp / Bᵀ·Δy matvecs — the dual never forms.
-    #
-    @. Δp = bw.Δp0 + dt * bw.Δp2
-    mul!(sp, B, Δp)                                     # sp = B Δp
-    pfloor = max(ptol, 100 * eps(T) * (norm(rp) + norm(sp) + abs(dt) * ng))
-    axpby!(one(T), rp, -one(T), sp); axpy!(dt, g, sp)   # sp = rp - B Δp + g Δτ  (assembled primal residual)
-    pres = norm(sp)
-
-    res = pres / pfloor
-    if res ≤ one(T)
-        # SOLVED iff the floor met was the requested tol, else STAGNATED (roundoff-limited short of tol)
-        st = pres ≤ ptol ? KKT_SOLVED : KKT_STAGNATED
-        return st, pres, 0
-    end
-    res > stall * (pprv / pfloor) && return KKT_STAGNATED, pres, 0
-    #
-    # column residual (solveuzw! RHS sign) and target; ONE warm correction toward tgt, then refresh S:
-    #
-    #   r_col = [ c - H Δp2 + Bᵀ Δy2 ;  g - B Δp2 ]
-    #   tgt   = max( (ptol - rb) / (2|Δτ|) , 100u(‖g‖ + ‖B Δp2‖) )
-    #
-    mulkkt!(sd, sp, H, B, bw.Δp2, bw.Δy2)              # sd = H Δp2 - Bᵀ Δy2 ,  sp = B Δp2
-    tgt = max((ptol - rb) / abs(dt), 100 * eps(T) * (ng + norm(sp)))
-    axpby!(one(T), c, -one(T), sd)                     # sd = c - H Δp2 + Bᵀ Δy2
-    axpby!(one(T), g, -one(T), sp)                     # sp = g - B Δp2
-    n, _ = solveuzw!(inner.divwrk, inner.itrwrk, dp, dy, inner.r, inner.F, H, B, sd, sp, inner.α[]; atol = tgt)
-    axpy!(one(T), dp, bw.Δp2)
-    axpy!(one(T), dy, bw.Δy2)
-    bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
-
-    return KKT_CONTINUE, pres, n
+    return ok, ρ, (1, 0, 0, KKT_SOLVED, r2, r2, T(NaN))
 end
 
 #
@@ -234,17 +177,29 @@ function solvekkt!(
     rb  = norm(sp)
     num = fτ - dot(bw.aτ, Δp) - dot(g, Δy)
     #
-    # column loop (one honest refinement loop): each pass lifts the assembled primal ‖rp - B Δp + g Δτ‖ and
-    # tightens the column toward ptol (Δτ = num/S) until it holds — not a prediction from S. The dual is not
-    # tested here; refinehsd! owns it. Bails early on stall; caps at itmax.
+    # column tighten — continue the column's CRAIG (base done once in initkkt!) to the accuracy THIS
+    # consumer's lift needs, then re-recover the dual and refresh S. ONE craig call, not a loop: tgt is
+    # first-order in S (the pre-tighten value) and craig iterates internally to it. Only the primal is
+    # driven; the dual is refinehsd!'s job (§ pass-economy) — the recovery just keeps Δy2 feasible for the
+    # tightened Δp2. δy accumulates in dya (craig resets Δy2 each call), so a corrector continuing from the
+    # predictor carries δy_pred + δy_corr.
     #
-    pprv = typemax(T)
-    for _ in 1:itmax
-        st, pres, n = refinebdr!(bw, Δp, H, B, c, g, ng, rp, num, rb, pprv; ptol, stall)
-        nbase += n
-        st == KKT_CONTINUE || break
-        pprv = pres
-    end
+    #   dt  = num / S ,   tgt = max( (ptol - rb)/|dt| , 100u(‖g‖ + ‖B Δp2‖) )
+    #   r   = g - B Δp2
+    #   craig!(Δp2, Δy2, r; atol = tgt)              Δp2 += δx ; r ← g - B Δp2 ; Δy2 = δy_incr
+    #   dya += Δy2 ;  Δy2 = yseed + α (dya + r) ;  S = aτᵀ Δp2 + gᵀ Δy2 + δ
+    #
+    dt  = num / bw.S[]
+    mul!(sp, B, bw.Δp2)                                   # sp = B Δp2
+    tgt = max((ptol - rb) / abs(dt), 100 * eps(T) * (ng + norm(sp)))
+    axpby!(one(T), g, -one(T), sp)                       # sp = g - B Δp2  (column residual)
+    nc, _ = craig!(inner.itrwrk, B, inner.F, inner.divwrk, bw.Δp2, bw.Δy2, sp; atol = tgt)
+    nbase += nc
+    axpy!(one(T), bw.Δy2, bw.dya)                        # dya += δy_incr
+    copyto!(bw.Δy2, bw.dya); axpy!(one(T), sp, bw.Δy2)   # Δy2 = dya + r
+    lmul!(inner.α[], bw.Δy2)                             # Δy2 = α (dya + r)
+    axpy!(one(T), bw.yseed, bw.Δy2)                      # Δy2 = yseed + α (dya + r)
+    bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
     #
     # final lift with the converged S — Δp, Δy already carry it on a satisfied/stalled exit; this makes them
     # consistent with S on an itmax exit too. Δτ pairs with the same S (τ-row exactness):
