@@ -7,12 +7,13 @@
 # capacitance; solvekkt! does the 2-row base solve + column loop + Schur lift + 3-row refinement net.
 struct BorderedSolver{T, W <: KKTSolver{T}} <: KKTSolver{T}
     inner::W          # the 2-row solver (factor + base solve primitive)
-    Δp2::FVector{T}    # cached Woodbury column, primal part — CRAIG accumulates δx into it (n)
-    Δy2::FVector{T}    # cached Woodbury column, dual part — re-recovered per consumer (m)
+    Δp2::FVector{T}    # cached Woodbury column, primal part — carried across iterations as the seed (n)
+    Δy2::FVector{T}    # cached Woodbury column, dual part — re-recovered per consumer, carried as seed (m)
+    rcol::FVector{T}   # MAINTAINED column residual (the correction's r, never re-formed as g - B Δp2) (m)
     dya::FVector{T}    # accumulated RAW CRAIG dual Σδyᵢ across the column's continued solves (m)
-    yseed::FVector{T}  # cross-iteration multiplier seed y0 (= s.Δy0), used by the dual recovery (m)
-    Δp0::FVector{T}    # base solve primal Δp₀ (n)
-    Δy0::FVector{T}    # base solve dual   Δy₀ (m)
+    yseed::FVector{T}  # cross-iteration multiplier seed (= carried Δy2), used by the dual recovery (m)
+    Δp0::FVector{T}    # direction base solve primal Δp₀, kept for the Schur lift (n)
+    Δy0::FVector{T}    # direction base solve dual   Δy₀ (m)
     aτ::FVector{T}     # cached border row c - 2Qp/τ (n)
     S::FScalar{T}      # cached capacitance scalar
     δ::FScalar{T}      # cached τ-row diagonal pᵀQp/τ² + κ/τ
@@ -22,11 +23,13 @@ function BorderedSolver(inner::W, B::BlockSparseMatrix{T, I}) where {T, I, W <: 
     m, n = size(B)
     S = FScalar{T}(undef); S[] = one(T)
     δ = FScalar{T}(undef); δ[] = zero(T)
-    return BorderedSolver(inner,
-                          FVector{T}(undef, n), FVector{T}(undef, m),   # Δp2, Δy2
-                          FVector{T}(undef, m), FVector{T}(undef, m),   # dya, yseed
-                          FVector{T}(undef, n), FVector{T}(undef, m),   # Δp0, Δy0
-                          FVector{T}(undef, n), S, δ)                   # aτ, S, δ
+    Δp2 = FVector{T}(undef, n); fill!(Δp2, zero(T))   # zero seed on the first factorization (cold bootstrap)
+    Δy2 = FVector{T}(undef, m); fill!(Δy2, zero(T))
+    return BorderedSolver(inner, Δp2, Δy2,
+                          FVector{T}(undef, m),                        # rcol
+                          FVector{T}(undef, m), FVector{T}(undef, m),  # dya, yseed
+                          FVector{T}(undef, n), FVector{T}(undef, m),  # Δp0, Δy0
+                          FVector{T}(undef, n), S, δ)                  # aτ, S, δ
 end
 
 ############################################################################################
@@ -68,35 +71,33 @@ function initkkt!(
     ok, ρ = initkkt!(bw.inner, H; α, rgmin)
     ok || return ok, ρ, (0, 0, 0, KKT_ITMAX, T(NaN), T(NaN), T(NaN))
     #
-    # bare backsolve for the Woodbury column [ H -Bᵀ; B 0 ][Δp2; Δy2] = [c; g] — ONE application (itmax=0
-    # skips CRAIG), no refinement (Change 2). The column is not solved to a tolerance here: its required
-    # accuracy is set per consumer by dt = num/S (computable only after S, which this backsolve yields).
-    # Solving it up front to the Newton tolerances over-solves fixed data (c,g) by up to 10 decades late.
+    # column base as a WARM CORRECTION seeded by the carried column (x0 = Δp2, y0 = Δy2 from the previous
+    # factorization; both 0 on the first). The primal seed cancels — Δp2 = G⁻¹(βc + Bᵀ(g + βy0)) is identical
+    # to a cold solve (§2 of the p-warm note) — but the residual we KEEP is the correction's residual
+    # rcol = sp - B·xb, NOT g - B·Δp2. THAT is the quantity the dual recovery consumes (α-amplified), and
+    # solvekkt!'s CRAIG maintains rcol in place; it is never re-formed against the accumulated column — that
+    # would re-cancel O(1) quantities to u‖g‖ and throw the gain away. ONE F-apply, no CRAIG here. y0 (the
+    # carried Δy2) is the cross-iteration multiplier seed; stash it as yseed and reset the δy accumulator.
+    #
+    #   sp = g - B·x0 ,   sd = c - H·x0 + Bᵀ·y0
+    #   xb = G⁻¹(β·sd + Bᵀ·sp) ,   Δp2 = x0 + xb
+    #   rcol = sp - B·xb ,   Δy2 = yseed + α·rcol
     #
     inr = bw.inner
-    β = inv(inr.α[]); r = inr.r
-    #
-    # base solve of the column — the inlined `solveuzw!` base (no CRAIG here; itmax=0). solvekkt! continues
-    # this same CRAIG per consumer, to the accuracy the lift needs. The cross-iteration seed y0 enters both
-    # the RHS and the dual recovery; stash it (yseed) for solvekkt!, and reset the δy accumulator.
-    #
-    #   G·Δp2 = β·c + Bᵀ(g + β·y0) ,   G = βH + BᵀB = F Fᵀ
-    #   r     = g - B·Δp2
-    #   Δy2   = y0 + α·r            (base: δy_total = 0)
-    #
-    copyto!(r, g)
-    isnothing(y0) || axpy!(β, y0, r)
-    copyto!(bw.Δp2, c)
-    mul!(bw.Δp2, B', r, one(T), β)
-    ldiv!(inr.divwrk, inr.F,  bw.Δp2)
-    ldiv!(inr.divwrk, inr.F', bw.Δp2)
-    copyto!(r, g)
-    mul!(r, B, bw.Δp2, -one(T), one(T))
-    r2 = norm(r)
-    copyto!(bw.Δy2, r); lmul!(inr.α[], bw.Δy2)
-    isnothing(y0) || axpy!(one(T), y0, bw.Δy2)
+    β = inv(inr.α[])
+    copyto!(bw.yseed, bw.Δy2)                              # carried multiplier seed (before the recovery overwrites Δy2)
+    mulkkt!(inr.sd, inr.sp, H, B, bw.Δp2, bw.Δy2)          # inr.sd = H·x0 - Bᵀ·y0 ,  inr.sp = B·x0
+    axpby!(one(T), c, -one(T), inr.sd)                     # inr.sd = c - H·x0 + Bᵀ·y0 = sd
+    copyto!(bw.rcol, g); axpy!(-one(T), inr.sp, bw.rcol)   # bw.rcol = g - B·x0 = sp
+    copyto!(inr.dp, inr.sd); rmul!(inr.dp, β)              # inr.dp = β·sd
+    mul!(inr.dp, B', bw.rcol, one(T), one(T))              # inr.dp = β·sd + Bᵀ·sp
+    ldiv!(inr.divwrk, inr.F,  inr.dp)
+    ldiv!(inr.divwrk, inr.F', inr.dp)                      # inr.dp = xb = G⁻¹(β·sd + Bᵀ·sp)
+    axpy!(one(T), inr.dp, bw.Δp2)                          # Δp2 = x0 + xb
+    mul!(bw.rcol, B, inr.dp, -one(T), one(T))              # bw.rcol = sp - B·xb  (MAINTAINED residual)
+    r2 = norm(bw.rcol)
+    copyto!(bw.Δy2, bw.rcol); lmul!(inr.α[], bw.Δy2); axpy!(one(T), bw.yseed, bw.Δy2)   # Δy2 = yseed + α·rcol
     fill!(bw.dya, zero(T))
-    isnothing(y0) ? fill!(bw.yseed, zero(T)) : copyto!(bw.yseed, y0)
     #
     # cache the border row aτ = c - 2Qp/τ and the capacitance — the Schur complement of the τ row,
     #
@@ -178,27 +179,25 @@ function solvekkt!(
     num = fτ - dot(bw.aτ, Δp) - dot(g, Δy)
     #
     # column tighten — continue the column's CRAIG (base done once in initkkt!) to the accuracy THIS
-    # consumer's lift needs, then re-recover the dual and refresh S. ONE craig call, not a loop: tgt is
-    # first-order in S (the pre-tighten value) and craig iterates internally to it. Only the primal is
-    # driven; the dual is refinehsd!'s job (§ pass-economy) — the recovery just keeps Δy2 feasible for the
-    # tightened Δp2. δy accumulates in dya (craig resets Δy2 each call), so a corrector continuing from the
-    # predictor carries δy_pred + δy_corr.
+    # consumer's lift needs, then re-recover the dual and refresh S. CRAIG continues on the MAINTAINED
+    # residual bw.rcol — it is never re-formed as g - B Δp2 (that re-cancels to u‖g‖ and loses the dual
+    # gain, p-warm note §3). Only the primal is driven; the dual is refinehsd!'s job — the recovery keeps
+    # Δy2 feasible. δy accumulates in dya (craig resets Δy2 each call), so a corrector continuing from the
+    # predictor carries δy_pred + δy_corr. tgt is first-order in S; the floor uses ‖B Δp2‖ = ‖g - rcol‖.
     #
     #   dt  = num / S ,   tgt = max( (ptol - rb)/|dt| , 100u(‖g‖ + ‖B Δp2‖) )
-    #   r   = g - B Δp2
-    #   craig!(Δp2, Δy2, r; atol = tgt)              Δp2 += δx ; r ← g - B Δp2 ; Δy2 = δy_incr
-    #   dya += Δy2 ;  Δy2 = yseed + α (dya + r) ;  S = aτᵀ Δp2 + gᵀ Δy2 + δ
+    #   craig!(Δp2, Δy2, rcol; atol = tgt)           Δp2 += δx ; rcol maintained ; Δy2 = δy_incr
+    #   dya += Δy2 ;  Δy2 = yseed + α (dya + rcol) ;  S = aτᵀ Δp2 + gᵀ Δy2 + δ
     #
     dt  = num / bw.S[]
-    mul!(sp, B, bw.Δp2)                                   # sp = B Δp2
+    copyto!(sp, g); axpy!(-one(T), bw.rcol, sp)          # sp = g - rcol = B Δp2  (floor only; no matvec)
     tgt = max((ptol - rb) / abs(dt), 100 * eps(T) * (ng + norm(sp)))
-    axpby!(one(T), g, -one(T), sp)                       # sp = g - B Δp2  (column residual)
-    nc, _ = craig!(inner.itrwrk, B, inner.F, inner.divwrk, bw.Δp2, bw.Δy2, sp; atol = tgt)
+    nc, _ = craig!(inner.itrwrk, B, inner.F, inner.divwrk, bw.Δp2, bw.Δy2, bw.rcol; atol = tgt)
     nbase += nc
     axpy!(one(T), bw.Δy2, bw.dya)                        # dya += δy_incr
-    copyto!(bw.Δy2, bw.dya); axpy!(one(T), sp, bw.Δy2)   # Δy2 = dya + r
-    lmul!(inner.α[], bw.Δy2)                             # Δy2 = α (dya + r)
-    axpy!(one(T), bw.yseed, bw.Δy2)                      # Δy2 = yseed + α (dya + r)
+    copyto!(bw.Δy2, bw.dya); axpy!(one(T), bw.rcol, bw.Δy2)   # Δy2 = dya + rcol
+    lmul!(inner.α[], bw.Δy2)                             # Δy2 = α (dya + rcol)
+    axpy!(one(T), bw.yseed, bw.Δy2)                      # Δy2 = yseed + α (dya + rcol)
     bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
     #
     # final lift with the converged S — Δp, Δy already carry it on a satisfied/stalled exit; this makes them
