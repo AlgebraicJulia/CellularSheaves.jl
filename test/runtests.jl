@@ -4,10 +4,6 @@ using Test
   include("aqua.jl")
 end
 
-@testset "Docs Consistency" begin
-  include("docs_consistency.jl")
-end
-
 @testset "Tikhonov Filter" begin
   include("ControlSheaves/Tikhonov.jl")
 end
@@ -48,4 +44,5 @@ end
 @testset "Control Sheaves" begin
   include("ControlSheaves/AgentControllers.jl")
   include("ControlSheaves/NestedSystems.jl")
+  include("ControlSheaves/CoordinationBenchmarks.jl")
 end

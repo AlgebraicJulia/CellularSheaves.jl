@@ -64,7 +64,17 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.Layered, CellularSheaves.ControlSheaves.NestedSystems, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves, CellularSheaves.SheafInterface, CellularSheaves.NetworkSheaves.EuclideanSheaves, CellularSheaves.NetworkSheaves.GraphHomomorphisms, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.Pushforwards, CellularSheaves.NetworkSheaves.Pushouts, CellularSheaves.NetworkSheaves.CellularSheafParser, CellularSheaves.BlockSparseArrays, CellularSheaves.NetworkSheaves.PotentialSheaves, CellularSheaves.NetworkSheaves.TrajectorySheaves, CellularSheaves.NetworkSheaves.DistributedSolve, CellularSheaves.NetworkSheaves.Formations, CellularSheaves.ControlSheaves.TrackingDSL, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLTerm, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLParser, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLValidator, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLResolver, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLLowering, CellularSheaves.IPM],
+  modules=[CellularSheaves,
+    CellularSheaves.ControlSheaves, 
+    CellularSheaves.ControlSheaves.Tikhonov,
+    CellularSheaves.ControlSheaves.AgentControllers,
+    CellularSheaves.ControlSheaves.DistributedLayeredControl,
+    CellularSheaves.ControlSheaves.Layered,
+    CellularSheaves.ControlSheaves.NestedSystems,
+    CellularSheaves.ControlSheaves.MultiAgentTracking,
+    CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts,
+    CellularSheaves.ControlSheaves.CoordinationBenchmarks,
+    CellularSheaves.AsynchSheaves],
   draft=false,
   format=Documenter.HTML(
     assets=["assets/benchtables.css"],
@@ -98,13 +108,8 @@ makedocs(
         "generated/layered/layered_scenario5.md",
         "generated/layered/escort.md",
         "generated/layered/escort_feedforward.md",
+        "generated/layered/diffusion_vs_direct.md",
         "generated/layered/multilayer_escort.md",
-        ],
-      "Nested Systems Examples" => Any[
-        "generated/nested/centroid_formation_tracking.md",
-        "generated/nested/wheel_formation.md",
-        "generated/nested/n_ring_formation.md",
-        "generated/nested/rescaling_formation.md",
         ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
@@ -152,19 +157,17 @@ makedocs(
       "api/dsl.md",
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
-      "api/formations.md",
       "api/trajectory_sheaves.md",
       "api/tikhonov.md",
       "api/agent_controllers.md",
       "api/distributed_layered_control.md",
       "api/layered.md",
       "api/nested_systems.md",
+      "api/coordination_benchmarks.md",
       "api/herding_platoon.md",
       "api/multi_agent_tracking.md",
       "api/quadratic_costs.md",
-      "api/asynch.md",
-      "api/tracking_dsl.md",
-      "api/ipm.md"
+      "api/asynch.md"
     ],
   ]
 )

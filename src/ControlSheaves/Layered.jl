@@ -6,6 +6,7 @@ Generic Team-of-Teams Layered Escort Sheaves, Pushforward Solvers, and Hierarchi
 module Layered
 
 export RingSpec, SupportSpec, LayeredEscortSpec, LayeredFiberBases,
+       HomogeneousDynamics, TeamHomogeneousDynamics, IndividualizedDynamics,
        LayeredEscortProblem, LayeredEscortResult,
        build_layered_escort_sheaf, build_layered_homomorphism, build_layered_fiber_bases,
        world_to_pf_stalk, solve_high_level_harmonic, solve_mid_level_harmonic,
@@ -21,11 +22,50 @@ using ...NetworkSheaves.Formations: build_escort_ring, se3_translation_matrix
 using ...NetworkSheaves.GraphHomomorphisms: GraphHomomorphism, fiber_vertices
 using ...NetworkSheaves.Pushforwards: pushforward_sheaf, all_fiber_bases
 using ..AgentControllers: AbstractAgentDynamics, QuadrotorDynamics, AgentState, step_agent!,
-                           position_indices, initial_state, _default_initial_position
-using ..NestedSystems: SystemBinding, AgentBinding, ResolvedAgent, _fold, _fold_system
-import ..NestedSystems: resolve_dynamics
+                           position_indices, initial_state
 
 function animate_comprehensive_escort end
+
+# ---------------------------------------------------------------------------
+# Dynamics Specification Types (Memory-Efficient Shared Dynamics)
+# ---------------------------------------------------------------------------
+
+abstract type AbstractDynamicsSpec end
+
+"""
+    HomogeneousDynamics(dyn::AbstractAgentDynamics, K_lqr::Matrix{Float64}=zeros(0,0))
+
+Single dynamics model and controller shared by all agents in the system.
+"""
+struct HomogeneousDynamics <: AbstractDynamicsSpec
+    dyn::AbstractAgentDynamics
+    K_lqr::Matrix{Float64}
+end
+
+HomogeneousDynamics(dyn::AbstractAgentDynamics) = HomogeneousDynamics(dyn, zeros(0, 0))
+
+"""
+    TeamHomogeneousDynamics(team_dyns::Dict{Int, Tuple{AbstractAgentDynamics, Matrix{Float64}}})
+
+Dynamics models and controllers shared per team/ring.
+"""
+struct TeamHomogeneousDynamics <: AbstractDynamicsSpec
+    team_dyns::Dict{Int, Tuple{AbstractAgentDynamics, Matrix{Float64}}}
+end
+
+"""
+    IndividualizedDynamics(dyns::Vector{Tuple{AbstractAgentDynamics, Matrix{Float64}}})
+
+Distinct dynamics models and controllers for each individual agent.
+"""
+struct IndividualizedDynamics <: AbstractDynamicsSpec
+    configs::Vector{Tuple{AbstractAgentDynamics, Matrix{Float64}}}
+end
+
+# Helper to get dynamics and K_lqr for agent i (belonging to team_idx) via multiple dispatch
+get_agent_dynamics_config(spec::HomogeneousDynamics, agent_idx::Int, team_idx::Int) = (spec.dyn, spec.K_lqr)
+get_agent_dynamics_config(spec::TeamHomogeneousDynamics, agent_idx::Int, team_idx::Int) = spec.team_dyns[team_idx]
+get_agent_dynamics_config(spec::IndividualizedDynamics, agent_idx::Int, team_idx::Int) = spec.configs[agent_idx]
 
 # ---------------------------------------------------------------------------
 # Topology Specification Types
@@ -115,108 +155,6 @@ function LayeredEscortSpec(rings::Vector{RingSpec}, supports::Vector{SupportSpec
     total_nodes = n_agents + n_targets
 
     return LayeredEscortSpec(rings, supports, D, affine, n_rings, n_supports, n_targets, n_agents, total_nodes, ring_ranges, support_ranges, target_nodes)
-end
-
-# ---------------------------------------------------------------------------
-# Dynamics binding: LayeredEscortSpec as a depth-1 tree (Issue 013)
-# ---------------------------------------------------------------------------
-
-"""
-    _flat_children(spec::LayeredEscortSpec) -> Vector{Tuple{Symbol,UnitRange{Int},Int}}
-
-Every ring and support pod of `spec`, named `:ring1, :ring2, …` / `:support1, :support2, …`
-matching the ordering of `spec.rings` / `spec.supports`, together with its global agent-index
-range and its own agent count. Order matches `spec.ring_node_ranges` followed by
-`spec.support_node_ranges` — the same order [`run_layered_escort_simulation`](@ref) iterates.
-"""
-function _flat_children(spec::LayeredEscortSpec)
-    out = Tuple{Symbol,UnitRange{Int},Int}[]
-    for (i, r) in enumerate(spec.ring_node_ranges)
-        push!(out, (Symbol(:ring, i), r, length(r)))
-    end
-    for (i, r) in enumerate(spec.support_node_ranges)
-        push!(out, (Symbol(:support, i), r, length(r)))
-    end
-    return out
-end
-
-"""
-    _resolve_flat_bindings(spec, ctx) -> Vector{Tuple{Symbol,Int,Int,AgentBinding}}
-
-Walk `spec`'s implicit depth-1 tree folding `ctx`'s cascade, exactly like
-`resolve_dynamics(::LayeredEscortSpec, ::SystemBinding)`, but stop *before* applying any
-initial-position default — callers get the raw folded `AgentBinding` (dynamics guaranteed
-non-`nothing`, `K_lqr` still possibly `nothing`, `initial_position` still possibly `nothing`)
-together with `(child_name, local_idx, global_idx)`.
-
-This is the shared core both `resolve_dynamics` (which defaults straight to the airstrip
-position) and `LayeredEscortProblem`'s three-tier fallback (which checks `initial_positions`
-*before* the airstrip) build on, so the precedence for `dynamics`/`K_lqr` cannot drift between
-the two call sites.
-"""
-function _resolve_flat_bindings(spec::LayeredEscortSpec, ctx::SystemBinding)
-    !isempty(ctx.agents) && throw(ArgumentError(
-        "SystemBinding declares `agents` at the root, but a LayeredEscortSpec's root has no " *
-        "direct agents — bind them via a :ring<i>/:support<i> child instead"))
-
-    children = _flat_children(spec)
-    valid_names = [name for (name, _, _) in children]
-    for name in keys(ctx.children)
-        name in valid_names || throw(ArgumentError(
-            "SystemBinding names child :$name, but the spec has no such ring/support " *
-            "(children: $(join(valid_names, ", ")))"))
-    end
-
-    root_level = _fold_system(AgentBinding(), ctx)
-    out = Tuple{Symbol,Int,Int,AgentBinding}[]
-    for (name, range, n_local) in children
-        child_ctx = get(ctx.children, name, SystemBinding())
-        !isempty(child_ctx.children) && throw(ArgumentError(
-            "SystemBinding declares children at :$name, but :$name is a flat ring/support " *
-            "pool with no children of its own — use `agents` to bind individual agents by " *
-            "local index"))
-        for idx in keys(child_ctx.agents)
-            @argcheck 1 <= idx <= n_local "SystemBinding names agent $idx at :$name, out of range 1:$n_local"
-        end
-
-        team_level = _fold_system(root_level, child_ctx)
-        for (local_idx, global_idx) in enumerate(range)
-            b = _fold(team_level, get(child_ctx.agents, local_idx, AgentBinding()))
-            b.dynamics === nothing && throw(ArgumentError(
-                "no dynamics bound for agent $local_idx at :$name (global index $global_idx) " *
-                "— declare a `dynamics` at this agent, this ring/pod, or the root"))
-            push!(out, (name, local_idx, global_idx, b))
-        end
-    end
-    return out
-end
-
-"""
-    resolve_dynamics(spec::LayeredEscortSpec, ctx::SystemBinding) -> Vector{ResolvedAgent}
-
-Resolve dynamics bindings for a flat layered escort specification, treating it as a depth-1
-tree: each escort ring and each support pod is a child of a single implicit root.
-
-Children are addressed by the conventional names `:ring1, :ring2, …` and `:support1, :support2,
-…`, matching the ordering of `spec.rings` and `spec.supports`. Per-agent overrides use the
-agent's **local** index within its ring or pod, consistent with `RingSpec.observers`.
-
-Agents come back in global agent-index order, matching `spec.ring_node_ranges` followed by
-`spec.support_node_ranges` — the same ordering [`run_layered_escort_simulation`](@ref) iterates.
-Precedence and field independence are identical to the tree-shaped
-`NestedSystems.resolve_dynamics(::NestedSystemSpec, ::SystemBinding)`: this reuses that same
-`_fold`/`_fold_system` cascade rather than re-deriving the precedence rule.
-"""
-function resolve_dynamics(spec::LayeredEscortSpec, ctx::SystemBinding)
-    resolved = ResolvedAgent[]
-    for (name, local_idx, global_idx, b) in _resolve_flat_bindings(spec, ctx)
-        K_lqr = something(b.K_lqr, Some(zeros(0, 0)))
-        initial_position = something(b.initial_position,
-                                     Some(_default_initial_position(b.dynamics, global_idx)))
-        push!(resolved, ResolvedAgent(global_idx, [name, Symbol(local_idx)],
-                                      b.dynamics, K_lqr, initial_position))
-    end
-    return resolved
 end
 
 # ---------------------------------------------------------------------------
@@ -465,7 +403,7 @@ struct LayeredEscortProblem
     hom::GraphHomomorphism
     pf_sheaf::EuclideanSheaf{Float64}
     bases::LayeredFiberBases
-    bindings::SystemBinding
+    dynamics_spec::AbstractDynamicsSpec
     target_trajectories::Vector{Any} # functions t -> [x,y,z,1.0]
     target_velocities::Union{Nothing, Vector{Any}}   # functions t -> [vx,vy,vz,0.0]
     target_accelerations::Union{Nothing, Vector{Any}}# functions t -> [ax,ay,az,0.0]
@@ -475,30 +413,20 @@ struct LayeredEscortProblem
 end
 
 """
-    LayeredEscortProblem(spec, bindings, target_trajectories; dt=0.05, steps=200, target_velocities=nothing, target_accelerations=nothing, initial_positions=nothing)
+    LayeredEscortProblem(spec, dynamics_spec, target_trajectories; dt=0.05, steps=200, target_velocities=nothing, target_accelerations=nothing, initial_positions=nothing)
 
 High-level constructor that automatically builds `F`, `f`, `PfF`, and structured fiber bases from `spec`.
 
-`bindings` is a `NestedSystems.SystemBinding` resolved against `spec` (see
-`NestedSystems.resolve_dynamics(::LayeredEscortSpec, ::SystemBinding)`) — a single root-level
-`SystemBinding(dynamics=dyn)` binds every agent to the same model, matching the old
-`HomogeneousDynamics(dyn)` behaviour exactly.
-
-Each agent's initial position resolves in three tiers, most specific first:
-1. `AgentBinding.initial_position` from `bindings` (a per-agent override)
-2. `initial_positions[i]` (this constructor's own field, if supplied)
-3. the "airstrip" default (`NestedSystems._default_initial_position`) — agents lined up along
-   the first position coordinate with fixed spacing, at a common hover altitude, deliberately
-   distinct from the target formation so the control law's convergence into formation is
-   visible in the simulation rather than starting there already.
-
-Existing callers that pass `initial_positions` and no per-agent bindings see unchanged
-behaviour: `resolve_dynamics` only fills in a position when `bindings` supplies one, so tier 2
-governs whenever tier 1 is absent.
+`initial_positions`, if given, is a `Vector` with one world position per agent (length
+`spec.n_agents`, each of dynamics-appropriate length — see `position_indices`) used to seed
+the simulation. If omitted, agents default to a simple "airstrip" starting layout — lined up
+along the first position coordinate with fixed spacing, at a common hover altitude (the last
+position coordinate) — deliberately distinct from the target formation, so the control law's
+convergence into formation is visible in the simulation rather than starting there already.
 """
 function LayeredEscortProblem(
     spec::LayeredEscortSpec,
-    bindings::SystemBinding,
+    dynamics_spec::AbstractDynamicsSpec,
     target_trajectories::Vector;
     target_velocities=nothing,
     target_accelerations=nothing,
@@ -513,7 +441,7 @@ function LayeredEscortProblem(
 
     return LayeredEscortProblem(
         spec, sheaf, hom, pf_sheaf, bases,
-        bindings, target_trajectories, target_velocities, target_accelerations,
+        dynamics_spec, target_trajectories, target_velocities, target_accelerations,
         dt, steps, initial_positions
     )
 end
@@ -523,6 +451,21 @@ struct LayeredEscortResult
     sim_data::Vector{Vector{Vector{Float64}}}
     qstar_history::Vector{Matrix{Float64}}
     target_history::Vector{Vector{Vector{Float64}}}
+end
+
+"""
+    _default_initial_position(dyn::AbstractAgentDynamics, i::Int) -> Vector{Float64}
+
+Default "airstrip" starting position for agent `i` when `LayeredEscortProblem.initial_positions`
+is not supplied: agents are lined up along the first position coordinate at a fixed spacing,
+at a common hover altitude (the last position coordinate). This is deliberately distinct from
+the target formation so that convergence into formation is visible in the simulation.
+"""
+function _default_initial_position(dyn::AbstractAgentDynamics, i::Int)
+    pos = zeros(length(position_indices(dyn)))
+    pos[1] = (i - 1) * 0.5   # spacing between agents along the line
+    pos[end] = 1.5           # common hover altitude
+    return pos
 end
 
 """
@@ -538,17 +481,26 @@ function run_layered_escort_simulation(prob::LayeredEscortProblem; use_feedforwa
     D = spec.D
     time_grid = 0:DT:(STEPS*DT)
 
-    # Initialize agent states with dynamic configurations. Bindings are resolved once, up
-    # front, rather than re-walked per agent per step.
+    # Initialize agent states with dynamic configurations
     agent_states = Vector{AgentState}()
-    for (name, local_idx, i, b) in _resolve_flat_bindings(spec, prob.bindings)
-        dyn = b.dynamics
-        K_lqr = something(b.K_lqr, Some(zeros(0, 0)))
-        # Three tiers, most specific first: an explicit per-agent binding, then this
-        # problem's own `initial_positions`, then the airstrip default.
-        pos0 = something(b.initial_position,
-                         isnothing(prob.initial_positions) ? nothing : Some(prob.initial_positions[i]),
-                         Some(_default_initial_position(dyn, i)))
+    for i in 1:spec.n_agents
+        # Find team index
+        team_idx = 1
+        for (r_idx, r_range) in enumerate(spec.ring_node_ranges)
+            if i in r_range
+                team_idx = r_idx
+                break
+            end
+        end
+        for (s_idx, s_range) in enumerate(spec.support_node_ranges)
+            if i in s_range
+                team_idx = spec.n_rings + s_idx
+                break
+            end
+        end
+
+        dyn, K_lqr = get_agent_dynamics_config(prob.dynamics_spec, i, team_idx)
+        pos0 = isnothing(prob.initial_positions) ? _default_initial_position(dyn, i) : prob.initial_positions[i]
         x0 = initial_state(dyn, pos0)
         push!(agent_states, AgentState(x0, dyn, DT, K_lqr, 0.02; use_velocity=use_feedforward))
     end
