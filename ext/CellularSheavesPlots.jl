@@ -82,4 +82,14 @@ function CellularSheaves.ControlSheaves.DistributedLayeredControl.animate_scenar
     return anim
 end
 
+function CellularSheaves.ControlSheaves.Layered.animate_comprehensive_escort(
+    sim_data, qstar_history, target_history, time_grid, r1, r2, r3, filename;
+    frame_step::Int=4, fps::Int=10, title_prefix::String=""
+)
+    return LayeredEscortPlots.animate_comprehensive_escort(
+        sim_data, qstar_history, target_history, time_grid, r1, r2, r3, filename;
+        frame_step=frame_step, fps=fps, title_prefix=title_prefix
+    )
+end
+
 end # module CellularSheavesPlots

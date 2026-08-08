@@ -178,41 +178,51 @@ using Random
     end
 
     @testset "distributed_tree_solve: real multi-process run" begin
-        needed = 5 - (nworkers() - 1)
-        if needed > 0
-            addprocs(needed; exeflags = ["--project=$(pkgdir(CellularSheaves))"])
+        active = Int[]
+        for p in workers()
+            try
+                remotecall_fetch(myid, p)
+                push!(active, p)
+            catch
+                try rmprocs(p; waitfor=1.0) catch; end
+            end
         end
-        pids = workers()[1:5]
+        needed = 5 - length(active)
+        if needed > 0
+            added = addprocs(needed; exeflags = ["--project=$(Base.active_project())"])
+            append!(active, added)
+        end
+        pids = active[1:5]
         @everywhere pids using CellularSheaves
 
-            function check_distributed(g, target_workers)
-                M = spd_sheaf_laplacian(g)
-                n = size(M, 1)
-                F = cholesky!(ChordalCholesky(M), NoPivot())
-                L = F.L
+        function check_distributed(g, target_workers)
+            M = spd_sheaf_laplacian(g)
+            n = size(M, 1)
+            F = cholesky!(ChordalCholesky(M), NoPivot())
+            L = F.L
 
-                for _ in 1:3
-                    b = rand(n)
-                    expected = copy(b)
-                    ldiv!(L, expected)
-                    ldiv!(L', expected)
+            for _ in 1:3
+                b = rand(n)
+                expected = copy(b)
+                ldiv!(L, expected)
+                ldiv!(L', expected)
 
-                    actual = distributed_tree_solve(L, b, target_workers; pids = pids)
-                    @test actual ≈ expected
-                end
+                actual = distributed_tree_solve(L, b, target_workers; pids = pids)
+                @test actual ≈ expected
             end
+        end
 
-            # path splits cleanly into exactly 2 chunks -> exercises real
-            # cross-process RemoteChannel messages at the one cut edge
-            check_distributed(path_graph(12), 2)
+        # path splits cleanly into exactly 2 chunks -> exercises real
+        # cross-process RemoteChannel messages at the one cut edge
+        check_distributed(path_graph(12), 2)
 
-            # star collapses to 1 chunk at this target -> exercises the
-            # single-worker, zero-cut-edge path (no messages needed at all)
-            check_distributed(star_graph(10), 2)
+        # star collapses to 1 chunk at this target -> exercises the
+        # single-worker, zero-cut-edge path (no messages needed at all)
+        check_distributed(star_graph(10), 2)
 
-            # a general graph -> exercises multiple cut edges / multiple
-            # simultaneous cross-process channels at once, not just one
-            check_distributed(random_connected_graph(16, 42), 3)
-            check_distributed(Graphs.grid([4, 5]), 3)
+        # a general graph -> exercises multiple cut edges / multiple
+        # simultaneous cross-process channels at once, not just one
+        check_distributed(random_connected_graph(16, 42), 3)
+        check_distributed(Graphs.grid([4, 5]), 3)
     end
 end
