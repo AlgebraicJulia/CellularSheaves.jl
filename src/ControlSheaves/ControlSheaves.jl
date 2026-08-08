@@ -55,4 +55,12 @@ include("NestedSystems.jl")
 import .NestedSystems
 export NestedSystems
 
+include("CoordinationBenchmarks.jl")
+import .CoordinationBenchmarks
+export CoordinationBenchmarks
+
+include("CoordinationProfiling.jl")
+import .CoordinationProfiling
+export CoordinationProfiling
+
 end # module ControlSheaves
