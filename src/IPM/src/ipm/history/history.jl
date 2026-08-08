@@ -29,7 +29,18 @@ function getaug(hist::AbstractHistory{T}) where {T}
     return α
 end
 
-function isstalled(hist::AbstractHistory{T}; window=6, threshold=0.5) where {T}
+function isstalled(hist::AbstractHistory{T}, μ::T, stats::KKTStatus...; window=6, threshold=0.5) where {T}
+    #
+    # endgame stagnation (fast): a KKT solve is floor-limited (STAGNATED — cannot reach tol) AND μ has
+    # stopped improving this step (gain < 1/threshold vs the previous iterate). The requested tol is then
+    # below the arithmetic floor, so grinding on wastes iterations. Fires at the endgame ONSET; it cannot
+    # trip mid-convergence (the solves stay SOLVED while μ still drops fast). Mirrors the oracle's
+    # all-stagnated stop, which the slow μ-window below only reproduces ~`window` iterations later.
+    #
+    if any(==(KKT_STAGNATED), stats) && !isempty(hist) && μ > threshold * hist.μ[end]
+        return true
+    end
+
     n = length(hist); flag = false
 
     if n >= 2 * window

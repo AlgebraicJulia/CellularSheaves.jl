@@ -509,7 +509,7 @@ function step!(s::IPMSolver{T}) where {T}
                 # the α-controller reads the predictor window (pamin, pamax) and refinement passes (ppass)
                 # straight from the history — nothing to aggregate here (see getaug).
                 #
-                if isstalled(s)
+                if isstalled(s, μ, pstat, cstat)
                     if s.settings.verbose > 1
                         @warn "Stalling detected."
                     end

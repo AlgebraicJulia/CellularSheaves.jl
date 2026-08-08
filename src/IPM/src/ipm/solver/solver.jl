@@ -33,8 +33,8 @@ function print_timers(s::AbstractSolver)
     display(s.timers)
 end
 
-function isstalled(s::AbstractSolver)
-    return isstalled(s.hist)
+function isstalled(s::AbstractSolver, μ, stats::KKTStatus...)
+    return isstalled(s.hist, μ, stats...)
 end
 
 function isnearoptimal(s::AbstractSolver)
