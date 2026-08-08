@@ -104,79 +104,72 @@ function inituzw!(
 end
 
 #
-# One iteration of the 2-row iterative-
-# refinement loop. Forms the residual of
-# (Δp, Δy)
+# Min-cost α-window for the 2-row solve, read off the base solve's own residual decay — the α-
+# controller's level structure. Two thresholds bound the zero-refinement operating range:
 #
-#   [ sd ] = [ f  ] - [ A -Bᵀ ] [ Δp ]
-#   [ sp ]   [ rp ]   [ B  0  ] [ Δy ]
+#   α₀ = α · fres / ptol         primal one-shot floor: base primal residual scales ∝ 1/α, so α ≥ α₀
+#                                is where the bare base already meets ptol (level 0).
+#   α_c = α · ytol / s0          dual ceiling: base dual residual s0 scales ∝ α, so α ≤ α_c is where
+#                                the dual meets ytol with no refinement.
 #
-# and, unless it already meets its per-row floor
-# (ptol/ytol raised to the terms' roundoff) or
-# has stalled against the previous residual
-# norms (pprv, dprv), solves the correction
+# When α₀ > α_c no bare α clears both rows; CRAIG buys primal accuracy, letting a smaller α still meet
+# ptol. Level k folds k CRAIG steps of the observed decay ‖r_k‖/‖r_0‖ into the primal floor:
 #
-#   [ A -Bᵀ ] [ dp ] = [ sd ]
-#   [ B  0  ] [ dy ]   [ sp ]
+#   α_k = ( α₀ · αᵏ · ‖r_k‖/‖r_0‖ )^{1/(k+1)}          (α_0 = α₀)
 #
-# to θ·(its entry residual) and folds it in.
-# Returns (status, pres, dres, n): KKT_SOLVED or
-# KKT_STAGNATED (no correction, n = 0), or
-# KKT_CONTINUE (corrected, n = craig count).
-# The stall test compares res = max(pres/pfloor,
-# dres/dfloor) against its previous value rebuilt
-# from (pprv, dprv).
+# decreasing in k. αmin is the α at the cheapest level that still clears the dual ceiling (smallest k
+# with α_k ≤ α_c); αmax = α_c. hist[k+1] = ‖r_k‖ is the base CRAIG decay, still resident from the base
+# solve — compute the window BEFORE any refinement pass overwrites it. Computed in log space so αᵏ does
+# not overflow for a large α.
 #
-function refinekkt!(
+function kktwindow!(
         wrk::UzawaSolver{UPLO, T},
-        Δp::AbstractVector{T},
-        Δy::AbstractVector{T},
         A::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         f::AbstractVector{T},
-        rp::AbstractVector{T},
-        pprv::T,
-        dprv::T;
+        Δp::AbstractVector{T},
+        Δy::AbstractVector{T},
+        fres::T,
+        nbase::Int;
         ptol::T,
         ytol::T,
-        stall::T,
     ) where {UPLO, T}
-    sd = wrk.sd; sp = wrk.sp; dp = wrk.dp; dy = wrk.dy
-
     #
-    # form the residual with the three matvecs kept SEPARATE so each row can be floored at its own
-    # evaluation limit — u × the sum of the magnitudes differenced to form it. ‖A Δp‖ is H-amplified but
-    # cancels against ‖Bᵀ Δy‖ in A Δp - Bᵀ Δy, so a fused ‖A Δp - Bᵀ Δy‖ floor would undercount exactly when
-    # it matters (see refinebdr!). dp holds Bᵀ Δy just long enough to floor and reassemble; the correction
-    # below overwrites it. The floors are the linear solve's own — the IPM passes force_tol, not a guessed
-    # floor_tol.
+    # base dual residual s0 = ‖ f - A Δp + Bᵀ Δy ‖ (unfused, as refinement forms it), accumulated into sd
+    # ALONE — no separate Bᵀ Δy buffer. sd is dead scratch after the base solve (the bordered caller's
+    # refinehsd! overwrites it via mulkkt! before reading), but wrk.dp is NOT free downstream: the HSD
+    # column path reuses the inner solver's dp buffer, and clobbering it regresses the solve (verified: a
+    # dp-clobber costs 07 87→56 CRAIG, an sd-clobber costs nothing). Hence the β=1 accumulate.
     #
-    mul!(sp, B, Δp)                  # sp = B Δp
+    sd = wrk.sd
     mul!(sd, Symmetric(A, :L), Δp)   # sd = A Δp
-    mul!(dp, B', Δy)                 # dp = Bᵀ Δy
-    pfloor = max(ptol, 100 * eps(T) * (norm(rp) + norm(sp)))
-    dfloor = max(ytol, 100 * eps(T) * (norm(f) + norm(sd) + norm(dp)))
-    axpby!(one(T), rp, -one(T), sp)                        # sp = rp - B Δp
-    axpby!(one(T), f, -one(T), sd); axpy!(one(T), dp, sd)  # sd = f - A Δp + Bᵀ Δy
+    axpby!(one(T), f, -one(T), sd)   # sd = f - A Δp
+    mul!(sd, B', Δy, one(T), one(T)) # sd = f - A Δp + Bᵀ Δy
+    s0 = norm(sd)
 
-    dres = norm(sd)
-    pres = norm(sp)
-    res  = max(pres / pfloor, dres / dfloor)
+    α  = wrk.α[]
+    αc = s0 > zero(T) ? α * ytol / s0 : T(Inf)
+    r0 = fres                        # ‖r_0‖ = base primal residual = hist[1]
+    (r0 > zero(T) && α > zero(T)) || return zero(T), αc
 
-    if res ≤ one(T)
-        # met the floor: SOLVED iff that floor was the requested tol, else STAGNATED (bottomed out at
-        # roundoff short of tol — the direction is as accurate as arithmetic allows, but not to tol).
-        st = (pres ≤ ptol && dres ≤ ytol) ? KKT_SOLVED : KKT_STAGNATED
-        return st, pres, dres, 0
+    hist  = wrk.itrwrk.hist
+    n0    = nbase - 1                # CRAIG steps the base took
+    logα  = log(α)
+    logr0 = log(r0)
+    logα0 = logα + logr0 - log(ptol)
+    logαc = αc == T(Inf) ? T(Inf) : log(αc)
+
+    αmin = exp(logα0)                # level 0 fallback
+    for k in 0:n0
+        k + 1 ≤ length(hist) || break
+        rk    = hist[k + 1]
+        logrk = rk > zero(T) ? log(rk) : logr0 + log(eps(T))   # clamp an exact-zero residual
+        logαk = (logα0 + k * logα + (logrk - logr0)) / (k + 1)
+        αmin  = exp(logαk)
+        logαk ≤ logαc && break
     end
-    res > stall * max(pprv / pfloor, dprv / dfloor) && return KKT_STAGNATED, pres, dres, 0
 
-    n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
-                     sd, sp, wrk.α[]; atol = ptol, rtol = T(INTERIOR_THETA))
-    axpy!(one(T), dp, Δp)
-    axpy!(one(T), dy, Δy)
-
-    return KKT_CONTINUE, pres, dres, n
+    return αmin, αc
 end
 
 #
@@ -197,7 +190,9 @@ end
 # KKT_STAGNATED / KKT_ITMAX saying why
 # not. Refinement scratch is workspace-
 # resident. Returns (nbase, nrefine, npass,
-# status, fres, entry_pres, entry_dres).
+# status, fres, entry_pres, entry_dres, αmin,
+# αmax) — the last two the min-cost α-window
+# (kktwindow!) the controller geo-means.
 #
 function solvekkt!(
     wrk::UzawaSolver{UPLO, T},
@@ -254,7 +249,18 @@ function solvekkt!(
     end
 
     #
-    # iterative refinement of the 2-row residual
+    # min-cost α-window, read off the base solve's CRAIG decay (hist, still resident) and base dual
+    # residual — BEFORE the refinement loop below overwrites hist with its correction solves.
+    #
+    αmin, αmax = kktwindow!(wrk, A, B, f, Δp, Δy, fres, nbase; ptol, ytol)
+
+    #
+    # iterative refinement of the 2-row residual (refinekkt! inlined). Each pass forms the residual with
+    # the three matvecs kept SEPARATE so each row is floored at its own evaluation limit — u × the sum of
+    # the magnitudes differenced. ‖A Δp‖ is H-amplified but cancels against ‖Bᵀ Δy‖ in A Δp - Bᵀ Δy, so a
+    # fused floor would undercount exactly when it matters. Unless a row meets its floor (met tol →
+    # SOLVED, roundoff-limited short of tol → STAGNATED) or the residual has stalled against the previous
+    # pass, solve the correction to θ·(its entry residual) and fold it in.
     #
     nrefine = 0
     npass = 0
@@ -265,17 +271,36 @@ function solvekkt!(
     dres1 = T(NaN)
 
     for i in 1:itmax
-        st, pres, dres, n = refinekkt!(wrk, Δp, Δy, A, B, f, rp, pprv, dprv; ptol, ytol, stall)
+        mul!(sp, B, Δp)                  # sp = B Δp
+        mul!(sd, Symmetric(A, :L), Δp)   # sd = A Δp
+        mul!(dp, B', Δy)                 # dp = Bᵀ Δy
+        pfloor = max(ptol, 100 * eps(T) * (norm(rp) + norm(sp)))
+        dfloor = max(ytol, 100 * eps(T) * (norm(f) + norm(sd) + norm(dp)))
+        axpby!(one(T), rp, -one(T), sp)                        # sp = rp - B Δp
+        axpby!(one(T), f, -one(T), sd); axpy!(one(T), dp, sd)  # sd = f - A Δp + Bᵀ Δy
+
+        dres = norm(sd)
+        pres = norm(sp)
+        res  = max(pres / pfloor, dres / dfloor)
 
         if isone(i)
             pres1 = pres
             dres1 = dres
         end
 
-        if st != KKT_CONTINUE
-            status = st
+        if res ≤ one(T)
+            status = (pres ≤ ptol && dres ≤ ytol) ? KKT_SOLVED : KKT_STAGNATED
             break
         end
+        if res > stall * max(pprv / pfloor, dprv / dfloor)
+            status = KKT_STAGNATED
+            break
+        end
+
+        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, A, B,
+                         sd, sp, wrk.α[]; atol = ptol, rtol = T(INTERIOR_THETA))
+        axpy!(one(T), dp, Δp)
+        axpy!(one(T), dy, Δy)
 
         pprv = pres
         dprv = dres
@@ -283,7 +308,7 @@ function solvekkt!(
         npass += 1
     end
 
-    return nbase, nrefine, npass, status, fres, pres1, dres1
+    return nbase, nrefine, npass, status, fres, pres1, dres1, αmin, αmax
 end
 
 #

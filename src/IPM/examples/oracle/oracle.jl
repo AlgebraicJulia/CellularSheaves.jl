@@ -66,6 +66,11 @@ function _oracle_record(i, α, sc, st, αctrl)
             cfres = row.cfres, cpres = row.cpres, cdres = row.cdres,
             wfres = hasw ? row.wfres : nothing, wpres = hasw ? row.wpres : nothing,
             wdres = hasw ? row.wdres : nothing,
+            # per-solve min-cost α-window from kktwindow! (IPM 2-row; HSD adds bordered window in step 3)
+            pamin = hasproperty(row, :pamin) ? row.pamin : nothing,
+            pamax = hasproperty(row, :pamax) ? row.pamax : nothing,
+            camin = hasproperty(row, :camin) ? row.camin : nothing,
+            camax = hasproperty(row, :camax) ? row.camax : nothing,
             chosen = false)
 end
 

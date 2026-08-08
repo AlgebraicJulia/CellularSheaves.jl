@@ -113,7 +113,7 @@ function solvepredictor!(
     #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
-    pbase, prefn, ppass, pstat, pfres, ppres, pdres = solvekkt!(
+    pbase, prefn, ppass, pstat, pfres, ppres, pdres, pamin, pamax = solvekkt!(
         kkt, w.Δpa, w.Δya, H, B, w.f, w.rp;
         ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
@@ -126,7 +126,7 @@ function solvepredictor!(
     mul!(w.Δda, B', w.Δya, -1, -1)
     mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
 
-    return pbase, prefn, ppass, pstat, pfres, ppres, pdres
+    return pbase, prefn, ppass, pstat, pfres, ppres, pdres, pamin, pamax
 end
 
 #
@@ -218,7 +218,7 @@ function solvecorrector!(
     #
     copyto!(w.Δp, w.Δpa)
     copyto!(w.Δy, w.Δya)
-    cbase, crefn, cpass, cstat, cfres, cpres, cdres = solvekkt!(
+    cbase, crefn, cpass, cstat, cfres, cpres, cdres, camin, camax = solvekkt!(
         kkt, w.Δp, w.Δy, H, B, w.f, w.rp;
         pwarm=true, ywarm=true, ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
@@ -231,7 +231,7 @@ function solvecorrector!(
     mul!(w.Δd, B', w.Δy, -1, -1)
     mul!(w.Δd, Symmetric(Q, :L), w.Δp, 1, 1)
 
-    return cbase, crefn, cpass, cstat, cfres, cpres, cdres
+    return cbase, crefn, cpass, cstat, cfres, cpres, cdres, camin, camax
 end
 
 ############################################################################################
@@ -374,6 +374,7 @@ function step!(s::IPMSolver{T}) where {T}
     step = zero(T)
     pfres = ppres = pdres = T(NaN)
     cfres = cpres = cdres = T(NaN)
+    pamin = pamax = camin = camax = T(NaN)   # per-solve min-cost α-window (kktwindow!)
     αmin = αmax = T(NaN)
     ρ = zero(T)      # ρ-shift actually applied this step (0 = none / no factorization); recorded below
 
@@ -465,7 +466,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                pbase, prefn, ppass, pstat, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s; ptol, ytol)
+                pbase, prefn, ppass, pstat, pfres, ppres, pdres, pamin, pamax = @timeit s.timers "predictor" solvepredictor!(s; ptol, ytol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -480,7 +481,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                cbase, crefn, cpass, cstat, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ; ptol, ytol)
+                cbase, crefn, cpass, cstat, cfres, cpres, cdres, camin, camax = @timeit s.timers "corrector" solvecorrector!(s, μ; ptol, ytol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -548,7 +549,7 @@ function step!(s::IPMSolver{T}) where {T}
     end
 
     push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat,
-        pfres, ppres, pdres, cfres, cpres, cdres, αmin, αmax))
+        pfres, ppres, pdres, cfres, cpres, cdres, pamin, pamax, camin, camax, αmin, αmax))
 
     return status
 end
