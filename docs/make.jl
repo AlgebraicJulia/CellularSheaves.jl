@@ -30,7 +30,7 @@ if !no_literate
       f, l = splitext(file)
       if l == ".jl" && !startswith(f, "_")
         src_path = joinpath(root, file)
-        execute = !contains(src_path, "asynch")
+        execute = !(contains(src_path, "asynch") || contains(src_path, "distributed") || contains(src_path, "escort.jl") || contains(src_path, "escort_feedforward") || contains(src_path, "scenario5"))
         Literate.markdown(src_path, out_dir;
           execute=execute, config=config, documenter=false, credit=false)
         Literate.notebook(src_path, out_dir;
@@ -64,7 +64,15 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.CoordinationBenchmarks, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves, 
+    CellularSheaves.ControlSheaves.Tikhonov,
+    CellularSheaves.ControlSheaves.AgentControllers,
+    CellularSheaves.ControlSheaves.DistributedLayeredControl,
+    CellularSheaves.ControlSheaves.Layered,
+    CellularSheaves.ControlSheaves.MultiAgentTracking,
+    CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts,
+    CellularSheaves.ControlSheaves.CoordinationBenchmarks,
+    CellularSheaves.AsynchSheaves],
   draft=false,
   format=Documenter.HTML(
     assets=["assets/benchtables.css"],
@@ -99,6 +107,7 @@ makedocs(
         "generated/layered/escort.md",
         "generated/layered/escort_feedforward.md",
         "generated/layered/diffusion_vs_direct.md",
+        "generated/layered/multilayer_escort.md",
         ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
@@ -150,6 +159,7 @@ makedocs(
       "api/tikhonov.md",
       "api/agent_controllers.md",
       "api/distributed_layered_control.md",
+      "api/layered.md",
       "api/coordination_benchmarks.md",
       "api/herding_platoon.md",
       "api/multi_agent_tracking.md",
