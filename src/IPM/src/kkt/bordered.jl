@@ -164,7 +164,7 @@ function solvekkt!(
     #   [ H  -Bᵀ ] [ Δp₀ ]   [ f  ]
     #   [ B   0  ] [ Δy₀ ] = [ rp ]
     #
-    nb, nr, _, _, fres, _, _ = solvekkt!(inner, Δp, Δy, H, B, f, rp; pwarm, ywarm, ptol, ytol, stall, itmax)
+    nb, nr, _, _, fres, _, _ = solvekkt!(inner, Δp, Δy, H, B, f, rp; pwarm, ywarm, ptol, ytol, stall, itmax=0)
     nbase = nb + nr
     #
     # preserve the base solve Δp₀, Δy₀: the column loop re-lifts Δp = Δp₀ + Δτ Δp2 from them every pass, so
