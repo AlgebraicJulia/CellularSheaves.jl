@@ -67,6 +67,131 @@ function shared_target_spec()
 end
 
 """
+    two_target_team_spec() -> NestedSystemSpec
+
+One refined system split into two rigid sub-teams wired by an internal consensus edge, with each
+sub-team observing a *different* target (`D == 4`). The whole refined system collapses to a single
+rigid vertex by `H_0`, so pulling the two targets apart is a demand the tower cannot meet: the
+direct solve stretches the internal edge, the hierarchical solve cannot. This is the strict case
+of the energy-gap inequality (Issue 010).
+"""
+function two_target_team_spec()
+    teamA = LeafTeam(:teamA, :ring, 3, 1.0)
+    teamB = LeafTeam(:teamB, :ring, 3, 1.0)
+    mid = RefinedSystem(:mid, AbstractSystemNode[teamA, teamB], [(1, 2)])
+    root = RefinedSystem(:root, AbstractSystemNode[mid])
+    targets = [TargetSpec(:t1), TargetSpec(:t2)]
+    observations = [Observation([1, 1], 1), Observation([1, 2], 2)]
+    return NestedSystemSpec(root, targets, observations, 4, true)
+end
+
+"""
+    flat_equivalent_spec() -> NestedSystemSpec
+
+The degenerate case with no refinement to speak of: a single rigid team observing a single
+target, `D == 4` affine. `depth == 2`, so the tower is just `H_N -> H_0` — structurally the same
+two-level pipeline the flat `Layered` code implements. The answer here is known in closed form
+(see the golden test), which makes it an oracle rather than a self-comparison.
+"""
+function flat_equivalent_spec()
+    team = LeafTeam(:team, :ring, 5, 0.3)
+    root = RefinedSystem(:root, AbstractSystemNode[team])
+    targets = [TargetSpec(:t1)]
+    observations = [Observation([1], 1)]
+    return NestedSystemSpec(root, targets, observations, 4, true)
+end
+
+"""
+    default_targets(spec::NestedSystemSpec) -> Vector{Vector{Float64}}
+
+Distinct, well-separated boundary values, one per target of `spec`. When `spec.affine`, the last
+coordinate is the homogeneous `1.0` row that affine restriction maps expect.
+"""
+function default_targets(spec::NestedSystemSpec)
+    D = spec.D
+    n_free = spec.affine ? D - 1 : D
+    return [begin
+                v = zeros(Float64, D)
+                for i in 1:n_free
+                    v[i] = t * (i == 1 ? 2.0 : -1.0 / i)
+                end
+                spec.affine && (v[D] = 1.0)
+                v
+            end
+            for t in 1:length(spec.targets)]
+end
+
+"""
+    three_child_system() -> RefinedSystem
+
+A `RefinedSystem` with three named `D=4` children (`alpha`, `bravo`, `charlie`), for unit-testing
+[`materialize_restriction`](@ref) directly against a node without building a whole tower.
+"""
+function three_child_system()
+    alpha = LeafTeam(:alpha, :ring, 3, 1.0)
+    bravo = LeafTeam(:bravo, :ring, 3, 1.0)
+    charlie = LeafTeam(:charlie, :ring, 3, 1.0)
+    return RefinedSystem(:node, AbstractSystemNode[alpha, bravo, charlie])
+end
+
+"""
+    mixed_arity_system() -> RefinedSystem
+
+A `RefinedSystem` with two children of very different size: `wide` (6 raw agents) and `narrow`
+(2 raw agents). [`centroid`](@ref) must weight them `1/2` each regardless — a *direct* member is
+counted once, however many agents it eventually expands to.
+"""
+function mixed_arity_system()
+    wide = LeafTeam(:wide, :clique, 6, 1.0)
+    narrow = LeafTeam(:narrow, :path, 2, 1.0)
+    return RefinedSystem(:node, AbstractSystemNode[wide, narrow])
+end
+
+"""
+    spec_default() -> NestedSystemSpec
+    spec_explicit_project1() -> NestedSystemSpec
+
+The same two-team spec, one relying on `project(1)` being the default `system_map`/edge map, the
+other declaring it explicitly. `solve_hierarchical` must agree bit-for-bit between them.
+"""
+function spec_default()
+    team1 = LeafTeam(:team1, :ring, 3, 1.0)
+    team2 = LeafTeam(:team2, :ring, 3, 1.0)
+    root = RefinedSystem(:root, AbstractSystemNode[team1, team2])
+    targets = [TargetSpec(:t1), TargetSpec(:t2)]
+    observations = [Observation([1], 1), Observation([2], 2)]
+    return NestedSystemSpec(root, targets, observations, 3, true)
+end
+
+function spec_explicit_project1()
+    team1 = LeafTeam(:team1, :ring, 3, 1.0)
+    team2 = LeafTeam(:team2, :ring, 3, 1.0)
+    root = RefinedSystem(:root, AbstractSystemNode[team1, team2])
+    targets = [TargetSpec(:t1), TargetSpec(:t2)]
+    observations = [Observation([1], 1; system_map=project(1)), Observation([2], 2; system_map=project(1))]
+    return NestedSystemSpec(root, targets, observations, 3, true)
+end
+
+"""
+    centroid_wired_spec() -> NestedSystemSpec
+
+Two rigid rings joined by an internal edge that wires each ring's **centroid** — the unweighted
+average of its own raw agents — rather than a single representative agent. Exercises
+[`centroid`](@ref) inside a real tower build/solve, not just `materialize_restriction` in
+isolation.
+"""
+function centroid_wired_spec()
+    teamA = LeafTeam(:teamA, :ring, 3, 1.0)
+    teamB = LeafTeam(:teamB, :ring, 3, 1.0)
+    mid = RefinedSystem(:mid, AbstractSystemNode[teamA, teamB],
+                        [SystemEdge(1, 2; src_map=centroid(), dst_map=centroid())])
+    root = RefinedSystem(:root, AbstractSystemNode[mid])
+    targets = [TargetSpec(:t1)]
+    observations = [Observation([1, 1], 1)]
+    return NestedSystemSpec(root, targets, observations, 3, true)
+end
+
+"""
     degenerate_spec() -> NestedSystemSpec
 
 An over-constrained/malformed team: a `:ring` formation with only one agent (`build_escort_topology`

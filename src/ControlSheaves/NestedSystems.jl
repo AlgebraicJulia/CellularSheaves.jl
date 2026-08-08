@@ -32,14 +32,105 @@ module NestedSystems
 using LinearAlgebra
 using Graphs
 using ArgCheck
-using ...NetworkSheaves: vertex_stalks, get_restriction_map, EuclideanSheaf, underlying_graph
-using ...NetworkSheaves.EuclideanSheaves: add_sheaf_edge!
+using ...NetworkSheaves: vertex_stalks, get_restriction_map, EuclideanSheaf, underlying_graph,
+                         coboundary_map
+using ...NetworkSheaves.EuclideanSheaves: add_sheaf_edge!, harmonic_extension
 using ...NetworkSheaves.Formations: build_escort_topology
 using ...NetworkSheaves.GraphHomomorphisms: GraphHomomorphism, fiber_vertices
 using ...NetworkSheaves.Pushforwards: pushforward_sheaf, all_fiber_bases
+using ..AgentControllers: AbstractAgentDynamics, _default_initial_position, AgentState, step_agent!,
+                          initial_state, position_indices
 
 export AbstractSystemNode, LeafTeam, RefinedSystem, TargetSpec, Observation, NestedSystemSpec,
-       SheafTower, build_sheaf_tower
+       SheafTower, build_sheaf_tower, n_agents,
+       solve_hierarchical, solve_direct, sheaf_energy, approximation_gap,
+       RestrictionSpec, ProjectMember, Centroid, RawRestriction, project, centroid,
+       materialize_restriction, SystemEdge,
+       AgentBinding, SystemBinding, ResolvedAgent, resolve_dynamics, homogeneous_binding,
+       NestedEscortProblem, NestedEscortResult, run_nested_escort_simulation,
+       agent_index_ranges, translation_pin, redundant_pin
+
+# ---------------------------------------------------------------------------
+# Restriction-map declarations (Issue 011)
+# ---------------------------------------------------------------------------
+
+"""
+    RestrictionSpec
+
+Declarative description of the restriction map on one end of an edge: what a subsystem
+*presents* to whatever it is wired to.
+
+**Declaration is symbolic; lowering is numeric.** A `RestrictionSpec` is declared against the
+subsystem's **raw joint state** — the plain concatenation of its direct members' values, of
+dimension `n_members × D`. That dimension follows from declared arities alone, with no rank or
+nullspace computation anywhere, which is what lets validation stay numeric-free. Only at tower
+assembly is the declared map composed with the fibre-section basis discovered by the pushforward:
+
+```
+R_coarse = R · B_v        (D × total) · (total × k)  =  D × k
+```
+
+`EuclideanSheaf` permits non-square restriction maps, so `R_coarse` needs no special handling.
+
+A node's **direct members** are its children if it is a [`RefinedSystem`](@ref), or its raw
+agents if it is a [`LeafTeam`](@ref). Refinement is opaque: a refined child counts as exactly one
+member no matter how many agents it eventually expands to.
+
+Concrete specs: [`project`](@ref), [`centroid`](@ref), and [`RawRestriction`](@ref).
+"""
+abstract type RestrictionSpec end
+
+"""
+    ProjectMember(member)
+
+Backing type for [`project`](@ref). `member` is a direct-member index, or a `Symbol` naming a
+child of a [`RefinedSystem`](@ref).
+"""
+struct ProjectMember <: RestrictionSpec
+    member::Union{Int,Symbol}
+end
+
+"""
+    Centroid()
+
+Backing type for [`centroid`](@ref).
+"""
+struct Centroid <: RestrictionSpec end
+
+"""
+    RawRestriction(M::Matrix{Float64})
+
+Escape hatch: present an arbitrary declared matrix. `M` must be `D × (n_members · D)`, checked
+when it is materialized against a specific node.
+"""
+struct RawRestriction <: RestrictionSpec
+    M::Matrix{Float64}
+end
+
+"""
+    project(i::Int) -> RestrictionSpec
+    project(name::Symbol) -> RestrictionSpec
+
+Present direct member `i`'s own block unchanged (or the child named `name`). The materialized
+matrix is the selection matrix `[0 … I_D … 0]`.
+
+This is the default on every edge, and it is the one spec that lowers all the way to a single
+finest-level vertex — selecting a member, then that member's first member, and so on — so a
+`project`-wired tower places its edges on raw agents in `H_N` exactly as it did before per-edge
+maps existed.
+"""
+project(i::Union{Int,Symbol}) = ProjectMember(i)
+
+"""
+    centroid() -> RestrictionSpec
+
+Present the unweighted average of the subsystem's **direct** members, `(1/N) Σ`.
+
+Unlike [`project`](@ref), a centroid is a functional of several members at once, so it has no
+representative vertex in `H_N`; it exists only at the level of abstraction where the subsystem
+is a single vertex. See [`build_sheaf_tower`](@ref) for what that implies.
+"""
+centroid() = Centroid()
 
 # ---------------------------------------------------------------------------
 # Specification types
@@ -83,30 +174,57 @@ LeafTeam(name::Symbol, kind::Symbol, n_agents::Int, radius::Real; observers=[1])
     LeafTeam(name, kind, n_agents, radius, collect(Int, observers))
 
 """
-    RefinedSystem(name, children, internal_edges=Tuple{Int,Int}[])
+    SystemEdge(src, dst; src_map=project(1), dst_map=project(1))
+
+A consensus edge between two children of a [`RefinedSystem`](@ref), given as index pairs into
+`children`. `src_map` and `dst_map` declare what each endpoint *presents* on this edge (see
+[`RestrictionSpec`](@ref)); a subsystem may present something different on each of its edges.
+
+The defaults reproduce the plain `(i, j)` behaviour exactly, which is why an `internal_edges`
+list of bare tuples is still accepted.
+"""
+struct SystemEdge
+    src::Int
+    dst::Int
+    src_map::RestrictionSpec
+    dst_map::RestrictionSpec
+end
+
+SystemEdge(src::Int, dst::Int; src_map::RestrictionSpec=project(1), dst_map::RestrictionSpec=project(1)) =
+    SystemEdge(src, dst, src_map, dst_map)
+
+SystemEdge(e::Tuple{Int,Int}) = SystemEdge(e[1], e[2])
+SystemEdge(e::SystemEdge) = e
+
+"""
+    RefinedSystem(name, children, internal_edges=SystemEdge[])
 
 A subsystem whose vertices are themselves systems. `internal_edges` are consensus edges among
-`children`, given as `(i, j)` index pairs into `children`.
+`children`: either [`SystemEdge`](@ref)s, or bare `(i, j)` index pairs, which are promoted to
+`SystemEdge`s with the default `project(1)` maps on both ends.
 """
 struct RefinedSystem <: AbstractSystemNode
     name::Symbol
     children::Vector{AbstractSystemNode}
-    internal_edges::Vector{Tuple{Int,Int}}
+    internal_edges::Vector{SystemEdge}
 
-    function RefinedSystem(name::Symbol, children::Vector{AbstractSystemNode}, internal_edges::Vector{Tuple{Int,Int}})
+    function RefinedSystem(name::Symbol, children::Vector{AbstractSystemNode}, internal_edges::Vector{SystemEdge})
         @argcheck !isempty(children) "RefinedSystem $(name) must have at least one child"
         n = length(children)
-        for (i, j) in internal_edges
-            @argcheck 1 <= i <= n "internal_edges index $i out of range 1:$n for RefinedSystem $(name)"
-            @argcheck 1 <= j <= n "internal_edges index $j out of range 1:$n for RefinedSystem $(name)"
-            @argcheck i != j "internal_edges cannot connect child $i to itself"
+        for e in internal_edges
+            @argcheck 1 <= e.src <= n "internal_edges index $(e.src) out of range 1:$n for RefinedSystem $(name)"
+            @argcheck 1 <= e.dst <= n "internal_edges index $(e.dst) out of range 1:$n for RefinedSystem $(name)"
+            @argcheck e.src != e.dst "internal_edges cannot connect child $(e.src) to itself"
+            # Materializing here would need `D`, which the spec supplies later; the member
+            # designators are checked against arity at tower-assembly time instead.
         end
         new(name, children, internal_edges)
     end
 end
 
-RefinedSystem(name::Symbol, children::Vector{<:AbstractSystemNode}, internal_edges::Vector{Tuple{Int,Int}}=Tuple{Int,Int}[]) =
-    RefinedSystem(name, Vector{AbstractSystemNode}(children), internal_edges)
+RefinedSystem(name::Symbol, children::Vector{<:AbstractSystemNode},
+              internal_edges::AbstractVector=SystemEdge[]) =
+    RefinedSystem(name, Vector{AbstractSystemNode}(children), SystemEdge[SystemEdge(e) for e in internal_edges])
 
 """
     TargetSpec(name)
@@ -119,16 +237,25 @@ struct TargetSpec
 end
 
 """
-    Observation(system_path, target_index)
+    Observation(system_path, target_index; system_map=project(1))
 
 Declares that the system at `system_path` (a path of child indices from the root) observes
 target `target_index`. Arbitrary many-to-many incidence is allowed: one system may observe
 several targets and one target may be observed by several systems.
+
+`system_map` declares what the observing system presents on this edge (see
+[`RestrictionSpec`](@ref)); the target end is always the identity, since a target is a single
+`D`-dimensional vertex at every level. The default `project(1)` reproduces the pre-Issue-011
+behaviour of wiring the system's first agent to the target.
 """
 struct Observation
     system_path::Vector{Int}
     target_index::Int
+    system_map::RestrictionSpec
 end
+
+Observation(system_path::AbstractVector{Int}, target_index::Int; system_map::RestrictionSpec=project(1)) =
+    Observation(collect(Int, system_path), target_index, system_map)
 
 """
     NestedSystemSpec(root, targets, observations, D, affine)
@@ -159,6 +286,86 @@ struct NestedSystemSpec
 end
 
 # ---------------------------------------------------------------------------
+# Materializing restriction declarations against a node
+# ---------------------------------------------------------------------------
+
+"""
+    _direct_member_names(node) -> Union{Vector{Symbol},Nothing}
+
+Names of `node`'s direct members, or `nothing` when they are unnamed (a [`LeafTeam`](@ref)'s raw
+agents are addressed by index only).
+"""
+_direct_member_names(node::RefinedSystem) = [c.name for c in node.children]
+_direct_member_names(::LeafTeam) = nothing
+
+"""
+    _n_direct_members(node) -> Int
+
+Number of direct members: children for a [`RefinedSystem`](@ref), raw agents for a
+[`LeafTeam`](@ref).
+"""
+_n_direct_members(node::RefinedSystem) = length(node.children)
+_n_direct_members(node::LeafTeam) = node.n_agents
+
+"""
+    _member_index(node, member) -> Int
+
+Resolve a direct-member designator to an index, checking it against `node`'s arity. A `Symbol`
+resolves against child names and throws a message naming the available children if unmatched.
+"""
+function _member_index(node::AbstractSystemNode, member::Int)
+    n = _n_direct_members(node)
+    @argcheck 1 <= member <= n "member index $member out of range 1:$n for system $(node.name)"
+    return member
+end
+
+function _member_index(node::AbstractSystemNode, member::Symbol)
+    names = _direct_member_names(node)
+    names === nothing && throw(ArgumentError(
+        "cannot select member :$member in $(node.name): a LeafTeam's agents are unnamed, " *
+        "use an integer index in 1:$(_n_direct_members(node))"))
+    idx = findfirst(==(member), names)
+    idx === nothing && throw(ArgumentError(
+        "system $(node.name) has no child named :$member (children: $(join(names, ", ")))"))
+    return idx
+end
+
+"""
+    materialize_restriction(r::RestrictionSpec, node::AbstractSystemNode, D::Int) -> Matrix{Float64}
+
+Build the `D × (n_members · D)` matrix for `r` against `node`'s raw joint state.
+
+Purely structural: it depends only on `node`'s declared arity, never on a rank, nullspace, or
+pseudo-inverse computation. Composition with the fibre basis — the only numeric step — happens
+later, at tower assembly.
+"""
+function materialize_restriction(r::ProjectMember, node::AbstractSystemNode, D::Int)
+    @argcheck D >= 1 "D must be positive (got $D)"
+    n = _n_direct_members(node)
+    i = _member_index(node, r.member)
+    R = zeros(Float64, D, n * D)
+    R[:, ((i - 1) * D + 1):(i * D)] = Matrix{Float64}(I, D, D)
+    return R
+end
+
+function materialize_restriction(::Centroid, node::AbstractSystemNode, D::Int)
+    @argcheck D >= 1 "D must be positive (got $D)"
+    n = _n_direct_members(node)
+    R = zeros(Float64, D, n * D)
+    for i in 1:n
+        R[:, ((i - 1) * D + 1):(i * D)] = Matrix{Float64}(I, D, D) ./ n
+    end
+    return R
+end
+
+function materialize_restriction(r::RawRestriction, node::AbstractSystemNode, D::Int)
+    @argcheck D >= 1 "D must be positive (got $D)"
+    total = _n_direct_members(node) * D
+    @argcheck size(r.M) == (D, total) "RawRestriction matrix is $(size(r.M)), expected ($D, $total) for system $(node.name)"
+    return copy(r.M)
+end
+
+# ---------------------------------------------------------------------------
 # Tree bookkeeping helpers
 # ---------------------------------------------------------------------------
 
@@ -178,6 +385,16 @@ function _resolve_path(root::RefinedSystem, path::Vector{Int})
     end
     return node
 end
+
+"""
+    n_agents(spec::NestedSystemSpec) -> Int
+    n_agents(node::AbstractSystemNode) -> Int
+
+Total number of raw agents in `spec`'s tree (or in `node`'s subtree).
+"""
+n_agents(spec::NestedSystemSpec) = n_agents(spec.root)
+n_agents(node::LeafTeam) = node.n_agents
+n_agents(node::RefinedSystem) = sum(n_agents, node.children)
 
 """
     _collapse_depth(node) -> Int
@@ -328,42 +545,116 @@ function _add_all_leafteam_edges!(F::EuclideanSheaf, node::RefinedSystem, D::Int
 end
 
 """
-    _add_internal_edges!(F, node, agent_range, D)
+    _fine_representative(node, r, agent_range) -> Union{Int,Nothing}
 
-Add a consensus edge for every `(i, j)` in `node.internal_edges`, recursively over every
-`RefinedSystem` in the tree (not just the root).
+The single `H_N` vertex that `r` designates on `node`, or `nothing` when `r` designates no
+single vertex.
 
-TODO(011): the representative vertex used for each endpoint is the child's first agent —
-equivalent to `project(1)` — because declared per-edge restriction maps (`project`/`centroid`)
-are Issue 011's territory, not this one's. This is the one place this issue touches that
-territory; see the "Open detail" section of `docs/issues/009-nested-spec-and-tower-compiler.md`.
+Only [`project`](@ref) has a representative, and finding it is recursive: selecting a member of a
+refined system leaves another system, whose own representative is *its* first member, and so on
+down to a raw agent. Selecting a member of a [`LeafTeam`](@ref) lands on that agent directly.
+
+An aggregate map such as [`centroid`](@ref) returns `nothing`: it is a functional of several
+vertices at once and cannot be an edge endpoint in `H_N`, where those vertices are still
+separate. Such an edge is placed at the coarsest level where its endpoints are single vertices —
+see [`build_sheaf_tower`](@ref).
 """
-function _add_internal_edges!(F::EuclideanSheaf, node::RefinedSystem,
-                               agent_range::IdDict{AbstractSystemNode,UnitRange{Int}}, D::Int)
-    I_D = Matrix{Float64}(I, D, D)
-    for (i, j) in node.internal_edges
-        u = first(agent_range[node.children[i]])  # TODO(011): project(1) placeholder
-        v = first(agent_range[node.children[j]])  # TODO(011): project(1) placeholder
-        add_sheaf_edge!(F, u, v, I_D, I_D)
-    end
-    for c in node.children
-        c isa RefinedSystem && _add_internal_edges!(F, c, agent_range, D)
-    end
+function _fine_representative(node::LeafTeam, r::ProjectMember,
+                               agent_range::IdDict{AbstractSystemNode,UnitRange{Int}})
+    return first(agent_range[node]) + _member_index(node, r.member) - 1
+end
+
+function _fine_representative(node::RefinedSystem, r::ProjectMember,
+                               agent_range::IdDict{AbstractSystemNode,UnitRange{Int}})
+    child = node.children[_member_index(node, r.member)]
+    return _fine_representative(child, ProjectMember(1), agent_range)
+end
+
+_fine_representative(::AbstractSystemNode, ::RestrictionSpec,
+                     ::IdDict{AbstractSystemNode,UnitRange{Int}}) = nothing
+
+"""
+    _DeferredEdge
+
+An edge that could not be expressed in `H_N` because at least one endpoint presents an aggregate
+of several vertices. It is added at `level`, the finest level at which both endpoints are single
+vertices. `u_node`/`v_node` are `nothing` for a target endpoint (targets are single vertices
+everywhere and always present the identity).
+"""
+struct _DeferredEdge
+    level::Int
+    u_node::Union{AbstractSystemNode,Nothing}
+    u_map::Union{RestrictionSpec,Nothing}
+    u_target::Int
+    v_node::Union{AbstractSystemNode,Nothing}
+    v_map::Union{RestrictionSpec,Nothing}
+    v_target::Int
 end
 
 """
-    _add_observation_edges!(F, spec, agent_range)
+    _atomic_level(node, S, depth) -> Int
 
-Add an edge from each [`Observation`](@ref)'s representative vertex (its system's first agent,
-same TODO(011) caveat as `_add_internal_edges!`) to its target vertex.
+The finest tower level at which `node` is a single vertex. Below it, `node` has been split into
+its direct members — which is precisely the level whose fibre basis an aggregate restriction map
+must compose with.
 """
-function _add_observation_edges!(F::EuclideanSheaf, spec::NestedSystemSpec,
-                                  agent_range::IdDict{AbstractSystemNode,UnitRange{Int}})
-    I_D = Matrix{Float64}(I, spec.D, spec.D)
+_atomic_level(node::AbstractSystemNode, S::IdDict{AbstractSystemNode,Int}, depth::Int) = depth - S[node]
+
+"""
+    _wire_declared_edges!(F, spec, agent_range, S, depth) -> Vector{_DeferredEdge}
+
+Add every declared consensus and observation edge that can live in `H_N`, and return the ones
+that cannot.
+
+An edge lands in `H_N` exactly when **both** endpoints resolve to a single vertex there — which
+is the case for `project`-wired edges, and so for every spec written before per-edge maps
+existed. Keeping those edges at the finest level is what preserves the earlier behaviour and, more
+importantly, what keeps [`solve_direct`](@ref)'s baseline meaningful: a target pinned through an
+`H_N` edge still constrains individual agents when the tower's rigidity is relaxed.
+"""
+function _wire_declared_edges!(F::EuclideanSheaf, spec::NestedSystemSpec,
+                                agent_range::IdDict{AbstractSystemNode,UnitRange{Int}},
+                                S::IdDict{AbstractSystemNode,Int}, depth::Int)
+    D = spec.D
+    I_D = Matrix{Float64}(I, D, D)
+    deferred = _DeferredEdge[]
+
+    _wire_internal_edges!(F, spec.root, agent_range, S, depth, D, I_D, deferred)
+
     for obs in spec.observations
         node = _resolve_path(spec.root, obs.system_path)
-        rep = first(agent_range[node])  # TODO(011): project(1) placeholder
-        add_sheaf_edge!(F, rep, obs.target_index, I_D, I_D)
+        rep = _fine_representative(node, obs.system_map, agent_range)
+        if rep === nothing
+            push!(deferred, _DeferredEdge(_atomic_level(node, S, depth),
+                                          node, obs.system_map, 0,
+                                          nothing, nothing, obs.target_index))
+        else
+            add_sheaf_edge!(F, rep, obs.target_index, I_D, I_D)
+        end
+    end
+
+    return deferred
+end
+
+function _wire_internal_edges!(F::EuclideanSheaf, node::RefinedSystem,
+                                agent_range::IdDict{AbstractSystemNode,UnitRange{Int}},
+                                S::IdDict{AbstractSystemNode,Int}, depth::Int, D::Int,
+                                I_D::Matrix{Float64}, deferred::Vector{_DeferredEdge})
+    for e in node.internal_edges
+        cu, cv = node.children[e.src], node.children[e.dst]
+        ru = _fine_representative(cu, e.src_map, agent_range)
+        rv = _fine_representative(cv, e.dst_map, agent_range)
+        if ru === nothing || rv === nothing
+            # One aggregate endpoint forces *both* ends to be expressed at the coarse level,
+            # since an edge cannot straddle two levels.
+            lvl = min(_atomic_level(cu, S, depth), _atomic_level(cv, S, depth))
+            push!(deferred, _DeferredEdge(lvl, cu, e.src_map, 0, cv, e.dst_map, 0))
+        else
+            add_sheaf_edge!(F, ru, rv, I_D, I_D)
+        end
+    end
+    for c in node.children
+        c isa RefinedSystem && _wire_internal_edges!(F, c, agent_range, S, depth, D, I_D, deferred)
     end
 end
 
@@ -435,8 +726,7 @@ function build_sheaf_tower(spec::NestedSystemSpec)
     # --- Build H_N ---
     F = EuclideanSheaf{Float64}(fill(D, total_HN))
     _add_all_leafteam_edges!(F, root, D, spec.affine, agent_range)
-    _add_internal_edges!(F, root, agent_range, D)
-    _add_observation_edges!(F, spec, agent_range)
+    deferred = _wire_declared_edges!(F, spec, agent_range, S, depth)
 
     levels = Vector{EuclideanSheaf{Float64}}(undef, depth)
     homs = Vector{GraphHomomorphism}(undef, depth - 1)
@@ -451,6 +741,11 @@ function build_sheaf_tower(spec::NestedSystemSpec)
         level_slots[k] = lst
         level_pos[k] = IdDict{AbstractSystemNode,Int}(n => i for (i, n) in enumerate(lst))
     end
+
+    # Restriction matrices for deferred (aggregate-mapped) edge endpoints, filled in as the
+    # loop below reaches each endpoint's own atomic level — see `_DeferredEdge`.
+    R_cache = IdDict{AbstractSystemNode,Matrix{Float64}}()
+    I_D = Matrix{Float64}(I, D, D)
 
     for k in (depth - 1):-1:1
         fine_level = levels[k + 1]
@@ -481,6 +776,36 @@ function build_sheaf_tower(spec::NestedSystemSpec)
         levels[k] = pushforward_sheaf(hom, fine_level)
         bases[k] = all_fiber_bases(hom, fine_level)
 
+        # --- Materialize any deferred (aggregate) endpoint whose node becomes atomic here. ---
+        # Row ordering: `node`'s direct members occupy a contiguous block of `level_slots[k]`
+        # in their own declared order (`_level_owner_slots` visits `node.children` in order and
+        # `vmap` numbers vertices by list position), so `fiber_vertices(hom, cv)` — the row
+        # order `bases[k][cv]` was built against — already matches `materialize_restriction`'s
+        # column order. The dimension check below is a cheap guard against that invariant ever
+        # breaking; a silent mismatch would misassign restriction blocks rather than error.
+        for d in deferred
+            for (node, spec_map) in ((d.u_node, d.u_map), (d.v_node, d.v_map))
+                node === nothing && continue
+                haskey(R_cache, node) && continue
+                _atomic_level(node, S, depth) == k || continue
+                cv = n_targets + level_pos[k][node]   # bases[k] is indexed by coarse vertex, targets first
+                B = bases[k][cv]
+                @argcheck size(B, 1) == _n_direct_members(node) * D (
+                    "fibre basis at coarse vertex $cv (level $k, system $(node.name)) has " *
+                    "$(size(B,1)) rows, expected $(_n_direct_members(node) * D) — row ordering " *
+                    "does not match materialize_restriction's column ordering")
+                R_cache[node] = materialize_restriction(spec_map, node, D) * B
+            end
+        end
+        for d in deferred
+            d.level == k || continue
+            R_u = d.u_node === nothing ? I_D : R_cache[d.u_node]
+            R_v = d.v_node === nothing ? I_D : R_cache[d.v_node]
+            u_idx = d.u_node === nothing ? d.u_target : n_targets + level_pos[k][d.u_node]
+            v_idx = d.v_node === nothing ? d.v_target : n_targets + level_pos[k][d.v_node]
+            add_sheaf_edge!(levels[k], u_idx, v_idx, R_u, R_v)
+        end
+
         # --- Assert the target invariant: singleton fibre, identity basis, stalk D. ---
         for t in 1:n_targets
             fverts = fiber_vertices(hom, t)
@@ -509,6 +834,479 @@ function build_sheaf_tower(spec::NestedSystemSpec)
     agent_vertices = collect((n_targets + 1):(n_targets + n_agents))
 
     return SheafTower(spec, levels, homs, bases, target_vertices, agent_vertices, depth)
+end
+
+# ---------------------------------------------------------------------------
+# Hierarchical & direct solves, and the approximation gap between them
+# ---------------------------------------------------------------------------
+
+"""
+    _per_vertex(F::EuclideanSheaf, x::AbstractVector) -> Vector{Vector{Float64}}
+
+Split a flat cochain `x` on `F` into one value per vertex, using each vertex's own stalk
+dimension (stalks are **not** uniform above `H_N`).
+"""
+function _per_vertex(F::EuclideanSheaf, x::AbstractVector)
+    dims = vertex_stalks(F)
+    out = Vector{Vector{Float64}}(undef, length(dims))
+    off = 0
+    for v in eachindex(dims)
+        out[v] = Vector{Float64}(x[(off + 1):(off + dims[v])])
+        off += dims[v]
+    end
+    return out
+end
+
+"""
+    _boundary_dict(tower, target_values) -> Dict{Int,Vector{Float64}}
+
+Map each target's vertex index to its pinned value, checking arity and stalk dimension.
+Targets share the same vertex index at every level of the tower, so the resulting dictionary
+is a valid boundary condition for `tower.levels[1]` and `tower.levels[end]` alike.
+"""
+function _boundary_dict(tower::SheafTower, target_values::AbstractVector)
+    @argcheck length(target_values) == length(tower.target_vertices) "expected $(length(tower.target_vertices)) target values, got $(length(target_values))"
+    D = tower.spec.D
+    for (t, val) in enumerate(target_values)
+        @argcheck length(val) == D "target $t value has length $(length(val)), expected stalk dimension $D"
+    end
+    return Dict{Int,Vector{Float64}}(
+        tower.target_vertices[t] => Vector{Float64}(target_values[t])
+        for t in eachindex(target_values))
+end
+
+"""
+    solve_hierarchical(tower::SheafTower, target_values) -> Vector{Vector{Vector{Float64}}}
+
+Solve the tower top-down: one harmonic extension on the coarsest sheaf `tower.levels[1]` with
+`target_values` pinned at the target vertices, then successive fibre-basis lifts down to each
+finer level.
+
+Because every fibre basis `B_v` spans the fibre's *exact* global-section space, each lift is
+energy-preserving: the internal edges of a fibre contribute exactly zero, and the cross-edge
+energy of the coarse sheaf equals that of the lifted cochain on the finer one. The coarse solve
+therefore genuinely minimises finest-level energy — but only over configurations in which every
+team stays rigidly in formation. See [`approximation_gap`](@ref) for what that restriction costs.
+
+Returns one cochain per level, coarsest first, each as a vector of per-vertex values (per-vertex,
+because stalk dimensions differ between vertices above the finest level). The last entry holds
+the per-agent and per-target reference states on `tower.levels[end]`.
+"""
+function solve_hierarchical(tower::SheafTower, target_values::AbstractVector)
+    boundary = _boundary_dict(tower, target_values)
+
+    x0, _ = harmonic_extension(tower.levels[1], boundary)
+    q = _per_vertex(tower.levels[1], Vector(x0))
+
+    out = Vector{Vector{Vector{Float64}}}()
+    push!(out, q)
+
+    for k in eachindex(tower.homs)
+        fine = tower.levels[k + 1]
+        fine_dims = vertex_stalks(fine)
+        q_fine = Vector{Vector{Float64}}(undef, length(fine_dims))
+
+        for v in eachindex(q)
+            lifted = tower.bases[k][v] * q[v]
+            off = 0
+            # `fiber_vertices` returns the fibre in ascending vertex order, which is exactly
+            # the row ordering `fiber_section_basis` documents for the basis it returns.
+            for u in fiber_vertices(tower.homs[k], v)
+                d = fine_dims[u]
+                q_fine[u] = lifted[(off + 1):(off + d)]
+                off += d
+            end
+        end
+
+        push!(out, q_fine)
+        q = q_fine
+    end
+
+    return out
+end
+
+"""
+    solve_direct(tower::SheafTower, target_values) -> Vector{Vector{Float64}}
+
+Baseline: harmonic extension on the fully expanded finest sheaf `tower.levels[end]`, pinning the
+same targets that [`solve_hierarchical`](@ref) pins. Every agent moves independently, so teams
+may deform — the internal formation edges are penalised, not enforced.
+
+Returns per-vertex values on the finest level. This is the unconstrained optimum against which
+the hierarchical solution is measured; see [`approximation_gap`](@ref).
+"""
+function solve_direct(tower::SheafTower, target_values::AbstractVector)
+    boundary = _boundary_dict(tower, target_values)
+    x, _ = harmonic_extension(tower.levels[end], boundary)
+    return _per_vertex(tower.levels[end], Vector(x))
+end
+
+"""
+    sheaf_energy(F::EuclideanSheaf, x::AbstractVector) -> Float64
+
+Dirichlet energy `‖δx‖²` of a flat cochain `x` on `F`, where `δ` is the
+[`coboundary_map`](@ref). This is the quantity both solves minimise, and the common yardstick
+that makes them comparable.
+"""
+function sheaf_energy(F::EuclideanSheaf, x::AbstractVector)
+    d = coboundary_map(F)
+    return sum(abs2, d * x)
+end
+
+sheaf_energy(F::EuclideanSheaf, q::AbstractVector{<:AbstractVector}) =
+    sheaf_energy(F, reduce(vcat, q))
+
+"""
+    approximation_gap(tower::SheafTower, target_values)
+        -> (; hierarchical, direct, gap, relative_gap)
+
+Energy of both solutions measured on the *finest* sheaf, and their difference.
+
+`gap` is guaranteed nonnegative up to floating-point tolerance, and this is a theorem rather
+than an empirical observation. The hierarchical solution satisfies every constraint the direct
+problem imposes plus the extra requirement that each team lie exactly on its space of global
+sections; it is therefore a feasible point of the direct problem, and a feasible point can never
+beat the optimum. Equality holds exactly when the direct optimum was already fibrewise-exact —
+rigid teams pinned to a single target are the equality case. A positive gap quantifies what
+insisting on rigid formations costs: it is the energy the direct solve recovers by letting teams
+deform.
+
+`relative_gap` is `gap / direct`, or `0.0` when both energies vanish.
+"""
+function approximation_gap(tower::SheafTower, target_values::AbstractVector)
+    F = tower.levels[end]
+    q_h = solve_hierarchical(tower, target_values)[end]
+    q_d = solve_direct(tower, target_values)
+
+    E_h = sheaf_energy(F, q_h)
+    E_d = sheaf_energy(F, q_d)
+    gap = E_h - E_d
+    scale = max(E_d, eps(Float64))
+    relative_gap = E_d <= eps(Float64) && abs(gap) <= eps(Float64) ? 0.0 : gap / scale
+
+    return (hierarchical = E_h, direct = E_d, gap = gap, relative_gap = relative_gap)
+end
+
+# ---------------------------------------------------------------------------
+# Dynamics binding cascade (Issue 012)
+# ---------------------------------------------------------------------------
+
+"""
+    AgentBinding(; dynamics=nothing, K_lqr=nothing, initial_position=nothing)
+
+Per-agent dynamics override. Any field left `nothing` falls back to the enclosing team's
+binding, then to successively more distant ancestors — see [`resolve_dynamics`](@ref). Fields
+resolve independently: an agent may override only its initial position while inheriting its
+dynamics model from an ancestor.
+"""
+Base.@kwdef struct AgentBinding
+    dynamics::Union{Nothing,AbstractAgentDynamics} = nothing
+    K_lqr::Union{Nothing,Matrix{Float64}} = nothing
+    initial_position::Union{Nothing,Vector{Float64}} = nothing
+end
+
+"""
+    SystemBinding(; dynamics=nothing, K_lqr=nothing, children=Dict(), agents=Dict())
+
+Dynamics bindings for one node of the system tree, mirroring the structure of the
+[`NestedSystemSpec`](@ref) it is resolved against.
+
+`dynamics`/`K_lqr` apply to every leaf agent in this subtree unless a descendant overrides them.
+`children` maps a child system's name to its own `SystemBinding`. `agents` maps a local agent
+index within a [`LeafTeam`](@ref) to an [`AgentBinding`](@ref).
+
+Child names and agent indices are validated against the spec during [`resolve_dynamics`](@ref):
+a name or index present here but absent from the spec is an error, so a typo surfaces
+immediately rather than as a silently-unbound agent.
+"""
+Base.@kwdef struct SystemBinding
+    dynamics::Union{Nothing,AbstractAgentDynamics} = nothing
+    K_lqr::Union{Nothing,Matrix{Float64}} = nothing
+    children::Dict{Symbol,SystemBinding} = Dict{Symbol,SystemBinding}()
+    agents::Dict{Int,AgentBinding} = Dict{Int,AgentBinding}()
+end
+
+"""
+    homogeneous_binding(dyn; K_lqr=zeros(0,0)) -> SystemBinding
+
+Shorthand for a root-level binding applying `dyn`/`K_lqr` to every agent in the tree — the
+common case, and the degenerate case that reproduces the old flat `HomogeneousDynamics`.
+"""
+homogeneous_binding(dyn::AbstractAgentDynamics; K_lqr::Matrix{Float64}=zeros(0, 0)) =
+    SystemBinding(dynamics=dyn, K_lqr=K_lqr)
+
+"""
+    ResolvedAgent
+
+A fully-bound leaf agent: its global agent index (matching [`SheafTower`](@ref)'s
+`agent_vertices`), its dotted path in the tree (for error messages and debugging), and the
+dynamics, gain, and initial position that won the inheritance cascade.
+"""
+struct ResolvedAgent
+    agent_index::Int
+    path::Vector{Symbol}
+    dynamics::AbstractAgentDynamics
+    K_lqr::Matrix{Float64}
+    initial_position::Vector{Float64}
+end
+
+"""
+    _fold(inherited::AgentBinding, local_::AgentBinding) -> AgentBinding
+
+Overlay `local_` on `inherited`, field by field: a non-`nothing` local field replaces the
+inherited one, a `nothing` field leaves the inherited value intact. This independence — not
+replacing the whole binding wholesale — is what lets an agent override just its initial
+position while still inheriting its dynamics model.
+"""
+_fold(inherited::AgentBinding, local_::AgentBinding) = AgentBinding(
+    dynamics = something(local_.dynamics, inherited.dynamics, Some(nothing)),
+    K_lqr = something(local_.K_lqr, inherited.K_lqr, Some(nothing)),
+    initial_position = something(local_.initial_position, inherited.initial_position, Some(nothing)),
+)
+
+_fold_system(inherited::AgentBinding, sb::SystemBinding) = _fold(inherited,
+    AgentBinding(dynamics=sb.dynamics, K_lqr=sb.K_lqr))
+
+"""
+    resolve_dynamics(spec::NestedSystemSpec, ctx::SystemBinding) -> Vector{ResolvedAgent}
+
+Walk `spec`'s tree carrying the inherited binding, overriding it wherever `ctx` supplies a more
+specific value, and return one [`ResolvedAgent`](@ref) per leaf agent in global agent-index
+order (matching [`SheafTower`](@ref)'s `agent_vertices`).
+
+Precedence, most specific first: per-agent, leaf team, nearer ancestor, root default. Each field
+resolves independently.
+
+Throws if any agent ends with no `dynamics` bound anywhere up its chain, or if `ctx` names a
+child or agent index that does not exist in `spec` — both errors report the full dotted path.
+"""
+function resolve_dynamics(spec::NestedSystemSpec, ctx::SystemBinding)
+    resolved = ResolvedAgent[]
+    next_idx = Ref(1)
+    _resolve_dynamics!(resolved, next_idx, spec.root, ctx, AgentBinding(), Symbol[])
+    return resolved
+end
+
+function _resolve_dynamics!(resolved::Vector{ResolvedAgent}, next_idx::Ref{Int},
+                             node::RefinedSystem, ctx::SystemBinding,
+                             inherited::AgentBinding, path::Vector{Symbol})
+    !isempty(ctx.agents) && throw(ArgumentError(
+        "SystemBinding declares `agents` at $(join([path; node.name], ".")), but $(node.name) " *
+        "is a RefinedSystem — per-agent overrides belong on the LeafTeam that owns them"))
+    for name in keys(ctx.children)
+        any(c -> c.name == name, node.children) || throw(ArgumentError(
+            "SystemBinding names child :$name at $(join([path; node.name], ".")), but " *
+            "$(node.name) has no such child (children: $(join([c.name for c in node.children], ", ")))"))
+    end
+
+    here = _fold_system(inherited, ctx)
+    for c in node.children
+        child_ctx = get(ctx.children, c.name, SystemBinding())
+        _resolve_dynamics!(resolved, next_idx, c, child_ctx, here, push!(copy(path), c.name))
+    end
+end
+
+function _resolve_dynamics!(resolved::Vector{ResolvedAgent}, next_idx::Ref{Int},
+                             node::LeafTeam, ctx::SystemBinding,
+                             inherited::AgentBinding, path::Vector{Symbol})
+    !isempty(ctx.children) && throw(ArgumentError(
+        "SystemBinding declares children at $(join(path, ".")), but $(node.name) is a LeafTeam " *
+        "with no children — use `agents` to bind individual agents by local index"))
+    for idx in keys(ctx.agents)
+        @argcheck 1 <= idx <= node.n_agents "SystemBinding names agent $idx at $(join(path, ".")), out of range 1:$(node.n_agents)"
+    end
+
+    here = _fold_system(inherited, ctx)
+    for i in 1:node.n_agents
+        local_binding = get(ctx.agents, i, AgentBinding())
+        b = _fold(here, local_binding)
+        b.dynamics === nothing && throw(ArgumentError(
+            "no dynamics bound for agent $i at $(join([path; Symbol(i)], ".")) — declare a " *
+            "`dynamics` at this agent, this team, or an ancestor"))
+        agent_index = next_idx[]
+        next_idx[] += 1
+        K_lqr = something(b.K_lqr, Some(zeros(0, 0)))
+        initial_position = something(b.initial_position, Some(_default_initial_position(b.dynamics, agent_index)))
+        push!(resolved, ResolvedAgent(agent_index, [path; Symbol(i)], b.dynamics, K_lqr, initial_position))
+    end
+end
+
+# ---------------------------------------------------------------------------
+# Multi-pin observation helpers
+# ---------------------------------------------------------------------------
+
+"""
+    translation_pin(n_members::Int, D::Int, k::Int) -> RawRestriction
+
+A restriction map pinning direct member `k`'s **translation** components (the first `D-1`
+coordinates) to a target, deliberately leaving the homogeneous row (`D`) unconstrained.
+
+Meant for every *redundant* pin beyond the first when several agents around a rigid team each
+observe the *same* target (see [`redundant_pin`](@ref)). [`project`](@ref) materializes as a full
+`D×D` identity block, homogeneous row included; a single such pin is fine (it unambiguously forces
+that row to `1`), but *several* pins to the same target are mutually inconsistent for a rigid body
+by construction — that inconsistency is the point, it rebalances the team's "vote" against
+competing edges elsewhere in a tower. Left unmodified, the least-squares compromise that
+inconsistency produces doesn't stay confined to translation: it drags the homogeneous row away
+from `1` too, which — because these affine restriction maps only represent *pure* translation
+correctly when that row is exactly `1` — rescales the entire rigid body's geometry.
+`translation_pin` avoids this by never contesting anything but translation, leaving only the first,
+unmodified [`project`](@ref)`(1)` pin responsible for anchoring the homogeneous row.
+
+This is the mechanism [`translation_pin`](@ref) exists to *suppress*; leaving pins full and
+untruncated on purpose is a legitimate, different construction — see the "emergent rescaling"
+literate example (`docs/literate/nested/rescaling_formation.jl`), where several agents are *each*
+pinned to a *different* target and the resulting homogeneous-coordinate drift is used deliberately
+to let a rigid team absorb divergent targets by uniform rescaling rather than shearing.
+"""
+function translation_pin(n_members::Int, D::Int, k::Int)
+    M = zeros(D, n_members * D)
+    for i in 1:(D - 1)
+        M[i, (k - 1) * D + i] = 1.0
+    end
+    return RawRestriction(M)
+end
+
+"""
+    redundant_pin(n_members::Int, D::Int, k::Int) -> RestrictionSpec
+
+[`project`](@ref)`(1)` for the first (`k == 1`) pin, [`translation_pin`](@ref) for every pin after
+that — the system-map to use for member `k` of a `1:2:n_members`-style redundant-pin scheme that
+lets several agents jointly vote on tracking one target without corrupting the homogeneous
+coordinate.
+"""
+redundant_pin(n_members::Int, D::Int, k::Int) = k == 1 ? project(1) : translation_pin(n_members, D, k)
+
+"""
+    agent_index_ranges(team_sizes::Vector{Int}) -> Vector{UnitRange{Int}}
+
+Contiguous index ranges into a [`SheafTower`](@ref)'s `agent_vertices` for a sequence of leaf
+teams of the given sizes, in the order those teams were added as children. Agent indices are
+assigned depth-first over the spec's tree (see `_assign_agent_ranges!`), so each leaf team
+occupies a contiguous block in visitation order — this reconstructs those blocks from the team
+sizes alone, without reaching into the tower's private bookkeeping.
+"""
+function agent_index_ranges(team_sizes::Vector{Int})
+    ranges = Vector{UnitRange{Int}}()
+    off = 0
+    for m in team_sizes
+        push!(ranges, (off + 1):(off + m))
+        off += m
+    end
+    return ranges
+end
+
+# ---------------------------------------------------------------------------
+# Closed-loop simulation driver
+# ---------------------------------------------------------------------------
+
+"""
+    NestedEscortProblem(tower, bindings, target_trajectories; target_velocities=nothing,
+                        target_accelerations=nothing, dt=0.05, steps=200)
+
+A closed-loop tracking problem over a [`SheafTower`](@ref): `tower` supplies the topology and
+per-timestep [`solve_hierarchical`](@ref) reference solve, `bindings` resolves per-agent
+dynamics/gain/initial state via [`resolve_dynamics`](@ref), and `target_trajectories[t]` is a
+function `time -> Vector{Float64}` giving target `t`'s `D`-dimensional world position.
+`target_velocities`/`target_accelerations`, if supplied, enable feedforward tracking (see
+[`run_nested_escort_simulation`](@ref)).
+
+Mirrors `Layered.LayeredEscortProblem` structurally, built on `NestedSystems`'s tree-shaped
+primitives instead of `LayeredEscortSpec`'s flat ones.
+"""
+struct NestedEscortProblem
+    tower::SheafTower
+    bindings::SystemBinding
+    target_trajectories::Vector{Any}
+    target_velocities::Union{Nothing,Vector{Any}}
+    target_accelerations::Union{Nothing,Vector{Any}}
+    dt::Float64
+    steps::Int
+end
+
+NestedEscortProblem(tower::SheafTower, bindings::SystemBinding, target_trajectories::Vector;
+                     target_velocities=nothing, target_accelerations=nothing,
+                     dt::Float64=0.05, steps::Int=200) =
+    NestedEscortProblem(tower, bindings, Vector{Any}(target_trajectories),
+                        target_velocities === nothing ? nothing : Vector{Any}(target_velocities),
+                        target_accelerations === nothing ? nothing : Vector{Any}(target_accelerations),
+                        dt, steps)
+
+"""
+    NestedEscortResult
+
+Output of [`run_nested_escort_simulation`](@ref). `sim_data[step][agent]` is the agent's raw
+dynamics state (length `state_dim(dyn)`); `qstar_history[step][agent]` is the `D`-dimensional
+hierarchical reference the agent was tracking that step (`tower.agent_vertices` order);
+`target_history[step][target]` is the target's `D`-dimensional world position that step.
+"""
+struct NestedEscortResult
+    problem::NestedEscortProblem
+    sim_data::Vector{Vector{Vector{Float64}}}
+    qstar_history::Vector{Vector{Vector{Float64}}}
+    target_history::Vector{Vector{Vector{Float64}}}
+end
+
+"""
+    run_nested_escort_simulation(prob::NestedEscortProblem; use_feedforward::Bool=false) -> NestedEscortResult
+
+Run a closed-loop simulation over `prob.tower`'s spec: at each step, solve the tower
+hierarchically for the current target positions, lift the result to per-agent references, and
+step each agent's `AgentState` toward that reference.
+
+`use_feedforward` toggles two things, exactly as in `Layered.run_layered_escort_simulation`:
+whether `AgentState` uses a joint (position+velocity) Tikhonov filter, and whether velocity/
+acceleration references are additionally solved for (via the same hierarchical machinery, on
+`prob.target_velocities`/`prob.target_accelerations`) and passed to `step_agent!` for
+differential-flatness feedforward.
+"""
+function run_nested_escort_simulation(prob::NestedEscortProblem; use_feedforward::Bool=false)
+    tower = prob.tower
+    resolved = resolve_dynamics(tower.spec, prob.bindings)   # tower.agent_vertices order (Issue 012)
+    agent_states = [AgentState(initial_state(r.dynamics, r.initial_position), r.dynamics,
+                                prob.dt, r.K_lqr, 0.02; use_velocity=use_feedforward)
+                    for r in resolved]
+
+    time_grid = 0:prob.dt:(prob.steps * prob.dt)
+    sim_data = Vector{Vector{Vector{Float64}}}()
+    qstar_history = Vector{Vector{Vector{Float64}}}()
+    target_history = Vector{Vector{Vector{Float64}}}()
+
+    for step in 1:prob.steps
+        t = time_grid[step]
+        p_targets = [traj(t) for traj in prob.target_trajectories]
+        q = solve_hierarchical(tower, p_targets)[end]
+        qstar_agents = [q[v] for v in tower.agent_vertices]
+        push!(qstar_history, qstar_agents)
+        push!(target_history, [q[v] for v in tower.target_vertices])
+
+        qdot_agents = qddot_agents = nothing
+        if use_feedforward && prob.target_velocities !== nothing
+            v = solve_hierarchical(tower, [vt(t) for vt in prob.target_velocities])[end]
+            qdot_agents = [v[vtx] for vtx in tower.agent_vertices]
+        end
+        if use_feedforward && prob.target_accelerations !== nothing
+            a = solve_hierarchical(tower, [at(t) for at in prob.target_accelerations])[end]
+            qddot_agents = [a[vtx] for vtx in tower.agent_vertices]
+        end
+
+        step_states = Vector{Vector{Float64}}()
+        for i in eachindex(agent_states)
+            pd = length(position_indices(agent_states[i].dyn))
+            q_ref = qstar_agents[i][1:pd]
+            if use_feedforward && qdot_agents !== nothing && qddot_agents !== nothing
+                step_agent!(agent_states[i], q_ref, qdot_agents[i][1:pd], qddot_agents[i][1:pd], prob.dt)
+            elseif use_feedforward && qdot_agents !== nothing
+                step_agent!(agent_states[i], q_ref, qdot_agents[i][1:pd], prob.dt)
+            else
+                step_agent!(agent_states[i], q_ref, prob.dt)
+            end
+            push!(step_states, copy(agent_states[i].x))
+        end
+        push!(sim_data, step_states)
+    end
+
+    return NestedEscortResult(prob, sim_data, qstar_history, target_history)
 end
 
 end # module NestedSystems
