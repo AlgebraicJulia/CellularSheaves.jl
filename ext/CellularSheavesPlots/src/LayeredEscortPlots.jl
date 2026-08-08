@@ -470,4 +470,156 @@ end
     end
 end
 
+"""
+    compute_escort_6panel_limits(sim_data, qstar_history, target_history, time_grid, r1, r2, r3)
+
+Compute static axis limits for 6-panel escort animation.
+"""
+function compute_escort_6panel_limits(sim_data, qstar_history, target_history, time_grid, r1, r2, r3)
+    STEPS = min(length(sim_data), length(time_grid), length(qstar_history), length(target_history))
+    
+    all_x = Float64[]
+    all_y = Float64[]
+    for step in 1:STEPS
+        for i in 1:15
+            push!(all_x, sim_data[step][i][1])
+            push!(all_y, sim_data[step][i][2])
+        end
+        push!(all_x, target_history[step][1][1])
+        push!(all_y, target_history[step][1][2])
+        push!(all_x, target_history[step][2][1])
+        push!(all_y, target_history[step][2][2])
+    end
+    cx = (minimum(all_x) + maximum(all_x)) / 2
+    cy = (minimum(all_y) + maximum(all_y)) / 2
+    span = max(maximum(all_x) - minimum(all_x), maximum(all_y) - minimum(all_y)) / 2 + 0.5
+    top_down_lims = ((cx - span, cx + span), (cy - span, cy + span))
+
+    form_err1 = zeros(STEPS)
+    form_err2 = zeros(STEPS)
+    track_err1 = zeros(STEPS)
+    track_err2 = zeros(STEPS)
+    track_err3 = zeros(STEPS)
+
+    for step in 1:STEPS
+        s = sim_data[step]
+        p1 = target_history[step][1]
+        p2 = target_history[step][2]
+        p3 = target_history[step][3]
+
+        r1_pos = reduce(hcat, [s[i][1:3] for i in 1:6])'
+        c1 = sum(r1_pos, dims=1) / 6
+        err1_sum = sum(abs(norm(r1_pos[i, 1:2] - c1[1:2]) - r1) for i in 1:6)
+        form_err1[step] = err1_sum / 6
+
+        r2_pos = reduce(hcat, [s[i][1:3] for i in 7:12])'
+        c2 = sum(r2_pos, dims=1) / 6
+        err2_sum = sum(abs(norm(r2_pos[i, 1:2] - c2[1:2]) - r2) for i in 1:6)
+        form_err2[step] = err2_sum / 6
+
+        track_err1[step] = norm(c1[1:2] - p1[1:2])
+        track_err2[step] = norm(c2[1:2] - p2[1:2])
+        
+        r3_pos = reduce(hcat, [s[i][1:3] for i in 13:15])'
+        c3 = sum(r3_pos, dims=1) / 3
+        track_err3[step] = norm(c3[1:2] - p3[1:2])
+    end
+
+    max_form_err = max(maximum(form_err1), maximum(form_err2), 0.05) * 1.2
+    max_track_err = max(maximum(track_err1), maximum(track_err2), maximum(track_err3), 0.05) * 1.2
+
+    return (
+        top_down = top_down_lims,
+        rel_lims1 = ((-r1*1.6, r1*1.6), (-r1*1.6, r1*1.6)),
+        rel_lims2 = ((-r2*1.6, r2*1.6), (-r2*1.6, r2*1.6)),
+        rel_lims3 = ((-r3*1.6, r3*1.6), (-r3*1.6, r3*1.6)),
+        form_err_max = max_form_err,
+        track_err_max = max_track_err,
+        form_err1 = form_err1,
+        form_err2 = form_err2,
+        track_err1 = track_err1,
+        track_err2 = track_err2,
+        track_err3 = track_err3
+    )
+end
+
+"""
+    plot_comprehensive_escort_frame(sim_data, qstar_history, target_history, time_grid, step_idx, limits, r1, r2, r3; title_prefix="")
+
+Render a single 6-panel frame for multi-ring escort simulation.
+"""
+function plot_comprehensive_escort_frame(sim_data, qstar_history, target_history, time_grid, step_idx, limits, r1, r2, r3; title_prefix="")
+    t_curr = time_grid[step_idx]
+    s = sim_data[step_idx]
+    qs = qstar_history[step_idx]
+    p1 = target_history[step_idx][1]
+    p2 = target_history[step_idx][2]
+    p3 = target_history[step_idx][3]
+
+    p1_plot = plot(title="Top-Down View", aspect_ratio=1, xlims=limits.top_down[1], ylims=limits.top_down[2], xlabel="x (m)", ylabel="y (m)")
+    scatter!(p1_plot, [p1[1]], [p1[2]], marker=:star5, markersize=10, color=:black, label="Target 1")
+    scatter!(p1_plot, [p2[1]], [p2[2]], marker=:star5, markersize=10, color=:darkgray, label="Target 2")
+    
+    r1_x = [s[i][1] for i in 1:6]
+    r1_y = [s[i][2] for i in 1:6]
+    scatter!(p1_plot, r1_x, r1_y, color=:steelblue, label="Ring 1 Agents")
+    plot!(p1_plot, [r1_x; r1_x[1]], [r1_y; r1_y[1]], color=:steelblue, linestyle=:dash, label="")
+
+    r2_x = [s[i][1] for i in 7:12]
+    r2_y = [s[i][2] for i in 7:12]
+    scatter!(p1_plot, r2_x, r2_y, color=:crimson, label="Ring 2 Agents")
+    plot!(p1_plot, [r2_x; r2_x[1]], [r2_y; r2_y[1]], color=:crimson, linestyle=:dash, label="")
+
+    r3_x = [s[i][1] for i in 13:15]
+    r3_y = [s[i][2] for i in 13:15]
+    scatter!(p1_plot, r3_x, r3_y, color=:forestgreen, label="Ring 3 Agents")
+    plot!(p1_plot, [r3_x; r3_x[1]], [r3_y; r3_y[1]], color=:forestgreen, linestyle=:dash, label="")
+
+    c1 = [sum(r1_x)/6, sum(r1_y)/6]
+    p2_plot = plot(title="Ring 1 Target-Relative", aspect_ratio=1, xlims=limits.rel_lims1[1], ylims=limits.rel_lims1[2], xlabel="Δx (m)", ylabel="Δy (m)")
+    scatter!(p2_plot, [0], [0], marker=:star5, markersize=8, color=:black, label="")
+    θ = range(0, 2π, length=100)
+    plot!(p2_plot, r1*cos.(θ), r1*sin.(θ), color=:gray, linestyle=:dot, label="")
+    scatter!(p2_plot, r1_x .- c1[1], r1_y .- c1[2], color=:steelblue, label="")
+
+    c2 = [sum(r2_x)/6, sum(r2_y)/6]
+    p3_plot = plot(title="Ring 2 Target-Relative", aspect_ratio=1, xlims=limits.rel_lims2[1], ylims=limits.rel_lims2[2], xlabel="Δx (m)", ylabel="Δy (m)")
+    scatter!(p3_plot, [0], [0], marker=:star5, markersize=8, color=:black, label="")
+    plot!(p3_plot, r2*cos.(θ), r2*sin.(θ), color=:gray, linestyle=:dot, label="")
+    scatter!(p3_plot, r2_x .- c2[1], r2_y .- c2[2], color=:crimson, label="")
+
+    c3 = [sum(r3_x)/3, sum(r3_y)/3]
+    p4_plot = plot(title="Ring 3 Target-Relative", aspect_ratio=1, xlims=limits.rel_lims3[1], ylims=limits.rel_lims3[2], xlabel="Δx (m)", ylabel="Δy (m)")
+    scatter!(p4_plot, [0], [0], marker=:star5, markersize=8, color=:black, label="")
+    scatter!(p4_plot, r3_x .- c3[1], r3_y .- c3[2], color=:forestgreen, label="")
+
+    p5_plot = plot(title="Formation Radius Error", xlabel="time (s)", ylabel="error (m)", xlims=(0, time_grid[end]), ylims=(0, limits.form_err_max))
+    plot!(p5_plot, time_grid[1:step_idx], limits.form_err1[1:step_idx], color=:steelblue, label="Ring 1 Error", linewidth=2)
+    plot!(p5_plot, time_grid[1:step_idx], limits.form_err2[1:step_idx], color=:crimson, label="Ring 2 Error", linewidth=2)
+
+    p6_plot = plot(title="Centroid Tracking Error", xlabel="time (s)", ylabel="error (m)", xlims=(0, time_grid[end]), ylims=(0, limits.track_err_max))
+    plot!(p6_plot, time_grid[1:step_idx], limits.track_err1[1:step_idx], color=:steelblue, label="Ring 1 Centroid", linewidth=2)
+    plot!(p6_plot, time_grid[1:step_idx], limits.track_err2[1:step_idx], color=:crimson, label="Ring 2 Centroid", linewidth=2)
+    plot!(p6_plot, time_grid[1:step_idx], limits.track_err3[1:step_idx], color=:forestgreen, label="Ring 3 Centroid", linewidth=2)
+
+    t_str = @sprintf("%.2f s", t_curr)
+    main_title = isempty(title_prefix) ? "Multi-Agent Escort Simulation (t = $t_str)" : "$title_prefix (t = $t_str)"
+    return plot(p1_plot, p2_plot, p3_plot, p4_plot, p5_plot, p6_plot, layout=(2, 3), size=(1200, 700), plot_title=main_title)
+end
+
+"""
+    animate_comprehensive_escort(sim_data, qstar_history, target_history, time_grid, r1, r2, r3, filename; frame_step=4, fps=15, title_prefix="")
+
+Generate animation GIF for multi-ring escort simulation.
+"""
+function animate_comprehensive_escort(sim_data, qstar_history, target_history, time_grid, r1, r2, r3, filename; frame_step=4, fps=15, title_prefix="")
+    limits = compute_escort_6panel_limits(sim_data, qstar_history, target_history, time_grid, r1, r2, r3)
+    STEPS = min(length(sim_data), length(time_grid), length(qstar_history), length(target_history))
+    anim = @animate for step in 1:frame_step:STEPS
+        plot_comprehensive_escort_frame(sim_data, qstar_history, target_history, time_grid, step, limits, r1, r2, r3; title_prefix=title_prefix)
+    end
+    gif(anim, filename, fps=fps)
+    return anim
+end
+
 end # module

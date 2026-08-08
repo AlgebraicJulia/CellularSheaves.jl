@@ -47,6 +47,10 @@ include("DistributedLayeredControl.jl")
 import .DistributedLayeredControl
 export DistributedLayeredControl
 
+include("Layered.jl")
+import .Layered
+export Layered
+
 include("CoordinationBenchmarks.jl")
 import .CoordinationBenchmarks
 export CoordinationBenchmarks
