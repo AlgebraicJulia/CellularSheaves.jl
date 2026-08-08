@@ -867,8 +867,92 @@ function LinearAlgebra.lmul!(α::Number, A::BlockSparseMatrix)
     return A
 end
 
+function LinearAlgebra.lmul!(D::Diagonal, A::BlockSparseMatrix{T, I}) where {T, I}
+    @assert size(D, 2) == size(A, 1)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+            Ae = block(A, u, v, e)
+            rows = rowrange(A, u)
+
+            jloc = zero(I)
+
+            for j in cols
+                jloc += one(I)
+                iloc  = zero(I)
+
+                for i in rows
+                    iloc += one(I); Ae[iloc, jloc] *= D.diag[i]
+                end
+            end
+        end
+    end
+
+    return A
+end
+
 function LinearAlgebra.rmul!(A::BlockSparseMatrix, α::Number)
     return lmul!(α, A)
+end
+
+function LinearAlgebra.rmul!(A::BlockSparseMatrix{T, I}, D::Diagonal) where {T, I}
+    @assert size(A, 2) == size(D, 1)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u    = A.tgt[e]
+            Ae   = block(A, u, v, e)
+            rows = rowrange(A, u)
+
+            jloc = zero(I)
+
+            for j in cols
+                Djj = D.diag[j]
+
+                jloc += one(I)
+                iloc  = zero(I)
+
+                for i in rows
+                    iloc += one(I) ; Ae[iloc, jloc] *= Djj
+                end
+            end
+        end
+    end
+
+    return A
+end
+
+function LinearAlgebra.ldiv!(D::Diagonal, A::BlockSparseMatrix{T, I}) where {T, I}
+    @assert size(D, 2) == size(A, 1)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+            Ae = block(A, u, v, e)
+            rows = rowrange(A, u)
+
+            jloc = zero(I)
+
+            for j in cols
+                jloc += one(I)
+                iloc  = zero(I)
+
+                for i in rows
+                    iloc += one(I)
+                    Ae[iloc, jloc] /= D.diag[i]
+                end
+            end
+        end
+    end
+
+    return A
 end
 
 function LinearAlgebra.ldiv!(α::Number, A::BlockSparseMatrix)
@@ -876,9 +960,74 @@ function LinearAlgebra.ldiv!(α::Number, A::BlockSparseMatrix)
     return A
 end
 
+function LinearAlgebra.rdiv!(A::BlockSparseMatrix{T, I}, D::Diagonal) where {T, I}
+    @assert size(A, 2) == size(D, 1)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u    = A.tgt[e]
+            Ae   = block(A, u, v, e)
+            rows = rowrange(A, u)
+
+            jloc = zero(I)
+
+            for j in cols
+                Djj = D.diag[j]
+
+                jloc += one(I)
+                iloc  = zero(I)
+
+                for i in rows
+                    iloc += one(I); Ae[iloc, jloc] /= Djj
+                end
+            end
+        end
+    end
+
+    return A
+end
+
 function LinearAlgebra.rdiv!(A::BlockSparseMatrix, α::Number)
     return ldiv!(α, A)
 end
+
+function diag!(d::AbstractVector, A::BlockSparseMatrix{T, I}) where {T, I}
+    @assert length(d) ≤ nrows(A)
+    @assert length(d) ≤ ncols(A)
+
+    fill!(d, false)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+            rows = rowrange(A, u)
+            both = rows ∩ cols
+
+            if !isempty(both)
+                Ae = block(A, u, v, e)
+
+                for i in both
+                    iloc = i - first(rows) + one(I)
+                    jloc = i - first(cols) + one(I)
+                    d[i] = Ae[iloc, jloc]
+                end
+            end
+        end
+    end
+
+    return d
+end
+
+function LinearAlgebra.diag(A::BlockSparseMatrix{T}) where {T}
+    n = min(nrows(A), ncols(A))
+    d = Vector{T}(undef, n)
+    return diag!(d, A)
+end
+
 
 function LinearAlgebra.axpy!(α::Number, J::UniformScaling, A::BlockSparseMatrix{T, I}) where {T, I}
     λ = α * J.λ
@@ -923,7 +1072,17 @@ end
 
 function LinearAlgebra.norm(A::HermOrSymBlockSparseMatrix, p::Real=2)
     uA, tA = unwrapsym(A)
-    return symnorm_impl(tA, Symbol(A.uplo), uA, p)
+    uplo = A.uplo == 'L' ? :L : :U
+
+    if p == Inf
+        return symnorm_impl_inf(uplo, uA)
+    elseif p == 2
+        return symnorm_impl_2(tA, uplo, uA)
+    elseif p == 1
+        return symnorm_impl_1(uplo, uA)
+    else
+        return symnorm_impl(tA, uplo, uA, p)
+    end
 end
 
 function norm_impl(A::BlockSparseMatrix, p::Real)
@@ -937,20 +1096,150 @@ function symnorm_impl(tA::Val{TA}, uplo::Symbol, A::BlockSparseMatrix{T}, p::Rea
     @inbounds for v in vtxs(A)
         for e in srcrange(A, v)
             u = A.tgt[e]
-            AE = block(A, u, v, e)
 
-            if u == v
-                if TA === :N
-                    SE = Symmetric(AE, uplo)
+            if intriangle(u, v, uplo)
+                AE = block(A, u, v, e)
+
+                if u == v
+                    nxt = norm(wrapsym(AE, tA, uplo), p)
+                    out = norm((out, nxt),            p)
                 else
-                    SE = Hermitian(AE, uplo)
+                    nxt = norm(AE, p)
+                    out = norm((out, nxt, nxt), p)
+                end
+            end
+        end
+    end
+
+    return out
+end
+
+function symnorm_impl_inf(uplo::Symbol, A::BlockSparseMatrix{T}) where T
+    out = zero(real(T))
+
+    @inbounds for v in vtxs(A)
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+
+            if intriangle(u, v, uplo)
+                AE = block(A, u, v, e)
+
+                if u == v
+                    nxt = symnorminf(AE, uplo)
+                else
+                    nxt = maximum(abs, AE)
                 end
 
-                nxt = norm(SE, p)
-                out = norm((out, nxt), p)
-            else
-                nxt = norm(AE, p)
-                out = norm((out, nxt, nxt), p)
+                out = max(out, nxt)
+            end
+        end
+    end
+
+    return out
+end
+
+function symnorm_impl_1(uplo::Symbol, A::BlockSparseMatrix{T}) where T
+    out = zero(real(T))
+
+    @inbounds for v in vtxs(A)
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+
+            if intriangle(u, v, uplo)
+                AE = block(A, u, v, e)
+
+                if u == v
+                    nxt = symnorm1(AE, uplo)
+                else
+                    nxt = 2sum(abs, AE)
+                end
+
+                out += nxt
+            end
+        end
+    end
+
+    return out
+end
+
+function symnorm_impl_2(tA::Val{TA}, uplo::Symbol, A::BlockSparseMatrix{T}) where {T, TA}
+    out = zero(real(T)); maxabs = symnorm_impl_inf(uplo, A)
+
+    if !iszero(maxabs)
+        imax = inv(maxabs)
+
+        @inbounds for v in vtxs(A)
+            for e in srcrange(A, v)
+                u = A.tgt[e]
+
+                if intriangle(u, v, uplo)
+                    AE = block(A, u, v, e)
+
+                    if u == v
+                        out += symsqnorm2(AE, uplo, imax)
+                    else
+                        out += 2sqnorm2(AE, imax)
+                    end
+                end
+            end
+        end
+
+        out = maxabs * sqrt(out)
+    end
+
+    return out
+end
+
+function LinearAlgebra.dot(x::AbstractVector, A::BlockSparseMatrix, y::AbstractVector)
+    out = zero(real(promote_eltype(x, A, y)))
+
+    @inbounds for v in vtxs(A)
+        yv = view(y, colrange(A, v))
+
+        for e in srcrange(A, v)
+            u  = A.tgt[e]
+            Ae = block(A, u, v, e)
+            xu = view(x, rowrange(A, u))
+            out += dot(xu, Ae, yv)
+        end
+    end
+
+    return out
+end 
+
+function LinearAlgebra.dot(x::AbstractVector, A::HermOrSymBlockSparseMatrix, y::AbstractVector)
+    uA, tA = unwrapsym(A)
+
+    if A.uplo == 'L'
+        uplo = :L
+    else
+        uplo = :U
+    end
+
+    return symdot_impl(tA, uplo, x, uA, y)
+end
+
+function symdot_impl(tA::Val{TA}, uplo::Symbol, x::AbstractVector, A::BlockSparseMatrix, y::AbstractVector) where {TA}
+    out = zero(real(promote_eltype(x, A, y)))
+
+    @inbounds for v in vtxs(A)
+        xv = view(x, rowrange(A, v))
+        yv = view(y, colrange(A, v))
+
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+
+            if intriangle(u, v, uplo)
+                Ae = block(A, u, v, e)
+
+                if u == v
+                    out += dot(xv, wrapsym(Ae, tA, uplo), yv)
+                else
+                    xu = view(x, rowrange(A, u))
+                    yu = view(y, colrange(A, u))
+                    out += dot(xu, Ae, yv)
+                    out += dot(xv, wrapadj(Ae, tA), yu)
+                end
             end
         end
     end
@@ -1163,3 +1452,4 @@ function show_matrix_dense(io::IO, A::BlockSparseMatrix)
     print_matrix(io, A)
     return
 end
+
