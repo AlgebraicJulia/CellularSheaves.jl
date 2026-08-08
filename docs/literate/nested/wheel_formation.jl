@@ -1,42 +1,47 @@
 # # Hub-and-Spoke Wheel Escort Formation
 #
-# `n` targets orbit a large circle, each with its own escort ring, exactly as in
-# `n_ring_formation.jl` -- but instead of wiring the `n` rings together in a **cycle** through `n`
-# pairwise support pods, this page wires them into a **tree**: one extra, unanchored hub ring sits
-# at the center, and each escort ring gets its own single-agent support pod tied to *both* its own
-# ring's centroid and one dedicated agent of the hub. No ring or pod is shared between two
-# different bridge relationships, so (unlike the cycle) this is expressible as a single
-# `NestedSystemSpec` with no node needing two parents -- every pod touches exactly one ring and one
-# hub agent, and the hub absorbs all `n` spokes through `n` different `project(i)` indices into its
-# own agents.
+# `n` targets orbit a large circle, each escorted by its own ring of agents. The rings must also
+# stay coordinated with one another, and this page bridges them as a **tree**: a wheel.
 #
-# Watching the result: every pod sits *exactly* halfway along its own spoke (a direct consequence
-# of having exactly one edge to each end and nothing else pulling on it), and the hub's own agents
-# spread out to distinct positions around a small inner ring rather than collapsing to one point --
-# a real bicycle wheel, spokes meeting the hub at `n` different points. Rings track their targets
-# noticeably more tightly than the cyclic design does, though (see the measurement below) not
-# perfectly -- the hub is still one unanchored consensus point shared by every spoke.
+# One extra, unanchored hub ring sits at the centre. Each escort ring gets a single-agent support
+# pod, tied to that ring's centroid at one end and to one dedicated hub agent at the other. The
+# hub absorbs all `n` spokes through `n` different `project(i)` indices into its own agents.
+#
+# The structure matters: no ring or pod is shared between two bridges, since every pod touches
+# exactly one ring and one hub agent. Every node therefore needs only one parent, and the whole
+# thing fits a single `NestedSystemSpec`. The next page, `n_ring_formation.jl`, bridges the same
+# rings in a **cycle** instead -- which, as it turns out, neither fits as neatly nor tracks as
+# well.
+#
+# What to watch for in the result:
+#
+# - Every pod sits *exactly* halfway along its own spoke -- it has one edge to each end and
+#   nothing else pulling on it.
+# - The hub's agents spread out around a small inner ring instead of collapsing to a point: a real
+#   bicycle wheel, with spokes meeting the hub at `n` distinct places.
+# - Rings track their targets closely, but not perfectly. The hub is still one unanchored
+#   consensus point shared by every spoke, and the measurement below puts a number on what that
+#   costs.
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.NestedDSL
 using CellularSheaves.ControlSheaves.AgentControllers
 using LinearAlgebra
 using Statistics
 using Plots
 using Printf
 
-## `@__DIR__` resolves relative to Literate.jl's *output* location while a page is being
-## executed, not this file's own source directory -- so the plotting helpers are located from the
-## package root instead, which is stable regardless of how this script gets run. The simulation
-## driver and multi-pin helpers themselves live in `NestedSystems` (already `using`-ed above).
+## Located from the package root, not `@__DIR__`: while Literate.jl executes a page, `@__DIR__`
+## points at the *output* directory rather than at this file. The simulation driver and the
+## multi-pin helpers live in `NestedSystems`, already loaded above.
 include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_helpers.jl"))
 
 # ## Spec construction, parameterized by `n`
 #
 # Targets sit at angle `2π(i-1)/n` around a circle of radius `R_big`; ring `i`'s radius is a
-# `safety` fraction of the chord between adjacent targets, exactly as in `n_ring_formation.jl` --
-# rings on a wheel still need to avoid overlapping their neighbors, even though they no longer
-# touch each other directly.
+# `safety` fraction of the chord between adjacent targets, so that neighbouring rings never
+# overlap as `n` grows.
 
 escort_radius(n::Int, R_big::Real, m_i::Int, m_max::Int; safety::Real=0.35) =
     safety * R_big * sin(pi / n) * (m_i / m_max)
@@ -44,7 +49,8 @@ escort_radius(n::Int, R_big::Real, m_i::Int, m_max::Int; safety::Real=0.35) =
 """
     build_wheel_spec(n; m=fill(5, n), R_big=3.0, hub_radius=0.4, safety=0.35, D=4, pin_scheme=:redundant)
 
-Build the `n`-spoke hub-and-wheel `NestedSystemSpec`, its compiled `SheafTower`, and the agent
+Build the `n`-spoke hub-and-wheel specification -- the `NestedDSL` [`SystemFragment`](@ref) it is
+written as, the lowered `NestedSystemSpec`, its compiled `SheafTower`, and the agent
 index ranges for each ring/hub/pod (into `tower.agent_vertices`, in the order they were added --
 ring 1, ..., ring n, hub, pod 1, ..., pod n).
 
@@ -56,44 +62,41 @@ function build_wheel_spec(n::Int; m::Vector{Int}=fill(5, n), R_big::Real=3.0,
                           pin_scheme::Symbol=:redundant)
     @assert length(m) == n
     m_max = maximum(m)
-    rings = [LeafTeam(Symbol(:ring, i), :ring, m[i], escort_radius(n, R_big, m[i], m_max; safety=safety))
-             for i in 1:n]
-    hub = LeafTeam(:hub, :ring, n, hub_radius)
-    ## Single-agent pods use :path -- the only `kind` that accepts `n_agents == 1` (see
-    ## `build_escort_topology`); with one agent there's nothing to internally connect anyway.
-    pods = [LeafTeam(Symbol(:pod, i), :path, 1, 0.1) for i in 1:n]
+    ring_name(i) = Symbol(:ring, i)
+    pod_name(i) = Symbol(:pod, i)
 
-    children = AbstractSystemNode[rings; hub; pods]
-    ring_idx(i) = i
-    hub_idx = n + 1
-    pod_idx(i) = n + 1 + i
-
-    spoke_edges = SystemEdge[]
-    for i in 1:n
-        push!(spoke_edges, SystemEdge(ring_idx(i), pod_idx(i); src_map=centroid(), dst_map=project(1)))
-        push!(spoke_edges, SystemEdge(pod_idx(i), hub_idx; src_map=project(1), dst_map=project(i)))
-    end
-
-    root = RefinedSystem(:root, children, spoke_edges)
-    targets = [TargetSpec(Symbol(:t, i)) for i in 1:n]
-    observations = Observation[]
-    for i in 1:n
-        ks = pin_scheme == :redundant ? (1:2:m[i]) : (1:1)
-        for k in ks
-            system_map = pin_scheme == :redundant ? redundant_pin(m[i], D, k) : project(1)
-            push!(observations, Observation([ring_idx(i)], i; system_map=system_map))
+    ## One [`NestedDSL`](@ref) fragment, parameterized by `n`. Note `project(hub, i)` on the
+    ## second spoke edge: an endpoint may present *any* [`RestrictionSpec`](@ref), and here each
+    ## spoke deliberately grabs a different agent of the hub -- which is what makes the hub a
+    ## real wheel hub rather than a single shared point.
+    fragment = @nested_system begin
+        @dim D
+        for i in 1:n
+            @team $(ring_name(i)) = ring(m[i]; radius=escort_radius(n, R_big, m[i], m_max; safety=safety))
+        end
+        @team hub = ring(n; radius=hub_radius)
+        for i in 1:n
+            ## Single-agent pods use :path -- the only `kind` that accepts `n_agents == 1` (see
+            ## `build_escort_topology`); with one agent there's nothing to internally connect.
+            @team $(pod_name(i)) = path(1; radius=0.1)
+        end
+        for i in 1:n
+            @target $(Symbol(:t, i))
+            @link centroid($(ring_name(i))) => $(pod_name(i))
+            @link $(pod_name(i)) => project(hub, i)
+            for k in (pin_scheme == :redundant ? (1:2:m[i]) : (1:1))
+                @observe via($(ring_name(i)), pin_scheme == :redundant ?
+                             redundant_pin(m[i], D, k) : project(1)) => $(Symbol(:t, i))
+            end
         end
     end
-    spec = NestedSystemSpec(root, targets, observations, D, true)
-    tower = build_sheaf_tower(spec)
 
-    team_sizes = Int[m; n; fill(1, n)]
-    ranges = agent_index_ranges(team_sizes)
-    ring_ranges = ranges[1:n]
-    hub_range = ranges[n + 1]
-    pod_ranges = ranges[(n + 2):end]
+    system = compile_nested_system(fragment)
+    ring_ranges = [agent_range(system, ring_name(i)) for i in 1:n]
+    hub_range = agent_range(system, :hub)
+    pod_ranges = [agent_range(system, pod_name(i)) for i in 1:n]
 
-    return spec, tower, ring_ranges, hub_range, pod_ranges
+    return fragment, system.spec, system.tower, ring_ranges, hub_range, pod_ranges
 end
 
 const N = 5
@@ -102,17 +105,16 @@ const R_BIG = 3.0
 const HUB_RADIUS = 0.4
 const D = 4
 
-spec, tower, ring_ranges, hub_range, pod_ranges = build_wheel_spec(N; m=M, R_big=R_BIG, hub_radius=HUB_RADIUS)
+fragment, spec, tower, ring_ranges, hub_range, pod_ranges = build_wheel_spec(N; m=M, R_big=R_BIG, hub_radius=HUB_RADIUS)
 println("Ring radius: ", round(escort_radius(N, R_BIG, M[1], maximum(M)), digits=3), " m ",
        "  (chord = ", round(2R_BIG * sin(pi / N), digits=3), " m)")
 
 # ## A tree, not a cycle -- and what that does and doesn't buy
 #
-# Every pod has exactly two edges: one to its own ring's centroid, one to one dedicated hub agent
-# -- and nothing else. That's the general "zero-tension follower" mechanism: a node with exactly
-# one tie to some value `x` and nothing else constraining it costs nothing for *any* value of
-# `x`, so it settles exactly at the value that satisfies it, which for two equal-weight ties means
-# exactly the midpoint. Directly measurable:
+# Every pod has exactly two edges and nothing else: one to its ring's centroid, one to a hub
+# agent. This is the "zero-tension follower" mechanism. A node tied to some value `x` and
+# otherwise unconstrained costs nothing for *any* value of `x`, so it simply settles wherever its
+# ties are satisfied -- and for two equal-weight ties, that is the midpoint. Directly measurable:
 
 q0 = solve_hierarchical(tower, [[R_BIG * cos(2π * (i - 1) / N), R_BIG * sin(2π * (i - 1) / N), 1.5, 1.0]
                                 for i in 1:N])[end]
@@ -122,12 +124,11 @@ pod1 = q0[tower.agent_vertices[pod_ranges[1][1]]]
 mid1 = (ring1_centroid .+ hub1) ./ 2
 @printf("pod1 = %s\nmidpoint(ring1, hub1) = %s\n", round.(pod1, digits=4), round.(mid1, digits=4))
 
-# But that only decouples each *pod* from feeling any tension -- it doesn't decouple the *rings*
-# from each other. The hub is a single rigid team (`n_agents` maintaining a fixed relative
-# geometry), so all `n` spokes are, underneath, all pulling on the same shared `D`-dimensional hub
-# translation. That's still a real coupling path between rings, just a much longer and more
-# diluted one than the cycle's direct ring-pod-ring edges. Measured the same way as
-# `n_ring_formation.jl`:
+# That decouples each *pod* from feeling tension, but it does not decouple the *rings* from each
+# other. The hub is a single rigid team holding a fixed relative geometry, so underneath, all `n`
+# spokes pull on one shared `D`-dimensional hub translation. That is still a real coupling path
+# between rings -- just far longer and more diluted than the cycle's direct ring-pod-ring edges.
+# Measured the same way as in `n_ring_formation.jl`:
 
 """
     target_response_weights(tower, ring_ranges, ring_idx, n) -> Vector{Float64}
@@ -156,13 +157,15 @@ end
 w = target_response_weights(tower, ring_ranges, 1, N)
 @printf("ring1's target-response weights: %s (sum=%.4f)\n", round.(w, digits=4), sum(w))
 
-# Ring 1's own weight comes out around `0.74` here -- noticeably higher than the cyclic design's
-# `0.6` (see `n_ring_formation.jl`), because the hub's pull is now divided among all `n` branches
-# instead of concentrated in `2` cyclic neighbors, and the response to any *one* other ring is
-# correspondingly smaller (and, interestingly, not uniform across ring index -- it depends on
-# angular distance around the hub, since the hub's own agents sit at fixed offsets around a small
-# rigid ring). This is a genuinely better topology for this purpose, not a free one: a tree with a
-# shared unanchored consensus node still isn't the same thing as `n` fully independent rings.
+# Ring 1's own weight comes out around `0.74`. For comparison, the cyclic design on the next page
+# manages only `0.6`: here the hub's pull is divided among all `n` branches rather than
+# concentrated in `2` cyclic neighbours, so the response to any *one* other ring is smaller.
+#
+# Those cross-weights are also not uniform across ring index: they depend on angular distance
+# around the hub, because the hub's agents sit at fixed offsets around a small rigid ring.
+#
+# So the tree is a genuinely better topology for this purpose -- but not a free one. A tree with a
+# shared, unanchored consensus node is still not the same thing as `n` independent rings.
 
 # ## Target motion: a rigid n-gon orbiting the big circle
 
@@ -181,9 +184,9 @@ target_accelerations = [target_acc(i) for i in 1:N]
 
 # ## Dynamics cascade
 #
-# The hub and the pods both have no target of their own and exist purely for structural
-# coordination -- both get a softer gain via a per-child override, the same pattern
-# `n_ring_formation.jl` uses for its pods alone.
+# Neither the hub nor the pods have a target of their own; both exist purely for structural
+# coordination, so both get a softer gain through a per-child override -- the same pattern
+# `n_ring_formation.jl` applies to its pods alone.
 
 DT, STEPS = 0.05, 200
 dyn = QuadrotorDynamics()
@@ -193,9 +196,16 @@ R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
 K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10 * Q_lqr, R_lqr)
 K_soft = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 2 * Q_lqr, R_lqr)
 
-soft_overrides = Dict{Symbol,SystemBinding}(Symbol(:pod, i) => SystemBinding(K_lqr=K_soft) for i in 1:N)
-soft_overrides[:hub] = SystemBinding(K_lqr=K_soft)
-bindings = SystemBinding(dynamics=dyn, K_lqr=K, children=soft_overrides)
+## Declared in the same language as the topology, in a separate fragment merged onto it: the
+## gains only exist once `solve_dare` has run. `nested_bindings` resolves the cascade alone,
+## without rebuilding the tower.
+bindings = nested_bindings(merge(fragment, @nested_system begin
+    @bind dynamics=dyn K_lqr=K
+    @bind hub K_lqr=K_soft
+    for i in 1:N
+        @bind $(Symbol(:pod, i)) K_lqr=K_soft
+    end
+end))
 
 # ## Run the closed-loop simulation with full feedforward
 
@@ -351,7 +361,7 @@ end
 plot(p1, p2, p3, p4, layout=(2, 2), size=(1100, 900),
     plot_title="$N-Spoke Hub-and-Wheel Escort Formation")
 
-# Mean tracking error validation.
+# How closely the rings hold their targets, averaged over the settled part of the run:
 
 @printf("Mean steady-state tracking error (last 20%% of run): %.3f m (ring radius = %.3f m)\n",
        sum(mean(track_err[i][round(Int, 0.8STEPS):end]) for i in 1:N) / N, ring_radius[1])

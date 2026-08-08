@@ -1,54 +1,54 @@
 # # N-Ring Cyclic Escort Formation
 #
-# `n` targets orbit a large circle. Each target `i` has its own escort ring of `m_i` agents at a
-# small radius (scaled so rings never overlap as `n` grows). The `n` rings are additionally wired
-# together at the coarse level through `n` small support pods, one between each consecutive pair
-# of rings, forming a **cycle** -- and every edge in that cycle uses [`centroid`](@ref)
-# (Issue 011), since neither a ring nor a pod has a single natural representative to expose on a
-# cross-ring edge. The whole spec is written as a function of `n`, so the topology, the escort
-# radius, and the dynamics cascade all generalize; this page renders the `n = 3` instance.
+# `n` targets orbit a large circle, each with its own escort ring of `m_i` agents. The rings are
+# also wired to each other in a **cycle**: one small support pod sits between each consecutive
+# pair. Every edge in that cycle uses [`centroid`](@ref), since neither a ring nor a pod has a
+# single natural representative to expose on a cross-ring edge.
 #
-# Watching the result, each ring sits *near* its own target but not exactly on it -- the next
-# section explains precisely why, with a direct measurement rather than a hand-wave.
+# The whole specification is a function of `n`, so the topology, escort radius, and dynamics
+# cascade all generalize; this page renders `n = 3`.
+#
+# Each ring ends up *near* its own target but not on it. The next section measures exactly why.
 #
 # ## Why a cycle, and not a tree
 #
-# `wheel_formation.jl`, the previous page in this section, bridges `n` rings with `n` support pods
-# too -- but arranged as a **tree** (spokes into a shared, unanchored hub) rather than a cycle, and
-# gets noticeably tighter tracking as a result (own-target weight around `0.74`, against `0.6`
-# here). That's not an oversight in this page's design; it's a real structural limit.
-# `NestedSystemSpec`'s tree of `RefinedSystem`/`LeafTeam` nodes gives every node exactly one
-# parent, and `SystemEdge` only ever connects two direct children of the *same* parent. A bridge
-# between ring `i` and ring `i+1` needs both of them exposed to whatever bridges them -- fine for
-# one bridge, but ring `i` also needs to be exposed to the *previous* bridge (with ring `i-1`), and
-# a single node cannot be a child of two different parents at once. There is no way to make a
-# cyclic bridge structure a child of one shared parent the way the wheel's spokes can all share the
-# hub. Wiring the cycle's edges directly into `root`'s own `internal_edges`, as this page does, is
-# the only way to express "ring `i` bridges into both of its neighbors" at all -- and it's exactly
-# that direct, unmediated coupling between every adjacent pair that produces the worse cross-talk
+# The previous page, `wheel_formation.jl`, also bridges `n` rings with `n` pods -- but as a
+# **tree**, spokes into a shared hub. It tracks noticeably better (own-target weight `0.74`
+# against `0.6` here). That is not an oversight in this page's design; it is a structural limit,
+# and worth understanding before reading the numbers below.
+#
+# `NestedSystemSpec` is a *tree* of `RefinedSystem`/`LeafTeam` nodes, so every node has exactly
+# one parent, and a `SystemEdge` only ever joins two children of the same parent. Now consider
+# what a cycle asks for: ring `i` must be visible to the bridge on its left *and* the bridge on
+# its right. Those are two different bridges, so ring `i` would have to be a child of two parents
+# at once -- which a tree cannot express. The wheel escapes this because all its spokes share the
+# single hub, so one parent suffices.
+#
+# The only remaining way to say "ring `i` bridges into both of its neighbours" is to wire the
+# cycle's edges directly into `root`'s own children, which is what this page does. That
+# unmediated coupling between every adjacent pair is precisely what produces the worse cross-talk
 # measured below.
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.NestedDSL
 using CellularSheaves.ControlSheaves.AgentControllers
 using LinearAlgebra
 using Statistics
 using Plots
 using Printf
 
-## `@__DIR__` resolves relative to Literate.jl's *output* location while a page is being
-## executed, not this file's own source directory -- so the plotting helpers are located from the
-## package root instead, which is stable regardless of how this script gets run. The simulation
-## driver and multi-pin helpers themselves live in `NestedSystems` (already `using`-ed above).
+## Located from the package root, not `@__DIR__`: while Literate.jl executes a page, `@__DIR__`
+## points at the *output* directory rather than at this file. The simulation driver and the
+## multi-pin helpers live in `NestedSystems`, already loaded above.
 include(joinpath(pkgdir(CellularSheaves), "docs", "literate", "nested", "_plot_helpers.jl"))
 
 # ## Escort radius scaling
 #
-# Targets sit at angle `2π(i-1)/n` around a circle of radius `R_big`, so the chord distance
-# between adjacent targets is `2 R_big sin(π/n)` -- shrinking as `n` grows, as it must for more
-# targets to fit around the same circle. Ring `i`'s radius is a `safety` fraction of that chord,
-# scaled by its own share of the largest ring's agent count, leaving headroom for the support pod
-# between it and its neighbor.
+# Targets sit at angle `2π(i-1)/n` on a circle of radius `R_big`, so adjacent targets are a chord
+# `2 R_big sin(π/n)` apart -- shrinking as `n` grows, as it must for more targets to fit on the
+# same circle. Ring `i` takes a `safety` fraction of that chord, scaled by its share of the
+# largest ring's agent count, which leaves headroom for the pod between it and its neighbour.
 
 escort_radius(n::Int, R_big::Real, m_i::Int, m_max::Int; safety::Real=0.35) =
     safety * R_big * sin(pi / n) * (m_i / m_max)
@@ -58,65 +58,56 @@ escort_radius(n::Int, R_big::Real, m_i::Int, m_max::Int; safety::Real=0.35) =
 """
     build_n_ring_spec(n; m=fill(5, n), R_big=3.0, support_m=2, safety=0.35, D=4, pin_scheme=:redundant)
 
-Build the `n`-ring cyclic escort `NestedSystemSpec`, its compiled `SheafTower`, and the agent
+Build the `n`-ring cyclic escort specification -- the `NestedDSL` [`SystemFragment`](@ref) it is
+written as, the lowered `NestedSystemSpec`, its compiled `SheafTower`, and the agent
 index ranges for each ring/pod (into `tower.agent_vertices`, in the order the rings/pods were
 added -- ring 1, pod 1, ring 2, pod 2, ..., matching `NestedSystems`'s depth-first agent
 assignment).
 
 `pin_scheme` selects how each ring observes its own target: `:redundant` (the default) pins every
-other agent around the ring, via [`NestedSystems.redundant_pin`](@ref); `:single` pins only the
-first agent, the same default every other example in this section uses. Both are used below --
-`:redundant` for the actual simulation, `:single` only as a comparison point for measuring how
-much the redundant pin actually buys.
+other agent around the ring via [`NestedSystems.redundant_pin`](@ref), while `:single` pins only
+the first agent. Both are used below -- `:redundant` for the simulation, `:single` purely as a
+comparison point for measuring what the redundant pin actually buys.
 """
 function build_n_ring_spec(n::Int; m::Vector{Int}=fill(5, n), R_big::Real=3.0,
                            support_m::Int=2, safety::Real=0.35, D::Int=4,
                            pin_scheme::Symbol=:redundant)
     @assert length(m) == n
     m_max = maximum(m)
-    rings = [LeafTeam(Symbol(:ring, i), :ring, m[i], escort_radius(n, R_big, m[i], m_max; safety=safety))
-             for i in 1:n]
-    ## 2-agent pods use :path (one edge) rather than :ring, to avoid the degenerate parallel-edge
-    ## 2-cycle a :ring topology gives for exactly 2 agents.
-    pods = [LeafTeam(Symbol(:pod, i), :path, support_m, 0.3 * escort_radius(n, R_big, m_max, m_max; safety=safety))
-            for i in 1:n]
+    ring_name(i) = Symbol(:ring, i)
+    pod_name(i) = Symbol(:pod, i)
+    pod_radius = 0.3 * escort_radius(n, R_big, m_max, m_max; safety=safety)
 
-    children = AbstractSystemNode[]
-    for i in 1:n
-        push!(children, rings[i])
-        push!(children, pods[i])
-    end
-
-    cyc_edges = SystemEdge[]
-    for i in 1:n
-        push!(cyc_edges, SystemEdge(2i - 1, 2i; src_map=centroid(), dst_map=centroid()))          # ring_i -- pod_i
-    end
-    for i in 1:n
-        push!(cyc_edges, SystemEdge(2i, (2i % 2n) + 1; src_map=centroid(), dst_map=centroid()))   # pod_i -- ring_{i+1}
-    end
-
-    root = RefinedSystem(:root, children, cyc_edges)
-    targets = [TargetSpec(Symbol(:t, i)) for i in 1:n]
-    observations = Observation[]
-    for i in 1:n
-        ks = pin_scheme == :redundant ? (1:2:m[i]) : (1:1)
-        for k in ks
-            system_map = pin_scheme == :redundant ? redundant_pin(m[i], D, k) : project(1)
-            push!(observations, Observation([2i - 1], i; system_map=system_map))
+    ## The whole cyclic topology is one [`NestedDSL`](@ref) fragment. Every loop below is Julia's
+    ## own -- `@nested_system` executes its block rather than quoting it -- so the spec scales
+    ## with `n` without the language needing any iteration construct of its own, and the `if`
+    ## selecting a pin scheme is likewise just an `if`.
+    fragment = @nested_system begin
+        @dim D
+        for i in 1:n
+            @team $(ring_name(i)) = ring(m[i]; radius=escort_radius(n, R_big, m[i], m_max; safety=safety))
+            ## 2-agent pods use :path (one edge) rather than :ring, to avoid the degenerate
+            ## parallel-edge 2-cycle a :ring topology gives for exactly 2 agents.
+            @team $(pod_name(i)) = path(support_m; radius=pod_radius)
+            @target $(Symbol(:t, i))
+        end
+        for i in 1:n
+            @link centroid($(ring_name(i))) => centroid($(pod_name(i)))                # ring_i -- pod_i
+            @link centroid($(pod_name(i))) => centroid($(ring_name(mod1(i + 1, n))))   # pod_i -- ring_{i+1}
+        end
+        for i in 1:n
+            for k in (pin_scheme == :redundant ? (1:2:m[i]) : (1:1))
+                @observe via($(ring_name(i)), pin_scheme == :redundant ?
+                             redundant_pin(m[i], D, k) : project(1)) => $(Symbol(:t, i))
+            end
         end
     end
-    spec = NestedSystemSpec(root, targets, observations, D, true)
-    tower = build_sheaf_tower(spec)
 
-    team_sizes = Int[]
-    for i in 1:n
-        push!(team_sizes, m[i]); push!(team_sizes, support_m)
-    end
-    ranges = agent_index_ranges(team_sizes)
-    ring_ranges = [ranges[2i - 1] for i in 1:n]
-    pod_ranges = [ranges[2i] for i in 1:n]
+    system = compile_nested_system(fragment)
+    ring_ranges = [agent_range(system, ring_name(i)) for i in 1:n]
+    pod_ranges = [agent_range(system, pod_name(i)) for i in 1:n]
 
-    return spec, tower, ring_ranges, pod_ranges
+    return fragment, system.spec, system.tower, ring_ranges, pod_ranges
 end
 
 const N = 3
@@ -125,22 +116,23 @@ const R_BIG = 3.0
 const SUPPORT_M = 2
 const D = 4
 
-spec, tower, ring_ranges, pod_ranges = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M)
+fragment, spec, tower, ring_ranges, pod_ranges = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M)
 println("Ring radius: ", round(escort_radius(N, R_BIG, M[1], maximum(M)), digits=3), " m ",
        "  (chord = ", round(2R_BIG * sin(pi / N), digits=3), " m)")
 
 # ## Why rings don't settle on their own targets
 #
-# Every ring sits between exactly two `centroid()` consensus edges (to its neighboring pods),
-# competing against its own target-pin edge -- and the pods have **no target of their own**: at
-# the joint least-squares optimum, an unanchored pod's position is *exactly* the average of its
-# two neighboring rings' own solved positions (a direct consequence of it appearing in only those
-# two quadratic terms). That makes every pod a perfect, undamped relay -- it doesn't just couple a
-# ring to its immediate neighbors, it couples every ring to *every other ring's target*, carried
-# around the whole cycle with no attenuation from the pods themselves.
+# Every ring is pulled three ways: by its own target pin, and by `centroid()` edges to the pods on
+# either side.
 #
-# Because the whole system is linear in the target positions, this is directly measurable: nudge
-# one target at a time and watch how much a ring's own solved position moves.
+# The pods are the problem. A pod has **no target of its own**, and it appears in only two
+# quadratic terms, so at the joint optimum it sits *exactly* at the average of its two
+# neighbouring rings' solved positions. That makes it a perfect, undamped relay. It does not
+# merely couple a ring to its immediate neighbours -- it carries every ring's influence to every
+# other ring, all the way around the cycle, with nothing to attenuate it.
+#
+# The system is linear in the target positions, so this is directly measurable: nudge one target
+# and watch how far a ring moves.
 
 """
     target_response_weights(tower, ring_ranges, ring_idx, n) -> Vector{Float64}
@@ -153,10 +145,9 @@ sensitivity measure.
 """
 function target_response_weights(tower::SheafTower, ring_ranges, ring_idx::Int, n::Int)
     base = fill([0.0, 0.0, 1.5, 1.0], n)
-    ## `ring_ranges` holds *local* agent-position ranges (see `agent_index_ranges`) -- the
-    ## convention `res.sim_data` uses elsewhere on this page. `solve_hierarchical`'s own output is
-    ## indexed by actual sheaf vertex number (targets first, then agents), a different convention
-    ## -- so this maps through `tower.agent_vertices` to convert before indexing into it.
+    ## Two different index conventions meet here. `ring_ranges` holds *agent* indices, which is
+    ## what `res.sim_data` uses elsewhere on this page; `solve_hierarchical` returns values indexed
+    ## by sheaf *vertex* (targets first, then agents). `tower.agent_vertices` converts between them.
     verts = tower.agent_vertices[ring_ranges[ring_idx]]
     ring_centroid(tv) = begin
         q = solve_hierarchical(tower, tv)[end]
@@ -175,14 +166,13 @@ end
 w = target_response_weights(tower, ring_ranges, 1, N)
 @printf("ring1's target-response weights: own=%.3f, neighbors=%.3f/%.3f (sum=%.3f)\n", w[1], w[2], w[3], sum(w))
 
-# With the redundant pin used below, ring 1's position is (to the precision printed above) `0.6`
-# of its own target plus `0.2` of each neighbor's -- not `1.0`/`0.0`/`0.0` the way a truly
-# independent ring would respond. That 60/20/20 split, not any single bad edge or a bug in the
-# pin scheme, is *why* the tracking-error panel further down never reaches zero: it's measuring
-# exactly this blend. See the "Design notes" section at the end of this page for how that split
-# compares to a plain single-pin ring, and why the redundant pin narrows it only modestly rather
-# than eliminating it -- and see `wheel_formation.jl` for how much of this blend is specifically a
-# cost of the cycle, versus a cost of having *any* bridge at all.
+# Ring 1 settles at `0.6` of its own target plus `0.2` of each neighbour's, where a truly
+# independent ring would read `1.0`/`0.0`/`0.0`.
+#
+# That 60/20/20 blend -- not a bad edge or a bug in the pin scheme -- is *why* the tracking-error
+# panel below never reaches zero. It is measuring exactly this. The "Design notes" at the end of
+# the page compare the split against a plain single-pin ring, and `wheel_formation.jl` separates
+# how much of it is the cost of the *cycle* from the cost of having any bridge at all.
 
 # ## Target motion: a rigid n-gon orbiting the big circle
 
@@ -201,10 +191,10 @@ target_accelerations = [target_acc(i) for i in 1:N]
 
 # ## Dynamics cascade
 #
-# Every agent gets `QuadrotorDynamics` with a shared gain by default -- but the pods, which have
-# no target of their own and exist purely for structural coordination, get a softer gain via a
-# per-child override. This is `SystemBinding`'s nested-`Dict` cascade doing real work, not the
-# uniform (root-only) case `centroid_formation_tracking.jl` already covers.
+# Every agent gets `QuadrotorDynamics` and a shared gain by default. The pods get a softer gain
+# through a per-child override: they have no target of their own and exist purely for structural
+# coordination, so they should not fight the rings they bridge. This is the binding cascade doing
+# real work, rather than the uniform root-only case `centroid_formation_tracking.jl` covers.
 
 DT, STEPS = 0.05, 200
 dyn = QuadrotorDynamics()
@@ -214,8 +204,15 @@ R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
 K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10 * Q_lqr, R_lqr)
 K_soft = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 2 * Q_lqr, R_lqr)
 
-pod_overrides = Dict(Symbol(:pod, i) => SystemBinding(K_lqr=K_soft) for i in 1:N)
-bindings = SystemBinding(dynamics=dyn, K_lqr=K, children=pod_overrides)
+## Declared in the same language as the topology, in a separate fragment merged onto it: the
+## gains do not exist until `solve_dare` has run. `nested_bindings` resolves the cascade alone,
+## without rebuilding the tower.
+bindings = nested_bindings(merge(fragment, @nested_system begin
+    @bind dynamics=dyn K_lqr=K
+    for i in 1:N
+        @bind $(Symbol(:pod, i)) K_lqr=K_soft
+    end
+end))
 
 # ## Run the closed-loop simulation with full feedforward
 
@@ -341,15 +338,14 @@ for i in 1:N
     plot!(p3, time_grid[1:STEPS], track_err[i], color=ring_color(i), label="ring$i", linewidth=2)
 end
 
-## Panel 4: high-level topology over time -- ring/pod centroids connected in cycle order, at the
-## same sparse snapshots as panel 1 (fading faint-to-solid), so the coarse topology's own arc
-## through time is visible directly, not just its final shape. Directly validates that the
-## centroid()-wired cycle closes the way it was declared, at every snapshot, not only the last.
+## Panel 4: the coarse topology over time -- ring and pod centroids joined in cycle order, at the
+## same sparse snapshots as panel 1. Shows the cycle closing as declared at every snapshot, not
+## just the last, and traces the whole structure's arc through time.
 p4 = plot(title="High-Level Topology Over Time (Ring/Pod Centroids)", aspect_ratio=1,
          xlabel="x (m)", ylabel="y (m)")
-## Skip the very start of the run: agents begin from the airstrip layout (see
-## `_default_initial_position`), and that convergence transient is already covered by panels 2/3
-## -- including it here would just stretch this panel's axes around one uninformative outlier.
+## Skip the start of the run: agents begin from the default airstrip layout, and including that
+## transient would stretch this panel's axes around one uninformative outlier. Panels 2 and 3
+## already cover the convergence.
 topo_snaps = snapshot_steps(STEPS, 9)[2:end]
 for (si, s) in enumerate(topo_snaps)
     a = fade_alpha(si, length(topo_snaps))
@@ -377,10 +373,10 @@ plot(p1, p2, p3, p4, layout=(2, 2), size=(1100, 900),
 @printf("Mean steady-state tracking error (last 20%% of run): %.3f m (ring radius = %.3f m)\n",
        sum(mean(track_err[i][round(Int, 0.8STEPS):end]) for i in 1:N) / N, ring_radius[1])
 
-# Note too, in the topology panel, that the pods sit closer to the *group centroid* than a naive
-# "midpoint between the two targets each pod bridges" would predict -- a pod has no target of its
-# own, so it sits exactly at the midpoint of its two neighboring rings' *actual* (already-blended)
-# positions, compounding the same effect one step further.
+# Note in the topology panel that the pods sit closer to the *group centroid* than a naive
+# "midpoint of the two targets it bridges" would predict. A pod has no target of its own, so it
+# sits at the midpoint of its neighbours' *actual* -- already blended -- positions, compounding
+# the same effect one step further.
 
 # ## Animated top-down view
 #
@@ -398,30 +394,29 @@ println("N-ring cyclic escort formation example complete.")
 
 # ## Design notes: alternatives considered
 #
-# Two things were tried and rejected while building this example, kept here for anyone tempted to
-# revisit either:
+# Two approaches were tried and rejected while building this example, recorded here for anyone
+# tempted to revisit either.
 #
 # **Weakening the pod coupling with a scaled `RawRestriction`.** Scaling both ends of each cyclic
-# edge by a factor `α < 1` (`RawRestriction(α .* materialize_restriction(centroid(), node, D))`)
-# does reduce the pull as `α → 0` -- but only down to a floor set by the single-pin boundary
-# offset (see `centroid_formation_tracking.jl`), and pushing `α` much smaller than that floor
-# needs made the harmonic solve's automatic nullity threshold misclassify the now-very-weak edges
-# as null directions, blowing up the solution entirely. Not a usable knob.
+# edge by `α < 1` does reduce the pull as `α → 0`, but only down to a floor set by the single-pin
+# boundary offset (see `centroid_formation_tracking.jl`). Pushing `α` below that floor made the
+# harmonic solve's automatic nullity threshold misclassify the now very weak edges as null
+# directions, blowing the solution up entirely. Not a usable knob.
 #
-# **Just adding more redundant pins.** The measurement above explains why this has limited
-# payoff: the blend isn't caused by an edge-*count* imbalance that more edges can out-vote, it's
-# caused by the pods providing an **undamped** path to every other ring's target, and no amount of
-# strengthening one ring's own pin removes that path. To see the size of the effect the redundant
-# pin *does* buy, compare against a plain single pin on the same topology:
+# **Adding more redundant pins.** The measurement above explains the limited payoff: the blend is
+# not an edge-*count* imbalance that more edges could out-vote. It comes from the pods providing
+# an **undamped** path to every other ring's target, and strengthening one ring's own pin does not
+# remove that path. To size the effect the redundant pin does buy, compare it against a plain
+# single pin on the same topology:
 
-_, tower_single, ring_ranges_single, _ = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M,
+_, _, tower_single, ring_ranges_single, _ = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M,
                                                             pin_scheme=:single)
 w_single = target_response_weights(tower_single, ring_ranges_single, 1, N)
 @printf("single pin:    own=%.3f, neighbors=%.3f/%.3f\n", w_single[1], w_single[2], w_single[3])
 @printf("redundant pin: own=%.3f, neighbors=%.3f/%.3f\n", w[1], w[2], w[3])
 
-# The redundant pin moves ring 1's own weight from about `0.56` to `0.6` -- a real, measurable
-# improvement, and worth having, but nowhere near the `1.0` a truly independent ring would show.
-# That gap is the honest cost of a cyclic topology whose bridges have no anchor of their own.
+# The redundant pin moves ring 1's own weight from about `0.56` to `0.6`: a real improvement and
+# worth having, but nowhere near the `1.0` an independent ring would show. That remaining gap is
+# the honest cost of a cyclic topology whose bridges have no anchor of their own.
 
 println("Design notes complete.")
