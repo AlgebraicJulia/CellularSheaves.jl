@@ -3,6 +3,29 @@
    they inherit Documenter's ordinary table styling; this only paints the
    winning cell. rgba keeps it legible on both the light and dark themes. */
 
+/* Documenter sets `.content table { width: 100% }`, which stretches every column
+   to fill the page even when its contents are a two-digit number, and squeezes
+   the cells of a wide table until it reads as broken. Sizing to content instead
+   keeps numeric columns narrow; the table grows only as wide as it needs and is
+   capped at the container, at which point long cells wrap rather than
+   overflowing sideways. */
+.content table.bench {
+  width: auto;
+  max-width: 100%;
+}
+
+.content table.bench th,
+.content table.bench td {
+  overflow-wrap: break-word;
+}
+
+/* the leading label column carries the longest strings; cap it so a long name
+   wraps instead of pushing the numeric columns off the page */
+.content table.bench th:first-child,
+.content table.bench td:first-child {
+  max-width: 22em;
+}
+
 /* right-align the numeric columns, left-align the leading label column, to
    match the alignment of the markdown tables elsewhere in the docs */
 .content table.bench th,

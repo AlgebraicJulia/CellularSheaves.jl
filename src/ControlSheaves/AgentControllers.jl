@@ -154,21 +154,6 @@ function initial_state(dyn::PlanarQuadrotorDynamics, position::AbstractVector, v
 end
 
 """
-    _default_initial_position(dyn::AbstractAgentDynamics, i::Int) -> Vector{Float64}
-
-Default "airstrip" starting position for agent `i` when no explicit initial position is
-supplied: agents are lined up along the first position coordinate at a fixed spacing, at a
-common hover altitude (the last position coordinate). This is deliberately distinct from the
-target formation so that convergence into formation is visible in a simulation.
-"""
-function _default_initial_position(dyn::AbstractAgentDynamics, i::Int)
-    pos = zeros(length(position_indices(dyn)))
-    pos[1] = (i - 1) * 0.5   # spacing between agents along the line
-    pos[end] = 1.5           # common hover altitude
-    return pos
-end
-
-"""
     solve_dare(A, B, Q, R)
 
 Solves the Discrete Algebraic Riccati Equation for LQR gain.

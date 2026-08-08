@@ -17,7 +17,6 @@ using CellularSheaves
 using CellularSheaves.Formations
 using CellularSheaves.AgentControllers
 using CellularSheaves.ControlSheaves.Layered
-using CellularSheaves.ControlSheaves.NestedSystems
 using CellularSheaves.Pushforwards
 using CellularSheaves.GraphHomomorphisms
 using LinearAlgebra
@@ -75,7 +74,7 @@ target_accels = [target1_acc, target2_acc]
 
 prob_pf = LayeredEscortProblem(
     spec, F, f, PfF, bases,
-    SystemBinding(dynamics=dyn_test, K_lqr=K_test),
+    HomogeneousDynamics(dyn_test, K_test),
     target_trajs, target_vels, target_accels,
     DT, STEPS, nothing
 )

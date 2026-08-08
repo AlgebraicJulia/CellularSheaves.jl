@@ -47,16 +47,12 @@ include("DistributedLayeredControl.jl")
 import .DistributedLayeredControl
 export DistributedLayeredControl
 
-include("NestedSystems.jl")
-import .NestedSystems
-export NestedSystems
-
-include("NestedDSL/NestedDSL.jl")
-import .NestedDSL
-export NestedDSL
-
 include("Layered.jl")
 import .Layered
 export Layered
+
+include("NestedSystems.jl")
+import .NestedSystems
+export NestedSystems
 
 end # module ControlSheaves

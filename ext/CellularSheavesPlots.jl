@@ -13,6 +13,7 @@ include("CellularSheavesPlots/src/ErrorNormPlots.jl")
 include("CellularSheavesPlots/src/Trajectory3D.jl")
 include("CellularSheavesPlots/src/SnapshotPlots.jl")
 include("CellularSheavesPlots/src/SpyPlots.jl")
+include("CellularSheavesPlots/src/CoordinationBenchmarkPlots.jl")
 
 function CellularSheaves.AsynchSheaves.empty_experiment_plot(; kwargs...)
     return plot(title="", thickness_scaling=2.0, yformatter=:plain, xformatter=:plain; kwargs...)
