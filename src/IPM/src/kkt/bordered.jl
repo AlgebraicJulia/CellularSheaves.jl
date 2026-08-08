@@ -110,7 +110,12 @@ function initkkt!(
     copyto!(bw.aτ, c)
     axpby!(-2 / τ, Qp, one(T), bw.aτ)
     bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
-    return ok, ρ, (1, 0, 0, KKT_SOLVED, r2, r2, T(NaN))
+    #
+    # column dual residual — the Woodbury window's dual boundary: wdres = ‖H Δp2 - Bᵀ Δy2 - c‖
+    #
+    mulkkt!(inr.sd, inr.sp, H, B, bw.Δp2, bw.Δy2)   # inr.sd = H Δp2 - Bᵀ Δy2
+    axpy!(-one(T), c, inr.sd)
+    return ok, ρ, (1, 0, 0, KKT_SOLVED, r2, r2, norm(inr.sd))
 end
 
 #
@@ -192,8 +197,7 @@ function solvekkt!(
     dt  = num / bw.S[]
     copyto!(sp, g); axpy!(-one(T), bw.rcol, sp)          # sp = g - rcol = B Δp2  (floor only; no matvec)
     tgt = max((ptol - rb) / abs(dt), 100 * eps(T) * (ng + norm(sp)))
-    nc, _ = craig!(inner.itrwrk, B, inner.F, inner.divwrk, bw.Δp2, bw.Δy2, bw.rcol; atol = tgt)
-    nbase += nc
+    ncol, _ = craig!(inner.itrwrk, B, inner.F, inner.divwrk, bw.Δp2, bw.Δy2, bw.rcol; atol = tgt)   # Woodbury/column CRAIG — reported separately, not folded into the direction cost
     axpy!(one(T), bw.Δy2, bw.dya)                        # dya += δy_incr
     copyto!(bw.Δy2, bw.dya); axpy!(one(T), bw.rcol, bw.Δy2)   # Δy2 = dya + rcol
     lmul!(inner.α[], bw.Δy2)                             # Δy2 = α (dya + rcol)
@@ -216,7 +220,7 @@ function solvekkt!(
         sp, sd, inner.dp, inner.dy;
         itmax, ptol, ytol, τtol, stall,
     )
-    return nbase, nrefine, npass, status, fres, pres1, dres1, Δτ
+    return nbase, ncol, nrefine, npass, status, fres, pres1, dres1, Δτ
 end
 
 ############################################################################################

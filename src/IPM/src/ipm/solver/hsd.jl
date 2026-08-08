@@ -210,7 +210,7 @@ function solvepredictor!(
     #   [  B           0              -g ] [ Δya ] = [ rp     ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
-    pbase, prefn, ppass, pstat, pfres, ppres, pdres, Δτa = solvekkt!(
+    pbase, pncol, prefn, ppass, pstat, pfres, ppres, pdres, Δτa = solvekkt!(
         kkt, w.Δpa, w.Δya, H, B, c, g, ng, w.f, w.rp, gap;
         ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
@@ -229,7 +229,7 @@ function solvepredictor!(
     #   Δκa = -κ (1 + 1/τ Δτa)
     #
     Δκa = -κ * (τ + Δτa) / τ
-    return pbase, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres
+    return pbase, pncol, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres
 end
 
 #
@@ -360,7 +360,7 @@ function solvecorrector!(
     #   [ B            0                -g ] [ Δy ] = [ rp                          ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
-    cbase, crefn, cpass, cstat, cfres, cpres, cdres, Δτ = solvekkt!(
+    cbase, cncol, crefn, cpass, cstat, cfres, cpres, cdres, Δτ = solvekkt!(
         kkt, w.Δp, w.Δy, H, B, c, g, ng, w.f, w.rp, fτ;
         pwarm=true, ywarm=true, ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
@@ -379,7 +379,7 @@ function solvecorrector!(
     #   Δκ ← (fκ - κ Δτ) / τ
     #
     Δκ = (fκ - κ * Δτ) / τ
-    return cbase, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres
+    return cbase, cncol, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres
 end
 
 ############################################################################################
@@ -722,7 +722,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δya ] = [ rp     ]
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
                 #
-                pbase, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s, gap; ptol, ytol, τtol)
+                pbase, pncol, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres = @timeit s.timers "predictor" solvepredictor!(s, gap; ptol, ytol, τtol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -736,7 +736,13 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δy ] = [ rp                          ]
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
                 #
-                cbase, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
+                cbase, cncol, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
+                #
+                # attribute the per-consumer column (Woodbury) CRAIG to the Woodbury role — wbase is the
+                # initkkt! column base (1 apply), wrefn the predictor + corrector column tightening — so
+                # pbase/cbase report the DIRECTION solves only, deconfounded from the border solve.
+                #
+                wrefn = pncol + cncol
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
