@@ -64,11 +64,13 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves, 
+  modules=[CellularSheaves,
+    CellularSheaves.ControlSheaves, 
     CellularSheaves.ControlSheaves.Tikhonov,
     CellularSheaves.ControlSheaves.AgentControllers,
     CellularSheaves.ControlSheaves.DistributedLayeredControl,
     CellularSheaves.ControlSheaves.Layered,
+    CellularSheaves.ControlSheaves.NestedSystems,
     CellularSheaves.ControlSheaves.MultiAgentTracking,
     CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts,
     CellularSheaves.ControlSheaves.CoordinationBenchmarks,
@@ -160,6 +162,7 @@ makedocs(
       "api/agent_controllers.md",
       "api/distributed_layered_control.md",
       "api/layered.md",
+      "api/nested_systems.md",
       "api/coordination_benchmarks.md",
       "api/herding_platoon.md",
       "api/multi_agent_tracking.md",

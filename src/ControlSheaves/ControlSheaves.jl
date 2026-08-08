@@ -51,6 +51,10 @@ include("Layered.jl")
 import .Layered
 export Layered
 
+include("NestedSystems.jl")
+import .NestedSystems
+export NestedSystems
+
 include("CoordinationBenchmarks.jl")
 import .CoordinationBenchmarks
 export CoordinationBenchmarks

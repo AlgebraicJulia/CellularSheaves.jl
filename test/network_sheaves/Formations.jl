@@ -1,5 +1,7 @@
 using Test
 using CellularSheaves.Formations
+using CellularSheaves: fiber_section_basis
+using Graphs
 using LinearAlgebra
 
 @testset "Formations" begin
@@ -71,5 +73,38 @@ using LinearAlgebra
 
         # observers out of range are rejected
         @test_throws Exception build_escort_ring(4, 5, 0.5; observers=[1, 5])
+    end
+
+    @testset "build_escort_topology — edge counts per kind" begin
+        n = 5
+        for (kind, n_consensus) in [(:ring, 5), (:path, 4), (:star, 4), (:clique, 10)]
+            s = build_escort_topology(kind, n, n+1, 0.3; observers=[1])
+            @test ne(s.underlying_graph) == n_consensus + 1   # +1 observer edge
+        end
+    end
+
+    @testset "build_escort_topology — every kind is rigid (section space is D-dimensional)" begin
+        for kind in (:ring, :path, :star, :clique)
+            s = build_escort_topology(kind, 4, 5, 0.3; observers=[1])
+            B = fiber_section_basis(s, collect(1:5),
+                                    [(src(e), dst(e)) for e in edges(s.underlying_graph)])
+            @test size(B, 2) == 4
+        end
+    end
+
+    @testset "build_escort_topology — ring wrapper reproduces build_escort_ring" begin
+        a = build_escort_topology(:ring, 6, 7, 0.3; observers=[1])
+        b = build_escort_ring(6, 7, 0.3; observers=[1])
+        @test a == b
+    end
+
+    @testset "build_escort_topology — clique honours D and affine" begin
+        s = build_escort_topology(:clique, 3, 4, 0.0; D=3, affine=false)
+        @test all(==(3), s.vertex_stalks)
+        @test_throws Exception build_escort_topology(:clique, 3, 4, 0.5; affine=false)
+    end
+
+    @testset "build_escort_topology — rejects unknown kind" begin
+        @test_throws Exception build_escort_topology(:hexagon, 4, 5, 0.3)
     end
 end
