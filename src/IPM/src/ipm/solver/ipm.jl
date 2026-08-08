@@ -1,8 +1,3 @@
-# α-window controller constants (alpha_window_laws.md §7): floor budget, ceiling gap, controller cap.
-const CTRL_BDG_IPM =  0.3
-const CTRL_GAP_IPM = -0.3
-const CTRL_CAP_IPM =  1.0
-
 struct IPMSolver{T, I, W, C} <: AbstractSolver{T}
     Q::BlockSparseMatrix{T, I}
     H::BlockSparseMatrix{T, I}
@@ -46,7 +41,7 @@ function result(s::IPMSolver{T}, status::IPMStatus) where {T}
 
     for row in s.hist
         niter += 1
-        nsolve += row.pbase + row.prefn + row.cbase + row.crefn
+        nsolve += row.piter + row.citer
     end
 
     return IPMResult{T}(p, d, y, status, niter, nsolve, s.hist, s.timers)
@@ -113,7 +108,7 @@ function solvepredictor!(
     #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
-    pbase, prefn, ppass, pstat, pfres, ppres, pdres, pamin, pamax = solvekkt!(
+    piter, ppass, pstat, pamin, pamax = solvekkt!(
         kkt, w.Δpa, w.Δya, H, B, w.f, w.rp;
         ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
@@ -126,7 +121,7 @@ function solvepredictor!(
     mul!(w.Δda, B', w.Δya, -1, -1)
     mul!(w.Δda, Symmetric(Q, :L), w.Δpa, 1, 1)
 
-    return pbase, prefn, ppass, pstat, pfres, ppres, pdres, pamin, pamax
+    return piter, ppass, pstat, pamin, pamax
 end
 
 #
@@ -218,7 +213,7 @@ function solvecorrector!(
     #
     copyto!(w.Δp, w.Δpa)
     copyto!(w.Δy, w.Δya)
-    cbase, crefn, cpass, cstat, cfres, cpres, cdres, camin, camax = solvekkt!(
+    citer, cpass, cstat, camin, camax = solvekkt!(
         kkt, w.Δp, w.Δy, H, B, w.f, w.rp;
         pwarm=true, ywarm=true, ptol, ytol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
@@ -231,7 +226,7 @@ function solvecorrector!(
     mul!(w.Δd, B', w.Δy, -1, -1)
     mul!(w.Δd, Symmetric(Q, :L), w.Δp, 1, 1)
 
-    return cbase, crefn, cpass, cstat, cfres, cpres, cdres, camin, camax
+    return citer, cpass, cstat, camin, camax
 end
 
 ############################################################################################
@@ -367,15 +362,11 @@ end
 function step!(s::IPMSolver{T}) where {T}
     status = CONTINUE
 
-    pbase = cbase = 0       # base-solve CRAIG per role
-    prefn = crefn = 0       # refinement CRAIG per role
+    piter = citer = 0       # total CRAIG per role (base + refinement)
     ppass = cpass = 0       # refinement passes per role
     pstat = cstat = KKT_SOLVED   # refinement exit status per role
     step = zero(T)
-    pfres = ppres = pdres = T(NaN)
-    cfres = cpres = cdres = T(NaN)
     pamin = pamax = camin = camax = T(NaN)   # per-solve min-cost α-window (kktwindow!)
-    αmin = αmax = T(NaN)
     ρ = zero(T)      # ρ-shift actually applied this step (0 = none / no factorization); recorded below
 
     w = s.wrk
@@ -430,7 +421,7 @@ function step!(s::IPMSolver{T}) where {T}
             #
             # choose augmentation parameter α
             #
-            setaug!(s, T(CTRL_CAP_IPM))
+            setaug!(s)
 
             initok, ρ = @timeit s.timers "initkkt" initkkt!(s)
             if !initok
@@ -466,7 +457,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
                 #   [ B   0  ] [ Δya ] = [ rp     ]
                 #
-                pbase, prefn, ppass, pstat, pfres, ppres, pdres, pamin, pamax = @timeit s.timers "predictor" solvepredictor!(s; ptol, ytol)
+                piter, ppass, pstat, pamin, pamax = @timeit s.timers "predictor" solvepredictor!(s; ptol, ytol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -481,7 +472,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # where rd* is the corrected dual residual
                 #
-                cbase, crefn, cpass, cstat, cfres, cpres, cdres, camin, camax = @timeit s.timers "corrector" solvecorrector!(s, μ; ptol, ytol)
+                citer, cpass, cstat, camin, camax = @timeit s.timers "corrector" solvecorrector!(s, μ; ptol, ytol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -515,22 +506,9 @@ function step!(s::IPMSolver{T}) where {T}
                 axpy!(step, w.Δd, s.d)
                 axpy!(step, w.Δy, s.y)
                 #
-                # compute optimal augmentation window
+                # the α-controller reads the predictor window (pamin, pamax) and refinement passes (ppass)
+                # straight from the history — nothing to aggregate here (see getaug).
                 #
-                #   α* ∈ [αmin, αmax]
-                #
-                pok = pstat === KKT_SOLVED
-                cok = cstat === KKT_SOLVED
-                state = pok && cok
-
-                if s.settings.policy == 1
-                    # Tier 1: aggregate the predictor and corrector solves (worst case each end).
-                    αmin, αmax = augwindow1(s.α[], _nanmax(pfres, cfres), _nanmax(pdres, cdres), ptol, ytol)
-                else
-                    αmin = augmin(s.α[], pfres, ptol, state, pbase, max(ppass, cpass), T(CTRL_BDG_IPM))
-                    αmax = augmax(s.α[], pdres, ytol, state, pbase, T(CTRL_GAP_IPM))
-                end
-
                 if isstalled(s)
                     if s.settings.verbose > 1
                         @warn "Stalling detected."
@@ -548,8 +526,8 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ, pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat,
-        pfres, ppres, pdres, cfres, cpres, cdres, pamin, pamax, camin, camax, αmin, αmax))
+    push!(s.hist, (; μ, step, pres, dres, α=s.α[], ρ, piter, ppass, pstat, citer, cpass, cstat,
+        pamin, pamax, camin, camax))
 
     return status
 end

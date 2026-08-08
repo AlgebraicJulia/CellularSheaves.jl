@@ -1,9 +1,8 @@
 const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, gap::T, α::T, ρ::T, τ::T, κ::T,
-    pbase::Int, prefn::Int, ppass::Int, pstat::KKTStatus,
-    cbase::Int, crefn::Int, cpass::Int, cstat::KKTStatus,
-    wbase::Int, wrefn::Int, wpass::Int, wstat::KKTStatus,
-    pfres::T, ppres::T, pdres::T, cfres::T, cpres::T, cdres::T, wfres::T, wpres::T, wdres::T,
-    pamin::T, pamax::T, camin::T, camax::T, αmin::T, αmax::T}
+    piter::Int, ppass::Int, pstat::KKTStatus,
+    citer::Int, cpass::Int, cstat::KKTStatus,
+    witer::Int, wpass::Int, wstat::KKTStatus,
+    pamin::T, pamax::T, camin::T, camax::T, wamin::T}
 
 struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     μ::Vector{T}
@@ -15,41 +14,28 @@ struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     ρ::Vector{T}
     τ::Vector{T}
     κ::Vector{T}
-    pbase::Vector{Int}
-    prefn::Vector{Int}
+    piter::Vector{Int}
     ppass::Vector{Int}
     pstat::Vector{KKTStatus}
-    cbase::Vector{Int}
-    crefn::Vector{Int}
+    citer::Vector{Int}
     cpass::Vector{Int}
     cstat::Vector{KKTStatus}
-    wbase::Vector{Int}
-    wrefn::Vector{Int}
+    witer::Vector{Int}
     wpass::Vector{Int}
     wstat::Vector{KKTStatus}
-    pfres::Vector{T}
-    ppres::Vector{T}
-    pdres::Vector{T}
-    cfres::Vector{T}
-    cpres::Vector{T}
-    cdres::Vector{T}
-    wfres::Vector{T}
-    wpres::Vector{T}
-    wdres::Vector{T}
     pamin::Vector{T}
     pamax::Vector{T}
     camin::Vector{T}
     camax::Vector{T}
-    αmin::Vector{T}
-    αmax::Vector{T}
+    wamin::Vector{T}
 end
 
 function HSDHistory{T}() where {T}
     return HSDHistory{T}(T[], T[], T[], T[], T[], T[], T[], T[], T[],
-        Int[], Int[], Int[], KKTStatus[],
-        Int[], Int[], Int[], KKTStatus[],
-        Int[], Int[], Int[], KKTStatus[],
-        T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[])
+        Int[], Int[], KKTStatus[],
+        Int[], Int[], KKTStatus[],
+        Int[], Int[], KKTStatus[],
+        T[], T[], T[], T[], T[])
 end
 
 function Base.getindex(hist::HSDHistory, i::Int)
@@ -62,18 +48,14 @@ function Base.getindex(hist::HSDHistory, i::Int)
     ρ       = hist.ρ[i]
     τ       = hist.τ[i]
     κ       = hist.κ[i]
-    pbase   = hist.pbase[i]; prefn = hist.prefn[i]; ppass = hist.ppass[i]; pstat = hist.pstat[i]
-    cbase   = hist.cbase[i]; crefn = hist.crefn[i]; cpass = hist.cpass[i]; cstat = hist.cstat[i]
-    wbase   = hist.wbase[i]; wrefn = hist.wrefn[i]; wpass = hist.wpass[i]; wstat = hist.wstat[i]
-    pfres   = hist.pfres[i]; ppres = hist.ppres[i]; pdres = hist.pdres[i]
-    cfres   = hist.cfres[i]; cpres = hist.cpres[i]; cdres = hist.cdres[i]
-    wfres   = hist.wfres[i]; wpres = hist.wpres[i]; wdres = hist.wdres[i]
+    piter   = hist.piter[i]; ppass = hist.ppass[i]; pstat = hist.pstat[i]
+    citer   = hist.citer[i]; cpass = hist.cpass[i]; cstat = hist.cstat[i]
+    witer   = hist.witer[i]; wpass = hist.wpass[i]; wstat = hist.wstat[i]
     pamin   = hist.pamin[i]; pamax = hist.pamax[i]; camin = hist.camin[i]; camax = hist.camax[i]
-    αmin    = hist.αmin[i];  αmax  = hist.αmax[i]
+    wamin   = hist.wamin[i]
     return (; μ, step, pres, dres, gap, α, ρ, τ, κ,
-        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat,
-        pfres, ppres, pdres, cfres, cpres, cdres, wfres, wpres, wdres,
-        pamin, pamax, camin, camax, αmin, αmax)
+        piter, ppass, pstat, citer, cpass, cstat, witer, wpass, wstat,
+        pamin, pamax, camin, camax, wamin)
 end
 
 function Base.push!(hist::HSDHistory, row::NamedTuple)
@@ -86,15 +68,12 @@ function Base.push!(hist::HSDHistory, row::NamedTuple)
     push!(hist.ρ,       row.ρ)
     push!(hist.τ,       row.τ)
     push!(hist.κ,       row.κ)
-    push!(hist.pbase,   row.pbase); push!(hist.prefn, row.prefn); push!(hist.ppass, row.ppass); push!(hist.pstat, row.pstat)
-    push!(hist.cbase,   row.cbase); push!(hist.crefn, row.crefn); push!(hist.cpass, row.cpass); push!(hist.cstat, row.cstat)
-    push!(hist.wbase,   row.wbase); push!(hist.wrefn, row.wrefn); push!(hist.wpass, row.wpass); push!(hist.wstat, row.wstat)
-    push!(hist.pfres, row.pfres); push!(hist.ppres, row.ppres); push!(hist.pdres, row.pdres)
-    push!(hist.cfres, row.cfres); push!(hist.cpres, row.cpres); push!(hist.cdres, row.cdres)
-    push!(hist.wfres, row.wfres); push!(hist.wpres, row.wpres); push!(hist.wdres, row.wdres)
+    push!(hist.piter,   row.piter); push!(hist.ppass, row.ppass); push!(hist.pstat, row.pstat)
+    push!(hist.citer,   row.citer); push!(hist.cpass, row.cpass); push!(hist.cstat, row.cstat)
+    push!(hist.witer,   row.witer); push!(hist.wpass, row.wpass); push!(hist.wstat, row.wstat)
     push!(hist.pamin, row.pamin); push!(hist.pamax, row.pamax)
     push!(hist.camin, row.camin); push!(hist.camax, row.camax)
-    push!(hist.αmin, row.αmin); push!(hist.αmax, row.αmax)
+    push!(hist.wamin, row.wamin)
     return hist
 end
 
@@ -108,23 +87,12 @@ function Base.empty!(hist::HSDHistory)
     empty!(hist.ρ)
     empty!(hist.τ)
     empty!(hist.κ)
-    empty!(hist.pbase); empty!(hist.prefn); empty!(hist.ppass); empty!(hist.pstat)
-    empty!(hist.cbase); empty!(hist.crefn); empty!(hist.cpass); empty!(hist.cstat)
-    empty!(hist.wbase); empty!(hist.wrefn); empty!(hist.wpass); empty!(hist.wstat)
-    empty!(hist.pfres); empty!(hist.ppres); empty!(hist.pdres)
-    empty!(hist.cfres); empty!(hist.cpres); empty!(hist.cdres)
-    empty!(hist.wfres); empty!(hist.wpres); empty!(hist.wdres)
+    empty!(hist.piter); empty!(hist.ppass); empty!(hist.pstat)
+    empty!(hist.citer); empty!(hist.cpass); empty!(hist.cstat)
+    empty!(hist.witer); empty!(hist.wpass); empty!(hist.wstat)
     empty!(hist.pamin); empty!(hist.pamax); empty!(hist.camin); empty!(hist.camax)
-    empty!(hist.αmin); empty!(hist.αmax)
+    empty!(hist.wamin)
     return hist
-end
-
-function nbase(hist::HSDHistory, i::Integer)
-    return hist.pbase[i] + hist.cbase[i] + hist.wbase[i]
-end
-
-function npass(hist::HSDHistory, i::Integer)
-    return max(hist.ppass[i], hist.cpass[i], hist.wpass[i])
 end
 
 function showtop(io::IO, ::HSDHistory; indent::Integer=0)
@@ -152,7 +120,7 @@ function showrow(io::IO, i::Integer, row::HSDHistoryRow; indent::Integer=0)
     println(io, pad, "├──────┼──────────┼──────────┼────────┼───────┼──────────┼──────────┼──────────┼──────────┼──────────┤")
     print(io, pad)
     # solve = total solve (CRAIG) iterations this step (base + refinement, all three solves); α = penalty, ρ = regularization.
-    solve = row.pbase + row.prefn + row.cbase + row.crefn + row.wbase + row.wrefn
+    solve = row.piter + row.citer + row.witer
     @printf(io, "│ %4d │ %8.2e │ %8.2e │ %6.4f │ %5d │ %8.2e │ %8.2e │ %8.2e │ %8.2e │ %8.2e │\n",
             i, row.pres, row.dres, row.step, solve, row.α, row.ρ, row.μ, row.τ, row.κ)
     return

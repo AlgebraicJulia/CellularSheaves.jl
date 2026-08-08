@@ -1,9 +1,3 @@
-# α-window controller constants (alpha_window_laws.md §7): floor budget, ceiling gap, controller cap.
-# budget_hsd=0 (universal minus the hidden ~0.3 woodbury workload); cap=1.5 = 1 + 0.5 near-edge bias.
-const CTRL_BDG_HSD =  0.0
-const CTRL_GAP_HSD = -0.4
-const CTRL_CAP_HSD =  1.5
-
 struct HSDSolver{T, I, W, C} <: AbstractSolver{T}
     Q::BlockSparseMatrix{T, I}
     H::BlockSparseMatrix{T, I}
@@ -63,7 +57,7 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
 
     for row in s.hist
         niter += 1
-        nsolve += row.pbase + row.prefn + row.cbase + row.crefn + row.wbase + row.wrefn
+        nsolve += row.piter + row.citer + row.witer
     end
     #
     # C5 (addendum): the answer at the returned point, in user frame. pres/dres are recomputed
@@ -210,7 +204,7 @@ function solvepredictor!(
     #   [  B           0              -g ] [ Δya ] = [ rp     ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
-    pbase, pncol, prefn, ppass, pstat, pfres, ppres, pdres, Δτa, pamin, pamax = solvekkt!(
+    piter, pncol, ppass, pstat, Δτa, pamin, pamax, pwamin = solvekkt!(
         kkt, w.Δpa, w.Δya, H, B, c, g, ng, w.f, w.rp, gap;
         ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
@@ -229,7 +223,7 @@ function solvepredictor!(
     #   Δκa = -κ (1 + 1/τ Δτa)
     #
     Δκa = -κ * (τ + Δτa) / τ
-    return pbase, pncol, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres, pamin, pamax
+    return piter, pncol, ppass, pstat, Δτa, Δκa, pamin, pamax, pwamin
 end
 
 #
@@ -360,7 +354,7 @@ function solvecorrector!(
     #   [ B            0                -g ] [ Δy ] = [ rp                          ]
     #   [ cᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
-    cbase, cncol, crefn, cpass, cstat, cfres, cpres, cdres, Δτ, camin, camax = solvekkt!(
+    citer, cncol, cpass, cstat, Δτ, camin, camax, cwamin = solvekkt!(
         kkt, w.Δp, w.Δy, H, B, c, g, ng, w.f, w.rp, fτ;
         pwarm=true, ywarm=true, ptol, ytol, τtol, stall=set.refine_stall, itmax=set.refine_itmax,
     )
@@ -379,7 +373,7 @@ function solvecorrector!(
     #   Δκ ← (fκ - κ Δτ) / τ
     #
     Δκ = (fκ - κ * Δτ) / τ
-    return cbase, cncol, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres, camin, camax
+    return citer, cncol, cpass, cstat, Δτ, Δκ, camin, camax, cwamin
 end
 
 ############################################################################################
@@ -608,17 +602,13 @@ end
 function step!(s::HSDSolver{T}) where {T}
     status = CONTINUE
 
-    pbase = cbase = wbase = 0   # base-solve CRAIG per role (woodbury counted into craig1, archive-wins)
-    prefn = crefn = wrefn = 0   # refinement CRAIG per role
+    piter = citer = witer = 0   # total CRAIG per role (base + refinement; woodbury = column base + tightening)
     ppass = cpass = wpass = 0   # refinement passes per role
     pstat = cstat = wstat = KKT_SOLVED   # refinement exit status per role
 
     step = zero(T)
-    pfres = ppres = pdres = T(NaN)
-    cfres = cpres = cdres = T(NaN)
-    wfres = wpres = wdres = T(NaN)
     pamin = pamax = camin = camax = T(NaN)   # per-solve min-cost α-window (bordered solvekkt!)
-    αmin = αmax = T(NaN)
+    wamin = T(NaN)                           # Woodbury column floor
     ρ = zero(T)      # ρ-shift actually applied this step (0 = none / no factorization); recorded below
 
     w = s.wrk
@@ -684,7 +674,7 @@ function step!(s::HSDSolver{T}) where {T}
             #
             # choose augmentation parameter α
             #
-            setaug!(s, T(CTRL_CAP_HSD))
+            setaug!(s)
             #
             # compute the KKT-solve tolerances (the border w₂ solve inside initkkt! needs them)
             #
@@ -715,7 +705,7 @@ function step!(s::HSDSolver{T}) where {T}
 
                 status = nearstatus(s, NUMERICAL_FAILURE)
             else
-                wbase, wrefn, wpass, wstat, wfres, wpres, wdres = wtuple
+                wbase, wrefn, wpass, wstat = wtuple
                 #
                 # solve for the Mehrota predictor direction
                 #
@@ -723,7 +713,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δya ] = [ rp     ]
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
                 #
-                pbase, pncol, prefn, ppass, pstat, Δτa, Δκa, pfres, ppres, pdres, pamin, pamax = @timeit s.timers "predictor" solvepredictor!(s, gap; ptol, ytol, τtol)
+                piter, pncol, ppass, pstat, Δτa, Δκa, pamin, pamax, wamin = @timeit s.timers "predictor" solvepredictor!(s, gap; ptol, ytol, τtol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -737,13 +727,14 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δy ] = [ rp                          ]
                 #   [ cᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
                 #
-                cbase, cncol, crefn, cpass, cstat, Δτ, Δκ, cfres, cpres, cdres, camin, camax = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
+                citer, cncol, cpass, cstat, Δτ, Δκ, camin, camax, _cwamin = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
                 #
-                # attribute the per-consumer column (Woodbury) CRAIG to the Woodbury role — wbase is the
-                # initkkt! column base (1 apply), wrefn the predictor + corrector column tightening — so
-                # pbase/cbase report the DIRECTION solves only, deconfounded from the border solve.
+                # Woodbury role: wbase (1, the initkkt! column base) + wrefn (predictor + corrector column
+                # tightening) → witer. piter/citer report the DIRECTION solves only, deconfounded from it.
+                # The history wamin is the predictor's column floor (_cwamin, the corrector's, is redundant).
                 #
                 wrefn = pncol + cncol
+                witer = wbase + wrefn
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -790,24 +781,10 @@ function step!(s::HSDSolver{T}) where {T}
 
                 s.τ[] = τ + step * Δτ
                 s.κ[] = κ + step * Δκ
-                #   
-                # compute optimal augmentation window
                 #
-                #   α* ∈ [αmin, αmax]
+                # the α-controller reads the predictor window (pamin, pamax) and refinement passes (ppass)
+                # straight from the history — nothing to aggregate here (see getaug).
                 #
-                pok = pstat === KKT_SOLVED
-                cok = cstat === KKT_SOLVED
-                wok = wstat === KKT_SOLVED
-                state = pok && cok && wok
-
-                if s.settings.policy == 1
-                    # Tier 1: aggregate the predictor, corrector, and Woodbury solves (worst case each end).
-                    αmin, αmax = augwindow1(s.α[], _nanmax(pfres, cfres, wfres), _nanmax(pdres, cdres, wdres), ptol, ytol)
-                else
-                    αmin = augmin(s.α[], pfres, ptol, state, pbase, max(ppass, cpass, wpass), T(CTRL_BDG_HSD))
-                    αmax = augmax(s.α[], pdres, ytol, state, pbase, T(CTRL_GAP_HSD))
-                end
-
                 if isstalled(s)
                     if s.settings.verbose > 1
                         @warn "Stalling detected."
@@ -826,9 +803,8 @@ function step!(s::HSDSolver{T}) where {T}
     end
 
     push!(s.hist, (; μ, step, pres, dres, gap, α=s.α[], ρ, τ=s.τ[], κ=s.κ[],
-        pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat,
-        pfres, ppres, pdres, cfres, cpres, cdres, wfres, wpres, wdres,
-        pamin, pamax, camin, camax, αmin, αmax))
+        piter, ppass, pstat, citer, cpass, cstat, witer, wpass, wstat,
+        pamin, pamax, camin, camax, wamin))
 
     return status
 end

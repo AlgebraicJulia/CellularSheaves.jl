@@ -189,10 +189,10 @@ end
 # and returns a typed exit: KKT_SOLVED, or
 # KKT_STAGNATED / KKT_ITMAX saying why
 # not. Refinement scratch is workspace-
-# resident. Returns (nbase, nrefine, npass,
-# status, fres, entry_pres, entry_dres, αmin,
-# αmax) — the last two the min-cost α-window
-# (kktwindow!) the controller geo-means.
+# resident. Returns (niter, npass, status,
+# αmin, αmax) — niter the total CRAIG (base +
+# refinement), the last two the min-cost
+# α-window (kktwindow!) the controller uses.
 #
 function solvekkt!(
     wrk::UzawaSolver{UPLO, T},
@@ -267,8 +267,6 @@ function solvekkt!(
     status = KKT_ITMAX
     pprv = typemax(T)
     dprv = typemax(T)
-    pres1 = T(NaN)
-    dres1 = T(NaN)
 
     for i in 1:itmax
         mul!(sp, B, Δp)                  # sp = B Δp
@@ -282,11 +280,6 @@ function solvekkt!(
         dres = norm(sd)
         pres = norm(sp)
         res  = max(pres / pfloor, dres / dfloor)
-
-        if isone(i)
-            pres1 = pres
-            dres1 = dres
-        end
 
         if res ≤ one(T)
             status = (pres ≤ ptol && dres ≤ ytol) ? KKT_SOLVED : KKT_STAGNATED
@@ -308,7 +301,7 @@ function solvekkt!(
         npass += 1
     end
 
-    return nbase, nrefine, npass, status, fres, pres1, dres1, αmin, αmax
+    return nbase + nrefine, npass, status, αmin, αmax
 end
 
 #

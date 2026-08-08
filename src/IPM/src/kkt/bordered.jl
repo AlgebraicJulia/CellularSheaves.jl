@@ -51,8 +51,7 @@ end
 # once per factorization, shared by the
 # predictor and corrector. Returns
 # (ok, ρ, wtuple), wtuple = (wbase, wrefn,
-# wpass, wstat, wfres, wpres, wdres) — the
-# column solve's history row.
+# wpass, wstat) — the column base's counts.
 #
 function initkkt!(
         bw::BorderedSolver{T},
@@ -69,7 +68,7 @@ function initkkt!(
         y0,
     ) where {T}
     ok, ρ = initkkt!(bw.inner, H; α, rgmin)
-    ok || return ok, ρ, (0, 0, 0, KKT_ITMAX, T(NaN), T(NaN), T(NaN))
+    ok || return ok, ρ, (0, 0, 0, KKT_ITMAX)
     #
     # column base as a WARM CORRECTION seeded by the carried column (x0 = Δp2, y0 = Δy2 from the previous
     # factorization; both 0 on the first). The primal seed cancels — Δp2 = G⁻¹(βc + Bᵀ(g + βy0)) is identical
@@ -95,7 +94,6 @@ function initkkt!(
     ldiv!(inr.divwrk, inr.F', inr.dp)                      # inr.dp = xb = G⁻¹(β·sd + Bᵀ·sp)
     axpy!(one(T), inr.dp, bw.Δp2)                          # Δp2 = x0 + xb
     mul!(bw.rcol, B, inr.dp, -one(T), one(T))              # bw.rcol = sp - B·xb  (MAINTAINED residual)
-    r2 = norm(bw.rcol)
     copyto!(bw.Δy2, bw.rcol); lmul!(inr.α[], bw.Δy2); axpy!(one(T), bw.yseed, bw.Δy2)   # Δy2 = yseed + α·rcol
     fill!(bw.dya, zero(T))
     #
@@ -110,12 +108,7 @@ function initkkt!(
     copyto!(bw.aτ, c)
     axpby!(-2 / τ, Qp, one(T), bw.aτ)
     bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
-    #
-    # column dual residual — the Woodbury window's dual boundary: wdres = ‖H Δp2 - Bᵀ Δy2 - c‖
-    #
-    mulkkt!(inr.sd, inr.sp, H, B, bw.Δp2, bw.Δy2)   # inr.sd = H Δp2 - Bᵀ Δy2
-    axpy!(-one(T), c, inr.sd)
-    return ok, ρ, (1, 0, 0, KKT_SOLVED, r2, r2, norm(inr.sd))
+    return ok, ρ, (1, 0, 0, KKT_SOLVED)
 end
 
 #
@@ -130,11 +123,12 @@ end
 # Woodbury column to the accuracy the lift
 # needs, apply the lift Δτ = num/S, then run
 # the 3-row refinement net. Refinement scratch
-# is the inner solver's. Returns (nbase, ncol,
-# nrefine, npass, status, fres, entry_pres,
-# entry_dres, Δτ, αmin, αmax) — the last two
-# the min-cost α-window (αmin from the base
-# CRAIG levels, αmax from the 3-row dual).
+# is the inner solver's. Returns (niter, ncol,
+# npass, status, Δτ, αmin, αmax, wamin): niter
+# the direction CRAIG (base + refinement), αmin
+# from the base CRAIG levels, αmax from the
+# 3-row dual, wamin the Woodbury column floor
+# (kktwindow! on the column).
 #
 function solvekkt!(
         bw::BorderedSolver{T},
@@ -223,12 +217,20 @@ function solvekkt!(
     dt  = num / bw.S[]
     copyto!(sp, g); axpy!(-one(T), bw.rcol, sp)          # sp = g - rcol = B Δp2  (floor only; no matvec)
     tgt = max((ptol - rb) / abs(dt), 100 * eps(T) * (ng + norm(sp)))
+    ngcol = norm(bw.rcol)                                # column entry residual (= hist[1]) for the wamin floor
     ncol, _ = craig!(inner.itrwrk, B, inner.F, inner.divwrk, bw.Δp2, bw.Δy2, bw.rcol; atol = tgt)   # Woodbury/column CRAIG — reported separately, not folded into the direction cost
     axpy!(one(T), bw.Δy2, bw.dya)                        # dya += δy_incr
     copyto!(bw.Δy2, bw.dya); axpy!(one(T), bw.rcol, bw.Δy2)   # Δy2 = dya + rcol
     lmul!(inner.α[], bw.Δy2)                             # Δy2 = α (dya + rcol)
     axpy!(one(T), bw.yseed, bw.Δy2)                      # Δy2 = yseed + α (dya + rcol)
     bw.S[] = dot(bw.aτ, bw.Δp2) + dot(g, bw.Δy2) + bw.δ[]
+    #
+    # Woodbury floor wamin — the α below which the column base no longer meets ptol (needs CRAIG), computed
+    # the SAME way as the predictor/corrector floors: kktwindow! on the column solve's own CRAIG decay (now
+    # resident in the inner workspace). Only the floor is meaningful for the column, so αmax is discarded —
+    # the column has no refinement/dual ceiling. Runs before the refinement net overwrites the decay.
+    #
+    wamin, _ = kktwindow!(inner, H, B, c, bw.Δp2, bw.Δy2, ngcol, ncol + 1; ptol, ytol)
     #
     # final lift with the converged S — Δp, Δy already carry it on a satisfied/stalled exit; this makes them
     # consistent with S on an itmax exit too. Δτ pairs with the same S (τ-row exactness):
@@ -254,7 +256,7 @@ function solvekkt!(
     status = KKT_ITMAX
     npass = 0; nrefine = 0
     prv = typemax(T)
-    pres1 = T(NaN); dres1 = T(NaN)
+    dres1 = T(NaN)   # entry 3-row dual residual, kept for the αmax ceiling
 
     for i in 1:itmax
         mulkkt!(sd, sp, H, B, Δp, Δy)
@@ -268,10 +270,7 @@ function solvekkt!(
         dres = norm(sd)
         τres = abs(sτ)
 
-        if isone(i)
-            pres1 = pres
-            dres1 = dres
-        end
+        isone(i) && (dres1 = dres)
 
         # converged iff all three rows are within their absolute targets
         res = max(pres / ptol, dres / ytol, τres / τtol)
@@ -304,6 +303,6 @@ function solvekkt!(
     # dual residual ‖f - H Δp + Bᵀ Δy + Δτ c‖ — the bordered ceiling, distinct from the 2-row dual.
     #
     αmax = (isfinite(dres1) && dres1 > zero(T)) ? α * ytol / dres1 : T(Inf)
-    return nbase, ncol, nrefine, npass, status, fres, pres1, dres1, Δτ, αmin, αmax
+    return nbase + nrefine, ncol, npass, status, Δτ, αmin, αmax, wamin
 end
 

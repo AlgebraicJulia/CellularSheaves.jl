@@ -9,51 +9,12 @@ include("utils.jl")
 # with the problem; per rgmin_note the old fixed 1e-9 overshot it by a problem-dependent 6-8 orders.
 resolve_rgmin(B) = eps(eltype(B)) / 2 * norm(B)^2
 
-# αmin/αmax take UNSCALED residuals (pfres = ‖r0‖, pdres = s0) and the solver's absolute targets
-# ptol/ytol (= tol·(1+ng), tol·(1+nc)): the entry test is ‖r0‖ ≤ ptol, the dual test s0 ≤ ytol, so
-# α₀ = ℓ_p/ptol and α_c = ytol/ℓ_d. (Passing scaled pdres with tol used to make αmax come out right by
-# accident while αmin was left (1+ng) too high — this makes both correct symmetrically.)
-function augmin(α::T, pfres::T, ptol::T, state::Bool, pbase::Int, npass::Int, bdg::T) where {T}
-    αmin = T(NaN)
-
-    if state && npass <= 1 && isfinite(pfres) && pfres > zero(T)
-        αmin = α * pfres / ptol / exp10(bdg - max(pbase - 1, 0) / T(20))
-    end
-
-    return αmin
-end
-
-function augmax(α::T, pdres::T, ytol::T, state::Bool, pbase::Int, gap::T) where {T}
-    αmax = T(NaN)
-
-    if state && pbase <= 3 && isfinite(pdres) && pdres > zero(T)
-        αmax = α * ytol / pdres * exp10(gap)
-    end
-
-    return αmax
-end
-
-# NaN-tolerant max: a role whose residual wasn't recorded (NaN) drops out of the aggregate; all-NaN → NaN.
-_nanmax(a::T, b::T) where {T} = isnan(a) ? b : isnan(b) ? a : max(a, b)
-_nanmax(a::T, b::T, c::T) where {T} = _nanmax(_nanmax(a, b), c)
-
-# Tier 1 (policies_1_and_2.md §4, Policy 1) window boundaries, mutatis mutandis the aggregation across the
-# step's 2–3 solves: ℓ_p = α·max_roles‖r0‖, ℓ_d = max_roles(s0)/α, giving the intersection of the per-solve
-# windows [ℓ_p/ptol, ytol/ℓ_d] — the band an α must sit in to cost one application for EVERY solve. Residuals
-# are UNSCALED (‖r0‖, s0) and the scaling lives in the absolute targets ptol/ytol; a non-finite/nonpositive
-# input drops that boundary to NaN (getaug then holds). No fudge factors, no validity gate.
-function augwindow1(α::T, fres::T, dres::T, ptol::T, ytol::T) where {T}
-    αmin = (isfinite(fres) && fres > zero(T)) ? α * fres / ptol : T(NaN)   # ℓ_p / ptol
-    αmax = (isfinite(dres) && dres > zero(T)) ? α * ytol / dres : T(NaN)   # ytol / ℓ_d
-    return αmin, αmax
-end
-
-function setaug!(s::AbstractSolver{T}, cap::T) where {T}
+function setaug!(s::AbstractSolver{T}) where {T}
     s.settings.fix_alpha && return   # ORACLE ONLY: leave the caller-injected α in place
     if isempty(s.hist)
         s.α[] = s.settings.aaug + s.settings.raug * norm(Symmetric(s.H, :L)) / s.nB[]^2
     else
-        s.α[] = getaug(s.hist, cap, s.settings.policy)
+        s.α[] = getaug(s.hist)
     end
 
     return

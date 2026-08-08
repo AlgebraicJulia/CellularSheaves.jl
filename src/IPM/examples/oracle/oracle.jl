@@ -20,12 +20,7 @@
 
 using LinearAlgebra: norm, Symmetric
 using Printf: @sprintf
-using CellularSheaves.IPM: step!, mu, CONTINUE, KKT_SOLVED,
-    getaug, CTRL_CAP_IPM, CTRL_CAP_HSD, IPMSolver, HSDSolver
-
-# The controller cap the live setaug! would use, per solver kind.
-_ctrl_cap(::IPMSolver) = CTRL_CAP_IPM
-_ctrl_cap(::HSDSolver) = CTRL_CAP_HSD
+using CellularSheaves.IPM: step!, mu, CONTINUE, KKT_SOLVED, getaug, IPMSolver, HSDSolver
 
 const DEFAULT_ALPHA_GRID = [round(10.0^e, sigdigits=4) for e in 0.0:0.5:18.0]   # half-decades 1e0..1e18 (37 pts)
 
@@ -38,8 +33,8 @@ function _oracle_state(row)
 end
 
 function _oracle_craig(row)
-    c = row.pbase + row.prefn + row.cbase + row.crefn
-    hasproperty(row, :wbase) && (c += row.wbase + row.wrefn)
+    c = row.piter + row.citer
+    hasproperty(row, :witer) && (c += row.witer)
     return c
 end
 
@@ -56,21 +51,13 @@ function _oracle_record(i, α, sc, st, αctrl)
             ipm_status = st, mu = μ, mu_next = mu(sc), rho = row.ρ,
             force_tol = ftol, floor_tol = fltol, normB = norm(sc.B),
             step = row.step, ipm_pres = row.pres, ipm_dres = row.dres,
-            # cost decomposition, per role (base includes the "1" backsolve; refn = j+Σni)
-            pbase = row.pbase, prefn = row.prefn, ppass = row.ppass, pstat = row.pstat,
-            cbase = row.cbase, crefn = row.crefn, cpass = row.cpass, cstat = row.cstat,
-            wbase = hasw ? row.wbase : nothing, wrefn = hasw ? row.wrefn : nothing,
-            wpass = hasw ? row.wpass : nothing, wstat = hasw ? row.wstat : nothing,
-            # the two FREE scales' raw inputs: base residual (‖r0‖) + pass-1 entry residuals (≈ s0)
-            pfres = row.pfres, ppres = row.ppres, pdres = row.pdres,
-            cfres = row.cfres, cpres = row.cpres, cdres = row.cdres,
-            wfres = hasw ? row.wfres : nothing, wpres = hasw ? row.wpres : nothing,
-            wdres = hasw ? row.wdres : nothing,
-            # per-solve min-cost α-window from kktwindow! (IPM 2-row; HSD adds bordered window in step 3)
-            pamin = hasproperty(row, :pamin) ? row.pamin : nothing,
-            pamax = hasproperty(row, :pamax) ? row.pamax : nothing,
-            camin = hasproperty(row, :camin) ? row.camin : nothing,
-            camax = hasproperty(row, :camax) ? row.camax : nothing,
+            # cost decomposition, per role — piter/citer/witer = total CRAIG (base + refinement)
+            piter = row.piter, ppass = row.ppass, pstat = row.pstat,
+            citer = row.citer, cpass = row.cpass, cstat = row.cstat,
+            witer = hasw ? row.witer : nothing, wpass = hasw ? row.wpass : nothing, wstat = hasw ? row.wstat : nothing,
+            # per-solve min-cost α-window from kktwindow! (pred/corr window + woodbury floor wamin, HSD)
+            pamin = row.pamin, pamax = row.pamax, camin = row.camin, camax = row.camax,
+            wamin = hasw ? row.wamin : nothing,
             chosen = false)
 end
 
@@ -104,10 +91,10 @@ function solve_logged(s0, grid = DEFAULT_ALPHA_GRID; itmax::Integer = s0.setting
         bestidx = 0
         # α the live controller (setaug!) would have picked at THIS iterate — the oracle disables the
         # controller (fix_alpha) so the swept α survives, but we still record its choice to judge it.
-        # iter≥2: exact — getaug reads only the previous step's recorded α/αmin/αmax. iter 1: raug
+        # iter≥2: exact — getaug reads only the previous step's recorded α/pamin/pamax/ppass. iter 1: raug
         # formula, filled below from a stepped candidate's scaled H (scaling is α-independent).
         T = eltype(s.wrk.rp)
-        αctrl = isempty(s.hist) ? T(NaN) : getaug(s.hist, _ctrl_cap(s))
+        αctrl = isempty(s.hist) ? T(NaN) : getaug(s.hist)
         for α in gs
             sc = deepcopy(s)
             sc.α[] = α

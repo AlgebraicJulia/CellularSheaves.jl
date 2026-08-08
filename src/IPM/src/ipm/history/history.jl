@@ -7,33 +7,25 @@ function Base.size(hist::AbstractHistory)
     return size(hist.μ)
 end
 
-function getaug(hist::AbstractHistory{T}, cap::T, policy::Int = 0) where {T}
+# Predictor-only α-controller (the one shipped policy). αmin/αmax are the predictor's min-cost window
+# (kktwindow!, stored as pamin/pamax); the trigger is the OBSERVED predictor refinement (ppass):
+#   • predictor refined last step (ppass > 0) → we sat above the refinement ceiling, so drop one decade
+#     below min(α used, ceiling αmax) — anchor on whichever is lower so a mis-high α still descends;
+#   • else → geo-mean the predictor window (even if inverted).
+# Observed refinement is the trigger, not the sign of the computed window — robust to a mis-estimated αmax
+# (which fails to invert the window when the true ceiling collapses in a single step). Only the predictor:
+# corrector refinement is inherent to the endgame stagnation regime and fires at ANY α, so triggering on it
+# would make α free-fall into a Woodbury blowup.
+function getaug(hist::AbstractHistory{T}) where {T}
     α = hist.α[end]
-    αmin = hist.αmin[end]
-    αmax = hist.αmax[end]
+    αmin = hist.pamin[end]
+    αmax = hist.pamax[end]
 
-    if policy == 1
-        #
-        # Policy 1 + closed-window descent (policies_1_and_2.md §4–§5). αmin/αmax are the aggregated
-        # window boundaries stored by step! under this policy:
-        #   • window open (a0 ≤ ac) → geometric mean (nothing to optimise inside, maximin midpoint);
-        #   • window closed (a0 > ac) → one decade below the ceiling a_c, so α DESCENDS with the
-        #     collapsing ceiling rather than freezing. Holding froze e04-hsd two decades too high and
-        #     stalled it; the one-decade drop is a stand-in for Policy 2's measured level spacing until
-        #     the correction-residual history is wired.
-        # If a boundary can't be priced (NaN) there is nothing to descend toward, so hold.
-        #
-        if isfinite(αmin) && isfinite(αmax)
-            α = αmin ≤ αmax ? sqrt(αmin) * sqrt(αmax) : αmax / exp10(one(T))
-        end
-    elseif isnan(αmin)
-        α /= 100
-    elseif isnan(αmax)
-        α = αmin * exp10(T(1.5))
-    else
-        α = min(sqrt(αmin) * sqrt(αmax), αmax / exp10(cap))
+    if hist.ppass[end] > 0
+        anchor = isfinite(αmax) ? min(α, αmax) : α
+        return anchor / T(10)
     end
-
+    (isfinite(αmin) && isfinite(αmax)) && return sqrt(αmin) * sqrt(αmax)
     return α
 end
 
