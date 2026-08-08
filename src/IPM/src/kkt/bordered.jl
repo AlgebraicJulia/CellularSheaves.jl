@@ -129,11 +129,12 @@ end
 # solve the 2-row part, drive the cached
 # Woodbury column to the accuracy the lift
 # needs, apply the lift Δτ = num/S, then run
-# the 3-row refinement net. The column re-
-# solve CRAIG folds into nbase; refinement
-# scratch is the inner solver's. Returns
-# (nbase, nrefine, npass, status, fres,
-# entry_pres, entry_dres, Δτ).
+# the 3-row refinement net. Refinement scratch
+# is the inner solver's. Returns (nbase, ncol,
+# nrefine, npass, status, fres, entry_pres,
+# entry_dres, Δτ, αmin, αmax) — the last two
+# the min-cost α-window (αmin from the base
+# CRAIG levels, αmax from the 3-row dual).
 #
 function solvekkt!(
         bw::BorderedSolver{T},
@@ -156,16 +157,41 @@ function solvekkt!(
         itmax::Int,
     ) where {T}
     inner = bw.inner
-    sp = inner.sp; sd = inner.sd
+    sp = inner.sp; sd = inner.sd; dp = inner.dp; dy = inner.dy
+    α = inner.α[]
     #
-    # base solve for the column-free part Δp₀, Δy₀ — the 2-row system to (ptol, ytol). pwarm/ywarm just
-    # forward to the inner solver: a warm caller has pre-seeded Δp/Δy, a cold one gets them zeroed.
+    # direction base for the column-free part Δp₀, Δy₀ — the bare 2-row base solve (itmax=0, refinehsd! is
+    # the sole refinement), inlined. pwarm/ywarm: a warm caller has pre-seeded Δp/Δy (corrected against the
+    # residual), a cold one gets them copied straight from the base correction.
     #
     #   [ H  -Bᵀ ] [ Δp₀ ]   [ f  ]
     #   [ B   0  ] [ Δy₀ ] = [ rp ]
     #
-    nb, nr, _, _, fres, _, _, _, _ = solvekkt!(inner, Δp, Δy, H, B, f, rp; pwarm, ywarm, ptol, ytol, stall, itmax=0)
-    nbase = nb + nr
+    copyto!(sd, f); copyto!(sp, rp)
+    if pwarm
+        mul!(sd, Symmetric(H, :L), Δp, -one(T), one(T))
+        mul!(sp, B,               Δp, -one(T), one(T))
+    end
+    if ywarm
+        mul!(sd, B', Δy, one(T), one(T))
+    end
+    nbase, fres = solveuzw!(inner.divwrk, inner.itrwrk, dp, dy, inner.r, inner.F, H, B, sd, sp, α; atol = ptol)
+    if pwarm
+        axpy!(one(T), dp, Δp)
+    else
+        copyto!(Δp, dp)
+    end
+    if ywarm
+        axpy!(one(T), dy, Δy)
+    else
+        copyto!(Δy, dy)
+    end
+    #
+    # primal window floor αmin from the base CRAIG decay (hist still resident — read it BEFORE the column
+    # CRAIG below overwrites it). kktwindow!'s αmax is the 2-row dual ceiling; the bordered ceiling is the
+    # 3-row dual, computed in the refinement net below, so take only αmin here.
+    #
+    αmin, _ = kktwindow!(inner, H, B, f, Δp, Δy, fres, nbase; ptol, ytol)
     #
     # preserve the base solve Δp₀, Δy₀: the column loop re-lifts Δp = Δp₀ + Δτ Δp2 from them every pass, so
     # they must survive the in-place lift into (Δp, Δy).
@@ -213,92 +239,30 @@ function solvekkt!(
     copyto!(Δp, bw.Δp0); axpy!(Δτ, bw.Δp2, Δp)
     copyto!(Δy, bw.Δy0); axpy!(Δτ, bw.Δy2, Δy)
     #
-    # 3-row refinement net (a single verifying pass when both column targets were met):
+    # 3-row refinement net (refinehsd! inlined — Govaerts–Pryce BE+1). Each pass forms the residual
     #
-    npass, nrefine, status, Δτ, pres1, dres1 = refinehsd!(
-        Δp, Δy, Δτ, inner, H, B, c, g, bw.aτ, bw.δ[], rp, f, fτ, bw.Δp2, bw.Δy2, bw.S[],
-        sp, sd, inner.dp, inner.dy;
-        itmax, ptol, ytol, τtol, stall,
-    )
-    return nbase, ncol, nrefine, npass, status, fres, pres1, dres1, Δτ
-end
-
-############################################################################################
-# refinehsd! — Govaerts–Pryce BE+1 refinement on the 3-row bordered system
-############################################################################################
-
-#
-# Iterative refinement of the 3-row bordered
-# system. Each pass forms the residual
-#
-#   [ sd ]   [ f  ]   [ H   -Bᵀ  -c ] [ Δp ]
-#   [ sp ] = [ rp ] - [ B    0   -g ] [ Δy ]
-#   [ sτ ]   [ fτ ]   [ aτᵀ  gᵀ   δ ] [ Δτ ]
-#
-# solves the 2-row correction (solveuzw!),
-# Schur-lifts dτ = (sτ - aτᵀdp - gᵀdy)/S,
-# and updates — until ‖sp‖ ≤ ptol ∧
-# ‖sd‖ ≤ ytol ∧ |sτ| ≤ τtol (KKT_SOLVED), or it
-# stalls / runs out of passes. Scratch
-# (sp, sd, dp, dy) is the caller's. Returns
-# (npass, nrefine, status, Δτ, entry_pres,
-# entry_dres).
-#
-function refinehsd!(
-    Δp::AbstractVector{T},
-    Δy::AbstractVector{T},
-    Δτ::T,
-    wrk::UzawaSolver{UPLO, T},
-    H::BlockSparseMatrix{T},
-    B::BlockSparseMatrix{T},
-    c::AbstractVector{T},
-    g::AbstractVector{T},
-    aτ::AbstractVector{T}, # border row: c - 2Qp/τ
-    δ::T,                  # τ-row diagonal pᵀQp/τ² + κ/τ
-    rp::AbstractVector{T},  # RHS for row P
-    f::AbstractVector{T},   # RHS for row D
-    fτ::T,                  # RHS for row T
-    Δp2::AbstractVector{T}, # Woodbury direction
-    Δy2::AbstractVector{T},
-    S::T,                   # Woodbury capacitance scalar
-    sp::AbstractVector{T},  # scratch for primal residual
-    sd::AbstractVector{T},  # scratch for dual residual
-    dp::AbstractVector{T},  # scratch for correction
-    dy::AbstractVector{T};
-    itmax::Int,
-    ptol::T,
-    ytol::T,
-    τtol::T,
-    stall::T,
-) where {UPLO, T}
-    niter = 0
-    npass = 0
+    #   [ sd ]   [ f  ]   [ H    -Bᵀ  -c ] [ Δp ]
+    #   [ sp ] = [ rp ] - [ B     0   -g ] [ Δy ]
+    #   [ sτ ]   [ fτ ]   [ aτᵀ   gᵀ   δ ] [ Δτ ]
     #
-    # craig works in unscaled 2-norms; the loop measures pres = ‖sp‖₂ against ptol, so its craig tolerance
-    # IS ptol. First-order in the bordered path: craig's exit residual is sp − B·dp_uzw, but the applied dp
-    # is Schur-lifted (dp_uzw + dτ·Δp2), so sp' = craig_resid + dτ·r₂ (r₂ = g − B·Δp2, §3). So ptol is the
-    # correct first-order translation, not an equality. Only ptol — the dual row is border-free.
+    # solves the 2-row correction (solveuzw!) to θ·(entry residual), Schur-lifts dτ = (sτ - aτᵀdp -
+    # gᵀdy)/S, and updates — until ‖sp‖ ≤ ptol ∧ ‖sd‖ ≤ ytol ∧ |sτ| ≤ τtol (KKT_SOLVED), or it stalls /
+    # runs out of passes. craig works in unscaled 2-norms so its target is ptol (first-order: the applied
+    # dp is Schur-lifted, so sp' = craig_resid + dτ·r₂). Scratch (sp, sd, dp, dy) is the inner solver's.
     #
     atol = ptol
     status = KKT_ITMAX
+    npass = 0; nrefine = 0
     prv = typemax(T)
-    pres1 = T(NaN)
-    dres1 = T(NaN)
+    pres1 = T(NaN); dres1 = T(NaN)
 
     for i in 1:itmax
-        #
-        # compute the residuals
-        #
-        #   [ sd ]   [ f  ]   [ H    -Bᵀ  -c ] [ Δp ]
-        #   [ sp ] = [ rp ] - [ B     0   -g ] [ Δy ]
-        #   [ sτ ]   [ fτ ]   [ aτᵀ   gᵀ   δ ] [ Δτ ]
-        #
         mulkkt!(sd, sp, H, B, Δp, Δy)
         axpy!(-Δτ, c, sd)
         axpy!(-Δτ, g, sp)
         axpby!(one(T), f,  -one(T), sd)
         axpby!(one(T), rp, -one(T), sp)
-        sτ = fτ - dot(aτ, Δp) - dot(g, Δy) - δ * Δτ
+        sτ = fτ - dot(bw.aτ, Δp) - dot(g, Δy) - bw.δ[] * Δτ
 
         pres = norm(sp)
         dres = norm(sd)
@@ -309,56 +273,37 @@ function refinehsd!(
             dres1 = dres
         end
 
-        # τ (border) row: τtol is the caller's absolute target for the border residual (= tol·(1+nc+ng),
-        # matching the old abs(sτ)/(1+nc+ng) ≤ tol test exactly). Converged iff all three rows are within
-        # their targets: ‖sp‖ ≤ ptol ∧ ‖sd‖ ≤ ytol ∧ abs(sτ) ≤ τtol.
+        # converged iff all three rows are within their absolute targets
         res = max(pres / ptol, dres / ytol, τres / τtol)
 
         if res ≤ one(T)
             status = KKT_SOLVED
             break
         end
-
         if res > stall * prv
             status = KKT_STAGNATED
             break
         end
-
         prv = res
-        #
-        # solve for dp and dy:
-        #
-        #   [ H -Bᵀ ] [ dp ] = [ sd ]
-        #   [ B  0  ] [ dy ]   [ sp ]
-        #
-        n, _ = solveuzw!(wrk.divwrk, wrk.itrwrk, dp, dy, wrk.r, wrk.F, H, B, sd, sp, wrk.α[]; atol, rtol = T(INTERIOR_THETA))
-        niter += n
+
+        n, _ = solveuzw!(inner.divwrk, inner.itrwrk, dp, dy, inner.r, inner.F, H, B, sd, sp, α; atol, rtol = T(INTERIOR_THETA))
+        nrefine += n
         npass += 1
         #
-        # apply the Schur lift (aτ = c - 2Qp/τ):
+        # Schur lift + border correction:  dτ = (sτ - aτᵀdp - gᵀdy)/S ; dp += dτ Δp2 ; dy += dτ Δy2
         #
-        #   dτ = (sτ - aτᵀdp - gᵀdy) / S
-        #
-        dτ = (sτ - dot(aτ, dp) - dot(g, dy)) / S
-        #
-        # apply border correction:
-        #
-        #   dp ← dp + dτ Δp2
-        #   dy ← dy + dτ Δy2
-        #
-        axpy!(dτ, Δp2, dp)
-        axpy!(dτ, Δy2, dy)
-        #
-        # update directions:
-        #
-        #   Δp ← Δp + dp
-        #   Δy ← Δy + dy
-        #   Δτ ← Δτ + dτ
-        #
+        dτ = (sτ - dot(bw.aτ, dp) - dot(g, dy)) / bw.S[]
+        axpy!(dτ, bw.Δp2, dp)
+        axpy!(dτ, bw.Δy2, dy)
         axpy!(one(T), dp, Δp)
         axpy!(one(T), dy, Δy)
         Δτ += dτ
     end
-
-    return npass, niter, status, Δτ, pres1, dres1
+    #
+    # 3-row dual ceiling: αmax = α·ytol / (base 3-row dual residual). dres1 is the entry (base-direction)
+    # dual residual ‖f - H Δp + Bᵀ Δy + Δτ c‖ — the bordered ceiling, distinct from the 2-row dual.
+    #
+    αmax = (isfinite(dres1) && dres1 > zero(T)) ? α * ytol / dres1 : T(Inf)
+    return nbase, ncol, nrefine, npass, status, fres, pres1, dres1, Δτ, αmin, αmax
 end
+

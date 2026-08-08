@@ -2,7 +2,8 @@ const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, gap::T, �
     pbase::Int, prefn::Int, ppass::Int, pstat::KKTStatus,
     cbase::Int, crefn::Int, cpass::Int, cstat::KKTStatus,
     wbase::Int, wrefn::Int, wpass::Int, wstat::KKTStatus,
-    pfres::T, ppres::T, pdres::T, cfres::T, cpres::T, cdres::T, wfres::T, wpres::T, wdres::T, αmin::T, αmax::T}
+    pfres::T, ppres::T, pdres::T, cfres::T, cpres::T, cdres::T, wfres::T, wpres::T, wdres::T,
+    pamin::T, pamax::T, camin::T, camax::T, αmin::T, αmax::T}
 
 struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     μ::Vector{T}
@@ -35,6 +36,10 @@ struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     wfres::Vector{T}
     wpres::Vector{T}
     wdres::Vector{T}
+    pamin::Vector{T}
+    pamax::Vector{T}
+    camin::Vector{T}
+    camax::Vector{T}
     αmin::Vector{T}
     αmax::Vector{T}
 end
@@ -44,7 +49,7 @@ function HSDHistory{T}() where {T}
         Int[], Int[], Int[], KKTStatus[],
         Int[], Int[], Int[], KKTStatus[],
         Int[], Int[], Int[], KKTStatus[],
-        T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[])
+        T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[], T[])
 end
 
 function Base.getindex(hist::HSDHistory, i::Int)
@@ -63,10 +68,12 @@ function Base.getindex(hist::HSDHistory, i::Int)
     pfres   = hist.pfres[i]; ppres = hist.ppres[i]; pdres = hist.pdres[i]
     cfres   = hist.cfres[i]; cpres = hist.cpres[i]; cdres = hist.cdres[i]
     wfres   = hist.wfres[i]; wpres = hist.wpres[i]; wdres = hist.wdres[i]
+    pamin   = hist.pamin[i]; pamax = hist.pamax[i]; camin = hist.camin[i]; camax = hist.camax[i]
     αmin    = hist.αmin[i];  αmax  = hist.αmax[i]
     return (; μ, step, pres, dres, gap, α, ρ, τ, κ,
         pbase, prefn, ppass, pstat, cbase, crefn, cpass, cstat, wbase, wrefn, wpass, wstat,
-        pfres, ppres, pdres, cfres, cpres, cdres, wfres, wpres, wdres, αmin, αmax)
+        pfres, ppres, pdres, cfres, cpres, cdres, wfres, wpres, wdres,
+        pamin, pamax, camin, camax, αmin, αmax)
 end
 
 function Base.push!(hist::HSDHistory, row::NamedTuple)
@@ -85,6 +92,8 @@ function Base.push!(hist::HSDHistory, row::NamedTuple)
     push!(hist.pfres, row.pfres); push!(hist.ppres, row.ppres); push!(hist.pdres, row.pdres)
     push!(hist.cfres, row.cfres); push!(hist.cpres, row.cpres); push!(hist.cdres, row.cdres)
     push!(hist.wfres, row.wfres); push!(hist.wpres, row.wpres); push!(hist.wdres, row.wdres)
+    push!(hist.pamin, row.pamin); push!(hist.pamax, row.pamax)
+    push!(hist.camin, row.camin); push!(hist.camax, row.camax)
     push!(hist.αmin, row.αmin); push!(hist.αmax, row.αmax)
     return hist
 end
@@ -102,6 +111,11 @@ function Base.empty!(hist::HSDHistory)
     empty!(hist.pbase); empty!(hist.prefn); empty!(hist.ppass); empty!(hist.pstat)
     empty!(hist.cbase); empty!(hist.crefn); empty!(hist.cpass); empty!(hist.cstat)
     empty!(hist.wbase); empty!(hist.wrefn); empty!(hist.wpass); empty!(hist.wstat)
+    empty!(hist.pfres); empty!(hist.ppres); empty!(hist.pdres)
+    empty!(hist.cfres); empty!(hist.cpres); empty!(hist.cdres)
+    empty!(hist.wfres); empty!(hist.wpres); empty!(hist.wdres)
+    empty!(hist.pamin); empty!(hist.pamax); empty!(hist.camin); empty!(hist.camax)
+    empty!(hist.αmin); empty!(hist.αmax)
     return hist
 end
 
