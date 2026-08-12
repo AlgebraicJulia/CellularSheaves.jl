@@ -64,7 +64,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.Layered, CellularSheaves.ControlSheaves.NestedSystems, CellularSheaves.ControlSheaves.NestedDSL, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLTerm, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLParser, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLValidator, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLLowering, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.ControlSheaves.CoordinationBenchmarks, CellularSheaves.AsynchSheaves, CellularSheaves.SheafInterface, CellularSheaves.NetworkSheaves.EuclideanSheaves, CellularSheaves.NetworkSheaves.GraphHomomorphisms, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.Pushforwards, CellularSheaves.NetworkSheaves.Pushouts, CellularSheaves.NetworkSheaves.CellularSheafParser, CellularSheaves.BlockSparseArrays, CellularSheaves.NetworkSheaves.PotentialSheaves, CellularSheaves.NetworkSheaves.TrajectorySheaves, CellularSheaves.NetworkSheaves.DistributedSolve, CellularSheaves.NetworkSheaves.Formations, CellularSheaves.ControlSheaves.TrackingDSL, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLTerm, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLParser, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLValidator, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLResolver, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLLowering, CellularSheaves.IPM],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.SafetyFilters, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.Layered, CellularSheaves.ControlSheaves.NestedSystems, CellularSheaves.ControlSheaves.NestedDSL, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLTerm, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLParser, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLValidator, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLLowering, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.ControlSheaves.CoordinationBenchmarks, CellularSheaves.AsynchSheaves, CellularSheaves.SheafInterface, CellularSheaves.NetworkSheaves.EuclideanSheaves, CellularSheaves.NetworkSheaves.GraphHomomorphisms, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.Pushforwards, CellularSheaves.NetworkSheaves.Pushouts, CellularSheaves.NetworkSheaves.CellularSheafParser, CellularSheaves.BlockSparseArrays, CellularSheaves.NetworkSheaves.PotentialSheaves, CellularSheaves.NetworkSheaves.TrajectorySheaves, CellularSheaves.NetworkSheaves.DistributedSolve, CellularSheaves.NetworkSheaves.Formations, CellularSheaves.ControlSheaves.TrackingDSL, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLTerm, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLParser, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLValidator, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLResolver, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLLowering, CellularSheaves.IPM],
   draft=false,
   format=Documenter.HTML(
     assets=["assets/benchtables.css"],
@@ -98,6 +98,7 @@ makedocs(
         "generated/layered/layered_scenario5.md",
         "generated/layered/escort.md",
         "generated/layered/escort_feedforward.md",
+        "generated/layered/escort_cbf_clf.md",
         "generated/layered/diffusion_vs_direct.md",
         "generated/layered/multilayer_escort.md",
         ],
@@ -158,6 +159,7 @@ makedocs(
       "api/trajectory_sheaves.md",
       "api/tikhonov.md",
       "api/agent_controllers.md",
+      "api/safety_filters.md",
       "api/distributed_layered_control.md",
       "api/layered.md",
       "api/nested_systems.md",
