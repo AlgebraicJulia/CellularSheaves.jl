@@ -107,6 +107,32 @@ saturated regime the relaxation exists to handle.
 safety_filter_settings(; itmax::Int = 200, raug::Float64 = 1e3) =
     IPMSettings{Float64}(kkt = UzawaSettings{Float64}(raug = raug), itmax = itmax)
 
+"""
+    SAFETY_FILTER_FALLBACK_RAUG
+
+Augmentations retried, in order, when a solve fails to reach an acceptable status.
+
+The conditioning of the KKT system depends on the augmentation in a way that is not
+monotone: an instance can fail at one value and succeed at neighbours a decade either side,
+and which values fail shifts with the floating-point details of the machine. A single
+augmentation is therefore not portable — the same program can solve on one CPU and fail on
+another. Retrying a failed solve at a different augmentation costs nothing when the first
+attempt succeeds, which is the overwhelmingly common case.
+"""
+const SAFETY_FILTER_FALLBACK_RAUG = (1e2, 1e4)
+
+# Rebuild settings with a different Uzawa augmentation, without naming the field lists: both
+# are @kwdef structs, so a field that is added upstream is carried through rather than
+# silently reset to its default.
+_with_raug(k::UzawaSettings{T}, raug::Real) where {T} =
+    UzawaSettings{T}(; (f => (f === :raug ? T(raug) : getfield(k, f))
+                        for f in fieldnames(UzawaSettings))...)
+
+_with_raug(s::IPMSettings{T}, raug::Real) where {T} =
+    s.kkt isa UzawaSettings ?
+        IPMSettings{T}(; (f => (f === :kkt ? _with_raug(s.kkt, raug) : getfield(s, f))
+                          for f in fieldnames(IPMSettings))...) : s
+
 include("model.jl")
 include("program.jl")
 include("barriers.jl")

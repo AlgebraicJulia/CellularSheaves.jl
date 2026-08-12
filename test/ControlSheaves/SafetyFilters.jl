@@ -551,7 +551,7 @@ end
     # but the public LinearRow/filter_program API, and require the filter to agree. This is
     # the executable form of the notation table: if a sign, a factor, or a disturbance term
     # in the documentation drifts away from the implementation, this fails.
-    using CellularSheaves.IPM: solve
+    using CellularSheaves.IPM: solve, OPTIMAL, NEAR_OPTIMAL
     using CellularSheaves.BlockSparseArrays: colrange
 
     rng = MersenneTwister(4242)
@@ -598,7 +598,21 @@ end
 
         problem, B = filter_program(u_nom, rows;
                                     cone_metric = W, cone_bound = params.actuator_cap)
-        expected = Vector(solve(problem, params.settings).p[colrange(B, 1)])
+        # Solve the reference exactly as the filter does, retries included. Taking the
+        # iterate of a solve that never converged would compare against noise, and would
+        # pass only while the filter happened to fail on the same instance.
+        reference = solve(problem, params.settings)
+        if !(reference.status in (OPTIMAL, NEAR_OPTIMAL))
+            for raug in SafetyFilters.SAFETY_FILTER_FALLBACK_RAUG
+                candidate = solve(problem, SafetyFilters._with_raug(params.settings, raug))
+                if candidate.status in (OPTIMAL, NEAR_OPTIMAL)
+                    reference = candidate
+                    break
+                end
+            end
+        end
+        @test reference.status in (OPTIMAL, NEAR_OPTIMAL)
+        expected = Vector(reference.p[colrange(B, 1)])
         @test got.command ≈ expected atol = 1e-6
         compared += 1
     end
@@ -1175,6 +1189,44 @@ end
     @test result.command !== nothing
     @test result.clf_residual >= -1e-6
     @test result.slack ≈ maximum(deltas) rtol = 1e-4
+end
+
+@testset "a failed solve is retried at another augmentation" begin
+    # Which Uzawa augmentations condition badly is a property of the instance and of the
+    # machine's floating point, not of the problem: this closed loop solves cleanly at 1e3
+    # and stalls almost completely at 1e5, and on a different CPU the same swap moves across
+    # that boundary. Without a retry the filter is not portable, so this pins the recovery
+    # rather than the tuning.
+    model = ControlAffineModel(2)
+    dt = 0.01
+    function swap_run(raug)
+        params = CBFCLFParams(d_safe = 0.6, gamma = 5.0, actuator_cap = 2.0, clf_rate = 3.0,
+                              settings = safety_filter_settings(raug = raug))
+        xs = [[-1.5, -0.15], [1.5, 0.15]]
+        refs = [[1.5, -0.15], [-1.5, 0.15]]
+        uncertified = 0
+        for _ in 1:400
+            u_noms = [4 .* (refs[i] - xs[i]) for i in 1:2]
+            results = safety_filter_all(params, model, u_noms, xs, refs)
+            for i in 1:2
+                results[i].certified || (uncertified += 1)
+                xs[i] = xs[i] + dt .* (results[i].certified ? results[i].command : zeros(2))
+            end
+        end
+        return uncertified, norm(xs[1] - refs[1])
+    end
+
+    for raug in (1e2, 1e3, 1e4, 1e5)
+        uncertified, reached = swap_run(raug)
+        @test uncertified == 0
+        @test reached < 1e-3
+    end
+
+    # The recovery is real rather than the augmentation being irrelevant: without it, the
+    # bare solve at 1e5 does fail on this instance.
+    bare = safety_filter_settings(raug = 1e5)
+    @test SafetyFilters._with_raug(bare, 1e2).kkt.raug == 1e2
+    @test SafetyFilters._with_raug(bare, 1e5) === bare
 end
 
 @testset "input validation" begin

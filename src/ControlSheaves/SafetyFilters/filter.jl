@@ -1,3 +1,14 @@
+# One solve attempt. A solver exception is the same outcome as a bad status, so both are
+# funnelled to `nothing` and handled by the caller; an interrupt is not and is rethrown.
+function _attempt(problem, settings)
+    return try
+        solve(problem, settings)
+    catch err
+        err isa InterruptException && rethrow()
+        nothing
+    end
+end
+
 # Composition. Terms are independent; the two operations below are not, and so live here
 # rather than inside any one term:
 #
@@ -94,11 +105,19 @@ function safety_filter(terms, ctx::FilterContext, u_nom::AbstractVector{<:Real};
                                 cone_bound = cap)
     # A solver failure is a reportable outcome, not an error: it becomes an uncertified
     # result below. An interrupt is not, and must not be swallowed by that convention.
-    result = try
-        solve(problem, settings)
-    catch err
-        err isa InterruptException && rethrow()
-        nothing
+    # A failed solve is retried at the augmentations of `SAFETY_FILTER_FALLBACK_RAUG`, since
+    # which augmentations condition badly is instance- and machine-dependent.
+    result = _attempt(problem, settings)
+    if result === nothing || !(result.status in (OPTIMAL, NEAR_OPTIMAL))
+        for raug in SAFETY_FILTER_FALLBACK_RAUG
+            retry = _with_raug(settings, raug)
+            retry === settings && continue
+            candidate = _attempt(problem, retry)
+            if candidate !== nothing && candidate.status in (OPTIMAL, NEAR_OPTIMAL)
+                result = candidate
+                break
+            end
+        end
     end
     if result === nothing || !(result.status in (OPTIMAL, NEAR_OPTIMAL))
         return SafetyFilterResult(nothing, Inf,
