@@ -9,7 +9,8 @@ export AbstractAgentDynamics, QuadrotorDynamics, PlanarQuadrotorDynamics,
        AbstractAgentController, LQRController,
        AbstractAgentState, AgentState,
        solve_dare, step_agent!,
-       position_indices, velocity_indices, state_dim, initial_state
+       position_indices, velocity_indices, state_dim, initial_state,
+       continuous_matrices, discrete_matrices
 
 abstract type AbstractAgentDynamics end
 
@@ -26,6 +27,12 @@ Base.@kwdef struct QuadrotorDynamics <: AbstractAgentDynamics
     Iyy::Float64 = 0.01
 end
 
+"""
+    continuous_matrices(dyn::AbstractAgentDynamics)
+
+Continuous-time state and input matrices `(Ac, Bc)` of the linearized agent model,
+``\\dot{x} = A_c x + B_c u``.
+"""
 function continuous_matrices(dyn::QuadrotorDynamics)
     Ac = zeros(10, 10)
     Ac[1, 6] = 1.0
@@ -185,8 +192,22 @@ function solve_dare(A::AbstractMatrix, B::AbstractMatrix, Q::AbstractMatrix, R::
     return (R + B' * P * B) \ (B' * P * A)
 end
 
+"""
+    AbstractAgentController
+
+Supertype for the local control laws an agent applies to track its reference. Implementations
+supply a [`step_agent!`](@ref) method advancing an [`AbstractAgentState`](@ref) by one
+control period.
+"""
 abstract type AbstractAgentController end
 
+"""
+    LQRController(K)
+    LQRController(dyn, dt, Q, R)
+
+Infinite-horizon LQR feedback ``u = -K (x - x_{\\text{ref}})``. The second form solves the
+discrete algebraic Riccati equation for `dyn` discretized at `dt`; see [`solve_dare`](@ref).
+"""
 struct LQRController <: AbstractAgentController
     K::Matrix{Float64}
 end
@@ -197,6 +218,14 @@ function LQRController(dyn::AbstractAgentDynamics, dt::Float64, Q::AbstractMatri
     LQRController(K)
 end
 
+"""
+    AbstractAgentState
+
+Supertype for the per-agent state an [`AbstractAgentController`](@ref) advances. An
+implementation carries whatever a [`step_agent!`](@ref) method needs to take one control
+period: at minimum the state vector itself and the reference filter feeding it. See
+[`AgentState`](@ref) for the concrete type used throughout.
+"""
 abstract type AbstractAgentState end
 
 """
