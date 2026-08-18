@@ -134,7 +134,6 @@ struct BlockSparseMatrix{T, I} <: AbstractMatrix{T}
 end
 
 const AdjOrTransBlockSparseMatrix{T, I} = AdjOrTrans{T, BlockSparseMatrix{T, I}}
-const  HermOrSymBlockSparseMatrix{T, I} = HermOrSym{T, BlockSparseMatrix{T, I}}
 
 const MaybeAdjOrTransBlockSparseMatrix{T, I} = Union{
               BlockSparseMatrix{T, I},
@@ -214,37 +213,6 @@ function BlockSparseMatrix{T, I}(A::SparseMatrixCSC{Mat, I}, R::AbstractVector{I
     return BlockSparseMatrix{T, I}(nout, nvtx, narc, ncol, nrow, nbnz, xsrc, xcol, xrow, xblk, tgt, val)
 end
 
-function blocksparse(I::AbstractVector{K}, J::AbstractVector{K}, V::AbstractVector) where {K}
-    A = sparse(I, J, V)
-
-    R = FVector{K}(undef, size(A, 1))
-    C = FVector{K}(undef, size(A, 2))
-
-    fill!(R, zero(K))
-
-    for v in axes(A, 2)
-        Cv = 0
-
-        for e in nzrange(A, v)
-            u =   rowvals(A)[e]
-            Ae = nonzeros(A)[e]
-
-            R[u] = size(Ae, 1)
-            Cv   = size(Ae, 2)
-        end
-
-        C[v] = Cv
-    end
-
-    return BlockSparseMatrix(A, R, C)
-end
-
-function blocksparse(I::AbstractVector, J::AbstractVector, V::AbstractVector, R::AbstractVector, C::AbstractVector)
-    m = length(R)
-    n = length(C)
-    return BlockSparseMatrix(sparse(I, J, V, m, n), R, C)
-end
-
 function Base.similar(A::BlockSparseMatrix{T, I}, ::Type{U}=T, ::Type{J}=I) where {T, U, I, J}
     return BlockSparseMatrix{U, J}(A.nout, A.nvtx, A.narc, A.ncol, A.nrow, A.nbnz)
 end
@@ -262,43 +230,6 @@ end
 
 function Base.copy(A::BlockSparseMatrix)
     return copyto!(similar(A), A)
-end
-
-function SparseArrays.sparse(A::BlockSparseMatrix{T, I}) where {T, I}
-    nrow = nrows(A)
-    ncol = ncols(A)
-    nbnz = nbnzs(A)
-
-    colptr = Vector{I}(undef, ncol + one(I))
-    rowval = Vector{I}(undef, nbnz)
-    nzval = Vector{T}(undef, nbnz)
-
-    p = zero(I)
-
-    for v in vtxs(A)
-        cols = colrange(A, v)
-
-        for j in cols
-            colptr[j] = p + one(I)
-            jloc = j - first(cols) + one(I)
-
-            for e in srcrange(A, v)
-                u = A.tgt[e]
-                Ae = block(A, u, v, e)
-                rows = rowrange(A, u)
-
-                for i in rows
-                    iloc = i - first(rows) + one(I)
-                    p += one(I)
-                    rowval[p] = i
-                    nzval[p] = Ae[iloc, jloc]
-                end
-            end
-        end
-    end
-
-    colptr[ncol + one(I)] = p + one(I)
-    return SparseMatrixCSC(nrow, ncol, colptr, rowval, nzval)
 end
 
 function Base.Matrix{T}(A::BlockSparseMatrix) where {T}
@@ -342,7 +273,7 @@ end
 function Base.getindex(A::BlockSparseMatrix{T}, i::Integer, j::Integer) where {T}
     @boundscheck checkbounds(A, i, j)
 
-    b = findbnz(A, i, j)
+    b = bnzindex(A, i, j)
 
     if !iszero(b)
         x = A.val[b]
@@ -356,7 +287,7 @@ end
 function Base.setindex!(A::BlockSparseMatrix, x, i::Integer, j::Integer)
     @boundscheck checkbounds(A, i, j)
 
-    b = findbnz(A, i, j)
+    b = bnzindex(A, i, j)
 
     if !iszero(b)
         A.val[b] = x
@@ -366,6 +297,82 @@ function Base.setindex!(A::BlockSparseMatrix, x, i::Integer, j::Integer)
     end
 
     return A
+end
+
+############################################################################################
+# AbstractSparseMatrixCSC Interface
+############################################################################################
+
+function blocksparse(I::AbstractVector{K}, J::AbstractVector{K}, V::AbstractVector) where {K}
+    A = sparse(I, J, V)
+
+    R = FVector{K}(undef, size(A, 1))
+    C = FVector{K}(undef, size(A, 2))
+
+    fill!(R, zero(K))
+
+    for v in axes(A, 2)
+        Cv = 0
+
+        for e in nzrange(A, v)
+            u =   rowvals(A)[e]
+            Ae = nonzeros(A)[e]
+
+            R[u] = size(Ae, 1)
+            Cv   = size(Ae, 2)
+        end
+
+        C[v] = Cv
+    end
+
+    return BlockSparseMatrix(A, R, C)
+end
+
+function blocksparse(I::AbstractVector, J::AbstractVector, V::AbstractVector, R::AbstractVector, C::AbstractVector)
+    m = length(R)
+    n = length(C)
+    return BlockSparseMatrix(sparse(I, J, V, m, n), R, C)
+end
+
+function SparseArrays.sparse(A::BlockSparseMatrix{T, I}) where {T, I}
+    nrow = nrows(A)
+    ncol = ncols(A)
+    nbnz = nbnzs(A)
+
+    colptr = Vector{I}(undef, ncol + one(I))
+    rowval = Vector{I}(undef, nbnz)
+    nzval = Vector{T}(undef, nbnz)
+
+    p = zero(I)
+
+    for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for j in cols
+            colptr[j] = p + one(I)
+            jloc = j - first(cols) + one(I)
+
+            for e in srcrange(A, v)
+                u = A.tgt[e]
+                Ae = block(A, u, v, e)
+                rows = rowrange(A, u)
+
+                for i in rows
+                    iloc = i - first(rows) + one(I)
+                    p += one(I)
+                    rowval[p] = i
+                    nzval[p] = Ae[iloc, jloc]
+                end
+            end
+        end
+    end
+
+    colptr[ncol + one(I)] = p + one(I)
+    return SparseMatrixCSC(nrow, ncol, colptr, rowval, nzval)
+end
+
+function SparseArrays.nnz(A::BlockSparseMatrix)
+    return convert(Int, nbnzs(A))
 end
 
 ############################################################################################
@@ -506,7 +513,7 @@ end
 
 # Get the number
 #
-#   nbnzs(A, e) = | blkrange(A, e) |
+#   nbnzs(A, e) = | bnzrange(A, e) |
 #
 # of nonzero indices incident to an arc e ∈ E.
 @propagate_inbounds function nbnzs(A::BlockSparseMatrix, e::J) where {J}
@@ -554,10 +561,10 @@ end
 
 # Get the nonzero indices
 #
-#   blkrange(A, e) ⊆ B
+#   bnzrange(A, e) ⊆ B
 #
 # incident to an arc e ∈ E.
-@propagate_inbounds function blkrange(A::BlockSparseMatrix{<:Any, I}, e::J) where {I, J}
+@propagate_inbounds function bnzrange(A::BlockSparseMatrix{<:Any, I}, e::J) where {I, J}
     @boundscheck checkbounds(arcs(A), e)
     bstrt = @inbounds A.xblk[e]
     bstop = @inbounds A.xblk[e + one(J)]
@@ -592,7 +599,7 @@ end
 #   e = (row[i], col[j]).
 #
 # Returns zero if no such block exists.
-function findbnz(A::BlockSparseMatrix{<:Any, I}, i::Integer, j::Integer) where {I}
+function bnzindex(A::BlockSparseMatrix{<:Any, I}, i::Integer, j::Integer) where {I}
     b = zero(I)
 
     if i in rows(A) && j in cols(A)
@@ -698,29 +705,6 @@ function LinearAlgebra.mul!(C::AbstractMatrix, A::MaybeAdjOrTransBlockSparseMatr
     return gemm_impl!(C, tA, uA, tB, uB, α, β)
 end
 
-function LinearAlgebra.mul!(C::AbstractVector, A::HermOrSymBlockSparseMatrix{T, I}, B::AbstractVector, α::Number, β::Number) where {T, I}
-    @assert length(C) == size(A, 1)
-    @assert length(B) == size(A, 2)
-    uA, tA = unwrapsym(A)
-
-    if A.uplo == 'L'
-        uplo = :L
-    else
-        uplo = :U
-    end
-
-    return symv_impl!(C, tA, uplo, uA, B, α, β)
-end
-
-function LinearAlgebra.mul!(C::AbstractMatrix, A::HermOrSymBlockSparseMatrix{T, I}, B::AbstractMatrix, α::Number, β::Number) where {T, I}
-    @assert size(C, 1) == size(A, 1)
-    @assert size(C, 2) == size(B, 2)
-    @assert size(A, 2) == size(B, 1)
-    uA, tA = unwrapsym(A)
-    uB, tB = unwrapadj(B)
-    return symm_impl!(C, tA, Symbol(A.uplo), uA, tB, uB, α, β)
-end
-
 function LinearAlgebra.mul!(C::BlockSparseMatrix, A::MaybeAdjOrTransBlockSparseMatrix, B::MaybeAdjOrTransBlockSparseMatrix, α::Number, β::Number)
     @assert size(C, 1) == size(A, 1)
     @assert size(C, 2) == size(B, 2)
@@ -741,6 +725,10 @@ end
 ############################################################################################
 # Operators
 ############################################################################################
+
+function Base.isstored(A::BlockSparseMatrix, i::Integer, j::Integer)
+    return !iszero(bnzindex(A, i, j))
+end
 
 function Base.copy(A::AdjOrTransBlockSparseMatrix)
     return copyto!(similar(A), A)
@@ -867,8 +855,92 @@ function LinearAlgebra.lmul!(α::Number, A::BlockSparseMatrix)
     return A
 end
 
+function LinearAlgebra.lmul!(D::Diagonal, A::BlockSparseMatrix{T, I}) where {T, I}
+    @assert size(D, 2) == size(A, 1)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+            Ae = block(A, u, v, e)
+            rows = rowrange(A, u)
+
+            jloc = zero(I)
+
+            for j in cols
+                jloc += one(I)
+                iloc  = zero(I)
+
+                for i in rows
+                    iloc += one(I); Ae[iloc, jloc] *= D.diag[i]
+                end
+            end
+        end
+    end
+
+    return A
+end
+
 function LinearAlgebra.rmul!(A::BlockSparseMatrix, α::Number)
     return lmul!(α, A)
+end
+
+function LinearAlgebra.rmul!(A::BlockSparseMatrix{T, I}, D::Diagonal) where {T, I}
+    @assert size(A, 2) == size(D, 1)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u    = A.tgt[e]
+            Ae   = block(A, u, v, e)
+            rows = rowrange(A, u)
+
+            jloc = zero(I)
+
+            for j in cols
+                Djj = D.diag[j]
+
+                jloc += one(I)
+                iloc  = zero(I)
+
+                for i in rows
+                    iloc += one(I) ; Ae[iloc, jloc] *= Djj
+                end
+            end
+        end
+    end
+
+    return A
+end
+
+function LinearAlgebra.ldiv!(D::Diagonal, A::BlockSparseMatrix{T, I}) where {T, I}
+    @assert size(D, 2) == size(A, 1)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+            Ae = block(A, u, v, e)
+            rows = rowrange(A, u)
+
+            jloc = zero(I)
+
+            for j in cols
+                jloc += one(I)
+                iloc  = zero(I)
+
+                for i in rows
+                    iloc += one(I)
+                    Ae[iloc, jloc] /= D.diag[i]
+                end
+            end
+        end
+    end
+
+    return A
 end
 
 function LinearAlgebra.ldiv!(α::Number, A::BlockSparseMatrix)
@@ -876,9 +948,74 @@ function LinearAlgebra.ldiv!(α::Number, A::BlockSparseMatrix)
     return A
 end
 
+function LinearAlgebra.rdiv!(A::BlockSparseMatrix{T, I}, D::Diagonal) where {T, I}
+    @assert size(A, 2) == size(D, 1)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u    = A.tgt[e]
+            Ae   = block(A, u, v, e)
+            rows = rowrange(A, u)
+
+            jloc = zero(I)
+
+            for j in cols
+                Djj = D.diag[j]
+
+                jloc += one(I)
+                iloc  = zero(I)
+
+                for i in rows
+                    iloc += one(I); Ae[iloc, jloc] /= Djj
+                end
+            end
+        end
+    end
+
+    return A
+end
+
 function LinearAlgebra.rdiv!(A::BlockSparseMatrix, α::Number)
     return ldiv!(α, A)
 end
+
+function diag!(d::AbstractVector, A::BlockSparseMatrix{T, I}) where {T, I}
+    @assert length(d) ≤ nrows(A)
+    @assert length(d) ≤ ncols(A)
+
+    fill!(d, false)
+
+    @inbounds for v in vtxs(A)
+        cols = colrange(A, v)
+
+        for e in srcrange(A, v)
+            u = A.tgt[e]
+            rows = rowrange(A, u)
+            both = rows ∩ cols
+
+            if !isempty(both)
+                Ae = block(A, u, v, e)
+
+                for i in both
+                    iloc = i - first(rows) + one(I)
+                    jloc = i - first(cols) + one(I)
+                    d[i] = Ae[iloc, jloc]
+                end
+            end
+        end
+    end
+
+    return d
+end
+
+function LinearAlgebra.diag(A::BlockSparseMatrix{T}) where {T}
+    n = min(nrows(A), ncols(A))
+    d = Vector{T}(undef, n)
+    return diag!(d, A)
+end
+
 
 function LinearAlgebra.axpy!(α::Number, J::UniformScaling, A::BlockSparseMatrix{T, I}) where {T, I}
     λ = α * J.λ
@@ -921,42 +1058,27 @@ function LinearAlgebra.norm(A::MaybeAdjOrTransBlockSparseMatrix, p::Real=2)
     return norm_impl(uA, p)
 end
 
-function LinearAlgebra.norm(A::HermOrSymBlockSparseMatrix, p::Real=2)
-    uA, tA = unwrapsym(A)
-    return symnorm_impl(tA, Symbol(A.uplo), uA, p)
-end
-
 function norm_impl(A::BlockSparseMatrix, p::Real)
     v = view(A.val, bnzs(A))
     return norm(v, p)
 end
 
-function symnorm_impl(tA::Val{TA}, uplo::Symbol, A::BlockSparseMatrix{T}, p::Real) where {T, TA}
-    out = zero(real(T))
+function LinearAlgebra.dot(x::AbstractVector, A::BlockSparseMatrix, y::AbstractVector)
+    out = zero(real(promote_eltype(x, A, y)))
 
     @inbounds for v in vtxs(A)
+        yv = view(y, colrange(A, v))
+
         for e in srcrange(A, v)
-            u = A.tgt[e]
-            AE = block(A, u, v, e)
-
-            if u == v
-                if TA === :N
-                    SE = Symmetric(AE, uplo)
-                else
-                    SE = Hermitian(AE, uplo)
-                end
-
-                nxt = norm(SE, p)
-                out = norm((out, nxt), p)
-            else
-                nxt = norm(AE, p)
-                out = norm((out, nxt, nxt), p)
-            end
+            u  = A.tgt[e]
+            Ae = block(A, u, v, e)
+            xu = view(x, rowrange(A, u))
+            out += dot(xu, Ae, yv)
         end
     end
 
     return out
-end
+end 
 
 function selectvtxs(A::BlockSparseMatrix{T, I}, sel::AbstractVector{<:Integer}) where {T, I}
     nBout = nouts(A)
@@ -1004,7 +1126,7 @@ function selectvtxs!(B::BlockSparseMatrix{T, I}, A::BlockSparseMatrix, sel::Abst
             B.tgt[Be] = Au
             B.xblk[Be] = Bb + one(I)
 
-            for Ab in blkrange(A, Ae)
+            for Ab in bnzrange(A, Ae)
                 Bb += one(I)
                 B.val[Bb] = A.val[Ab]
             end
@@ -1163,3 +1285,4 @@ function show_matrix_dense(io::IO, A::BlockSparseMatrix)
     print_matrix(io, A)
     return
 end
+

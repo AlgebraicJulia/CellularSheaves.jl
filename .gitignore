@@ -41,3 +41,6 @@ skills-lock.json
 
 # Benchmarking
 bench/results.json
+
+# FCLIB frictional-contact benchmark data (fetched by the user, not vendored)
+src/IPM/data/
