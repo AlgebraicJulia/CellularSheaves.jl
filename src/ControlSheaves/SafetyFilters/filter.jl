@@ -1,10 +1,20 @@
-# One solve attempt. A solver exception is the same outcome as a bad status, so both are
-# funnelled to `nothing` and handled by the caller; an interrupt is not and is rethrown.
+# Only numerical failure is the same outcome as a bad status: an ill-conditioned instance can
+# break down inside a factorization, which is a property of the instance and not a defect.
+# Everything else must propagate, because a caller that receives `nothing` applies the
+# *unfiltered* nominal command, so a swallowed defect would silently disable the filter.
+const SOLVER_NUMERICAL_FAILURES = Union{
+    LinearAlgebra.LAPACKException,
+    LinearAlgebra.SingularException,
+    LinearAlgebra.PosDefException,
+    LinearAlgebra.RankDeficientException,
+    DomainError,
+}
+
 function _attempt(problem, settings)
     return try
         solve(problem, settings)
     catch err
-        err isa InterruptException && rethrow()
+        err isa SOLVER_NUMERICAL_FAILURES || rethrow()
         nothing
     end
 end
