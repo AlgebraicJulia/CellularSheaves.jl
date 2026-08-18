@@ -6,6 +6,7 @@ using ...NetworkSheaves.TrajectorySheaves: continuous_to_discrete_zoh
 using ..Tikhonov: AbstractTikhonovFilter, TikhonovFilter, JointTikhonovFilter, tikhonov_step!
 
 export AbstractAgentDynamics, QuadrotorDynamics, PlanarQuadrotorDynamics,
+       AbstractControlAffine, SingleIntegrator, DoubleIntegrator,
        AbstractAgentController, LQRController,
        AbstractAgentState, AgentState,
        solve_dare, step_agent!,
@@ -13,6 +14,16 @@ export AbstractAgentDynamics, QuadrotorDynamics, PlanarQuadrotorDynamics,
        continuous_matrices, discrete_matrices
 
 abstract type AbstractAgentDynamics end
+
+"""
+    AbstractControlAffine <: AbstractAgentDynamics
+
+Agents whose configuration is *directly actuated*: the input reaches it in one derivative
+for a [`SingleIntegrator`](@ref) and two for a [`DoubleIntegrator`](@ref), rather than
+through an attitude loop as in [`QuadrotorDynamics`](@ref). That is what decides whether a
+configuration barrier is usable, so it is what the hierarchy records.
+"""
+abstract type AbstractControlAffine <: AbstractAgentDynamics end
 
 """
     QuadrotorDynamics <: AbstractAgentDynamics
@@ -77,6 +88,99 @@ function continuous_matrices(dyn::PlanarQuadrotorDynamics)
     Bc[6, 1] = dyn.ell / (2*dyn.I_quad)
     Bc[6, 2] = -dyn.ell / (2*dyn.I_quad)
     return Ac, Bc
+end
+
+"""
+    SingleIntegrator(n; input = I)
+
+Single integrator on ``\\mathbb{R}^n``: state is the configuration alone, ``\\dot{q} = B u``
+with ``B = I`` by default. The configuration is the whole state, so a configuration barrier
+has relative degree one and the plain `DistanceBarrier` applies.
+
+`input` is the ``n \\times m`` map from command to configuration rate; a non-identity `input`
+describes an agent that cannot move equally freely in every direction.
+"""
+struct SingleIntegrator <: AbstractControlAffine
+    n::Int
+    input::Matrix{Float64}
+end
+
+function SingleIntegrator(n::Integer; input = I)
+    @argcheck n > 0
+    B = input isa UniformScaling ? Matrix{Float64}(input, n, n) : Matrix{Float64}(input)
+    @argcheck size(B, 1) == n
+    return SingleIntegrator(Int(n), B)
+end
+
+"""
+    DoubleIntegrator(n; damping = nothing, input = I)
+
+Double integrator on ``n`` position variables, in the Darboux coordinates ``(q, p)`` of
+``\\mathbb{R}^{2n}``: the state is a configuration stacked on its rate, and
+
+```math
+A = \\begin{pmatrix} 0 & I \\\\ 0 & D \\end{pmatrix}, \\qquad
+B = \\begin{pmatrix} 0 \\\\ B_p \\end{pmatrix} .
+```
+
+Only the blocks acting on the rate are specified; the kinematic ``\\dot{q} = p`` coupling and
+the zero rows are padded on. `damping` is ``D``, defaulting to the *free* double integrator;
+`input` is ``B_p``, defaulting to the identity so the command is an acceleration.
+
+The configuration is not directly actuated, so a configuration barrier has relative degree
+two and needs the braking form; see `BrakingBarrier` and `RelativeDegreeError`.
+"""
+struct DoubleIntegrator <: AbstractControlAffine
+    n::Int
+    damping::Matrix{Float64}
+    input::Matrix{Float64}
+end
+
+function DoubleIntegrator(n::Integer; damping = nothing, input = I)
+    @argcheck n > 0
+    D = damping === nothing ? zeros(n, n) :
+        damping isa UniformScaling ? Matrix{Float64}(damping, n, n) : Matrix{Float64}(damping)
+    B = input isa UniformScaling ? Matrix{Float64}(input, n, n) : Matrix{Float64}(input)
+    @argcheck size(D) == (n, n)
+    @argcheck size(B, 1) == n
+    return DoubleIntegrator(Int(n), D, B)
+end
+
+function continuous_matrices(dyn::SingleIntegrator)
+    return zeros(dyn.n, dyn.n), copy(dyn.input)
+end
+
+# The Darboux padding: the caller gave the blocks acting on the rate, and the kinematic
+# coupling and zero rows are supplied here rather than at every call site.
+function continuous_matrices(dyn::DoubleIntegrator)
+    n = dyn.n
+    Ac = zeros(2n, 2n)
+    Ac[1:n, (n + 1):(2n)] = Matrix{Float64}(I, n, n)
+    Ac[(n + 1):(2n), (n + 1):(2n)] = dyn.damping
+    Bc = vcat(zeros(n, size(dyn.input, 2)), dyn.input)
+    return Ac, Bc
+end
+
+position_indices(dyn::SingleIntegrator) = 1:(dyn.n)
+# A single integrator has no rate state at all, so the velocity selector is empty. This is
+# what makes `ControlAffineModel` hand the filter a `nothing` velocity, and so what makes the
+# braking barrier report that it cannot be used here.
+velocity_indices(dyn::SingleIntegrator) = 1:0
+state_dim(dyn::SingleIntegrator) = dyn.n
+
+position_indices(dyn::DoubleIntegrator) = 1:(dyn.n)
+velocity_indices(dyn::DoubleIntegrator) = (dyn.n + 1):(2 * dyn.n)
+state_dim(dyn::DoubleIntegrator) = 2 * dyn.n
+
+# There is no attitude to trim, so the acceleration argument carries no information here.
+function initial_state(dyn::AbstractControlAffine, position::AbstractVector,
+                       velocity::AbstractVector, acceleration::AbstractVector)
+    @argcheck length(position) == length(position_indices(dyn))
+    @argcheck length(velocity) == length(velocity_indices(dyn))
+    x = zeros(state_dim(dyn))
+    x[position_indices(dyn)] .= position
+    x[velocity_indices(dyn)] .= velocity
+    return x
 end
 
 function discrete_matrices(dyn::AbstractAgentDynamics, dt::Float64)

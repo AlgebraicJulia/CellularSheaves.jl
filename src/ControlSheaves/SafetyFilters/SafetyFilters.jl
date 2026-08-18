@@ -77,7 +77,8 @@ using ...IPM: IPMProblem, IPMSettings, UzawaSettings, solve, allocblockdiag,
               AbstractCone, CofreeCone, PositiveCone, SecondOrderCone,
               OPTIMAL, NEAR_OPTIMAL
 using ...BlockSparseArrays: blocksparse, block, colrange
-using ..AgentControllers: AbstractAgentDynamics, AbstractAgentController, AgentState,
+using ..AgentControllers: AbstractAgentDynamics, AbstractControlAffine, SingleIntegrator,
+                          DoubleIntegrator, AbstractAgentController, AgentState,
                           LQRController, continuous_matrices, position_indices,
                           velocity_indices
 using ..Tikhonov: tikhonov_step!, JointTikhonovFilter

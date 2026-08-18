@@ -82,23 +82,18 @@ end
 ControlAffineModel(drift, input, position::AbstractMatrix) =
     ControlAffineModel(drift, input, position, nothing)
 
-function ControlAffineModel(n::Integer)
-    @argcheck n > 0
-    zero_drift = let n = n
-        x -> zeros(Float64, n)
-    end
-    identity_input = let n = n
-        x -> Matrix{Float64}(I, n, n)
-    end
-    return ControlAffineModel(zero_drift, identity_input, Matrix{Float64}(I, n, n), nothing)
-end
+ControlAffineModel(n::Integer) = ControlAffineModel(SingleIntegrator(n))
 
 function ControlAffineModel(dyn::AbstractAgentDynamics)
     Ac, Bc = continuous_matrices(dyn)
     nx = size(Ac, 1)
     eye = Matrix{Float64}(I, nx, nx)
     P = eye[position_indices(dyn), :]
-    Pv = eye[velocity_indices(dyn), :]
+    # An agent with no rate state gets `nothing` rather than a 0-row selector, so that the
+    # barriers needing a velocity report that they cannot be used instead of silently
+    # building rows out of empty vectors.
+    v_idxs = velocity_indices(dyn)
+    Pv = isempty(v_idxs) ? nothing : eye[v_idxs, :]
     linear_drift = let Ac = Matrix{Float64}(Ac)
         x -> Ac * x
     end
@@ -115,15 +110,13 @@ Model of a double integrator on ``\\mathbb{R}^n``: state ``(p, v)``, input the a
 ``\\dot{p} = v``, ``\\dot{v} = u``. Position is not directly actuated, so a configuration
 barrier has relative degree two and requires the braking form; see
 [`CBFCLFParams`](@ref) and [`RelativeDegreeError`](@ref).
+
+Shorthand for `ControlAffineModel(DoubleIntegrator(n))`. Use [`DoubleIntegrator`](@ref)
+directly to add a damping block, a non-identity input map, or to drive an
+[`AgentState`](@ref), since that is an `AbstractAgentDynamics` and this is only the
+model the filter reads.
 """
-function double_integrator_model(n::Integer)
-    @argcheck n > 0
-    A = zeros(2n, 2n)
-    A[1:n, (n + 1):(2n)] = Matrix{Float64}(I, n, n)
-    B = vcat(zeros(n, n), Matrix{Float64}(I, n, n))
-    eye = Matrix{Float64}(I, 2n, 2n)
-    return ControlAffineModel(x -> A * x, x -> B, eye[1:n, :], eye[(n + 1):(2n), :])
-end
+double_integrator_model(n::Integer) = ControlAffineModel(DoubleIntegrator(n))
 
 state_dimension(model::ControlAffineModel) = size(model.position, 2)
 

@@ -1237,6 +1237,62 @@ end
     @test SafetyFilters._with_raug(bare, 1e5) === bare
 end
 
+@testset "integrator dynamics live in the agent hierarchy" begin
+    @test SingleIntegrator <: AbstractControlAffine <: AbstractAgentDynamics
+    @test DoubleIntegrator <: AbstractControlAffine <: AbstractAgentDynamics
+
+    # The free double integrator: only the rate blocks are given, the kinematic coupling and
+    # the zero rows are padded on.
+    A, B = continuous_matrices(DoubleIntegrator(2))
+    @test A == [0 0 1 0; 0 0 0 1; 0 0 0 0; 0 0 0 0]
+    @test B == [0 0; 0 0; 1 0; 0 1]
+
+    # A damping block and a non-identity input map land in those same blocks.
+    Ad, Bd = continuous_matrices(DoubleIntegrator(2; damping = -0.5I,
+                                                 input = [1.0 0.0; 0.0 2.0]))
+    @test Ad[1:2, 3:4] == Matrix(1.0I, 2, 2)   # coupling still padded on
+    @test Ad[3:4, 3:4] == [-0.5 0.0; 0.0 -0.5]
+    @test Bd == [0 0; 0 0; 1 0; 0 2]
+
+    di = DoubleIntegrator(2)
+    @test (position_indices(di), velocity_indices(di), state_dim(di)) == (1:2, 3:4, 4)
+    si = SingleIntegrator(3)
+    @test (position_indices(si), state_dim(si)) == (1:3, 3)
+    @test isempty(velocity_indices(si))
+    @test continuous_matrices(si) == (zeros(3, 3), Matrix(1.0I, 3, 3))
+
+    @test initial_state(di, [1.0, 2.0], [3.0, 4.0]) == [1.0, 2.0, 3.0, 4.0]
+    @test initial_state(si, [1.0, 2.0, 3.0]) == [1.0, 2.0, 3.0]
+
+    @test_throws ArgumentError DoubleIntegrator(0)
+    @test_throws ArgumentError DoubleIntegrator(2; damping = zeros(3, 3))
+end
+
+@testset "the filter models are the integrator dynamics" begin
+    # `double_integrator_model` is now a shorthand, not a second source of truth.
+    a = double_integrator_model(2)
+    b = ControlAffineModel(DoubleIntegrator(2))
+    x = [1.0, 2.0, 3.0, 4.0]
+    @test a.drift(x) == b.drift(x)
+    @test a.input(x) == b.input(x)
+    @test a.position == b.position
+    @test a.velocity == b.velocity
+
+    # `ControlAffineModel(n)` is the single integrator, and still reports no velocity.
+    m = ControlAffineModel(2)
+    @test m.velocity === nothing
+    @test m.position == Matrix(1.0I, 2, 2)
+    @test m.drift([1.0, 2.0]) == zeros(2)
+    @test m.input([1.0, 2.0]) == Matrix(1.0I, 2, 2)
+
+    # An empty velocity selector means the braking barrier reports it cannot be used, rather
+    # than building a row out of empty vectors.
+    ctx = FilterContext(ControlAffineModel(SingleIntegrator(2)), zeros(2), zeros(2), 2;
+                        others = [[1.0, 0.0]])
+    @test_throws ArgumentError constraints(SafetyTerm(BrakingBarrier(0.5, 1.0); gamma = 1.0),
+                                           ctx)
+end
+
 @testset "one safety term covers a whole formation" begin
     # James's question on the PR: an agent with several near neighbours does not need several
     # filters. One term emits one row per neighbour in range, and they compose into a single
