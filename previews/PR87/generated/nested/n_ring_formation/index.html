@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>N-Ring Cyclic Escort Formation · CellularSheaves.jl</title><meta name="title" content="N-Ring Cyclic Escort Formation · CellularSheaves.jl"/><meta property="og:title" content="N-Ring Cyclic Escort Formation · CellularSheaves.jl"/><meta property="twitter:title" content="N-Ring Cyclic Escort Formation · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../search_index.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script><link href="../../../assets/benchtables.css" rel="stylesheet" type="text/css"/></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../../literate_example/">Code Example</a></li><li><a class="tocitem" href="../../sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../nullspace/">Computing the Nullspace of the Sheaf Laplacian</a></li><li><a class="tocitem" href="../../nearest_global_section_iterative/">Nearest Global Section: Iterative Method</a></li><li><a class="tocitem" href="../../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li><li><a class="tocitem" href="../../trajectory_sheaf/">Spring Oscillator: Four Colocation Methods Compared</a></li><li><input class="collapse-toggle" id="menuitem-2-7" type="checkbox"/><label class="tocitem" for="menuitem-2-7"><span class="docs-label">Control Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../control/simple_integrator/">Controlled Trajectory Examples: 0 — Scalar Integrator</a></li><li><a class="tocitem" href="../../control/controlled_double_integrator/">Controlled Trajectory Examples: 1 — Double Integrator</a></li><li><a class="tocitem" href="../../control/controlled_vehicle_platoon/">Controlled Trajectory Examples: 2 — Vehicle Platoon</a></li><li><a class="tocitem" href="../../control/controlled_planar_quadrotor/">Controlled Trajectory Examples: 3 — Planar Quadrotor</a></li><li><a class="tocitem" href="../../control/controlled_mass_spring_damper_chain/">Controlled Trajectory Examples: 4 — Mass-Spring-Damper Chain</a></li><li><a class="tocitem" href="../../../control/single_integrator_target_tracking/">Single‑Integrator Target Tracking (DSL Version)</a></li><li><a class="tocitem" href="../../control/multi_quadrotor_target_tracking/">Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a></li><li><a class="tocitem" href="../../control/mpc_target_tracking/">Receding-Horizon MPC via a Cached Harmonic Extension</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-8" type="checkbox"/><label class="tocitem" for="menuitem-2-8"><span class="docs-label">Layered Control Architecture Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../layered/distributed_harmonic_tracking/">Distributed Harmonic Extension: Tracking Without a Central Solver</a></li><li><a class="tocitem" href="../../layered/tikhonov_harmonic_tracking/">Tikhonov-Filtered Harmonic Extension</a></li><li><a class="tocitem" href="../../layered/layered_scenario5/">Layered Control Architecture for Multi-Quadrotor Tracking (Scenario 5)</a></li><li><a class="tocitem" href="../../layered/escort/">Layered Control Architecture for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/escort_feedforward/">Feedforward Layered Control for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/diffusion_vs_direct/">Diffusion versus Direct: Two Routes to the Harmonic Extension</a></li><li><a class="tocitem" href="../../layered/multilayer_escort/">Multilayer Hierarchical Control for Team-of-Teams Escort Formation</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-9" type="checkbox" checked/><label class="tocitem" for="menuitem-2-9"><span class="docs-label">Nested Systems Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../centroid_formation_tracking/">Centroid-Coupled Formation Tracking</a></li><li><a class="tocitem" href="../wheel_formation/">Hub-and-Spoke Wheel Escort Formation</a></li><li class="is-active"><a class="tocitem" href>N-Ring Cyclic Escort Formation</a><ul class="internal"><li><a class="tocitem" href="#Why-a-cycle,-and-not-a-tree"><span>Why a cycle, and not a tree</span></a></li><li><a class="tocitem" href="#Escort-radius-scaling"><span>Escort radius scaling</span></a></li><li><a class="tocitem" href="#Spec-construction,-parameterized-by-n"><span>Spec construction, parameterized by <code>n</code></span></a></li><li><a class="tocitem" href="#Why-rings-don&#39;t-settle-on-their-own-targets"><span>Why rings don&#39;t settle on their own targets</span></a></li><li><a class="tocitem" href="#Target-motion:-a-rigid-n-gon-orbiting-the-big-circle"><span>Target motion: a rigid n-gon orbiting the big circle</span></a></li><li><a class="tocitem" href="#Dynamics-cascade"><span>Dynamics cascade</span></a></li><li><a class="tocitem" href="#Run-the-closed-loop-simulation-with-full-feedforward"><span>Run the closed-loop simulation with full feedforward</span></a></li><li><a class="tocitem" href="#Diagnostics:-per-ring-formation-and-tracking-error-over-time"><span>Diagnostics: per-ring formation and tracking error over time</span></a></li><li><a class="tocitem" href="#Plots"><span>Plots</span></a></li><li><a class="tocitem" href="#Animated-top-down-view"><span>Animated top-down view</span></a></li><li><a class="tocitem" href="#Design-notes:-alternatives-considered"><span>Design notes: alternatives considered</span></a></li></ul></li><li><a class="tocitem" href="../rescaling_formation/">Emergent Rescaling: A Rigid Team Absorbing Divergent Targets Through Scale</a></li><li><a class="tocitem" href="../hierarchical_fleet/">A Four-Level Fleet, Written in the Nested DSL</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-10" type="checkbox"/><label class="tocitem" for="menuitem-2-10"><span class="docs-label">Asynchronous Diffusion</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B</a></li><li><a class="tocitem" href="../../asynch/step_size_comparison/">Step Size Comparison: Optimal vs. Conservative</a></li><li><a class="tocitem" href="../../asynch/restriction_map_comparison/">Restriction Map Type Comparison</a></li><li><a class="tocitem" href="../../asynch/orthogonal_projection/">Convergence Bounds vs. Maximum Delay B</a></li></ul></li></ul></li><li><span class="tocitem">Feature Guides</span><ul><li><a class="tocitem" href="../../../features/core_sheaf_workflows/">Core Sheaf Workflows</a></li><li><a class="tocitem" href="../../../features/morphisms_and_pushforwards/">Morphisms and Pushforwards</a></li><li><a class="tocitem" href="../../../features/trajectory_and_control/">Trajectory and Control</a></li><li><input class="collapse-toggle" id="menuitem-3-4" type="checkbox"/><label class="tocitem" for="menuitem-3-4"><span class="docs-label">Distributed Sheaf Solve</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/">Distributed Sheaf Solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_coordination/">Coordination as a harmonic extension</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_multifrontal/">The multifrontal factorization</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_distributed/">Distributing the solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/comparison/">Three methods, one communication model</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/api/">Usage and API</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-3-5" type="checkbox"/><label class="tocitem" for="menuitem-3-5"><span class="docs-label">Tikhonov Harmonic Tracking</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/">Tikhonov Harmonic Tracking</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/harmonic_manifold/">The Harmonic Manifold</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/stability/">Boundary-Layer Stability and ISS</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/feedforward/">Analytic Feedforward</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/scenarios/">Complete Tracking Scenarios</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/api/">Usage and API</a></li></ul></li></ul></li><li><span class="tocitem">Benchmarks</span><ul><li><a class="tocitem" href="../../../benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../benchmark_report/">Benchmark report</a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../../api/">API Reference</a></li><li><a class="tocitem" href="../../../api/network_sheaves/">Network Sheaves</a></li><li><a class="tocitem" href="../../../api/sheaf_interface/">Sheaf Interface</a></li><li><a class="tocitem" href="../../../api/euclidean_sheaves/">Euclidean Sheaves</a></li><li><a class="tocitem" href="../../../api/distributed_solve/">Distributed Solve</a></li><li><a class="tocitem" href="../../../api/graph_homomorphisms/">Graph Homomorphisms</a></li><li><a class="tocitem" href="../../../api/sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../../api/pushforwards/">Pushforwards</a></li><li><a class="tocitem" href="../../../api/pushouts/">Pushouts</a></li><li><a class="tocitem" href="../../../api/dsl/">Cellular Sheaf DSL</a></li><li><a class="tocitem" href="../../../api/block_sparse_arrays/">Block Sparse Arrays</a></li><li><a class="tocitem" href="../../../api/potential_sheaves/">Potential Sheaves</a></li><li><a class="tocitem" href="../../../api/formations/">Formations</a></li><li><a class="tocitem" href="../../../api/trajectory_sheaves/">Trajectory Sheaves</a></li><li><a class="tocitem" href="../../../api/tikhonov/">Tikhonov</a></li><li><a class="tocitem" href="../../../api/agent_controllers/">Agent Controllers</a></li><li><a class="tocitem" href="../../../api/distributed_layered_control/">Distributed Layered Control</a></li><li><a class="tocitem" href="../../../api/layered/">Layered Escort Architecture</a></li><li><a class="tocitem" href="../../../api/nested_systems/">Nested Systems: Sheaf Tower Compiler</a></li><li><a class="tocitem" href="../../../api/nested_dsl/">NestedDSL</a></li><li><a class="tocitem" href="../../../api/coordination_benchmarks/">Coordination Benchmarks</a></li><li><a class="tocitem" href="../../../api/herding_platoon/">Herding Platoon Utilities</a></li><li><a class="tocitem" href="../../../api/multi_agent_tracking/">Multi-Agent Tracking</a></li><li><a class="tocitem" href="../../../api/quadratic_costs/">Quadratic Costs</a></li><li><a class="tocitem" href="../../../api/asynch/">Asynchronous Sheaf Diffusion</a></li><li><a class="tocitem" href="../../../api/tracking_dsl/">TrackingDSL</a></li><li><a class="tocitem" href="../../../api/ipm/">IPM</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li><a class="is-disabled">Nested Systems Examples</a></li><li class="is-active"><a href>N-Ring Cyclic Escort Formation</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>N-Ring Cyclic Escort Formation</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/src/generated/nested/n_ring_formation.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="N-Ring-Cyclic-Escort-Formation"><a class="docs-heading-anchor" href="#N-Ring-Cyclic-Escort-Formation">N-Ring Cyclic Escort Formation</a><a id="N-Ring-Cyclic-Escort-Formation-1"></a><a class="docs-heading-anchor-permalink" href="#N-Ring-Cyclic-Escort-Formation" title="Permalink"></a></h1><p><code>n</code> targets orbit a large circle, each with its own escort ring of <code>m_i</code> agents. The rings are also wired to each other in a <strong>cycle</strong>: one small support pod sits between each consecutive pair. Every edge in that cycle uses <code>centroid</code>, since neither a ring nor a pod has a single natural representative to expose on a cross-ring edge.</p><p>The whole specification is a function of <code>n</code>, so the topology, escort radius, and dynamics cascade all generalize; this page renders <code>n = 3</code>.</p><p>Each ring ends up <em>near</em> its own target but not on it. The next section measures exactly why.</p><h2 id="Why-a-cycle,-and-not-a-tree"><a class="docs-heading-anchor" href="#Why-a-cycle,-and-not-a-tree">Why a cycle, and not a tree</a><a id="Why-a-cycle,-and-not-a-tree-1"></a><a class="docs-heading-anchor-permalink" href="#Why-a-cycle,-and-not-a-tree" title="Permalink"></a></h2><p>The previous page, <code>wheel_formation.jl</code>, also bridges <code>n</code> rings with <code>n</code> pods – but as a <strong>tree</strong>, spokes into a shared hub. It tracks noticeably better (own-target weight <code>0.74</code> against <code>0.6</code> here). That is not an oversight in this page&#39;s design; it is a structural limit, and worth understanding before reading the numbers below.</p><p><code>NestedSystemSpec</code> is a <em>tree</em> of <code>RefinedSystem</code>/<code>LeafTeam</code> nodes, so every node has exactly one parent, and a <code>SystemEdge</code> only ever joins two children of the same parent. Now consider what a cycle asks for: ring <code>i</code> must be visible to the bridge on its left <em>and</em> the bridge on its right. Those are two different bridges, so ring <code>i</code> would have to be a child of two parents at once – which a tree cannot express. The wheel escapes this because all its spokes share the single hub, so one parent suffices.</p><p>The only remaining way to say &quot;ring <code>i</code> bridges into both of its neighbours&quot; is to wire the cycle&#39;s edges directly into <code>root</code>&#39;s own children, which is what this page does. That unmediated coupling between every adjacent pair is precisely what produces the worse cross-talk measured below.</p><pre><code class="language-julia hljs">using CellularSheaves
+using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.NestedDSL
+using CellularSheaves.ControlSheaves.AgentControllers
+using LinearAlgebra
+using Statistics
+using Plots
+using Printf
+
+# Located from the package root, not `@__DIR__`: while Literate.jl executes a page, `@__DIR__`
+# points at the *output* directory rather than at this file. The simulation driver and the
+# multi-pin helpers live in `NestedSystems`, already loaded above.
+include(joinpath(pkgdir(CellularSheaves), &quot;docs&quot;, &quot;literate&quot;, &quot;nested&quot;, &quot;_plot_helpers.jl&quot;))</code></pre><pre><code class="nohighlight hljs">Main.var&quot;##2209&quot;.fade_alpha</code></pre><h2 id="Escort-radius-scaling"><a class="docs-heading-anchor" href="#Escort-radius-scaling">Escort radius scaling</a><a id="Escort-radius-scaling-1"></a><a class="docs-heading-anchor-permalink" href="#Escort-radius-scaling" title="Permalink"></a></h2><p>Targets sit at angle <code>2π(i-1)/n</code> on a circle of radius <code>R_big</code>, so adjacent targets are a chord <code>2 R_big sin(π/n)</code> apart – shrinking as <code>n</code> grows, as it must for more targets to fit on the same circle. Ring <code>i</code> takes a <code>safety</code> fraction of that chord, scaled by its share of the largest ring&#39;s agent count, which leaves headroom for the pod between it and its neighbour.</p><pre><code class="language-julia hljs">escort_radius(n::Int, R_big::Real, m_i::Int, m_max::Int; safety::Real=0.35) =
+    safety * R_big * sin(pi / n) * (m_i / m_max)</code></pre><pre><code class="nohighlight hljs">escort_radius (generic function with 1 method)</code></pre><h2 id="Spec-construction,-parameterized-by-n"><a class="docs-heading-anchor" href="#Spec-construction,-parameterized-by-n">Spec construction, parameterized by <code>n</code></a><a id="Spec-construction,-parameterized-by-n-1"></a><a class="docs-heading-anchor-permalink" href="#Spec-construction,-parameterized-by-n" title="Permalink"></a></h2><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    build_n_ring_spec(n; m=fill(5, n), R_big=3.0, support_m=2, safety=0.35, D=4, pin_scheme=:redundant)
+
+Build the `n`-ring cyclic escort specification -- the `NestedDSL` `SystemFragment` it is
+written as, the lowered `NestedSystemSpec`, its compiled `SheafTower`, and the agent
+index ranges for each ring/pod (into `tower.agent_vertices`, in the order the rings/pods were
+added -- ring 1, pod 1, ring 2, pod 2, ..., matching `NestedSystems`&#39;s depth-first agent
+assignment).
+
+`pin_scheme` selects how each ring observes its own target: `:redundant` (the default) pins every
+other agent around the ring via `NestedSystems.redundant_pin`, while `:single` pins only
+the first agent. Both are used below -- `:redundant` for the simulation, `:single` purely as a
+comparison point for measuring what the redundant pin actually buys.
+&quot;&quot;&quot;
+function build_n_ring_spec(n::Int; m::Vector{Int}=fill(5, n), R_big::Real=3.0,
+                           support_m::Int=2, safety::Real=0.35, D::Int=4,
+                           pin_scheme::Symbol=:redundant)
+    @assert length(m) == n
+    m_max = maximum(m)
+    ring_name(i) = Symbol(:ring, i)
+    pod_name(i) = Symbol(:pod, i)
+    pod_radius = 0.3 * escort_radius(n, R_big, m_max, m_max; safety=safety)
+
+    # The whole cyclic topology is one `NestedDSL` fragment. Every loop below is Julia&#39;s
+    # own -- `@nested_system` executes its block rather than quoting it -- so the spec scales
+    # with `n` without the language needing any iteration construct of its own, and the `if`
+    # selecting a pin scheme is likewise just an `if`.
+    fragment = @nested_system begin
+        @dim D
+        for i in 1:n
+            @team $(ring_name(i)) = ring(m[i]; radius=escort_radius(n, R_big, m[i], m_max; safety=safety))
+            # 2-agent pods use :path (one edge) rather than :ring, to avoid the degenerate
+            # parallel-edge 2-cycle a :ring topology gives for exactly 2 agents.
+            @team $(pod_name(i)) = path(support_m; radius=pod_radius)
+            @target $(Symbol(:t, i))
+        end
+        for i in 1:n
+            @link centroid($(ring_name(i))) =&gt; centroid($(pod_name(i)))                # ring_i -- pod_i
+            @link centroid($(pod_name(i))) =&gt; centroid($(ring_name(mod1(i + 1, n))))   # pod_i -- ring_{i+1}
+        end
+        for i in 1:n
+            for k in (pin_scheme == :redundant ? (1:2:m[i]) : (1:1))
+                @observe via($(ring_name(i)), pin_scheme == :redundant ?
+                             redundant_pin(m[i], D, k) : project(1)) =&gt; $(Symbol(:t, i))
+            end
+        end
+    end
+
+    system = compile_nested_system(fragment)
+    ring_ranges = [agent_range(system, ring_name(i)) for i in 1:n]
+    pod_ranges = [agent_range(system, pod_name(i)) for i in 1:n]
+
+    return fragment, system.spec, system.tower, ring_ranges, pod_ranges
+end
+
+const N = 3
+const M = fill(5, N)
+const R_BIG = 3.0
+const SUPPORT_M = 2
+const D = 4
+
+fragment, spec, tower, ring_ranges, pod_ranges = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M)
+println(&quot;Ring radius: &quot;, round(escort_radius(N, R_BIG, M[1], maximum(M)), digits=3), &quot; m &quot;,
+       &quot;  (chord = &quot;, round(2R_BIG * sin(pi / N), digits=3), &quot; m)&quot;)</code></pre><pre><code class="nohighlight hljs">Ring radius: 0.909 m   (chord = 5.196 m)
+</code></pre><h2 id="Why-rings-don&#39;t-settle-on-their-own-targets"><a class="docs-heading-anchor" href="#Why-rings-don&#39;t-settle-on-their-own-targets">Why rings don&#39;t settle on their own targets</a><a id="Why-rings-don&#39;t-settle-on-their-own-targets-1"></a><a class="docs-heading-anchor-permalink" href="#Why-rings-don&#39;t-settle-on-their-own-targets" title="Permalink"></a></h2><p>Every ring is pulled three ways: by its own target pin, and by <code>centroid()</code> edges to the pods on either side.</p><p>The pods are the problem. A pod has <strong>no target of its own</strong>, and it appears in only two quadratic terms, so at the joint optimum it sits <em>exactly</em> at the average of its two neighbouring rings&#39; solved positions. That makes it a perfect, undamped relay. It does not merely couple a ring to its immediate neighbours – it carries every ring&#39;s influence to every other ring, all the way around the cycle, with nothing to attenuate it.</p><p>The system is linear in the target positions, so this is directly measurable: nudge one target and watch how far a ring moves.</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    target_response_weights(tower, ring_ranges, ring_idx, n) -&gt; Vector{Float64}
+
+The linear response of ring `ring_idx`&#39;s own centroid to a unit displacement of each of the `n`
+targets in turn, holding the others fixed at a common base point. Sums to `1` for any ring in a
+translation-invariant tower (translating every target by the same vector must translate every
+ring&#39;s solved position by that same vector) -- so this is a set of blending weights, not just a
+sensitivity measure.
+&quot;&quot;&quot;
+function target_response_weights(tower::SheafTower, ring_ranges, ring_idx::Int, n::Int)
+    base = fill([0.0, 0.0, 1.5, 1.0], n)
+    # Two different index conventions meet here. `ring_ranges` holds *agent* indices, which is
+    # what `res.sim_data` uses elsewhere on this page; `solve_hierarchical` returns values indexed
+    # by sheaf *vertex* (targets first, then agents). `tower.agent_vertices` converts between them.
+    verts = tower.agent_vertices[ring_ranges[ring_idx]]
+    ring_centroid(tv) = begin
+        q = solve_hierarchical(tower, tv)[end]
+        sum(q[v] for v in verts) / length(verts)
+    end
+    c0 = ring_centroid(base)
+    h = 1.0
+    return [begin
+                perturbed = copy(base)
+                perturbed[j] = base[j] .+ [h, 0.0, 0.0, 0.0]
+                (ring_centroid(perturbed)[1] - c0[1]) / h
+            end
+            for j in 1:n]
+end
+
+w = target_response_weights(tower, ring_ranges, 1, N)
+@printf(&quot;ring1&#39;s target-response weights: own=%.3f, neighbors=%.3f/%.3f (sum=%.3f)\n&quot;, w[1], w[2], w[3], sum(w))</code></pre><pre><code class="nohighlight hljs">ring1&#39;s target-response weights: own=0.600, neighbors=0.200/0.200 (sum=1.000)
+</code></pre><p>Ring 1 settles at <code>0.6</code> of its own target plus <code>0.2</code> of each neighbour&#39;s, where a truly independent ring would read <code>1.0</code>/<code>0.0</code>/<code>0.0</code>.</p><p>That 60/20/20 blend – not a bad edge or a bug in the pin scheme – is <em>why</em> the tracking-error panel below never reaches zero. It is measuring exactly this. The &quot;Design notes&quot; at the end of the page compare the split against a plain single-pin ring, and <code>wheel_formation.jl</code> separates how much of it is the cost of the <em>cycle</em> from the cost of having any bridge at all.</p><h2 id="Target-motion:-a-rigid-n-gon-orbiting-the-big-circle"><a class="docs-heading-anchor" href="#Target-motion:-a-rigid-n-gon-orbiting-the-big-circle">Target motion: a rigid n-gon orbiting the big circle</a><a id="Target-motion:-a-rigid-n-gon-orbiting-the-big-circle-1"></a><a class="docs-heading-anchor-permalink" href="#Target-motion:-a-rigid-n-gon-orbiting-the-big-circle" title="Permalink"></a></h2><pre><code class="language-julia hljs">const ω_big, h_alt = 0.3, 1.5
+
+target_traj(i::Int) = t -&gt; [R_BIG * cos(2π * (i - 1) / N + ω_big * t),
+                            R_BIG * sin(2π * (i - 1) / N + ω_big * t), h_alt, 1.0]
+target_vel(i::Int) = t -&gt; [-R_BIG * ω_big * sin(2π * (i - 1) / N + ω_big * t),
+                           R_BIG * ω_big * cos(2π * (i - 1) / N + ω_big * t), 0.0, 0.0]
+target_acc(i::Int) = t -&gt; [-R_BIG * ω_big^2 * cos(2π * (i - 1) / N + ω_big * t),
+                           -R_BIG * ω_big^2 * sin(2π * (i - 1) / N + ω_big * t), 0.0, 0.0]
+
+target_trajectories = [target_traj(i) for i in 1:N]
+target_velocities = [target_vel(i) for i in 1:N]
+target_accelerations = [target_acc(i) for i in 1:N]</code></pre><pre><code class="nohighlight hljs">3-element Vector{Main.var&quot;##2209&quot;.var&quot;#target_acc##0#target_acc##1&quot;{Int64}}:
+ #target_acc##0 (generic function with 1 method)
+ #target_acc##0 (generic function with 1 method)
+ #target_acc##0 (generic function with 1 method)</code></pre><h2 id="Dynamics-cascade"><a class="docs-heading-anchor" href="#Dynamics-cascade">Dynamics cascade</a><a id="Dynamics-cascade-1"></a><a class="docs-heading-anchor-permalink" href="#Dynamics-cascade" title="Permalink"></a></h2><p>Every agent gets <code>QuadrotorDynamics</code> and a shared gain by default. The pods get a softer gain through a per-child override: they have no target of their own and exist purely for structural coordination, so they should not fight the rings they bridge. This is the binding cascade doing real work, rather than the uniform root-only case <code>centroid_formation_tracking.jl</code> covers.</p><pre><code class="language-julia hljs">DT, STEPS = 0.05, 200
+dyn = QuadrotorDynamics()
+Ad, Bd = CellularSheaves.AgentControllers.discrete_matrices(dyn, DT)
+Q_lqr = Matrix(Diagonal([500.0, 500.0, 500.0, 150.0, 150.0, 100.0, 100.0, 100.0, 5.0, 5.0]))
+R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
+K = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 10 * Q_lqr, R_lqr)
+K_soft = CellularSheaves.AgentControllers.solve_dare(Ad, Bd, 2 * Q_lqr, R_lqr)
+
+# Declared in the same language as the topology, in a separate fragment merged onto it: the
+# gains do not exist until `solve_dare` has run. `nested_bindings` resolves the cascade alone,
+# without rebuilding the tower.
+bindings = nested_bindings(merge(fragment, @nested_system begin
+    @bind dynamics=dyn K_lqr=K
+    for i in 1:N
+        @bind $(Symbol(:pod, i)) K_lqr=K_soft
+    end
+end))</code></pre><pre><code class="nohighlight hljs">CellularSheaves.ControlSheaves.NestedSystems.SystemBinding(CellularSheaves.ControlSheaves.AgentControllers.QuadrotorDynamics(9.81, 0.5, 0.01, 0.01), [0.0 0.0 21.166309247170133 0.0 0.0 0.0 0.0 10.52467760470746 0.0 0.0; 0.0 -1.4667218880511848 0.0 2.392340797060175 0.0 0.0 -1.0703393879965992 0.0 0.25550801774491644 0.0; 1.4667218880511848 0.0 0.0 0.0 2.392340797060175 1.0703393879965992 0.0 0.0 0.0 0.25550801774491644], Dict{Symbol, CellularSheaves.ControlSheaves.NestedSystems.SystemBinding}(:pod1 =&gt; CellularSheaves.ControlSheaves.NestedSystems.SystemBinding(nothing, [0.0 0.0 21.124325990923666 0.0 0.0 0.0 0.0 10.505796292336779 0.0 0.0; 0.0 -1.4666988342024776 0.0 2.3923102931864766 0.0 0.0 -1.070323556150252 0.0 0.25550559773198644 0.0; 1.4666988342024776 0.0 0.0 0.0 2.3923102931864766 1.070323556150252 0.0 0.0 0.0 0.25550559773198644], Dict{Symbol, CellularSheaves.ControlSheaves.NestedSystems.SystemBinding}(), Dict{Int64, CellularSheaves.ControlSheaves.NestedSystems.AgentBinding}()), :pod2 =&gt; CellularSheaves.ControlSheaves.NestedSystems.SystemBinding(nothing, [0.0 0.0 21.124325990923666 0.0 0.0 0.0 0.0 10.505796292336779 0.0 0.0; 0.0 -1.4666988342024776 0.0 2.3923102931864766 0.0 0.0 -1.070323556150252 0.0 0.25550559773198644 0.0; 1.4666988342024776 0.0 0.0 0.0 2.3923102931864766 1.070323556150252 0.0 0.0 0.0 0.25550559773198644], Dict{Symbol, CellularSheaves.ControlSheaves.NestedSystems.SystemBinding}(), Dict{Int64, CellularSheaves.ControlSheaves.NestedSystems.AgentBinding}()), :pod3 =&gt; CellularSheaves.ControlSheaves.NestedSystems.SystemBinding(nothing, [0.0 0.0 21.124325990923666 0.0 0.0 0.0 0.0 10.505796292336779 0.0 0.0; 0.0 -1.4666988342024776 0.0 2.3923102931864766 0.0 0.0 -1.070323556150252 0.0 0.25550559773198644 0.0; 1.4666988342024776 0.0 0.0 0.0 2.3923102931864766 1.070323556150252 0.0 0.0 0.0 0.25550559773198644], Dict{Symbol, CellularSheaves.ControlSheaves.NestedSystems.SystemBinding}(), Dict{Int64, CellularSheaves.ControlSheaves.NestedSystems.AgentBinding}())), Dict{Int64, CellularSheaves.ControlSheaves.NestedSystems.AgentBinding}())</code></pre><h2 id="Run-the-closed-loop-simulation-with-full-feedforward"><a class="docs-heading-anchor" href="#Run-the-closed-loop-simulation-with-full-feedforward">Run the closed-loop simulation with full feedforward</a><a id="Run-the-closed-loop-simulation-with-full-feedforward-1"></a><a class="docs-heading-anchor-permalink" href="#Run-the-closed-loop-simulation-with-full-feedforward" title="Permalink"></a></h2><pre><code class="language-julia hljs">prob = NestedEscortProblem(tower, bindings, target_trajectories;
+                           target_velocities=target_velocities,
+                           target_accelerations=target_accelerations,
+                           dt=DT, steps=STEPS)
+res = run_nested_escort_simulation(prob; use_feedforward=true)
+time_grid = 0:DT:(STEPS*DT)</code></pre><pre><code class="nohighlight hljs">0.0:0.05:10.0</code></pre><h2 id="Diagnostics:-per-ring-formation-and-tracking-error-over-time"><a class="docs-heading-anchor" href="#Diagnostics:-per-ring-formation-and-tracking-error-over-time">Diagnostics: per-ring formation and tracking error over time</a><a id="Diagnostics:-per-ring-formation-and-tracking-error-over-time-1"></a><a class="docs-heading-anchor-permalink" href="#Diagnostics:-per-ring-formation-and-tracking-error-over-time" title="Permalink"></a></h2><pre><code class="language-julia hljs">form_err = [zeros(STEPS) for _ in 1:N]
+track_err = [zeros(STEPS) for _ in 1:N]
+ring_radius = [escort_radius(N, R_BIG, M[i], maximum(M)) for i in 1:N]
+
+for step in 1:STEPS
+    t = time_grid[step]
+    for i in 1:N
+        positions = [res.sim_data[step][a][1:3] for a in ring_ranges[i]]
+        c = sum(positions) / length(positions)
+        form_err[i][step] = sum(abs(norm(p .- c) - ring_radius[i]) for p in positions) / length(positions)
+        track_err[i][step] = norm(c[1:2] .- target_trajectories[i](t)[1:2])
+    end
+end</code></pre><h2 id="Plots"><a class="docs-heading-anchor" href="#Plots">Plots</a><a id="Plots-1"></a><a class="docs-heading-anchor-permalink" href="#Plots" title="Permalink"></a></h2><pre><code class="language-julia hljs">cs = palette(:tab10)
+ring_color(i) = cs[mod1(i, 10)]
+
+# Panel 1: top-down view, and the animated version below both need consistent axis limits --
+# computed once, from every agent and target position across the whole run.
+all_x = Float64[]; all_y = Float64[]
+for rngs in (ring_ranges, pod_ranges), rng in rngs, a in rng, step in 1:STEPS
+    push!(all_x, res.sim_data[step][a][1]); push!(all_y, res.sim_data[step][a][2])
+end
+for traj in target_trajectories, t in time_grid[1:STEPS]
+    p = traj(t)
+    push!(all_x, p[1]); push!(all_y, p[2])
+end
+const TOPDOWN_XLIM = (minimum(all_x) - 0.5, maximum(all_x) + 0.5)
+const TOPDOWN_YLIM = (minimum(all_y) - 0.5, maximum(all_y) + 0.5)
+
+# Panel 1 proper: a composite of the whole run. Every agent&#39;s full path is drawn thin and faint
+# (dt is far finer than a static plot needs); ring/pod outlines are drawn at sparse, evenly-spaced
+# snapshots (not one per step) with alpha fading from faint (early) to solid (final).
+function top_down_composite(; n_snapshots::Int=8)
+    snaps = snapshot_steps(STEPS, n_snapshots)
+    p = plot(title=&quot;Top-Down View (full trajectory)&quot;, aspect_ratio=1,
+            xlabel=&quot;x (m)&quot;, ylabel=&quot;y (m)&quot;, xlims=TOPDOWN_XLIM, ylims=TOPDOWN_YLIM,
+            legend=:outertopright)
+    for i in 1:N
+        for a in ring_ranges[i]
+            px = [res.sim_data[s][a][1] for s in 1:STEPS]
+            py = [res.sim_data[s][a][2] for s in 1:STEPS]
+            plot!(p, px, py, color=ring_color(i), alpha=0.1, linewidth=1, label=&quot;&quot;)
+        end
+        for (si, s) in enumerate(snaps)
+            a = fade_alpha(si, length(snaps))
+            fx = [res.sim_data[s][v][1] for v in ring_ranges[i]]
+            fy = [res.sim_data[s][v][2] for v in ring_ranges[i]]
+            plot!(p, [fx; fx[1]], [fy; fy[1]], color=ring_color(i), linestyle=:dash, alpha=a,
+                 label=(s == snaps[end] ? &quot;ring$i&quot; : &quot;&quot;))
+            scatter!(p, fx, fy, color=ring_color(i), markersize=3, alpha=a, label=&quot;&quot;)
+
+            px = [res.sim_data[s][v][1] for v in pod_ranges[i]]
+            py = [res.sim_data[s][v][2] for v in pod_ranges[i]]
+            scatter!(p, px, py, color=:gray40, markersize=3, marker=:diamond, alpha=a,
+                    label=(i == 1 &amp;&amp; s == snaps[end] ? &quot;pods&quot; : &quot;&quot;))
+        end
+
+        tp = [target_trajectories[i](t) for t in time_grid[1:STEPS]]
+        plot!(p, [q[1] for q in tp], [q[2] for q in tp], color=ring_color(i), linestyle=:dot, alpha=0.5, label=&quot;&quot;)
+        for (si, s) in enumerate(snaps)
+            pt = target_trajectories[i](time_grid[s])
+            a = fade_alpha(si, length(snaps))
+            scatter!(p, [pt[1]], [pt[2]], marker=:star5, markersize=(s == snaps[end] ? 9 : 5),
+                    color=ring_color(i), alpha=a, label=(s == snaps[end] ? &quot;target$i&quot; : &quot;&quot;))
+        end
+    end
+    return p
+end
+
+p1 = top_down_composite()
+
+# The animated version reuses the same per-step rendering in miniature -- current positions and
+# outline only, no accumulated trail (the composite above already shows the whole run at once).
+function top_down_frame(step::Int)
+    t = time_grid[step]
+    p = plot(title=@sprintf(&quot;Top-Down View (t = %.2f s)&quot;, t), aspect_ratio=1,
+            xlabel=&quot;x (m)&quot;, ylabel=&quot;y (m)&quot;, xlims=TOPDOWN_XLIM, ylims=TOPDOWN_YLIM,
+            legend=:outertopright)
+    for i in 1:N
+        fx = [res.sim_data[step][a][1] for a in ring_ranges[i]]
+        fy = [res.sim_data[step][a][2] for a in ring_ranges[i]]
+        scatter!(p, fx, fy, color=ring_color(i), markersize=4, label=&quot;ring$i&quot;)
+        plot!(p, [fx; fx[1]], [fy; fy[1]], color=ring_color(i), linestyle=:dash, label=&quot;&quot;)
+
+        px = [res.sim_data[step][a][1] for a in pod_ranges[i]]
+        py = [res.sim_data[step][a][2] for a in pod_ranges[i]]
+        scatter!(p, px, py, color=:gray40, markersize=3, marker=:diamond, label=(i == 1 ? &quot;pods&quot; : &quot;&quot;))
+
+        tp = [target_trajectories[i](tt) for tt in time_grid[1:step]]
+        plot!(p, [q[1] for q in tp], [q[2] for q in tp], color=ring_color(i), linestyle=:dot, alpha=0.5, label=&quot;&quot;)
+        pt = target_trajectories[i](t)
+        scatter!(p, [pt[1]], [pt[2]], marker=:star5, markersize=9, color=ring_color(i), label=&quot;target$i&quot;)
+    end
+    return p
+end
+
+# Panel 2: per-ring formation radius error.
+p2 = plot(title=&quot;Formation Radius Error&quot;, xlabel=&quot;time (s)&quot;, ylabel=&quot;error (m)&quot;)
+for i in 1:N
+    plot!(p2, time_grid[1:STEPS], form_err[i], color=ring_color(i), label=&quot;ring$i&quot;, linewidth=2)
+end
+
+# Panel 3: per-ring centroid tracking error -- the 40% (own weight 0.6, not 1.0) that the
+# redundant pin leaves on the table, per the &quot;Why rings don&#39;t settle on their own targets&quot;
+# section above.
+p3 = plot(title=&quot;Centroid Tracking Error&quot;, xlabel=&quot;time (s)&quot;, ylabel=&quot;error (m)&quot;)
+for i in 1:N
+    plot!(p3, time_grid[1:STEPS], track_err[i], color=ring_color(i), label=&quot;ring$i&quot;, linewidth=2)
+end
+
+# Panel 4: the coarse topology over time -- ring and pod centroids joined in cycle order, at the
+# same sparse snapshots as panel 1. Shows the cycle closing as declared at every snapshot, not
+# just the last, and traces the whole structure&#39;s arc through time.
+p4 = plot(title=&quot;High-Level Topology Over Time (Ring/Pod Centroids)&quot;, aspect_ratio=1,
+         xlabel=&quot;x (m)&quot;, ylabel=&quot;y (m)&quot;)
+# Skip the start of the run: agents begin from the default airstrip layout, and including that
+# transient would stretch this panel&#39;s axes around one uninformative outlier. Panels 2 and 3
+# already cover the convergence.
+topo_snaps = snapshot_steps(STEPS, 9)[2:end]
+for (si, s) in enumerate(topo_snaps)
+    a = fade_alpha(si, length(topo_snaps))
+    node_xy = Vector{Tuple{Float64,Float64}}()
+    for i in 1:N
+        rc = sum(res.sim_data[s][v][1:2] for v in ring_ranges[i]) / length(ring_ranges[i])
+        push!(node_xy, (rc[1], rc[2]))
+        scatter!(p4, [rc[1]], [rc[2]], color=ring_color(i), markersize=(s == topo_snaps[end] ? 8 : 4),
+                alpha=a, label=(i == 1 &amp;&amp; s == topo_snaps[end] ? &quot;ring centroid&quot; : &quot;&quot;))
+        pc = sum(res.sim_data[s][v][1:2] for v in pod_ranges[i]) / length(pod_ranges[i])
+        push!(node_xy, (pc[1], pc[2]))
+        scatter!(p4, [pc[1]], [pc[2]], color=:gray40, marker=:diamond,
+                markersize=(s == topo_snaps[end] ? 6 : 3), alpha=a,
+                label=(i == 1 &amp;&amp; s == topo_snaps[end] ? &quot;pod centroid&quot; : &quot;&quot;))
+    end
+    cyc_x = [pt[1] for pt in node_xy]; push!(cyc_x, node_xy[1][1])
+    cyc_y = [pt[2] for pt in node_xy]; push!(cyc_y, node_xy[1][2])
+    plot!(p4, cyc_x, cyc_y, color=:black, linewidth=(s == topo_snaps[end] ? 1.5 : 1.0), alpha=a * 0.7,
+         label=(s == topo_snaps[end] ? &quot;cycle&quot; : &quot;&quot;))
+end
+
+plot(p1, p2, p3, p4, layout=(2, 2), size=(1100, 900),
+    plot_title=&quot;$N-Ring Cyclic Escort Formation (centroid-wired)&quot;)
+
+@printf(&quot;Mean steady-state tracking error (last 20%% of run): %.3f m (ring radius = %.3f m)\n&quot;,
+       sum(mean(track_err[i][round(Int, 0.8STEPS):end]) for i in 1:N) / N, ring_radius[1])</code></pre><pre><code class="nohighlight hljs">Mean steady-state tracking error (last 20% of run): 1.800 m (ring radius = 0.909 m)
+</code></pre><p>Note in the topology panel that the pods sit closer to the <em>group centroid</em> than a naive &quot;midpoint of the two targets it bridges&quot; would predict. A pod has no target of its own, so it sits at the midpoint of its neighbours&#39; <em>actual</em> – already blended – positions, compounding the same effect one step further.</p><h2 id="Animated-top-down-view"><a class="docs-heading-anchor" href="#Animated-top-down-view">Animated top-down view</a><a id="Animated-top-down-view-1"></a><a class="docs-heading-anchor-permalink" href="#Animated-top-down-view" title="Permalink"></a></h2><p>Same <code>top_down_frame</code> function as panel 1 above, stepped through the run – watch each ring hold reasonably close to its own orbiting target while the pods visibly bridge between them.</p><pre><code class="language-julia hljs">anim = @animate for step in 1:4:STEPS
+    top_down_frame(step)
+end
+gif(anim, &quot;n_ring_formation_top_down.gif&quot;, fps=10)</code></pre><pre><code class="nohighlight hljs">Plots.AnimatedGif(&quot;/home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/src/generated/nested/n_ring_formation_top_down.gif&quot;)</code></pre><p><img src="../n_ring_formation_top_down.gif" alt="N-ring formation top-down animation"/></p><pre><code class="language-julia hljs">println(&quot;N-ring cyclic escort formation example complete.&quot;)</code></pre><pre><code class="nohighlight hljs">N-ring cyclic escort formation example complete.
+</code></pre><h2 id="Design-notes:-alternatives-considered"><a class="docs-heading-anchor" href="#Design-notes:-alternatives-considered">Design notes: alternatives considered</a><a id="Design-notes:-alternatives-considered-1"></a><a class="docs-heading-anchor-permalink" href="#Design-notes:-alternatives-considered" title="Permalink"></a></h2><p>Two approaches were tried and rejected while building this example, recorded here for anyone tempted to revisit either.</p><p><strong>Weakening the pod coupling with a scaled <code>RawRestriction</code>.</strong> Scaling both ends of each cyclic edge by <code>α &lt; 1</code> does reduce the pull as <code>α → 0</code>, but only down to a floor set by the single-pin boundary offset (see <code>centroid_formation_tracking.jl</code>). Pushing <code>α</code> below that floor made the harmonic solve&#39;s automatic nullity threshold misclassify the now very weak edges as null directions, blowing the solution up entirely. Not a usable knob.</p><p><strong>Adding more redundant pins.</strong> The measurement above explains the limited payoff: the blend is not an edge-<em>count</em> imbalance that more edges could out-vote. It comes from the pods providing an <strong>undamped</strong> path to every other ring&#39;s target, and strengthening one ring&#39;s own pin does not remove that path. To size the effect the redundant pin does buy, compare it against a plain single pin on the same topology:</p><pre><code class="language-julia hljs">_, _, tower_single, ring_ranges_single, _ = build_n_ring_spec(N; m=M, R_big=R_BIG, support_m=SUPPORT_M,
+                                                            pin_scheme=:single)
+w_single = target_response_weights(tower_single, ring_ranges_single, 1, N)
+@printf(&quot;single pin:    own=%.3f, neighbors=%.3f/%.3f\n&quot;, w_single[1], w_single[2], w_single[3])
+@printf(&quot;redundant pin: own=%.3f, neighbors=%.3f/%.3f\n&quot;, w[1], w[2], w[3])</code></pre><pre><code class="nohighlight hljs">single pin:    own=0.556, neighbors=0.222/0.222
+redundant pin: own=0.600, neighbors=0.200/0.200
+</code></pre><p>The redundant pin moves ring 1&#39;s own weight from about <code>0.56</code> to <code>0.6</code>: a real improvement and worth having, but nowhere near the <code>1.0</code> an independent ring would show. That remaining gap is the honest cost of a cyclic topology whose bridges have no anchor of their own.</p><pre><code class="language-julia hljs">println(&quot;Design notes complete.&quot;)</code></pre><pre><code class="nohighlight hljs">Design notes complete.
+</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../wheel_formation/">« Hub-and-Spoke Wheel Escort Formation</a><a class="docs-footer-nextpage" href="../rescaling_formation/">Emergent Rescaling: A Rigid Team Absorbing Divergent Targets Through Scale »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 18 August 2026 21:48">Tuesday 18 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

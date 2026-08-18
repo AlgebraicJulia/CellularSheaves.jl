@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>A Four-Level Fleet, Written in the Nested DSL · CellularSheaves.jl</title><meta name="title" content="A Four-Level Fleet, Written in the Nested DSL · CellularSheaves.jl"/><meta property="og:title" content="A Four-Level Fleet, Written in the Nested DSL · CellularSheaves.jl"/><meta property="twitter:title" content="A Four-Level Fleet, Written in the Nested DSL · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../search_index.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script><link href="../../../assets/benchtables.css" rel="stylesheet" type="text/css"/></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../../literate_example/">Code Example</a></li><li><a class="tocitem" href="../../sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../nullspace/">Computing the Nullspace of the Sheaf Laplacian</a></li><li><a class="tocitem" href="../../nearest_global_section_iterative/">Nearest Global Section: Iterative Method</a></li><li><a class="tocitem" href="../../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li><li><a class="tocitem" href="../../trajectory_sheaf/">Spring Oscillator: Four Colocation Methods Compared</a></li><li><input class="collapse-toggle" id="menuitem-2-7" type="checkbox"/><label class="tocitem" for="menuitem-2-7"><span class="docs-label">Control Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../control/simple_integrator/">Controlled Trajectory Examples: 0 — Scalar Integrator</a></li><li><a class="tocitem" href="../../control/controlled_double_integrator/">Controlled Trajectory Examples: 1 — Double Integrator</a></li><li><a class="tocitem" href="../../control/controlled_vehicle_platoon/">Controlled Trajectory Examples: 2 — Vehicle Platoon</a></li><li><a class="tocitem" href="../../control/controlled_planar_quadrotor/">Controlled Trajectory Examples: 3 — Planar Quadrotor</a></li><li><a class="tocitem" href="../../control/controlled_mass_spring_damper_chain/">Controlled Trajectory Examples: 4 — Mass-Spring-Damper Chain</a></li><li><a class="tocitem" href="../../../control/single_integrator_target_tracking/">Single‑Integrator Target Tracking (DSL Version)</a></li><li><a class="tocitem" href="../../control/multi_quadrotor_target_tracking/">Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a></li><li><a class="tocitem" href="../../control/mpc_target_tracking/">Receding-Horizon MPC via a Cached Harmonic Extension</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-8" type="checkbox"/><label class="tocitem" for="menuitem-2-8"><span class="docs-label">Layered Control Architecture Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../layered/distributed_harmonic_tracking/">Distributed Harmonic Extension: Tracking Without a Central Solver</a></li><li><a class="tocitem" href="../../layered/tikhonov_harmonic_tracking/">Tikhonov-Filtered Harmonic Extension</a></li><li><a class="tocitem" href="../../layered/layered_scenario5/">Layered Control Architecture for Multi-Quadrotor Tracking (Scenario 5)</a></li><li><a class="tocitem" href="../../layered/escort/">Layered Control Architecture for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/escort_feedforward/">Feedforward Layered Control for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/diffusion_vs_direct/">Diffusion versus Direct: Two Routes to the Harmonic Extension</a></li><li><a class="tocitem" href="../../layered/multilayer_escort/">Multilayer Hierarchical Control for Team-of-Teams Escort Formation</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-9" type="checkbox" checked/><label class="tocitem" for="menuitem-2-9"><span class="docs-label">Nested Systems Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../centroid_formation_tracking/">Centroid-Coupled Formation Tracking</a></li><li><a class="tocitem" href="../wheel_formation/">Hub-and-Spoke Wheel Escort Formation</a></li><li><a class="tocitem" href="../n_ring_formation/">N-Ring Cyclic Escort Formation</a></li><li><a class="tocitem" href="../rescaling_formation/">Emergent Rescaling: A Rigid Team Absorbing Divergent Targets Through Scale</a></li><li class="is-active"><a class="tocitem" href>A Four-Level Fleet, Written in the Nested DSL</a><ul class="internal"><li><a class="tocitem" href="#Reusable-fragments"><span>Reusable fragments</span></a></li><li><a class="tocitem" href="#The-fleet"><span>The fleet</span></a></li><li><a class="tocitem" href="#Names,-not-indices"><span>Names, not indices</span></a></li><li><a class="tocitem" href="#Target-motion:-two-wings,-two-orbiting-clusters"><span>Target motion: two wings, two orbiting clusters</span></a></li><li><a class="tocitem" href="#Influence-across-the-tree"><span>Influence across the tree</span></a></li><li><a class="tocitem" href="#A-sharp-edge:-centroid-on-a-refined-system-is-not-centroid-on-a-team"><span>A sharp edge: <code>centroid</code> on a refined system is not <code>centroid</code> on a team</span></a></li><li><a class="tocitem" href="#The-cost-of-four-levels-of-rigidity"><span>The cost of four levels of rigidity</span></a></li><li><a class="tocitem" href="#Dynamics,-declared-in-a-second-fragment"><span>Dynamics, declared in a second fragment</span></a></li><li><a class="tocitem" href="#Closed-loop-simulation"><span>Closed-loop simulation</span></a></li><li><a class="tocitem" href="#Diagnostics"><span>Diagnostics</span></a></li><li><a class="tocitem" href="#Plots"><span>Plots</span></a></li><li><a class="tocitem" href="#Animated-view"><span>Animated view</span></a></li></ul></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-10" type="checkbox"/><label class="tocitem" for="menuitem-2-10"><span class="docs-label">Asynchronous Diffusion</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B</a></li><li><a class="tocitem" href="../../asynch/step_size_comparison/">Step Size Comparison: Optimal vs. Conservative</a></li><li><a class="tocitem" href="../../asynch/restriction_map_comparison/">Restriction Map Type Comparison</a></li><li><a class="tocitem" href="../../asynch/orthogonal_projection/">Convergence Bounds vs. Maximum Delay B</a></li></ul></li></ul></li><li><span class="tocitem">Feature Guides</span><ul><li><a class="tocitem" href="../../../features/core_sheaf_workflows/">Core Sheaf Workflows</a></li><li><a class="tocitem" href="../../../features/morphisms_and_pushforwards/">Morphisms and Pushforwards</a></li><li><a class="tocitem" href="../../../features/trajectory_and_control/">Trajectory and Control</a></li><li><input class="collapse-toggle" id="menuitem-3-4" type="checkbox"/><label class="tocitem" for="menuitem-3-4"><span class="docs-label">Distributed Sheaf Solve</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/">Distributed Sheaf Solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_coordination/">Coordination as a harmonic extension</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_multifrontal/">The multifrontal factorization</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_distributed/">Distributing the solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/comparison/">Three methods, one communication model</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/api/">Usage and API</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-3-5" type="checkbox"/><label class="tocitem" for="menuitem-3-5"><span class="docs-label">Tikhonov Harmonic Tracking</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/">Tikhonov Harmonic Tracking</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/harmonic_manifold/">The Harmonic Manifold</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/stability/">Boundary-Layer Stability and ISS</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/feedforward/">Analytic Feedforward</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/scenarios/">Complete Tracking Scenarios</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/api/">Usage and API</a></li></ul></li></ul></li><li><span class="tocitem">Benchmarks</span><ul><li><a class="tocitem" href="../../../benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../benchmark_report/">Benchmark report</a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../../api/">API Reference</a></li><li><a class="tocitem" href="../../../api/network_sheaves/">Network Sheaves</a></li><li><a class="tocitem" href="../../../api/sheaf_interface/">Sheaf Interface</a></li><li><a class="tocitem" href="../../../api/euclidean_sheaves/">Euclidean Sheaves</a></li><li><a class="tocitem" href="../../../api/distributed_solve/">Distributed Solve</a></li><li><a class="tocitem" href="../../../api/graph_homomorphisms/">Graph Homomorphisms</a></li><li><a class="tocitem" href="../../../api/sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../../api/pushforwards/">Pushforwards</a></li><li><a class="tocitem" href="../../../api/pushouts/">Pushouts</a></li><li><a class="tocitem" href="../../../api/dsl/">Cellular Sheaf DSL</a></li><li><a class="tocitem" href="../../../api/block_sparse_arrays/">Block Sparse Arrays</a></li><li><a class="tocitem" href="../../../api/potential_sheaves/">Potential Sheaves</a></li><li><a class="tocitem" href="../../../api/formations/">Formations</a></li><li><a class="tocitem" href="../../../api/trajectory_sheaves/">Trajectory Sheaves</a></li><li><a class="tocitem" href="../../../api/tikhonov/">Tikhonov</a></li><li><a class="tocitem" href="../../../api/agent_controllers/">Agent Controllers</a></li><li><a class="tocitem" href="../../../api/distributed_layered_control/">Distributed Layered Control</a></li><li><a class="tocitem" href="../../../api/layered/">Layered Escort Architecture</a></li><li><a class="tocitem" href="../../../api/nested_systems/">Nested Systems: Sheaf Tower Compiler</a></li><li><a class="tocitem" href="../../../api/nested_dsl/">NestedDSL</a></li><li><a class="tocitem" href="../../../api/coordination_benchmarks/">Coordination Benchmarks</a></li><li><a class="tocitem" href="../../../api/herding_platoon/">Herding Platoon Utilities</a></li><li><a class="tocitem" href="../../../api/multi_agent_tracking/">Multi-Agent Tracking</a></li><li><a class="tocitem" href="../../../api/quadratic_costs/">Quadratic Costs</a></li><li><a class="tocitem" href="../../../api/asynch/">Asynchronous Sheaf Diffusion</a></li><li><a class="tocitem" href="../../../api/tracking_dsl/">TrackingDSL</a></li><li><a class="tocitem" href="../../../api/ipm/">IPM</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li><a class="is-disabled">Nested Systems Examples</a></li><li class="is-active"><a href>A Four-Level Fleet, Written in the Nested DSL</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>A Four-Level Fleet, Written in the Nested DSL</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/src/generated/nested/hierarchical_fleet.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="A-Four-Level-Fleet,-Written-in-the-Nested-DSL"><a class="docs-heading-anchor" href="#A-Four-Level-Fleet,-Written-in-the-Nested-DSL">A Four-Level Fleet, Written in the Nested DSL</a><a id="A-Four-Level-Fleet,-Written-in-the-Nested-DSL-1"></a><a class="docs-heading-anchor-permalink" href="#A-Four-Level-Fleet,-Written-in-the-Nested-DSL" title="Permalink"></a></h1><p>The other pages in this section nest at most one subsystem inside the root. This one nests two, for four levels of tree – <code>root → wing → flight → escort team → agents</code> – and is written entirely in the <code>NestedDSL</code> language rather than by hand-assembling <code>RefinedSystem</code> and <code>SystemEdge</code> values.</p><p>It makes two points, and documents one sharp edge.</p><p><strong>Composition.</strong> The fleet is not one big literal. Three ordinary Julia functions – <code>escort</code>, <code>relay</code>, and <code>flight</code> – each return a <code>SystemFragment</code>, and the fleet is assembled by calling them. <code>escort</code> is used at two different depths without change, because a fragment&#39;s paths are relative to wherever it lands and lowering rewrites them against its final position. The DSL has no looping or conditional constructs; Julia&#39;s own do that work, which is the whole design.</p><p><strong>What depth costs.</strong> Three pushforward steps separate the coarsest sheaf from the raw agents, so the rigidity the hierarchy imposes is far stronger than in a shallow spec. <code>approximation_gap</code> measures what that buys and what it costs.</p><p><strong>The sharp edge.</strong> <code>centroid</code> means something different on a refined subsystem than it does on a leaf team. The page shows the difference with a measurement rather than a warning.</p><pre><code class="language-julia hljs">using CellularSheaves
+using CellularSheaves.ControlSheaves.NestedSystems
+using CellularSheaves.ControlSheaves.NestedDSL
+using CellularSheaves.ControlSheaves.AgentControllers
+using LinearAlgebra
+using Statistics
+using Plots
+using Printf
+
+# Located from the package root, not `@__DIR__`: while Literate.jl executes a page, `@__DIR__`
+# points at the *output* directory rather than at this file.
+include(joinpath(pkgdir(CellularSheaves), &quot;docs&quot;, &quot;literate&quot;, &quot;nested&quot;, &quot;_plot_helpers.jl&quot;))
+
+const D = 4   # SE(3) homogeneous: 3D translation + 1 homogeneous row</code></pre><pre><code class="nohighlight hljs">4</code></pre><h2 id="Reusable-fragments"><a class="docs-heading-anchor" href="#Reusable-fragments">Reusable fragments</a><a id="Reusable-fragments-1"></a><a class="docs-heading-anchor-permalink" href="#Reusable-fragments" title="Permalink"></a></h2><p>Each of these is an ordinary Julia function returning a <code>SystemFragment</code> – a value, not a macro and not a template. <code>$(...)</code> marks a computed name; everything else in the block is an ordinary Julia expression evaluated on the spot.</p><p>Note that <code>escort</code> declares its own <code>@target</code> <em>as well as</em> the observation that tracks it. Targets are global however deeply the declaring fragment is nested, so an escort team can carry the target it is responsible for along with it. That is what lets one function serve a team three levels down and a team two levels down, with neither call knowing where it will land.</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    escort(name, m, r, tgt) -&gt; SystemFragment
+
+An `m`-agent rigid escort ring of radius `r`, its own target `tgt`, and the pin tying the two
+together.
+&quot;&quot;&quot;
+escort(name::Symbol, m::Int, r::Real, tgt::Symbol) = @nested_system begin
+    @team $(name) = ring(m; radius=r)
+    @target $(tgt)
+    @observe $(name) =&gt; $(tgt)
+end
+
+&quot;&quot;&quot;
+    relay(name) -&gt; SystemFragment
+
+A single unanchored agent with no target of its own, used to bridge two systems. With exactly one
+edge to each of two neighbours and nothing else pulling on it, a relay costs zero energy wherever
+it sits and therefore settles exactly at the midpoint of the two -- the same &quot;zero-tension
+follower&quot; mechanism `wheel_formation.jl` measures.
+&quot;&quot;&quot;
+relay(name::Symbol) = @nested_system begin
+    @team $(name) = path(1; radius=0.1)
+end
+
+&quot;&quot;&quot;
+    flight(name, elems, bridge) -&gt; SystemFragment
+
+A refined subsystem named `name` holding one `escort` per entry of `elems` (each a
+`(name, m, radius, target)` tuple), bridged in a chain through a `relay` named `bridge`.
+
+The `@system name begin … end` block nests a whole fragment inside another, and the `@include`s
+splice the escorts&#39; declarations into it. Depth is unbounded: nothing stops a `flight` from
+containing another `flight`.
+&quot;&quot;&quot;
+function flight(name::Symbol, elems, bridge::Symbol)
+    @nested_system begin
+        @system $(name) begin
+            for e in elems
+                @include escort(e[1], e[2], e[3], e[4])
+            end
+            @include relay(bridge)
+            # Chain each escort&#39;s centroid through the shared relay. `centroid` is applied only
+            # to leaf teams here -- see the caveat section below for why that matters.
+            for e in elems
+                @link centroid($(e[1])) =&gt; $(bridge)
+            end
+        end
+    end
+end</code></pre><pre><code class="nohighlight hljs">Main.var&quot;##2152&quot;.flight</code></pre><h2 id="The-fleet"><a class="docs-heading-anchor" href="#The-fleet">The fleet</a><a id="The-fleet-1"></a><a class="docs-heading-anchor-permalink" href="#The-fleet" title="Permalink"></a></h2><p>The root holds two wings. <code>wingA</code> holds a flight and a directly-attached escort; the flight holds two escorts; each escort holds its agents.</p><p><code>wingB</code> is deliberately <em>shallower</em> than <code>wingA</code>. The result is an irregular tree whose siblings differ in depth, arity, and team size – exactly the case a tower compiler is easiest to get wrong on.</p><pre><code class="language-julia hljs">fleet = @nested_system begin
+    @dim D
+    @affine true
+
+    @system wingA begin
+        @include flight(:flight1, [(:alpha, 4, 0.6, :t1), (:bravo, 4, 0.6, :t2)], :r1)
+        @include escort(:charlie, 4, 0.6, :t3)
+        @include relay(:r2)
+        # `project(flight1, 1)` descends: flight1&#39;s first member is `alpha`, whose own first
+        # member is its agent 1 -- so this edge lands on a single raw agent at the finest level.
+        @link project(flight1, 1) =&gt; r2
+        @link r2 =&gt; centroid(charlie)
+    end
+
+    @system wingB begin
+        @include escort(:delta, 5, 0.7, :t4)
+        @include escort(:echo, 5, 0.7, :t5)
+        @include relay(:r3)
+        @link centroid(delta) =&gt; r3
+        @link r3 =&gt; centroid(echo)
+    end
+
+    @include relay(:r4)
+    @link project(wingA, 1) =&gt; r4
+    @link r4 =&gt; project(wingB, 1)
+end
+
+system = compile_nested_system(fleet)
+tower = system.tower
+
+@printf(&quot;%d agents, %d targets, tower depth %d\n&quot;,
+        length(tower.agent_vertices), length(system.targets), tower.depth)
+for (k, level) in enumerate(tower.levels)
+    @printf(&quot;  H%d: %2d vertices\n&quot;, k - 1, length(vertex_stalks(level)))
+end</code></pre><pre><code class="nohighlight hljs">26 agents, 5 targets, tower depth 4
+  H0:  8 vertices
+  H1: 10 vertices
+  H2: 14 vertices
+  H3: 31 vertices
+</code></pre><p>The tower collapses from 31 vertices at the finest level to 8 at the coarsest, one pushforward per level of the tree. Every intermediate level is a genuine sheaf in its own right, and the one harmonic solve <code>solve_hierarchical</code> performs happens on the 8-vertex <code>H₀</code>.</p><h2 id="Names,-not-indices"><a class="docs-heading-anchor" href="#Names,-not-indices">Names, not indices</a><a id="Names,-not-indices-1"></a><a class="docs-heading-anchor-permalink" href="#Names,-not-indices" title="Permalink"></a></h2><p>The compiled system keeps its name tables, so downstream code never has to reconstruct which block of agent indices belongs to which team. That bookkeeping is what <code>agent_index_ranges</code> does by hand on the other pages in this section, and it gets harder to keep in sync the deeper the tree goes.</p><pre><code class="language-julia hljs">team_paths = [&quot;wingA.flight1.alpha&quot;, &quot;wingA.flight1.bravo&quot;, &quot;wingA.charlie&quot;,
+              &quot;wingB.delta&quot;, &quot;wingB.echo&quot;]
+for p in team_paths
+    @printf(&quot;  %-22s agents %s\n&quot;, p, agent_range(system, p))
+end
+@printf(&quot;  %-22s agents %s  (the whole subtree)\n&quot;, &quot;wingA&quot;, agent_range(system, :wingA))</code></pre><pre><code class="nohighlight hljs">  wingA.flight1.alpha    agents 1:4
+  wingA.flight1.bravo    agents 5:8
+  wingA.charlie          agents 10:13
+  wingB.delta            agents 15:19
+  wingB.echo             agents 20:24
+  wingA                  agents 1:14  (the whole subtree)
+</code></pre><h2 id="Target-motion:-two-wings,-two-orbiting-clusters"><a class="docs-heading-anchor" href="#Target-motion:-two-wings,-two-orbiting-clusters">Target motion: two wings, two orbiting clusters</a><a id="Target-motion:-two-wings,-two-orbiting-clusters-1"></a><a class="docs-heading-anchor-permalink" href="#Target-motion:-two-wings,-two-orbiting-clusters" title="Permalink"></a></h2><p><code>wingA</code>&#39;s three targets sit on a triangle around one centre, <code>wingB</code>&#39;s two on a segment around another. The centres orbit a common origin in opposite directions, so the wings are pulled steadily apart and back together while the relay chain between them stays taut.</p><pre><code class="language-julia hljs">const ω, R_orbit, h_alt = 0.35, 2.5, 1.5
+
+wingA_centre(t) = [R_orbit * cos(ω * t), R_orbit * sin(ω * t)]
+wingB_centre(t) = [-R_orbit * cos(ω * t), -R_orbit * sin(ω * t)]
+
+offsets = Dict(:t1 =&gt; [0.8, 0.6], :t2 =&gt; [0.8, -0.6], :t3 =&gt; [-0.9, 0.0],
+               :t4 =&gt; [0.0, 0.7], :t5 =&gt; [0.0, -0.7])
+centre_of(name) = name in (:t1, :t2, :t3) ? wingA_centre : wingB_centre
+
+target_traj(name) = t -&gt; begin
+    c = centre_of(name)(t)
+    [c[1] + offsets[name][1], c[2] + offsets[name][2], h_alt, 1.0]
+end
+
+# Analytic derivatives of the orbit -- the offsets are constant, so only the centre contributes.
+target_vel(name) = t -&gt; begin
+    s = name in (:t1, :t2, :t3) ? 1.0 : -1.0
+    [-s * R_orbit * ω * sin(ω * t), s * R_orbit * ω * cos(ω * t), 0.0, 0.0]
+end
+target_acc(name) = t -&gt; begin
+    s = name in (:t1, :t2, :t3) ? 1.0 : -1.0
+    [-s * R_orbit * ω^2 * cos(ω * t), -s * R_orbit * ω^2 * sin(ω * t), 0.0, 0.0]
+end
+
+trajectories = Dict(n =&gt; target_traj(n) for n in system.targets)
+velocities = Dict(n =&gt; target_vel(n) for n in system.targets)
+accelerations = Dict(n =&gt; target_acc(n) for n in system.targets)</code></pre><pre><code class="nohighlight hljs">Dict{Symbol, Main.var&quot;##2152&quot;.var&quot;#target_acc##0#target_acc##1&quot;{Symbol}} with 5 entries:
+  :t2 =&gt; #target_acc##0
+  :t3 =&gt; #target_acc##0
+  :t5 =&gt; #target_acc##0
+  :t1 =&gt; #target_acc##0
+  :t4 =&gt; #target_acc##0</code></pre><h2 id="Influence-across-the-tree"><a class="docs-heading-anchor" href="#Influence-across-the-tree">Influence across the tree</a><a id="Influence-across-the-tree-1"></a><a class="docs-heading-anchor-permalink" href="#Influence-across-the-tree" title="Permalink"></a></h2><p>The tower is linear in the target positions, so the influence of any target on any team is directly measurable: nudge one target and watch a team&#39;s solved centroid move. In a four-level tree the interesting question is how far that influence <em>reaches</em> – does a target in one wing move the escorts in the other, three levels of pushforward away?</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    response_weights(system, path) -&gt; Dict{Symbol,Float64}
+
+The linear response of the team at `path`&#39;s own centroid to a unit displacement of each target in
+turn, holding the others fixed. Sums to `1` in a translation-invariant tower, so these read as
+blending weights rather than raw sensitivities.
+&quot;&quot;&quot;
+function response_weights(system::CompiledNestedSystem, path::AbstractString)
+    base = Dict(n =&gt; [0.0, 0.0, h_alt, 1.0] for n in system.targets)
+    verts = agent_vertices(system, path)
+    centroid_at(vals) = begin
+        q = solve_hierarchical(system.tower, target_vector(system, vals))[end]
+        sum(q[v] for v in verts) / length(verts)
+    end
+    c0 = centroid_at(base)
+    return Dict(n =&gt; begin
+                    perturbed = copy(base)
+                    perturbed[n] = base[n] .+ [1.0, 0.0, 0.0, 0.0]
+                    centroid_at(perturbed)[1] - c0[1]
+                end
+                for n in system.targets)
+end
+
+w_alpha = response_weights(system, &quot;wingA.flight1.alpha&quot;)
+@printf(&quot;alpha&#39;s response weights: %s  (sum = %.3f)\n&quot;,
+        join([@sprintf(&quot;%s=%.3f&quot;, n, w_alpha[n]) for n in system.targets], &quot;, &quot;),
+        sum(values(w_alpha)))</code></pre><pre><code class="nohighlight hljs">alpha&#39;s response weights: t1=0.332, t2=0.332, t3=0.204, t4=0.066, t5=0.066  (sum = 1.000)
+</code></pre><p>Three things are worth reading off those weights.</p><ul><li><code>alpha</code> splits its weight <strong>evenly with <code>bravo</code>&#39;s target</strong>, <code>t1</code> and <code>t2</code> both near <code>0.33</code>. The two are tied through the same relay <code>r1</code> and are perfectly symmetric within <code>flight1</code>, so neither gets to claim its own target.</li><li><code>t3</code>, one level further out in the same wing, still carries about <code>0.20</code>.</li><li><code>t4</code> and <code>t5</code> are in the <em>other wing</em>, reachable only by climbing to the root and back down. Their weights are small but emphatically <strong>not zero</strong>.</li></ul><p>That last point is the hierarchy doing its job: the relay chain <code>r1 → r2 → r4 → r3</code> is a real mechanical path, and every level of the tower propagates along it. It is also why a deep specification cannot be reasoned about one team at a time. No team here tracks only its own target, and it is the weights, not the topology diagram, that say by how much.</p><h2 id="A-sharp-edge:-centroid-on-a-refined-system-is-not-centroid-on-a-team"><a class="docs-heading-anchor" href="#A-sharp-edge:-centroid-on-a-refined-system-is-not-centroid-on-a-team">A sharp edge: <code>centroid</code> on a refined system is not <code>centroid</code> on a team</a><a id="A-sharp-edge:-centroid-on-a-refined-system-is-not-centroid-on-a-team-1"></a><a class="docs-heading-anchor-permalink" href="#A-sharp-edge:-centroid-on-a-refined-system-is-not-centroid-on-a-team" title="Permalink"></a></h2><p><code>@link centroid(alpha) =&gt; r1</code> and <code>@link centroid(flight1) =&gt; r2</code> look symmetric. They are not.</p><p><code>materialize_restriction</code> builds a restriction map against a node&#39;s <strong>direct members</strong>, then composes it with the fibre-section basis the pushforward discovered. What those members are makes all the difference:</p><ul><li>For a <strong>leaf team</strong>, the members are raw agents, whose stalk coordinates <em>are</em> world positions. Averaging them gives the geometric centroid, as expected.</li><li>For a <strong>refined system</strong>, the members are themselves coarse vertices, whose stalk coordinates are coefficients in whatever basis <code>fiber_section_basis</code> happened to return. Averaging coefficients from two differently-chosen bases is not the average of the two positions.</li></ul><p>In practice, a <code>centroid()</code> chain through several refined levels drags the affine homogeneous coordinate away from <code>1</code> – and since these restriction maps represent pure translation only while that row is exactly <code>1</code> (see <code>rescaling_formation.jl</code>), the whole fleet quietly rescales.</p><p>That is why this page uses <code>project(flight1, 1)</code> and <code>project(wingA, 1)</code> on its refined endpoints, and reserves <code>centroid</code> for leaf teams. <code>project</code> resolves recursively down to a single raw agent, so it lands on <code>H_N</code> with identity maps and is immune to the choice of basis.</p><p>The difference is measurable. Translating every target by a common vector must translate every agent by that same vector – it is an exact global section, so a well-posed tower reproduces it exactly:</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    translation_defect(tower, trajectories, shift) -&gt; Float64
+
+The largest per-agent deviation from exact translation equivariance: solve with every target
+displaced by `shift`, and compare against the undisplaced solution shifted by hand.
+&quot;&quot;&quot;
+function translation_defect(system::CompiledNestedSystem, vals::AbstractDict, shift)
+    q0 = solve_hierarchical(system.tower, target_vector(system, vals))[end]
+    q1 = solve_hierarchical(system.tower,
+                            target_vector(system, Dict(n =&gt; v .+ shift for (n, v) in vals)))[end]
+    return maximum(norm(q1[v] .- (q0[v] .+ shift)) for v in system.tower.agent_vertices)
+end
+
+base_vals = Dict(n =&gt; target_traj(n)(0.0) for n in system.targets)
+shift = [1.0, -2.0, 0.0, 0.0]
+@printf(&quot;translation defect (project on refined endpoints): %.2e\n&quot;,
+        translation_defect(system, base_vals, shift))
+
+# The same fleet with `centroid()` on the two refined endpoints instead -- everything else
+# identical.
+fleet_centroid = @nested_system begin
+    @dim D
+    @system wingA begin
+        @include flight(:flight1, [(:alpha, 4, 0.6, :t1), (:bravo, 4, 0.6, :t2)], :r1)
+        @include escort(:charlie, 4, 0.6, :t3)
+        @include relay(:r2)
+        @link centroid(flight1) =&gt; r2
+        @link r2 =&gt; centroid(charlie)
+    end
+    @system wingB begin
+        @include escort(:delta, 5, 0.7, :t4)
+        @include escort(:echo, 5, 0.7, :t5)
+        @include relay(:r3)
+        @link centroid(delta) =&gt; r3
+        @link r3 =&gt; centroid(echo)
+    end
+    @include relay(:r4)
+    @link centroid(wingA) =&gt; r4
+    @link r4 =&gt; centroid(wingB)
+end
+system_centroid = compile_nested_system(fleet_centroid)
+@printf(&quot;translation defect (centroid on refined endpoints):  %.2e\n&quot;,
+        translation_defect(system_centroid, base_vals, shift))</code></pre><pre><code class="nohighlight hljs">translation defect (project on refined endpoints): 1.35e-15
+translation defect (centroid on refined endpoints):  2.89e+00
+</code></pre><p>The first is at solver tolerance; the second is not, by fifteen orders of magnitude. The two specifications differ by exactly two tokens – which is why this is worth <em>measuring</em> rather than reasoning about, since nothing in the source makes the difference visible.</p><h2 id="The-cost-of-four-levels-of-rigidity"><a class="docs-heading-anchor" href="#The-cost-of-four-levels-of-rigidity">The cost of four levels of rigidity</a><a id="The-cost-of-four-levels-of-rigidity-1"></a><a class="docs-heading-anchor-permalink" href="#The-cost-of-four-levels-of-rigidity" title="Permalink"></a></h2><pre><code class="language-julia hljs">gap = approximation_gap(tower, target_vector(system, base_vals))
+@printf(&quot;hierarchical energy = %.3f, direct energy = %.3f, gap = %.3f (relative %.2f)\n&quot;,
+        gap.hierarchical, gap.direct, gap.gap, gap.relative_gap)</code></pre><pre><code class="nohighlight hljs">hierarchical energy = 14.081, direct energy = 8.412, gap = 5.668 (relative 0.67)
+</code></pre><p>The direct baseline lets every agent move independently, so it satisfies all five target pins at once and pays almost nothing. The hierarchical solve must keep every team rigid <em>and</em> every level of the tree consistent, and pays a substantial gap for it.</p><p>That gap is not a defect. It is the price of the guarantee that each escort ring stays in formation – the whole reason to impose a hierarchy. <code>NestedSystems</code> guarantees the gap is never negative, and it is not:</p><pre><code class="language-julia hljs">@assert gap.gap &gt;= -1e-8 &quot;hierarchical energy must not beat the unconstrained optimum&quot;</code></pre><h2 id="Dynamics,-declared-in-a-second-fragment"><a class="docs-heading-anchor" href="#Dynamics,-declared-in-a-second-fragment">Dynamics, declared in a second fragment</a><a id="Dynamics,-declared-in-a-second-fragment-1"></a><a class="docs-heading-anchor-permalink" href="#Dynamics,-declared-in-a-second-fragment" title="Permalink"></a></h2><p>The gains do not exist until <code>solve_dare</code> has run, which is ordinary Julia that has to happen after the topology is written. Because a fragment is a value, that is no obstacle: the binding cascade is its own fragment, merged onto the topology. Relays get a softer gain than escorts – they exist purely for structural coordination and should not fight the teams they bridge.</p><pre><code class="language-julia hljs">DT, STEPS = 0.05, 200
+dyn = QuadrotorDynamics()
+Ad, Bd = AgentControllers.discrete_matrices(dyn, DT)
+Q_lqr = Matrix(Diagonal([500.0, 500.0, 500.0, 150.0, 150.0, 100.0, 100.0, 100.0, 5.0, 5.0]))
+R_lqr = Matrix(Diagonal([0.005, 0.005, 0.005]))
+K = AgentControllers.solve_dare(Ad, Bd, 10 * Q_lqr, R_lqr)
+K_soft = AgentControllers.solve_dare(Ad, Bd, 2 * Q_lqr, R_lqr)
+
+bound = compile_nested_system(merge(fleet, @nested_system begin
+    @bind dynamics=dyn K_lqr=K
+    @bind wingA.flight1.r1 K_lqr=K_soft
+    @bind wingA.r2 K_lqr=K_soft
+    @bind wingB.r3 K_lqr=K_soft
+    @bind r4 K_lqr=K_soft
+end))</code></pre><pre><code class="nohighlight hljs">CompiledNestedSystem(26 agents, 5 targets, tower depth 4)</code></pre><h2 id="Closed-loop-simulation"><a class="docs-heading-anchor" href="#Closed-loop-simulation">Closed-loop simulation</a><a id="Closed-loop-simulation-1"></a><a class="docs-heading-anchor-permalink" href="#Closed-loop-simulation" title="Permalink"></a></h2><p><code>escort_problem</code> takes trajectories keyed by target <em>name</em>, so the positional ordering of <code>spec.targets</code> never has to be tracked by hand.</p><pre><code class="language-julia hljs">prob = escort_problem(bound, trajectories; velocities=velocities, accelerations=accelerations,
+                      dt=DT, steps=STEPS)
+res = run_nested_escort_simulation(prob; use_feedforward=true)
+time_grid = 0:DT:(STEPS*DT)</code></pre><pre><code class="nohighlight hljs">0.0:0.05:10.0</code></pre><h2 id="Diagnostics"><a class="docs-heading-anchor" href="#Diagnostics">Diagnostics</a><a id="Diagnostics-1"></a><a class="docs-heading-anchor-permalink" href="#Diagnostics" title="Permalink"></a></h2><pre><code class="language-julia hljs">ranges = Dict(p =&gt; agent_range(bound, p) for p in team_paths)
+radii = Dict(&quot;wingA.flight1.alpha&quot; =&gt; 0.6, &quot;wingA.flight1.bravo&quot; =&gt; 0.6, &quot;wingA.charlie&quot; =&gt; 0.6,
+             &quot;wingB.delta&quot; =&gt; 0.7, &quot;wingB.echo&quot; =&gt; 0.7)
+team_target = Dict(&quot;wingA.flight1.alpha&quot; =&gt; :t1, &quot;wingA.flight1.bravo&quot; =&gt; :t2,
+                   &quot;wingA.charlie&quot; =&gt; :t3, &quot;wingB.delta&quot; =&gt; :t4, &quot;wingB.echo&quot; =&gt; :t5)
+
+form_err = Dict(p =&gt; zeros(STEPS) for p in team_paths)
+track_err = Dict(p =&gt; zeros(STEPS) for p in team_paths)
+for step in 1:STEPS
+    t = time_grid[step]
+    for p in team_paths
+        positions = [res.sim_data[step][a][1:3] for a in ranges[p]]
+        c = sum(positions) / length(positions)
+        form_err[p][step] = sum(abs(norm(q .- c) - radii[p]) for q in positions) / length(positions)
+        track_err[p][step] = norm(c[1:2] .- trajectories[team_target[p]](t)[1:2])
+    end
+end</code></pre><h2 id="Plots"><a class="docs-heading-anchor" href="#Plots">Plots</a><a id="Plots-1"></a><a class="docs-heading-anchor-permalink" href="#Plots" title="Permalink"></a></h2><pre><code class="language-julia hljs">cs = palette(:tab10)
+team_color(i) = cs[mod1(i, 10)]
+relay_paths = [&quot;wingA.flight1.r1&quot;, &quot;wingA.r2&quot;, &quot;wingB.r3&quot;, &quot;r4&quot;]
+relay_ranges = Dict(p =&gt; agent_range(bound, p) for p in relay_paths)
+
+all_x = Float64[]; all_y = Float64[]
+for step in 1:STEPS, a in 1:length(bound.tower.agent_vertices)
+    push!(all_x, res.sim_data[step][a][1]); push!(all_y, res.sim_data[step][a][2])
+end
+const TOPDOWN_XLIM = (minimum(all_x) - 0.5, maximum(all_x) + 0.5)
+const TOPDOWN_YLIM = (minimum(all_y) - 0.5, maximum(all_y) + 0.5)
+
+# Panel 1: the whole run at once -- faint per-agent paths, ring outlines at sparse snapshots
+# fading from early (faint) to final (solid), and the relay chain drawn at the final snapshot.
+function top_down_composite(; n_snapshots::Int=7)
+    snaps = snapshot_steps(STEPS, n_snapshots)
+    p = plot(title=&quot;Top-Down View (full trajectory)&quot;, aspect_ratio=1, xlabel=&quot;x (m)&quot;,
+             ylabel=&quot;y (m)&quot;, xlims=TOPDOWN_XLIM, ylims=TOPDOWN_YLIM, legend=:outertopright)
+    for (i, path) in enumerate(team_paths)
+        for a in ranges[path]
+            plot!(p, [res.sim_data[s][a][1] for s in 1:STEPS],
+                  [res.sim_data[s][a][2] for s in 1:STEPS],
+                  color=team_color(i), alpha=0.1, linewidth=1, label=&quot;&quot;)
+        end
+        for (si, s) in enumerate(snaps)
+            al = fade_alpha(si, length(snaps))
+            fx = [res.sim_data[s][a][1] for a in ranges[path]]
+            fy = [res.sim_data[s][a][2] for a in ranges[path]]
+            plot!(p, [fx; fx[1]], [fy; fy[1]], color=team_color(i), linestyle=:dash, alpha=al,
+                  label=(s == snaps[end] ? last(split(path, &quot;.&quot;)) : &quot;&quot;))
+            scatter!(p, fx, fy, color=team_color(i), markersize=3, alpha=al, label=&quot;&quot;)
+        end
+        tp = [trajectories[team_target[path]](t) for t in time_grid[1:STEPS]]
+        plot!(p, [q[1] for q in tp], [q[2] for q in tp], color=team_color(i), linestyle=:dot,
+              alpha=0.5, label=&quot;&quot;)
+        pt = trajectories[team_target[path]](time_grid[STEPS])
+        scatter!(p, [pt[1]], [pt[2]], marker=:star5, markersize=9, color=team_color(i), label=&quot;&quot;)
+    end
+    for (j, rp) in enumerate(relay_paths)
+        a = first(relay_ranges[rp])
+        scatter!(p, [res.sim_data[STEPS][a][1]], [res.sim_data[STEPS][a][2]],
+                 color=:gray30, marker=:diamond, markersize=6,
+                 label=(j == 1 ? &quot;relays&quot; : &quot;&quot;))
+    end
+    return p
+end
+
+p1 = top_down_composite()
+
+function top_down_frame(step::Int)
+    p = plot(title=@sprintf(&quot;Fleet (t = %.2f s)&quot;, time_grid[step]), aspect_ratio=1,
+             xlabel=&quot;x (m)&quot;, ylabel=&quot;y (m)&quot;, xlims=TOPDOWN_XLIM, ylims=TOPDOWN_YLIM,
+             legend=:outertopright)
+    for (i, path) in enumerate(team_paths)
+        fx = [res.sim_data[step][a][1] for a in ranges[path]]
+        fy = [res.sim_data[step][a][2] for a in ranges[path]]
+        scatter!(p, fx, fy, color=team_color(i), markersize=4, label=last(split(path, &quot;.&quot;)))
+        plot!(p, [fx; fx[1]], [fy; fy[1]], color=team_color(i), linestyle=:dash, label=&quot;&quot;)
+        pt = trajectories[team_target[path]](time_grid[step])
+        scatter!(p, [pt[1]], [pt[2]], marker=:star5, markersize=8, color=team_color(i), label=&quot;&quot;)
+    end
+    for (j, rp) in enumerate(relay_paths)
+        a = first(relay_ranges[rp])
+        scatter!(p, [res.sim_data[step][a][1]], [res.sim_data[step][a][2]],
+                 color=:gray30, marker=:diamond, markersize=6, label=(j == 1 ? &quot;relays&quot; : &quot;&quot;))
+    end
+    return p
+end
+
+# Panel 2: per-team formation radius error -- does each ring stay rigid four levels down?
+p2 = plot(title=&quot;Formation Radius Error&quot;, xlabel=&quot;time (s)&quot;, ylabel=&quot;error (m)&quot;)
+for (i, path) in enumerate(team_paths)
+    plot!(p2, time_grid[1:STEPS], form_err[path], color=team_color(i),
+          label=last(split(path, &quot;.&quot;)), linewidth=2)
+end
+
+# Panel 3: per-team centroid tracking error.
+p3 = plot(title=&quot;Centroid Tracking Error&quot;, xlabel=&quot;time (s)&quot;, ylabel=&quot;error (m)&quot;)
+for (i, path) in enumerate(team_paths)
+    plot!(p3, time_grid[1:STEPS], track_err[path], color=team_color(i),
+          label=last(split(path, &quot;.&quot;)), linewidth=2)
+end
+
+# Panel 4: the hierarchy itself over time -- each team&#39;s centroid, each relay, and the relay
+# chain that ties the two wings together, at sparse snapshots fading faint-to-solid. The early
+# transient is skipped: agents start from the default airstrip layout and that convergence is
+# already visible in panels 2 and 3.
+p4 = plot(title=&quot;Hierarchy Over Time (team centroids and relay chain)&quot;, aspect_ratio=1,
+          xlabel=&quot;x (m)&quot;, ylabel=&quot;y (m)&quot;)
+topo_snaps = snapshot_steps(STEPS, 8)[3:end]
+for (si, s) in enumerate(topo_snaps)
+    al = fade_alpha(si, length(topo_snaps))
+    final = s == topo_snaps[end]
+    for (i, path) in enumerate(team_paths)
+        c = sum(res.sim_data[s][a][1:2] for a in ranges[path]) / length(ranges[path])
+        scatter!(p4, [c[1]], [c[2]], color=team_color(i), markersize=(final ? 8 : 4), alpha=al,
+                 label=(final ? last(split(path, &quot;.&quot;)) : &quot;&quot;))
+    end
+    chain = [res.sim_data[s][first(relay_ranges[rp])][1:2] for rp in relay_paths]
+    scatter!(p4, [q[1] for q in chain], [q[2] for q in chain], color=:gray30, marker=:diamond,
+             markersize=(final ? 6 : 3), alpha=al, label=(final ? &quot;relays&quot; : &quot;&quot;))
+end
+
+plot(p1, p2, p3, p4, layout=(2, 2), size=(1200, 950),
+     plot_title=&quot;Four-Level Fleet (root → wing → flight → team)&quot;)
+
+@printf(&quot;Mean steady-state tracking error (last 20%% of run): %.3f m\n&quot;,
+        mean(mean(track_err[p][round(Int, 0.8STEPS):end]) for p in team_paths))
+@printf(&quot;Mean steady-state formation error (last 20%% of run): %.4f m\n&quot;,
+        mean(mean(form_err[p][round(Int, 0.8STEPS):end]) for p in team_paths))</code></pre><pre><code class="nohighlight hljs">Mean steady-state tracking error (last 20% of run): 1.300 m
+Mean steady-state formation error (last 20% of run): 0.1438 m
+</code></pre><p>The rings hold their formation to about <code>0.14 m</code> against radii of <code>0.6</code>–<code>0.7 m</code>, a few percent, while their centroids sit some <code>1.3 m</code> from their own targets. That second number is not a tracking failure: it is the blend the response weights predicted, since no team here tracks only its own target. It is the same trade the shallower pages measure, one level deeper.</p><h2 id="Animated-view"><a class="docs-heading-anchor" href="#Animated-view">Animated view</a><a id="Animated-view-1"></a><a class="docs-heading-anchor-permalink" href="#Animated-view" title="Permalink"></a></h2><pre><code class="language-julia hljs">anim = @animate for step in 1:4:STEPS
+    top_down_frame(step)
+end
+gif(anim, &quot;hierarchical_fleet.gif&quot;, fps=10)</code></pre><pre><code class="nohighlight hljs">Plots.AnimatedGif(&quot;/home/runner/work/CellularSheaves.jl/CellularSheaves.jl/docs/src/generated/nested/hierarchical_fleet.gif&quot;)</code></pre><p><img src="../hierarchical_fleet.gif" alt="Four-level fleet animation"/></p><pre><code class="language-julia hljs">println(&quot;Four-level fleet example complete.&quot;)</code></pre><pre><code class="nohighlight hljs">Four-level fleet example complete.
+</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../rescaling_formation/">« Emergent Rescaling: A Rigid Team Absorbing Divergent Targets Through Scale</a><a class="docs-footer-nextpage" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 18 August 2026 21:48">Tuesday 18 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
