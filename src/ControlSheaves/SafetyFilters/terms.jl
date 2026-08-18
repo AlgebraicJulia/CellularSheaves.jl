@@ -120,16 +120,42 @@ end
 
 """
     SafetyTerm(barrier; gamma = 6.0, sense = 3.0, obstacle_radius = 0.0,
-               disturbance_bound = 0.0)
+               disturbance_bound = 0.0, neighbors = (:), obstacles = (:))
 
-The control-barrier family. It contributes one hard row per neighbour and per obstacle
+The control-barrier family. It contributes one hard row **per neighbour and per obstacle**
 within `sense`, each enforcing this agent's share of ``\\dot{h} \\ge -\\gamma h`` for the
 given [`AbstractBarrier`](@ref).
+
+A single term therefore already covers a whole formation: an agent with `n` neighbours in
+range solves one program carrying `n` barrier rows, not `n` separate filters. The rows are
+independent of each other, which is why the per-agent solves need no communication.
 
 Responsibility for a pair of agents is split evenly (Wang, Ames, and Egerstedt, T-RO 2017):
 each enforces half, and the two halves sum to the pairwise condition without any
 communication in the execution loop. An obstacle enforces nothing, so the agent carries the
 full ``\\gamma`` and the obstacle's own velocity is carried into the row.
+
+`gamma`, `sense`, and the barrier's clearance are scalars shared by every target the term
+covers, so a *heterogeneous* formation — a larger clearance for one neighbour, a tighter gain
+for a high-priority pair — is expressed by composing several terms, each scoped to part of
+the context:
+
+```julia
+terms = (stability,
+         SafetyTerm(DistanceBarrier(0.6); neighbors = [1, 2]),
+         SafetyTerm(DistanceBarrier(1.5); neighbors = [3], gamma = 2.0),
+         actuator)
+```
+
+`neighbors` and `obstacles` are indices into the `others` and `obstacles` of the
+[`FilterContext`](@ref); the default `(:)` covers all of them. Scoped terms compose into one
+program, and [`safety_filter`](@ref) requires their selections to be **disjoint**, since two
+terms covering the same pair would emit two rows for it and silently enforce whichever is
+tighter.
+
+The two fields are scoped independently, so setting `neighbors` alone leaves `obstacles` at
+its default of every obstacle. Terms partitioned only by `neighbors` therefore still collide
+on the obstacles; give the obstacles to one term and pass `obstacles = Int[]` to the rest.
 
 These rows are never relaxed. The composed program can therefore be infeasible, which
 [`safety_filter`](@ref) reports rather than papering over.
@@ -140,9 +166,22 @@ Base.@kwdef struct SafetyTerm{B <: AbstractBarrier} <: AbstractFilterTerm
     sense::Float64 = 3.0
     obstacle_radius::Float64 = 0.0
     disturbance_bound::Float64 = 0.0
+    neighbors::Union{Colon, Vector{Int}} = (:)
+    obstacles::Union{Colon, Vector{Int}} = (:)
 end
 
 SafetyTerm(barrier::AbstractBarrier; kwargs...) = SafetyTerm(; barrier = barrier, kwargs...)
+
+# The indices of `ctx.others` / `ctx.obstacles` a term covers. `(:)` is every one of them,
+# which is both the default and what every pre-existing call site gets.
+_selected(::Colon, n::Integer) = Base.OneTo(Int(n))
+function _selected(indices::Vector{Int}, n::Integer)
+    for i in indices
+        @argcheck 1 <= i <= n
+    end
+    @argcheck allunique(indices)
+    return indices
+end
 
 function constraints(term::SafetyTerm, ctx::FilterContext)
     @argcheck term.gamma > 0
@@ -160,10 +199,14 @@ function constraints(term::SafetyTerm, ctx::FilterContext)
     rows = LinearRow[]
     values = Float64[]
 
-    for (targets, share, extra, drifts) in
-            ((ctx.others, 2.0, 0.0, nothing),
-             (ctx.obstacles, 1.0, term.obstacle_radius, ctx.obstacle_velocities))
-        for (index, target) in enumerate(targets)
+    for (targets, selection, share, extra, drifts) in
+            ((ctx.others, term.neighbors, 2.0, 0.0, nothing),
+             (ctx.obstacles, term.obstacles, 1.0, term.obstacle_radius,
+              ctx.obstacle_velocities))
+        # `index` indexes the context, not the selection, so a scoped term still reads the
+        # velocity belonging to the target it is actually constraining.
+        for index in _selected(selection, length(targets))
+            target = targets[index]
             @argcheck length(target) == length(ctx.x)
             dp = ctx.px - P * target
             dot(dp, dp) > term.sense^2 && continue

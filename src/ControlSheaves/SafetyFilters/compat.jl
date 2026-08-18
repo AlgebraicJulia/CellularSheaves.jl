@@ -9,6 +9,16 @@ Tuning for the usual composition of one [`StabilityTerm`](@ref), one [`SafetyTer
 and one [`ActuatorTerm`](@ref). [`filter_terms`](@ref) shows exactly which term each keyword
 reaches.
 
+"One safety term" is one constraint *family*, not one constraint: a term emits one barrier
+row for every neighbour and obstacle within `sense`, so a single agent in a formation of any
+size still solves one program, carrying one row per neighbour. Multiple agents need no
+further machinery — see [`safety_filter_all`](@ref), whose per-agent solves are independent.
+
+What this bundle cannot express is a *heterogeneous* formation, since `d_safe`, `gamma`, and
+`sense` here are scalars applied to every neighbour alike. For per-pair clearances or gains,
+drop to the term-wise interface and compose several [`SafetyTerm`](@ref)s scoped to disjoint
+neighbour sets.
+
   - `d_safe`, `obstacle_radius`, `gamma`, `sense`, `cbf_disturbance_bound` — the safety term.
     `gamma` is the class-``\\mathcal{K}`` gain in ``\\dot{h} \\ge -\\gamma h``; larger is more
     permissive and intervenes later.

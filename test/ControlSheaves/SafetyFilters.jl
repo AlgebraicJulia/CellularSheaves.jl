@@ -1237,6 +1237,110 @@ end
     @test SafetyFilters._with_raug(bare, 1e5) === bare
 end
 
+@testset "one safety term covers a whole formation" begin
+    # James's question on the PR: an agent with several near neighbours does not need several
+    # filters. One term emits one row per neighbour in range, and they compose into a single
+    # program.
+    model = ControlAffineModel(2)
+    x = zeros(2)
+    others = [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]
+    ctx = FilterContext(model, x, x, 2; others = others)
+    term = SafetyTerm(DistanceBarrier(0.5); gamma = 1.0)
+    @test length(constraints(term, ctx).rows) == 3
+
+    # and only the ones inside `sense`
+    near = SafetyTerm(DistanceBarrier(0.5); gamma = 1.0, sense = 1.5)
+    far = FilterContext(model, x, x, 2; others = vcat(others, [[9.0, 0.0]]))
+    @test length(constraints(near, far).rows) == 3
+end
+
+@testset "scoped safety terms give a formation per-pair clearances" begin
+    model = ControlAffineModel(2)
+    x = zeros(2)
+    others = [[1.0, 0.0], [0.0, 1.0]]
+    ctx = FilterContext(model, x, x, 2; others = others)
+
+    # Each term sees only its slice.
+    tight = SafetyTerm(DistanceBarrier(0.5); gamma = 1.0, neighbors = [1])
+    loose = SafetyTerm(DistanceBarrier(1.2); gamma = 1.0, neighbors = [2])
+    @test length(constraints(tight, ctx).rows) == 1
+    @test length(constraints(loose, ctx).rows) == 1
+
+    # The rows are exactly the ones an unscoped term would emit for those neighbours, so
+    # scoping only selects and never changes a row.
+    all_rows = constraints(SafetyTerm(DistanceBarrier(0.5); gamma = 1.0), ctx).rows
+    @test constraints(tight, ctx).rows[1].coefficients ≈ all_rows[1].coefficients
+    @test constraints(tight, ctx).rows[1].bound ≈ all_rows[1].bound
+
+    # Distinct clearances really do reach the barrier values.
+    @test constraints(tight, ctx).diagnostics.barriers ≈ [1.0 - 0.5^2]
+    @test constraints(loose, ctx).diagnostics.barriers ≈ [1.0 - 1.2^2]
+
+    # And the composed program carries one row per neighbour, each with its own clearance.
+    res = safety_filter((tight, loose, ActuatorTerm()), ctx, [0.3, 0.3])
+    @test res.certified
+    @test res.cbf_margin ≈ min(1.0 - 0.5^2, 1.0 - 1.2^2)
+end
+
+@testset "scoped safety terms default to the whole context" begin
+    model = ControlAffineModel(2)
+    x = zeros(2)
+    ctx = FilterContext(model, x, x, 2; others = [[1.0, 0.0], [0.0, 1.0]],
+                        obstacles = [[0.0, -1.0]])
+    explicit = SafetyTerm(DistanceBarrier(0.5); gamma = 1.0,
+                          neighbors = [1, 2], obstacles = [1])
+    implicit = SafetyTerm(DistanceBarrier(0.5); gamma = 1.0)
+    a = constraints(implicit, ctx)
+    b = constraints(explicit, ctx)
+    @test length(a.rows) == length(b.rows) == 3
+    @test all(a.rows[i].coefficients ≈ b.rows[i].coefficients for i in 1:3)
+    @test a.diagnostics.barriers ≈ b.diagnostics.barriers
+end
+
+@testset "overlapping safety terms are rejected" begin
+    model = ControlAffineModel(2)
+    x = zeros(2)
+    ctx = FilterContext(model, x, x, 2; others = [[1.0, 0.0], [0.0, 1.0]],
+                        obstacles = [[0.0, -1.0]])
+    one = SafetyTerm(DistanceBarrier(0.5); gamma = 1.0, neighbors = [1])
+
+    # Explicit overlap on a neighbour.
+    @test_throws ArgumentError safety_filter((one, SafetyTerm(DistanceBarrier(1.0);
+                                                             gamma = 1.0, neighbors = [1, 2])),
+                                             ctx, [0.1, 0.1])
+    # Two unscoped terms overlap on everything: this is the silent-duplication case.
+    @test_throws ArgumentError safety_filter((SafetyTerm(DistanceBarrier(0.5); gamma = 1.0),
+                                              SafetyTerm(DistanceBarrier(1.0); gamma = 1.0)),
+                                             ctx, [0.1, 0.1])
+    # Overlap on an obstacle is caught independently of the neighbours.
+    @test_throws ArgumentError safety_filter((SafetyTerm(DistanceBarrier(0.5); gamma = 1.0,
+                                                        neighbors = [1], obstacles = [1]),
+                                              SafetyTerm(DistanceBarrier(1.0); gamma = 1.0,
+                                                         neighbors = [2], obstacles = [1])),
+                                             ctx, [0.1, 0.1])
+    # Scoping `neighbors` does not implicitly scope `obstacles`: the unscoped field still
+    # defaults to every obstacle, so two otherwise-disjoint terms overlap there.
+    @test_throws ArgumentError safety_filter((one, SafetyTerm(DistanceBarrier(1.0);
+                                                             gamma = 1.0, neighbors = [2],
+                                                             obstacles = [1])),
+                                             ctx, [0.1, 0.1])
+
+    # Fully disjoint on both fields is fine.
+    disjoint = (SafetyTerm(DistanceBarrier(0.5); gamma = 1.0, neighbors = [1],
+                           obstacles = Int[]),
+                SafetyTerm(DistanceBarrier(1.0); gamma = 1.0, neighbors = [2],
+                           obstacles = [1]))
+    @test safety_filter(disjoint, ctx, [0.1, 0.1]).certified
+    # Between them the two terms cover all three targets exactly once.
+    @test sum(length(constraints(t, ctx).rows) for t in disjoint) == 3
+
+    # Out-of-range and repeated indices are caught.
+    @test_throws ArgumentError safety_filter((SafetyTerm(DistanceBarrier(0.5); gamma = 1.0,
+                                                        neighbors = [3]),), ctx, [0.1, 0.1])
+    @test_throws ArgumentError safety_filter((SafetyTerm(DistanceBarrier(0.5); gamma = 1.0,
+                                                        neighbors = [1, 1]),), ctx, [0.1, 0.1])
+end
+
 @testset "input validation" begin
     model = ControlAffineModel(2)
     @test_throws ArgumentError safety_filter(CBFCLFParams(), model, [1.0, 0.0], [0.0], [0.0])

@@ -19,6 +19,32 @@ function _attempt(problem, settings)
     end
 end
 
+# Two safety terms covering the same neighbour each emit a row for that pair, and the solver
+# then enforces whichever is tighter. That is a silently wrong program rather than a reported
+# one: the looser term's clearance is the number the caller believes is in force. Overlap is
+# therefore rejected up front. This is a composition property, invisible to any single term,
+# so it lives here.
+function _check_disjoint_safety_terms(terms, ctx::FilterContext)
+    for (field, count, what) in ((:neighbors, length(ctx.others), "neighbour"),
+                                 (:obstacles, length(ctx.obstacles), "obstacle"))
+        seen = Dict{Int, Int}()
+        for (position, term) in enumerate(terms)
+            term isa SafetyTerm || continue
+            for index in _selected(getfield(term, field), count)
+                previous = get(seen, index, 0)
+                previous == 0 ||
+                    throw(ArgumentError(
+                        "safety terms $previous and $position both cover $what $index; " *
+                        "scope them to disjoint sets with the `$field` keyword, since " *
+                        "overlapping terms emit two rows for the same pair and silently " *
+                        "enforce the tighter one"))
+                seen[index] = position
+            end
+        end
+    end
+    return nothing
+end
+
 # Composition. Terms are independent; the two operations below are not, and so live here
 # rather than inside any one term:
 #
@@ -61,12 +87,17 @@ Each term is independent and may be tested on its own; this function only concat
 rows, drops the ones the actuator cone renders unreachable, and hands the rest to
 [`filter_program`](@ref). Correctness therefore composes — but feasibility does not, since
 hard barrier rows and a hard cone can have empty intersection.
+
+Several [`SafetyTerm`](@ref)s may be composed to give different pairs different clearances or
+gains, provided they cover disjoint sets of neighbours and obstacles; overlapping selections
+are rejected. At most one [`ActuatorTerm`](@ref) may contribute a cone.
 """
 function safety_filter(terms, ctx::FilterContext, u_nom::AbstractVector{<:Real};
                        settings = safety_filter_settings(), deadlock_bias::Real = 0.0)
     command_nom = Vector{Float64}(u_nom)
     @argcheck length(command_nom) == ctx.nu
     @argcheck deadlock_bias >= 0
+    _check_disjoint_safety_terms(terms, ctx)
 
     soft = LinearRow[]
     hard = LinearRow[]
