@@ -74,6 +74,74 @@ This package implements theory and algorithms from research on network sheaves, 
 
 See the [documentation](https://AlgebraicJulia.github.io/CellularSheaves.jl/dev) for worked examples, mathematical background, and the full API reference.
 
+## Benchmarking
+
+The package ships with a dedicated benchmark suite based on `BenchmarkTools.jl` and `PkgBenchmark.jl`. Benchmarks are kept out of the unit-test and docs-build paths and are organized into named shards across two size tiers:
+
+| Shard | Contents | Profile |
+|---|---|---|
+| `assembly-small` | `coboundary_map`, `laplacian` on small graphs | `small`, `full` |
+| `solver-small` | `nearest_global_section` on small graphs | `small`, `full` |
+| `extension-small` | `harmonic_extension` on small graphs | `small`, `full` |
+| `assembly-large` | `coboundary_map`, `laplacian` on large graphs | `large`, `full` |
+| `solver-large` | `nearest_global_section` on large graphs | `large`, `full` |
+| `extension-large` | `harmonic_extension` on large graphs | `large`, `full` |
+
+Set up the benchmark environment once:
+
+```julia
+julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+```
+
+**Run the full small-profile suite** (artifacts saved under `bench/results`):
+
+    julia --project=bench bench/run_benchmarks.jl
+
+**Run a single shard** (fastest local smoke test):
+
+    BENCHMARK_PROFILE=small BENCHMARK_SHARD=assembly-small julia --project=bench bench/run_benchmarks.jl
+
+**Run the full suite** (all six shards, all sizes):
+
+    BENCHMARK_PROFILE=full julia --project=bench bench/run_benchmarks.jl
+
+**Compare against `main`** using `PkgBenchmark.jl`:
+
+    BENCHMARK_PROFILE=small BENCHMARK_BASELINE_REF=main julia --project=bench bench/compare_benchmarks.jl
+
+**Render an HTML/Markdown report** from saved shard artifacts:
+
+    BENCHMARK_INPUT_DIR=bench/results BENCHMARK_OUTPUT_DIR=bench/results julia --project=bench bench/render_report.jl
+
+**Run large-scale shards via SLURM** (requires HPC access):
+
+    bench/slurm_benchmarks.sh submit
+
+### Key environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `BENCHMARK_PROFILE` | `small` | Which size tier: `small`, `large`, or `full` |
+| `BENCHMARK_SHARD` | `all` | A single shard name or `all` to run the whole profile |
+| `BENCHMARK_RESULT_DIR` | `bench/results` | Directory for output artifacts |
+| `BENCHMARK_SECONDS` | `5` | Minimum seconds per benchmark leaf |
+| `BENCHMARK_SAMPLES` | `25` | Maximum samples per benchmark leaf |
+| `BENCHMARK_BASELINE_REF` | *(required for compare)* | Git ref for baseline in `compare_benchmarks.jl` |
+
+### Adding a new benchmark and shard
+
+1. **Add benchmark leaves** to `build_suite()` in `bench/src/BenchmarkSuite.jl`. Follow the existing `@benchmarkable` pattern and nest the new benchmarks under a descriptive group key (e.g., `suite["my_operation"]["family"]["n$n"]`).
+
+2. **Register leaf IDs** in `bench/src/BenchmarkShards.jl`. Add a new branch to `benchmark_ids()` if the operation is used across shards, or specify the IDs inline. The leaf ID is the `/`-joined path of group keys down to the benchmark leaf.
+
+3. **Declare the shards** in `BenchmarkShards.jl`:
+   - Add the new shard names to `SHARD_ORDER` in the desired position (small before large for the same category).
+   - Add entries to `SHARD_MANIFEST` mapping each shard name to its leaf IDs.
+
+4. **Register in CI** (`.github/workflows/hpc.yml`): add the new shard names to the `SHARDS` arrays for the `small`, `large`, and `full` profile branches. Update the `--array` count automatically (it is derived from `${#SHARDS[@]}`).
+
+5. **Update `bench/slurm_benchmarks.sh`**: add the new shard names to the `ALL_SHARDS` array so manual SLURM submissions include them.
+
 ## Authors and Attribution
 
 CellularSheaves.jl was developed by **Tyler Hanks** and **James Fairbanks** as part of the [AlgebraicJulia](https://algebraicjulia.org) ecosystem.

@@ -25,14 +25,46 @@ struct CurrentAgentDynamics <: AbstractDynamics end
 struct CurrentTargetDynamics <: AbstractDynamics end
 
 include("integrate.jl")
+include("Tikhonov.jl")
 include("entity.jl")
 include("MultiAgentTracking.jl")
 include("TrackingDSL/TrackingDSL.jl")
+
+import .Tikhonov
+export Tikhonov
 
 import .MultiAgentTracking
 export MultiAgentTracking
 
 import .TrackingDSL
 export TrackingDSL
+
+include("AgentControllers.jl")
+import .AgentControllers
+export AgentControllers
+
+include("DistributedLayeredControl.jl")
+import .DistributedLayeredControl
+export DistributedLayeredControl
+
+include("NestedSystems.jl")
+import .NestedSystems
+export NestedSystems
+
+include("NestedDSL/NestedDSL.jl")
+import .NestedDSL
+export NestedDSL
+
+include("Layered.jl")
+import .Layered
+export Layered
+
+include("CoordinationBenchmarks.jl")
+import .CoordinationBenchmarks
+export CoordinationBenchmarks
+
+include("CoordinationProfiling.jl")
+import .CoordinationProfiling
+export CoordinationProfiling
 
 end # module ControlSheaves

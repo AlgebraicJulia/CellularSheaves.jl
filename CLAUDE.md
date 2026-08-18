@@ -21,12 +21,32 @@ julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.i
 
 **Run benchmarks:**
 ```
-julia --project=bench bench/benchmarks.jl
+julia --project=bench bench/run_benchmarks.jl
 ```
 
-**Update baseline after an intentional perf change:**
+**Run one benchmark shard:**
 ```
-cp bench/results.json bench/baseline.json
+BENCHMARK_PROFILE=small BENCHMARK_SHARD=assembly-small julia --project=bench bench/run_benchmarks.jl
+```
+
+**Run the full suite (all shards, all sizes):**
+```
+BENCHMARK_PROFILE=full julia --project=bench bench/run_benchmarks.jl
+```
+
+**Compare against a baseline ref:**
+```
+BENCHMARK_PROFILE=small BENCHMARK_BASELINE_REF=main julia --project=bench bench/compare_benchmarks.jl
+```
+
+**Render benchmark reports:**
+```
+BENCHMARK_INPUT_DIR=bench/results BENCHMARK_OUTPUT_DIR=bench/results julia --project=bench bench/render_report.jl
+```
+
+**Run large tiers on SLURM:**
+```
+bench/slurm_benchmarks.sh submit
 ```
 
 **Install docs dependencies (first time only):**
@@ -78,7 +98,36 @@ The primary concrete type is `EuclideanSheaf{T}`, a struct with `vertex_stalks::
 
 **Test layout:** one test file per source module in `test/network_sheaves/`, included from `test/runtests.jl`. Do not add `CellularSheaves` to `test/Project.toml` — this breaks CI.
 
-## Cochain indexing
+## Benchmark architecture
+
+The benchmark suite lives entirely in `bench/src/`:
+
+```
+bench/src/
+  BenchmarkSuite.jl    # build_suite(): defines all @benchmarkable leaves
+  BenchmarkShards.jl   # SHARD_ORDER, SHARD_MANIFEST, shard/profile selection logic
+  BenchmarkReports.jl  # report rendering; run/compare/render entry points
+  CellularSheavesBenchmarks.jl  # module aggregator
+```
+
+Key env vars read by `run_benchmarks_from_env!()`:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BENCHMARK_PROFILE` | `small` | Size tier: `small`, `large`, or `full` |
+| `BENCHMARK_SHARD` | `all` | Shard name or `all` to run the whole profile |
+| `BENCHMARK_RESULT_DIR` | `bench/results` | Output directory for artifacts |
+| `BENCHMARK_SECONDS` | `5` | Min seconds per leaf |
+| `BENCHMARK_SAMPLES` | `25` | Max samples per leaf |
+
+**Adding a new benchmark and shard:**
+1. Add `@benchmarkable` leaves to `build_suite()` in `BenchmarkSuite.jl` under a descriptive group key.
+2. In `BenchmarkShards.jl`, add a branch to `benchmark_ids()` (or specify IDs inline) and add entries to `SHARD_MANIFEST`.
+3. Add the new shard names to `SHARD_ORDER` (small before large for the same category).
+4. In `.github/workflows/hpc.yml`, add the new names to the `SHARDS` arrays for the relevant profiles.
+5. In `bench/slurm_benchmarks.sh`, add them to `ALL_SHARDS`.
+
+
 
 Vertex `v`'s DOF slice in a flat cochain vector `x`:
 ```julia

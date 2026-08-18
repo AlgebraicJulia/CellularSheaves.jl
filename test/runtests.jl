@@ -4,6 +4,14 @@ using Test
   include("aqua.jl")
 end
 
+@testset "Docs Consistency" begin
+  include("docs_consistency.jl")
+end
+
+@testset "Tikhonov Filter" begin
+  include("ControlSheaves/Tikhonov.jl")
+end
+
 @testset "Block Sparse Arrays" begin
   include("block_sparse_arrays.jl")
 end
@@ -30,4 +38,16 @@ end
   include("network_sheaves/per_agent_and_target_dynamics.jl")
   include("network_sheaves/TrackingDSL.jl")
   include("network_sheaves/QuadraticCosts.jl")
+  include("network_sheaves/EscortTracking.jl")
+  include("network_sheaves/Formations.jl")
+  include("network_sheaves/test_feedforward_control.jl")
+  include("network_sheaves/TransferMapLift.jl")
+  include("network_sheaves/LayeredEscort.jl")
+end
+
+@testset "Control Sheaves" begin
+  include("ControlSheaves/AgentControllers.jl")
+  include("ControlSheaves/NestedSystems.jl")
+  include("ControlSheaves/NestedDSL.jl")
+  include("ControlSheaves/CoordinationBenchmarks.jl")
 end

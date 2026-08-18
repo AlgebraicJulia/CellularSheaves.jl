@@ -30,11 +30,11 @@ if !no_literate
       f, l = splitext(file)
       if l == ".jl" && !startswith(f, "_")
         src_path = joinpath(root, file)
+        execute = !(contains(src_path, "asynch") || contains(src_path, "distributed") || contains(src_path, "escort.jl") || contains(src_path, "escort_feedforward") || contains(src_path, "scenario5"))
         Literate.markdown(src_path, out_dir;
-          config=config, documenter=true, credit=false)
-        execute = !contains(src_path, "asynch")
+          execute=execute, config=config, documenter=false, credit=false)
         Literate.notebook(src_path, out_dir;
-          execute=execute, documenter=true, credit=false)
+          execute=false, documenter=false, credit=false)
       end
     end
   end
@@ -54,11 +54,22 @@ let src = joinpath(@__DIR__, "figures", "distributed_solve"),
   end
 end
 
+let src = joinpath(@__DIR__, "figures", "tikhonov"),
+    dst = joinpath(@__DIR__, "src", "assets", "figures", "tikhonov")
+  if isdir(src)
+    mkpath(dirname(dst))
+    cp(src, dst; force=true)
+  end
+end
+
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.AsynchSheaves],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.Layered, CellularSheaves.ControlSheaves.NestedSystems, CellularSheaves.ControlSheaves.NestedDSL, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLTerm, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLParser, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLValidator, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLLowering, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.ControlSheaves.CoordinationBenchmarks, CellularSheaves.AsynchSheaves, CellularSheaves.SheafInterface, CellularSheaves.NetworkSheaves.EuclideanSheaves, CellularSheaves.NetworkSheaves.GraphHomomorphisms, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.Pushforwards, CellularSheaves.NetworkSheaves.Pushouts, CellularSheaves.NetworkSheaves.CellularSheafParser, CellularSheaves.BlockSparseArrays, CellularSheaves.NetworkSheaves.PotentialSheaves, CellularSheaves.NetworkSheaves.TrajectorySheaves, CellularSheaves.NetworkSheaves.DistributedSolve, CellularSheaves.NetworkSheaves.Formations, CellularSheaves.ControlSheaves.TrackingDSL, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLTerm, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLParser, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLValidator, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLResolver, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLLowering, CellularSheaves.IPM],
   draft=false,
-  format=Documenter.HTML(assets=["assets/benchtables.css"]),
+  format=Documenter.HTML(
+    assets=["assets/benchtables.css"],
+    size_threshold=nothing
+  ),
   sitename="CellularSheaves.jl",
   doctest=false,
   checkdocs=:none,
@@ -80,9 +91,22 @@ makedocs(
         "generated/control/controlled_mass_spring_damper_chain.md",
         "control/single_integrator_target_tracking.md",
         "generated/control/multi_quadrotor_target_tracking.md",
-        "generated/control/mpc_target_tracking.md",
-        "generated/control/distributed_harmonic_tracking.md"
-
+        "generated/control/mpc_target_tracking.md"],
+      "Layered Control Architecture Examples" => Any[
+        "generated/layered/distributed_harmonic_tracking.md",
+        "generated/layered/tikhonov_harmonic_tracking.md",
+        "generated/layered/layered_scenario5.md",
+        "generated/layered/escort.md",
+        "generated/layered/escort_feedforward.md",
+        "generated/layered/diffusion_vs_direct.md",
+        "generated/layered/multilayer_escort.md",
+        ],
+      "Nested Systems Examples" => Any[
+        "generated/nested/centroid_formation_tracking.md",
+        "generated/nested/wheel_formation.md",
+        "generated/nested/n_ring_formation.md",
+        "generated/nested/rescaling_formation.md",
+        "generated/nested/hierarchical_fleet.md",
         ],
       "Asynchronous Diffusion"=>Any[
         "generated/asynch/convergence_vs_delay.md",
@@ -104,6 +128,18 @@ makedocs(
         "features/distributed_sheaf_solve/benchmarks.md",
         "features/distributed_sheaf_solve/api.md",
       ],
+      "Tikhonov Harmonic Tracking"=>Any[
+        "features/tikhonov_harmonic_tracking/index.md",
+        "features/tikhonov_harmonic_tracking/harmonic_manifold.md",
+        "features/tikhonov_harmonic_tracking/stability.md",
+        "features/tikhonov_harmonic_tracking/feedforward.md",
+        "features/tikhonov_harmonic_tracking/scenarios.md",
+        "features/tikhonov_harmonic_tracking/api.md",
+      ],
+    ],
+    "Benchmarks"=>Any[
+      "benchmarks.md",
+      "benchmark_report.md",
     ],
     "API Reference"=>Any[
       "api/index.md",
@@ -118,11 +154,21 @@ makedocs(
       "api/dsl.md",
       "api/block_sparse_arrays.md",
       "api/potential_sheaves.md",
+      "api/formations.md",
       "api/trajectory_sheaves.md",
+      "api/tikhonov.md",
+      "api/agent_controllers.md",
+      "api/distributed_layered_control.md",
+      "api/layered.md",
+      "api/nested_systems.md",
+      "api/nested_dsl.md",
+      "api/coordination_benchmarks.md",
       "api/herding_platoon.md",
       "api/multi_agent_tracking.md",
       "api/quadratic_costs.md",
-      "api/asynch.md"
+      "api/asynch.md",
+      "api/tracking_dsl.md",
+      "api/ipm.md"
     ],
   ]
 )

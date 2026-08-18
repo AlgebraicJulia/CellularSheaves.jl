@@ -1,0 +1,87 @@
+name: Benchmarks
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Benchmark seconds per leaf"
+        required: false
+        default: "5"
+      samples:
+        description: "Benchmark samples per leaf"
+        required: false
+        default: "25"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark-shards:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["assembly-small", "solver-small", "extension-small"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+
+      - name: Instantiate benchmark environment
+        run: julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+
+      - name: Run benchmark shard
+        env:
+          BENCHMARK_PROFILE: small
+          BENCHMARK_SHARD: ${{ matrix.shard }}
+          BENCHMARK_RESULT_DIR: bench/results/github-actions/${{ github.run_id }}
+          BENCHMARK_REF: ${{ github.sha }}
+          BENCHMARK_SECONDS: ${{ github.event.inputs.seconds || '5' }}
+          BENCHMARK_SAMPLES: ${{ github.event.inputs.samples || '25' }}
+          BENCHMARK_RENDER_REPORT: "false"
+        run: julia --project=bench bench/run_benchmarks.jl
+
+      - name: Upload shard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ matrix.shard }}
+          path: bench/results/github-actions/${{ github.run_id }}/${{ matrix.shard }}
+
+  aggregate-report:
+    needs: benchmark-shards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+
+      - name: Instantiate benchmark environment
+        run: julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+
+      - name: Download shard artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: bench/results/github-actions/${{ github.run_id }}/downloads
+
+      - name: Render merged report
+        env:
+          BENCHMARK_INPUT_DIR: bench/results/github-actions/${{ github.run_id }}/downloads
+          BENCHMARK_OUTPUT_DIR: bench/results/github-actions/${{ github.run_id }}/report
+          BENCHMARK_PROFILE: small
+          BENCHMARK_EXPECTED_SHARDS: assembly-small,solver-small,extension-small
+        run: julia --project=bench bench/render_report.jl
+
+      - name: Upload merged report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: bench/results/github-actions/${{ github.run_id }}/report
