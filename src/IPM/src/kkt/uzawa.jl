@@ -105,7 +105,7 @@ end
 #
 # to the tolerances
 #
-#   ‖ A x + Bᵀ y - f ‖ ≤ ftol
+#   ‖ A x - Bᵀ y - f ‖ ≤ ftol
 #   ‖ B x        - g ‖ ≤ gtol
 #
 # with the minimum possible number of triangular solves.
@@ -160,7 +160,7 @@ end
 # The solution (x, y) meets the
 # following tolerances:
 #
-#   ‖ A x + Bᵀ y - f ‖ ≤ ftol
+#   ‖ A x - Bᵀ y - f ‖ ≤ ftol
 #   ‖ B x        - g ‖ ≤ gtol.
 #
 function solvekkt!(wrk::UzawaSolver, args...; kw...)
@@ -281,7 +281,7 @@ function solvekkt!(
         # any parameter δ in this interval would have
         # solved (1) to the tolerances
         #
-        #   ‖ A δx + Bᵀ δy - δf ‖ ≤ ftol
+        #   ‖ A δx - Bᵀ δy - δf ‖ ≤ ftol
         #   ‖ B δx         - δg ‖ ≤ gtol
         #
         # with the minimum possible number of triangular solves.

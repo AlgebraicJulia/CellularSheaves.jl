@@ -14,7 +14,7 @@ end
 function CGWorkspace{T}(m::Integer, n::Integer) where {T}
     p = FVector{T}(undef, m)
     w = FVector{T}(undef, n)
-    hist = FVector{T}(undef, m + n + 1)
+    hist = FVector{T}(undef, 2n + 1)
     return CGWorkspace{T}(p, w, hist)
 end
 
