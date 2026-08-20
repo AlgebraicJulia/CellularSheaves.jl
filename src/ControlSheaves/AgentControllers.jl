@@ -11,7 +11,13 @@ export AbstractAgentDynamics, QuadrotorDynamics, PlanarQuadrotorDynamics,
        AbstractAgentState, AgentState,
        solve_dare, step_agent!,
        position_indices, velocity_indices, state_dim, initial_state,
-       continuous_matrices, discrete_matrices
+       continuous_matrices, discrete_matrices,
+       SE3QuadrotorDynamics, SE3Reference, GeometricSE3Controller,
+       SE3Errors, SE3Certificate, SE3AgentState,
+       geometric_control, se3_lyapunov, se3_certificate, se3_tune_lyapunov, se3_autotune,
+       se3_error_vector, se3_measured_rate, se3_unpack, se3_pack, se3_derivative, se3_step,
+       attitude_indices, angular_velocity_indices,
+       hat_so3, vee_so3, expm_so3, project_SO3, deriv_unit_vector
 
 abstract type AbstractAgentDynamics end
 
@@ -459,5 +465,7 @@ function step_agent!(w::AgentState, qstar_target::Vector{Float64}, qstar_dot_tar
     
     return (copy(w.x), copy(x_ref))
 end
+
+include("geometric_se3.jl")
 
 end # module

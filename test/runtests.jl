@@ -51,6 +51,7 @@ end
 
 @testset "Control Sheaves" begin
   include("ControlSheaves/AgentControllers.jl")
+  include("ControlSheaves/GeometricSE3.jl")
   include("ControlSheaves/NestedSystems.jl")
   include("ControlSheaves/NestedDSL.jl")
   include("ControlSheaves/CoordinationBenchmarks.jl")
