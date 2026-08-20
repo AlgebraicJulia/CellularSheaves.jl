@@ -12,7 +12,7 @@ function getaug(hist::AbstractHistory{T}) where {T}
     dmin = hist.dmin[end]
     dmax = hist.dmax[end]
 
-    if hist.ppass[end] > 0
+    if hist.ppass[end] > 1
         if isfinite(dmin)
             δ = max(δ, dmin)
         end

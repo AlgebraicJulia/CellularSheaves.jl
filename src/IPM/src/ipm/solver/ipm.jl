@@ -230,7 +230,7 @@ function solvecorrector!(
 
     citer, cpass, cstat, _, _ = solvekkt!(
         kkt, w.Δp, w.Δy, H, B, w.f, w.rp;
-        xwarm=true, ywarm=true, gtol=ptol, ftol=ytol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
+        warm=true, gtol=ptol, ftol=ytol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
     #
     # recover Δd:
@@ -356,7 +356,7 @@ function IPMSolver(prob::IPMProblem{T, I}, settings::IPMSettings{T}; p0=nothing,
         equilibrate!(scaling, B, Q, f, g; itmax=settings.scale_max_iter)
     end
 
-    kkt = UzawaSolver(S, B)
+    kkt = UzawaSolver(S, B; cgmax=settings.newton_max_iter, rfmax=settings.refine_max_iter)
 
     C = C * prob.C
     R = prob.R

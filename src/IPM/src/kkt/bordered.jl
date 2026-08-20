@@ -4,7 +4,7 @@ struct BorderedSolver{T, UPLO, I} <: KKTSolver{T}
     facwrk::FactorizationWorkspace{T, I}
     divwrk::DivisionWorkspace{T, I}
     itrwrk::CGWorkspace{T}
-    r::FVector{T}
+    hist::FVector{T}
     δ::FScalar{T}
     δf::FVector{T}
     δg::FVector{T}
@@ -15,21 +15,21 @@ struct BorderedSolver{T, UPLO, I} <: KKTSolver{T}
     φ::FScalar{T}
 end
 
-function BorderedSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}) where {T, I <: Integer}
+function BorderedSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), rfmax::Integer = 10) where {T, I <: Integer}
     F = FChordalTriangular{:N, :L, T, I}(S)
-    return BorderedSolver(F, B)
+    return BorderedSolver(F, B; cgmax, rfmax)
 end
 
-function BorderedSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix{T, I}) where {UPLO, T, I <: Integer}
+function BorderedSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), rfmax::Integer = 10) where {UPLO, T, I <: Integer}
     m, n = size(B)
 
     L = B' * B
 
     facwrk = FactorizationWorkspace(F)
     divwrk = DivisionWorkspace(F, 1)
-    itrwrk = CGWorkspace{T}(m, n)
+    itrwrk = CGWorkspace{T}(m, n; itmax = cgmax)
 
-    r = FVector{T}(undef, m)
+    hist = FVector{T}(undef, rfmax + 2)
     d = FVector{T}(undef, n)
 
     δf = FVector{T}(undef, n)
@@ -41,7 +41,7 @@ function BorderedSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMat
     κ = FScalar{T}(undef)
     φ = FScalar{T}(undef)
 
-    return BorderedSolver{T, UPLO, I}(F, L, facwrk, divwrk, itrwrk, r, δ,
+    return BorderedSolver{T, UPLO, I}(F, L, facwrk, divwrk, itrwrk, hist, δ,
                                       δf, δg, δx, δy,
                                       d, κ, φ)
 end
@@ -50,7 +50,6 @@ function initkkt!(
         bw::BorderedSolver{T},
         x2::AbstractVector{T},
         y2::AbstractVector{T},
-        r2::AbstractVector{T},
         A::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         c::AbstractVector{T},
@@ -63,8 +62,9 @@ function initkkt!(
     bw.δ[] = δ
     bw.φ[] = φ
 
-    ok, ρ, nwood, κ = initkkt!(bw.facwrk, bw.F, bw.L, bw.divwrk, bw.δf, bw.δx,
-                               x2, y2, r2, A, B, c, e, d, φ; δ, rgmin)
+    ok, ρ, nwood, κ = initkkt!(bw.divwrk, bw.itrwrk, bw.hist, bw.F, bw.L, bw.facwrk,
+                               bw.δf, bw.δg, bw.δx, bw.δy,
+                               x2, y2, A, B, c, e, d, φ; δ, rgmin)
     copyto!(bw.d, d)
     bw.κ[] = κ
 
@@ -72,15 +72,18 @@ function initkkt!(
 end
 
 function initkkt!(
-        facwrk::FactorizationWorkspace{T},
+        divwrk::DivisionWorkspace{T},
+        itrwrk::CGWorkspace{T},
+        hist::AbstractVector{T},
         F::AbstractMatrix{T},
         L::BlockSparseMatrix{T},
-        divwrk::DivisionWorkspace{T},
+        facwrk::FactorizationWorkspace{T},
         δf::AbstractVector{T},
+        δg::AbstractVector{T},
         δx::AbstractVector{T},
+        δy::AbstractVector{T},
         x2::AbstractVector{T},
         y2::AbstractVector{T},
-        r2::AbstractVector{T},
         A::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         c::AbstractVector{T},
@@ -94,7 +97,6 @@ function initkkt!(
 
     @assert length(x2) == n
     @assert length(y2) == m
-    @assert length(r2) == m
     @assert length(c)  == n
     @assert length(e)  == m
     @assert length(d)  == n
@@ -103,8 +105,6 @@ function initkkt!(
     @assert δ     ≥ 0
     @assert rgmin ≥ 0
 
-    α = inv(δ)
-
     nwood = 0
     κ = zero(T)
     #
@@ -112,43 +112,24 @@ function initkkt!(
     #
     #   F Fᵀ = δ A + Bᵀ B + ρ I
     #
-    ok, ρ = inituzw!(facwrk, F, L, A, δ, rgmin)
+    ok, ρ = initkkt!(facwrk, F, L, A, δ, rgmin)
 
     if ok
         #
-        # compute the residual
+        # solve the Woodbury system
         #
-        #   [ δf ] = [ c ] - [ A  -Bᵀ ] [ x₂ ]
-        #   [ r₂ ]   [ e ]   [ B   0  ] [ y₂ ]
+        #   [ A -Bᵀ ] [ x₂ ] = [ c ]
+        #   [ B  0  ] [ y₂ ]   [ e ]
         #
-        mulkkt!(δf, r2, A, B, x2, y2)
-        axpby!(one(T), c, -one(T), δf)
-        axpby!(one(T), e, -one(T), r2)
-        #
-        # solve for the direction δx
-        #
-        #   (δ A + Bᵀ B) δx = δ δf + Bᵀ r₂
-        #
-        # and update x₂ and r₂:
-        #
-        #   x₂ ← x₂ +   δx
-        #   r₂ ← r₂ - B δx
-        #
-        copyto!(δx, δf)
-        rmul!(δx, δ)
-        mul!(δx, B', r2, one(T), one(T))
-        ldiv!(divwrk, F,  δx)
-        ldiv!(divwrk, F', δx)
-
-        axpy!(one(T), δx, x2)
-        mul!(r2, B, δx, -one(T), one(T))
+        ncg, nir, _ = solvekkt!(divwrk, itrwrk, hist, F, δf, δg, δx, δy, δ,
+                                x2, y2, A, B, c, e; warm = true, rfmax = 1, cgmax = 0)
         #
         # compute the capacitance
         #
-        #   κ ← dᵀx₂ + eᵀy₂ + α eᵀr₂ + φ
+        #   κ ← dᵀ x₂ + eᵀ y₂ + φ
         #
-        κ = dot(d, x2) + dot(e, y2) + α * dot(e, r2) + φ
-        nwood = 1
+        κ = dot(d, x2) + dot(e, y2) + φ
+        nwood = 1 + nir + ncg
     end
 
     return ok, ρ, nwood, κ
@@ -161,15 +142,23 @@ end
 #   [ B     0   -e ] [ y ] = [ g ]
 #   [ dᵀ    eᵀ   φ ] [ ζ ]   [ η ]
 #
+#
+# where A is a n x n positive-definite
+# matrix, B is a m × n matrix, δ is a
+# positive number, and L is the n × n
+# Cholesky factor of the augmented matrix
+#
+#   δ A + Bᵀ B = L Lᵀ.
+#
 # The solution (x, y, ζ) meets the tolerances
 #
 #   ‖ A x - Bᵀ y - c ζ - f ‖ ≤ ftol
 #   ‖ B x        - e ζ - g ‖ ≤ gtol
-#   | dᵀx + eᵀy  + φ ζ - η | ≤ ηtol
+#   | dᵀx + eᵀy  + φ ζ - η | ≤ ηtol.
 #
 function solvekkt!(bw::BorderedSolver, args...; kw...)
     niter, nwood, npass, status, ζ, δmin, δmax, κ =
-        solvekkt!(bw.divwrk, bw.itrwrk, bw.r, bw.F, bw.δf, bw.δg, bw.δx, bw.δy,
+        solvekkt!(bw.divwrk, bw.itrwrk, bw.hist, bw.F, bw.δf, bw.δg, bw.δx, bw.δy,
                   bw.d, bw.κ[], bw.φ[], bw.δ[],
                   args...; kw...)
     bw.κ[] = κ
@@ -179,7 +168,7 @@ end
 function solvekkt!(
         divwrk::DivisionWorkspace{T},
         itrwrk::CGWorkspace{T},
-        r::AbstractVector{T},
+        hist::AbstractVector{T},
         L::AbstractMatrix{T},
         δf::AbstractVector{T},
         δg::AbstractVector{T},
@@ -193,7 +182,6 @@ function solvekkt!(
         y::AbstractVector{T},
         x2::AbstractVector{T},
         y2::AbstractVector{T},
-        r2::AbstractVector{T},
         A::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         c::AbstractVector{T},
@@ -201,8 +189,7 @@ function solvekkt!(
         f::AbstractVector{T},
         g::AbstractVector{T},
         η::T;
-        xwarm::Bool = false,
-        ywarm::Bool = false,
+        warm::Bool = false,
         gtol::T = √eps(T),
         ftol::T = √eps(T),
         ηtol::T = √eps(T),
@@ -212,8 +199,6 @@ function solvekkt!(
     ) where {T}
     m, n = size(B)
 
-    α = inv(δ)
-
     @assert length(x)  == n
     @assert length(y)  == m
     @assert length(x2) == n
@@ -222,250 +207,84 @@ function solvekkt!(
     @assert length(g)  == m
     @assert length(c)  == n
     @assert length(e)  == m
-    @assert length(r2) == m
     @assert length(d)  == n
     @assert size(A, 1) == n
     @assert size(L, 1) == n
 
-    niter = 0
-    nwood = 0
-    npass = 0
+    nwood = 0; ζ = T(NaN)
     #
-    # compute the residuals
+    # solve the KKT system
     #
-    #   [ δf ]   [ f ]   [ A  -Bᵀ ] [ x ]
-    #   [ δg ] = [ g ] - [ B   0  ] [ y ]
+    #   [ A -Bᵀ ] [ x ] = [ f ]
+    #   [ B  0  ] [ y ]   [ g ]
     #
-    copyto!(δf, f)
-    copyto!(δg, g)
+    # to the tolerances
+    #
+    #   ‖ Ax - Bᵀy - f ‖ ≤ 1/2 ftol
+    #   ‖ Bx       - g ‖ ≤ 1/2 gtol
+    #
+    niter, npass, status, δmin, δmax = solvekkt!(divwrk, itrwrk, hist, L, δf, δg, δx, δy, δ,
+                                x, y, A, B, f, g; warm, ftol = ftol / 2, gtol = gtol / 2, stall, rfmax, cgmax)
 
-    if xwarm
-        mul!(δf, A, x, -one(T), one(T))
-        mul!(δg, B,                x, -one(T), one(T))
-    end
-
-    if ywarm
-        mul!(δf, B', y, one(T), one(T))
-    end
-    #
-    # solve for the corrections δx and δy
-    #
-    #   [ A -Bᵀ ] [ δx ] = [ δf ] (1)
-    #   [ B  0  ] [ δy ]   [ δg ]
-    #
-    n, cgstat = solveuzw!(divwrk, itrwrk, δx, δy, r, L, A, B, δf, δg, δ; atol = gtol / 2, itmax = cgmax)
-    niter += n
-
-    if cgstat === CG_NUMERICAL_FAILURE
-        status = KKT_NUMERICAL_FAILURE
-        δmin = δmax = δ
-        ζ = zero(T)
-    else
+    if status === KKT_SOLVED
         #
-        # update x and y:
+        # compute the residual
         #
-        #   x ← x + δx
-        #   y ← y + δy
+        #   δη = η - dᵀx - eᵀy
         #
-        if xwarm
-            axpy!(one(T), δx, x)
-        else
-            copyto!(x, δx)
-        end
-
-        if ywarm
-            axpy!(one(T), δy, y)
-        else
-            copyto!(y, δy)
-        end
-        #
-        # compute the residuals
-        #
-        #   [ δf ]   [ f ]   [ A   -Bᵀ ] [ x ]
-        #   [ δg ] = [ g ] - [ B    0  ] [ y ]
-        #   [ δη ]   [ η ]   [ dᵀ   eᵀ ]
-        #
-        mulkkt!(δf, δg, A, B, x, y)
-        axpby!(one(T), f, -one(T), δf)
-        axpby!(one(T), g, -one(T), δg)
         δη = η - dot(d, x) - dot(e, y)
         #
-        # compute the residual norms
-        #
-        #   gres = ‖ δg ‖
-        #   fres = ‖ δf ‖
-        #
-        gres = norm(δg)
-        fres = norm(δf)
-        #
-        # estimate the minimum-cost interval
-        #
-        #   [δmin, δmax];
-        #
-        # any parameter δ in this interval would have
-        # solved (1) to the tolerances
-        #
-        #   ‖ A δx + Bᵀ δy - δf ‖ ≤ ftol
-        #   ‖ B δx         - δg ‖ ≤ gtol
-        #
-        # with the minimum possible number of triangular solves.
-        # beware! this estimate can be very poor.
-        #
-        δmin, δmax = kktwindow(itrwrk.hist, δ, fres, niter; gtol = gtol / 2, ftol)
-        #
-        # compute ζ:
+        # compute ζ
         #
         #   ζ = κ⁻¹ δη
         #
-        ζ = δη / κ
+        ζ  = δη / κ
         #
-        # ensure that
+        # refine the Woodbury system
         #
-        #   ‖ e - B x₂ ‖ ≤ (gtol - gres) / | ζ |
+        #   [ A -Bᵀ ] [ x₂ ] = [ c ]
+        #   [ B  0  ] [ y₂ ]   [ e ]
         #
-        # by solving for δx₂ and δy₂
+        # until
         #
-        #   [ δ A + Bᵀ B  -Bᵀ ] [ δx₂ ] = [ 0  ]
-        #   [          B   0  ] [ δy₂ ]   [ r₂ ]
+        #   ‖ A x₂ - Bᵀy₂ - c ‖ ≤ 1/(2|ζ|) ftol
+        #   ‖ B x₂        - e ‖ ≤ 1/(2|ζ|) gtol
         #
-        # and updating
-        #
-        #   x₂ ← x₂ +   δx₂
-        #   y₂ ← y₂ + α δy₂
-        #   r₂ ← r₂ - B δx₂
-        #
-        nwood, wstat = cg!(itrwrk, B, L, divwrk, x2, δy, r2; atol = (gtol - gres) / abs(ζ), itmax = cgmax)
-        axpy!(α, δy, y2)
-        #
-        # re-compute the capacitance
-        #
-        #   κ ← dᵀx₂ + eᵀy₂ + α eᵀr₂ + φ
-        #
-        κ = dot(d, x2) + dot(e, y2) + α * dot(e, r2) + φ
-        #
-        # re-compute ζ:
-        #
-        #   ζ = κ⁻¹ δη
-        #
-        ζ = δη / κ
-        #
-        # lift x and y
-        #
-        #   x ← x + ζ x2
-        #   y ← y + ζ y2 + α ζ r2
-        #
-        axpy!(ζ,     x2, x)
-        axpy!(ζ,     y2, y)
-        axpy!(ζ * α, r2, y)
-        #
-        # compute the residuals
-        #
-        #   [ δf ]   [ f ]   [ A   -Bᵀ  -c ] [ x ]
-        #   [ δg ] = [ g ] - [ B    0   -e ] [ y ]
-        #   [ δη ]   [ η ]   [ dᵀ   eᵀ   φ ] [ ζ ]
-        #
-        mulkkt!(δf, δg, A, B, x, y)
-        axpy!(-ζ, c, δf)
-        axpy!(-ζ, e, δg)
-        axpby!(one(T), f, -one(T), δf)
-        axpby!(one(T), g, -one(T), δg)
-        δη = η - dot(d, x) - dot(e, y) - φ * ζ
-        #
-        # compute the residual norms
-        #
-        #   gres = ‖ δg ‖
-        #   fres = ‖ δf ‖
-        #   ηres = | δη |
-        #
-        gres = norm(δg)
-        fres = norm(δf)
-        ηres = abs(δη)
-
-        if wstat === CG_NUMERICAL_FAILURE
-            status = KKT_NUMERICAL_FAILURE
-        elseif gres ≤ gtol && fres ≤ ftol && ηres ≤ ηtol
-            status = KKT_SOLVED
-        elseif npass == rfmax
-            status = KKT_ITMAX
-        else
-            status = KKT_CONTINUE
+        if !iszero(ζ)
+            ncg2, nir2, status = solvekkt!(divwrk, itrwrk, hist, L, δf, δg, δx, δy, δ,
+                                    x2, y2, A, B, c, e; warm = true,
+                                    ftol = ftol / 2abs(ζ), gtol = gtol / 2abs(ζ), stall, rfmax, cgmax)
+            nwood += 1 + nir2 + ncg2
+            #
+            # compute the capacitance
+            #
+            #   κ ← dᵀ x₂ + eᵀ y₂ + φ
+            #
+            κ = dot(d, x2) + dot(e, y2) + φ
+            #
+            # re-compute ζ
+            #
+            #   ζ = κ⁻¹ δη
+            #
+            ζ = δη / κ
         end
+        #
+        # lift x and y:
+        #
+        #   x ← x + ζ x₂
+        #   y ← y + ζ y₂
+        #
+        axpy!(ζ, x2, x)
+        axpy!(ζ, y2, y)
+        #
+        # compute the residual norm
+        #
+        #   ηres = | dᵀ x + eᵀ y + φ ζ - η |
+        #
+        ηres = abs(η - dot(d, x) - dot(e, y) - φ * ζ)
 
-        gprv = gres
-        fprv = fres
-        ηprv = ηres
-
-        while status == KKT_CONTINUE
-            #
-            # solve for the corrections δx and δy
-            #
-            #   [ A  -Bᵀ ] [ δx ]   [ δf ]
-            #   [ B   0  ] [ δy ] = [ δg ]
-            #
-            n, cgstat = solveuzw!(divwrk, itrwrk, δx, δy, r, L, A, B, δf, δg, δ; atol = gtol, rtol = T(INTERIOR_THETA), itmax = cgmax)
-            niter += n
-            npass += 1
-
-            if cgstat === CG_NUMERICAL_FAILURE
-                status = KKT_NUMERICAL_FAILURE
-            else
-                #
-                # compute the correction δζ:
-                #
-                #   δζ = (δη - dᵀδx - eᵀδy) / κ
-                #
-                δζ = (δη - dot(d, δx) - dot(e, δy)) / κ
-                #
-                # lift x, y, and ζ:
-                #
-                #   x ← x + δx + δζ x₂
-                #   y ← y + δy + δζ y₂ + α δζ r₂
-                #   ζ ← ζ + δζ
-                #
-                axpy!(δζ, x2, δx)
-                axpy!(δζ, y2, δy)
-                axpy!(δζ * α, r2, δy)
-                axpy!(one(T), δx, x)
-                axpy!(one(T), δy, y)
-                ζ += δζ
-                #
-                # compute the residuals
-                #
-                #   [ δf ]   [ f ]   [ A   -Bᵀ  -c ] [ x ]
-                #   [ δg ] = [ g ] - [ B    0   -e ] [ y ]
-                #   [ δη ]   [ η ]   [ dᵀ   eᵀ   φ ] [ ζ ]
-                #
-                mulkkt!(δf, δg, A, B, x, y)
-                axpy!(-ζ, c, δf)
-                axpy!(-ζ, e, δg)
-                axpby!(one(T), f, -one(T), δf)
-                axpby!(one(T), g, -one(T), δg)
-                δη = η - dot(d, x) - dot(e, y) - φ * ζ
-                #
-                # compute the residual norms
-                #
-                #   gres = ‖ δg ‖
-                #   fres = ‖ δf ‖
-                #   ηres = | δη |
-                #
-                gres = norm(δg)
-                fres = norm(δf)
-                ηres = abs(δη)
-
-                if gres ≤ gtol && fres ≤ ftol && ηres ≤ ηtol
-                    status = KKT_SOLVED
-                elseif gres > (1 - stall) * gprv && fres > (1 - stall) * fprv && ηres > (1 - stall) * ηprv
-                    status = KKT_STAGNATED
-                elseif npass == rfmax
-                    status = KKT_ITMAX
-                else
-                    status = KKT_CONTINUE
-                end
-
-                gprv = gres
-                fprv = fres
-                ηprv = ηres
-            end
+        if ηres > ηtol
+            status = KKT_STAGNATED
         end
     end
 

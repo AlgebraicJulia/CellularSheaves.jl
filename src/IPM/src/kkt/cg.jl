@@ -11,43 +11,33 @@ struct CGWorkspace{T}
     hist::FVector{T}
 end
 
-function CGWorkspace{T}(m::Integer, n::Integer) where {T}
+function CGWorkspace{T}(m::Integer, n::Integer; itmax::Integer = 2n) where {T}
     p = FVector{T}(undef, m)
     w = FVector{T}(undef, n)
-    hist = FVector{T}(undef, 2n + 1)
+    hist = FVector{T}(undef, itmax + 1)
     return CGWorkspace{T}(p, w, hist)
 end
 
-#
-# solve for δx and δy:
+# Solve the KKT system
 #
 #   [ A -Bᵀ ] [ δx ] = [ 0 ]
 #   [ B  0  ] [ δy ]   [ u ]
 #
-# and update
+# where A is a n x n positive-definite
+# matrix and B is a m × n matrix and L
+# is the n × n Cholesky factor of A. The
+# solution (δx, δy) meets the following
+# tolerances:
+#
+#   ‖ A δx - Bᵀ δy ‖ ≤ c u ( ‖A‖  ‖δx‖ + ‖B‖ ‖δy‖ )
+#   ‖ B δx -     u ‖ ≤ gtol
+#
+# where c is a small constant depending on n. Then
+# update x, y, and u:
 #
 #   x ← x +   δx
 #   y ←       δy
 #   u ← u - B δx
-#
-# given a Cholesky factorization
-#
-#   A = L Lᵀ
-#
-# Eliminating δx = A⁻¹ Bᵀ δy reduces the system to
-#
-#   M δy = u,   M = B A⁻¹ Bᵀ,
-#
-# which is solved by the method of conjugate gradients.
-# The iterate δx is accumulated alongside δy from the
-# vector
-#
-#   w = A⁻¹ Bᵀ p
-#
-# formed when applying M to the direction p, so no
-# additional triangular solve is needed to recover it.
-# Likewise u is the recurred CG residual, so no
-# additional product with M is needed to recover it.
 #
 function cg!(wrk::CGWorkspace{T}, B, L, divwrk, x, y, u; kwargs...) where {T}
     return cg!(wrk.p, wrk.w, B, L, divwrk, x, y, u, wrk.hist; kwargs...)
@@ -78,70 +68,75 @@ function cg!(
     @assert length(u) == size(B, 1)
 
     niter = 0
-    status = CG_SOLVED
 
     nu² = dot(u, u); hist[1] = nu = sqrt(nu²)
     np² = nu²
 
     fill!(y, zero(T))
 
-    if itmax > 0 && nu > atol
-        copyto!(p, u)
+    status = CG_SOLVED
 
-        status = CG_CONTINUE
+    if nu > atol
+        status = CG_ITMAX
 
-        while status == CG_CONTINUE
-            niter += 1
-            # solve for w:
-            #
-            #   L w = Bᵀ p
-            #
-            mul!(w, B', p)
-            ldiv!(divwrk, L, w)
-            #
-            # compute the squared elliptic norm of the direction p
-            #
-            #   ep² ← ‖ p ‖²_M = pᵀ B A⁻¹ Bᵀ p = pᵀ M p
-            #
-            ep² = dot(w, w)
+        if itmax > 0
+            copyto!(p, u)
 
-            if ep² ≤ eps(T) * np²
-                status = CG_NUMERICAL_FAILURE
-            else
+            status = CG_CONTINUE
+
+            while status == CG_CONTINUE
+                niter += 1
                 # solve for w:
                 #
-                #   Lᵀ w = w
+                #   L w = Bᵀ p
                 #
-                ldiv!(divwrk, L', w)
+                mul!(w, B', p)
+                ldiv!(divwrk, L, w)
                 #
-                # solution update: advance the CG iterate
+                # compute the squared elliptic norm of the direction p
                 #
-                #   α ← ep⁻² nu²,  y ← y + α p,  x ← x + α w,  u ← u − α B w
+                #   ep² ← ‖ p ‖²_M = pᵀ B A⁻¹ Bᵀ p = pᵀ M p
                 #
-                α = nu² / ep²
-                axpy!(α, p, y)
-                axpy!(α, w, x)
-                mul!(u, B, w, -α, one(T))
-                #
-                # compute the norm of the residual u:
-                #
-                #   nu ← ‖ u ‖
-                #
-                pnu² = nu²
-                nu² = dot(u, u); hist[niter + 1] = nu = sqrt(nu²)
+                ep² = dot(w, w)
 
-                if nu ≤ atol || one(T) + nu ≤ one(T)
-                    status = CG_SOLVED
-                elseif niter ≥ itmax
-                    status = CG_ITMAX
+                if ep² ≤ eps(T) * np²
+                    status = CG_NUMERICAL_FAILURE
                 else
-                    # direction update: compute the next conjugate direction
+                    # solve for w:
                     #
-                    #   β ← pnu⁻² nu²,  p ← u + β p,  np² ← nu² + β² np²
+                    #   Lᵀ w = w
                     #
-                    β = nu² / pnu²
-                    axpby!(one(T), u, β, p)
-                    np² = nu² + β^2 * np²
+                    ldiv!(divwrk, L', w)
+                    #
+                    # solution update: advance the CG iterate
+                    #
+                    #   α ← ep⁻² nu²,  y ← y + α p,  x ← x + α w,  u ← u − α B w
+                    #
+                    α = nu² / ep²
+                    axpy!(α, p, y)
+                    axpy!(α, w, x)
+                    mul!(u, B, w, -α, one(T))
+                    #
+                    # compute the norm of the residual u:
+                    #
+                    #   nu ← ‖ u ‖
+                    #
+                    pnu² = nu²
+                    nu² = dot(u, u); hist[niter + 1] = nu = sqrt(nu²)
+
+                    if nu ≤ atol || one(T) + nu ≤ one(T)
+                        status = CG_SOLVED
+                    elseif niter ≥ itmax
+                        status = CG_ITMAX
+                    else
+                        # direction update: compute the next conjugate direction
+                        #
+                        #   β ← pnu⁻² nu²,  p ← u + β p,  np² ← nu² + β² np²
+                        #
+                        β = nu² / pnu²
+                        axpby!(one(T), u, β, p)
+                        np² = nu² + β^2 * np²
+                    end
                 end
             end
         end

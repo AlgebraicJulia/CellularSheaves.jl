@@ -23,7 +23,6 @@ struct HSDSolver{T, I, V} <: AbstractSolver{T}
     κ::FScalar{T}
     Δp2::FVector{T}
     Δy2::FVector{T}
-    Δe2::FVector{T}
     nf::FScalar{T}
     ng::FScalar{T}
     sg::FScalar{T}     # ‖g‖ in original (unscaled) units — stopping-test primal denominator
@@ -181,7 +180,7 @@ end
 #
 function solvepredictor!(s::HSDSolver{T}, gap::T; ptol::T, ytol::T, τtol::T) where {T}
     return solvepredictor!(
-        s.wrk, s.kkt, s.Δp2, s.Δy2, s.Δe2, s.settings, s.H, s.B, s.Q, s.f, s.g, s.d,
+        s.wrk, s.kkt, s.Δp2, s.Δy2, s.settings, s.H, s.B, s.Q, s.f, s.g, s.d,
         s.τ[], s.κ[], gap;
         ptol, ytol, τtol,
     )
@@ -191,8 +190,7 @@ function solvepredictor!(
         w::HSDWorkspace{T},
         kkt::BorderedSolver{T},
         Δp2::AbstractVector{T},  # Woodbury column primal (HSD-owned; threaded to solvekkt!) (n)
-        Δy2::AbstractVector{T},  # Woodbury column dual, accreted                             (m)
-        Δe2::AbstractVector{T},  # Woodbury column residual e - B Δp2                         (m)
+        Δy2::AbstractVector{T},  # Woodbury column dual (physical multiplier)                (m)
         set::HSDSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -217,7 +215,7 @@ function solvepredictor!(
     #   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
     piter, pncol, ppass, pstat, Δτa, dmin, dmax = solvekkt!(
-        kkt, w.Δpa, w.Δya, Δp2, Δy2, Δe2, H, B, f, g, w.f, w.rp, gap;
+        kkt, w.Δpa, w.Δya, Δp2, Δy2, H, B, f, g, w.f, w.rp, gap;
         gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
     #
@@ -251,7 +249,7 @@ end
 #
 function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T; ptol::T, ytol::T, τtol::T) where {T}
     return solvecorrector!(
-        s.wrk, s.kkt, s.Δp2, s.Δy2, s.Δe2, s.settings, s.H, s.B, s.Q, s.f, s.g, s.K, s.p, s.d,
+        s.wrk, s.kkt, s.Δp2, s.Δy2, s.settings, s.H, s.B, s.Q, s.f, s.g, s.K, s.p, s.d,
         s.caches, s.sched, s.ν, s.τ[], s.κ[], s.δ[],
         μ, gap, Δτa, Δκa;
         ptol, ytol, τtol,
@@ -262,8 +260,7 @@ function solvecorrector!(
         w::HSDWorkspace{T},
         kkt::BorderedSolver{T},
         Δp2::AbstractVector{T},  # Woodbury column primal (HSD-owned; threaded to solvekkt!) (n)
-        Δy2::AbstractVector{T},  # Woodbury column dual, accreted                             (m)
-        Δe2::AbstractVector{T},  # Woodbury column residual e - B Δp2                         (m)
+        Δy2::AbstractVector{T},  # Woodbury column dual (physical multiplier)                (m)
         set::HSDSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -287,7 +284,6 @@ function solvecorrector!(
         ytol::T,
         τtol::T,
     ) where {T}
-    α = inv(δ)
     #
     # compute the largest step length αa ∈ (0, 1]
     # such that the perturbed iterates
@@ -347,16 +343,16 @@ function solvecorrector!(
 
     axpy!(1, w.rd, w.f)
     #
-    # warm-start the corrector from the predictor's column-free directions (the column dual uses the
-    # physical value Δy2 + α Δe2, folding the transient tail):
+    # warm-start the corrector from the predictor's column-free directions (Δy2 is the physical
+    # column multiplier):
     #
-    #   Δp₀a = Δpa - Δτa Δp2,   Δy₀a = Δya - Δτa (Δy2 + α Δe2)
+    #   Δp₀a = Δpa - Δτa Δp2,   Δy₀a = Δya - Δτa Δy2
     #
     # (the 2-row base's answer differs from these only by the corrector's second-order RHS) — seed both
     # into the output buffers and let the base refine from there.
     #
     copyto!(w.Δp, w.Δpa); axpy!(-Δτa, Δp2, w.Δp)
-    copyto!(w.Δy, w.Δya); axpy!(-Δτa, Δy2, w.Δy); axpy!(-Δτa * α, Δe2, w.Δy)
+    copyto!(w.Δy, w.Δya); axpy!(-Δτa, Δy2, w.Δy)
     #
     # solve for the directions Δp, Δy, and Δτ
     #
@@ -365,8 +361,8 @@ function solvecorrector!(
     #   [ fᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
     citer, cncol, cpass, cstat, Δτ, _, _ = solvekkt!(
-        kkt, w.Δp, w.Δy, Δp2, Δy2, Δe2, H, B, f, g, w.f, w.rp, fτ;
-        xwarm=true, ywarm=true, gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
+        kkt, w.Δp, w.Δy, Δp2, Δy2, H, B, f, g, w.f, w.rp, fτ;
+        warm=true, gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
     #
     # recover Δd:
@@ -418,7 +414,6 @@ function reinit!(s::HSDSolver{T}) where {T}
     s.κ[] = one(T)
     fill!(s.Δp2, false)
     fill!(s.Δy2, false)
-    fill!(s.Δe2, false)
 
     return s
 end
@@ -444,7 +439,7 @@ function HSDSolver(prob::IPMProblem{T, I}, settings::HSDSettings{T}) where {T, I
         update!(scaling, f, g)   # Stage 2: equilibrate the f/g embedding border → τ ≈ 1
     end
 
-    kkt = BorderedSolver(S, B)   # HSD solves the 3-row bordered system
+    kkt = BorderedSolver(S, B; cgmax=settings.newton_max_iter, rfmax=settings.refine_max_iter)   # HSD solves the 3-row bordered system
 
     C = C * prob.C
     R = prob.R
@@ -477,11 +472,10 @@ function HSDSolver(prob::IPMProblem{T, I}, settings::HSDSettings{T}) where {T, I
     ρ[] = initreg(nB[])
     Δp2 = FVector{T}(undef, n)
     Δy2 = FVector{T}(undef, m)
-    Δe2 = FVector{T}(undef, m)
 
     solver = HSDSolver(Q, H, B, f, g, p, d, y, cones,
         scaling, C, R, hsdwrk, caches, sched, kkt,
-        hist, ν, settings, ρ, τ, κ, Δp2, Δy2, Δe2, nf, ng, sg, sf, nB, δ, TimerOutput()
+        hist, ν, settings, ρ, τ, κ, Δp2, Δy2, nf, ng, sg, sf, nB, δ, TimerOutput()
     )
 
     return reinit!(solver)
@@ -607,7 +601,7 @@ function initkkt!(s::HSDSolver{T}) where {T}
     copyto!(d, s.f); axpby!(-2 / τ, Qp, one(T), d)
     φ  = dot(s.p, Qp) / τ^2 + s.κ[] / τ
     flag, ρ, wbase = initkkt!(
-        s.kkt, s.Δp2, s.Δy2, s.Δe2, s.H, s.B, s.f, s.g, d, φ;
+        s.kkt, s.Δp2, s.Δy2, s.H, s.B, s.f, s.g, d, φ;
         δ=s.δ[], rgmin=s.ρ[],
     )
     s.ρ[] = max(s.ρ[], ρ)
@@ -737,13 +731,6 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
                 #
                 citer, cncol, cpass, cstat, Δτ, Δκ = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
-                #
-                # materialize the physical column dual into s.Δy2 (fold the transient tail once, now that
-                # the column is final) so it seeds next iteration's base. s.Δp2/s.Δe2 are already physical.
-                #
-                #   Δy2 ← Δy2 + α Δe2
-                #
-                axpy!(inv(s.δ[]), s.Δe2, s.Δy2)
                 #
                 # The Woodbury column (s.Δp2/s.Δy2) is threaded in/out of initkkt!/predictor/corrector, so
                 # the final column already lives in it — no copy-back. It seeds next iteration's column base
