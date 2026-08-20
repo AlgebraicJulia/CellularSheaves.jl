@@ -129,7 +129,7 @@ function initkkt!(
         #   κ ← dᵀ x₂ + eᵀ y₂ + φ
         #
         κ = dot(d, x2) + dot(e, y2) + φ
-        nwood = 1 + nir + ncg
+        nwood = nir + ncg
     end
 
     return ok, ρ, nwood, κ
@@ -254,7 +254,7 @@ function solvekkt!(
             ncg2, nir2, status = solvekkt!(divwrk, itrwrk, hist, L, δf, δg, δx, δy, δ,
                                     x2, y2, A, B, c, e; warm = true,
                                     ftol = ftol / 2abs(ζ), gtol = gtol / 2abs(ζ), stall, rfmax, cgmax)
-            nwood += 1 + nir2 + ncg2
+            nwood += nir2 + ncg2
             #
             # compute the capacitance
             #
