@@ -344,4 +344,30 @@ x0_for_rate() = se3_pack([0.15, -0.1, 1.42], zeros(3),
         @test !cert.feasible
         @test !isempty(cert.violations)
     end
+
+    @testset "analytic feedforward removes the filter's lag" begin
+        dyn = SE3QuadrotorDynamics(m = 0.6, J = Matrix(Diagonal([0.012, 0.012, 0.02])))
+        ctrl = GeometricSE3Controller(dyn)
+        eps, dt, speed = 0.2, 0.005, 0.35
+        station(t) = [speed * t, 0.0, 1.5]
+        statvel(t) = [speed, 0.0, 0.0]
+
+        function tail_error(ff)
+            x0 = initial_state(dyn, station(0.0), statvel(0.0), zeros(3))
+            a = SE3AgentState(x0, dyn, ctrl, eps; feedforward = ff)
+            errs = Float64[]
+            for k in 0:2999
+                t = k * dt
+                xk, _ = step_agent!(a, station(t), statvel(t), zeros(3), dt)
+                t > 10 && push!(errs, norm(xk[1:3] .- station(t)))
+            end
+            return sum(errs) / length(errs)
+        end
+
+        plain, ff = tail_error(false), tail_error(true)
+        # Without feedforward the lag is set by the filter time constant and
+        # the reference speed; with it, the forcing term cancels.
+        @test plain > 0.5 * eps * speed
+        @test ff < 0.2 * plain
+    end
 end

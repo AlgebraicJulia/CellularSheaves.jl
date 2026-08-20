@@ -849,6 +849,13 @@ agents would do here, is not a meaningful operation.
 - `filter`: joint position/velocity reference filter.
 - `ctrl`, `dyn`: controller gains and vehicle.
 - `b1`: desired heading direction, held fixed by default.
+- `feedforward`: when true, the filter is driven by `qstar + eps * qstar_dot`
+  rather than by `qstar`, which cancels the moving-reference forcing term
+  identically and so removes the filter's own `O(eps)` lag. This is the
+  analytic feedforward of the reference-filter proposition, and it is a
+  property of the *agent* only in the sense of which signal it is handed --
+  the extra right-hand side is solved for upstream, in the same two sweeps of
+  the same cached factor.
 - `last`: errors from the most recent step, for logging and certificate checks.
 """
 mutable struct SE3AgentState <: AbstractAgentState
@@ -857,6 +864,7 @@ mutable struct SE3AgentState <: AbstractAgentState
     ctrl::GeometricSE3Controller
     dyn::SE3QuadrotorDynamics
     b1::Vector{Float64}
+    feedforward::Bool
     last::Union{Nothing, SE3Errors}
 end
 
@@ -873,13 +881,15 @@ the cascade's peaking behaviour can be exercised deliberately.
 function SE3AgentState(x0::AbstractVector, dyn::SE3QuadrotorDynamics,
                        ctrl::GeometricSE3Controller, eps::Float64;
                        b1::AbstractVector = [1.0, 0.0, 0.0],
+                       feedforward::Bool = false,
                        r0::Union{Nothing, AbstractVector} = nothing,
                        rdot0::Union{Nothing, AbstractVector} = nothing)
     @argcheck length(x0) == 18
     p0 = r0 === nothing ? collect(x0[1:3]) : collect(r0)
     v0 = rdot0 === nothing ? collect(x0[4:6]) : collect(rdot0)
     flt = JointTikhonovFilter(p0, v0; epsilon = eps)
-    return SE3AgentState(collect(float.(x0)), flt, ctrl, dyn, collect(float.(b1)), nothing)
+    return SE3AgentState(collect(float.(x0)), flt, ctrl, dyn, collect(float.(b1)),
+                         feedforward, nothing)
 end
 
 """
@@ -905,7 +915,16 @@ function step_agent!(w::SE3AgentState, qstar::AbstractVector, qstar_dot::Abstrac
     qd = _first3(qstar_dot)
     qdd = _first3(qstar_ddot)
 
-    tikhonov_step!(w.filter, q, qd, dt)
+    # Analytic feedforward: driving the filter with qstar + eps*qstar_dot makes
+    # its error dynamics eps*edot = -e, so the moving-reference term cancels
+    # identically instead of being tracked with an O(eps) lag. The velocity
+    # channel gets the same treatment one derivative up.
+    if w.feedforward
+        tikhonov_step!(w.filter, q .+ w.filter.epsilon .* qd,
+                       qd .+ w.filter.epsilon .* qdd, dt)
+    else
+        tikhonov_step!(w.filter, q, qd, dt)
+    end
     ref = SE3Reference(x = copy(w.filter.x), v = copy(w.filter.v), a = qdd, b1 = w.b1)
 
     f, M, err = geometric_control(w.ctrl, w.dyn, w.x, ref)
