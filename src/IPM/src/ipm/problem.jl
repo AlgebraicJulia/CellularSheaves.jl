@@ -73,6 +73,10 @@ function IPMProblem{T, I, V}(Q::BlockSparseMatrix, B::BlockSparseMatrix, f::Abst
     return IPMProblem{T, I, V}(Q, B, f, g, K, R, C)
 end
 
+function symbkkt(prob::IPMProblem, alg::EliminationAlgorithm)
+    return symbkkt(prob.B, prob.Q, prob.f, prob.g, prob.K, prob.C, prob.R, alg)
+end
+
 """
     IPMProblem(Q, B, f, g, K, s)
 

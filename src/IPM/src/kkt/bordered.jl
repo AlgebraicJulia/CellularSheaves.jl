@@ -1,98 +1,60 @@
-struct BorderedSolver{T, UPLO, I} <: KKTSolver{T}
-    F::FChordalTriangular{:N, UPLO, T, I}
-    L::BlockSparseMatrix{T, I}
-    facwrk::FactorizationWorkspace{T, I}
-    divwrk::DivisionWorkspace{T, I}
-    itrwrk::CGWorkspace{T}
-    hist::FVector{T}
-    δ::FScalar{T}
-    δf::FVector{T}
-    δg::FVector{T}
-    δx::FVector{T}
-    δy::FVector{T}
+struct BorderedSolver{UPLO, T, I} <: KKTSolver{T}
+    kkt::UzawaSolver{UPLO, T, I}
     d::FVector{T}
     κ::FScalar{T}
     φ::FScalar{T}
 end
 
-function BorderedSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), rfmax::Integer = 10) where {T, I <: Integer}
+function BorderedSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {T, I <: Integer}
     F = FChordalTriangular{:N, :L, T, I}(S)
-    return BorderedSolver(F, B; cgmax, rfmax)
+    return BorderedSolver(F, B; cgmax, irmax)
 end
 
-function BorderedSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), rfmax::Integer = 10) where {UPLO, T, I <: Integer}
-    m, n = size(B)
+function BorderedSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {UPLO, T, I <: Integer}
+    n = size(B, 2)
 
-    L = B' * B
+    kkt = UzawaSolver(F, B; cgmax, irmax)
 
-    facwrk = FactorizationWorkspace(F)
-    divwrk = DivisionWorkspace(F, 1)
-    itrwrk = CGWorkspace{T}(m, n; itmax = cgmax)
-
-    hist = FVector{T}(undef, rfmax + 2)
     d = FVector{T}(undef, n)
-
-    δf = FVector{T}(undef, n)
-    δg = FVector{T}(undef, m)
-    δx = FVector{T}(undef, n)
-    δy = FVector{T}(undef, m)
-
-    δ = FScalar{T}(undef)
     κ = FScalar{T}(undef)
     φ = FScalar{T}(undef)
 
-    return BorderedSolver{T, UPLO, I}(F, L, facwrk, divwrk, itrwrk, hist, δ,
-                                      δf, δg, δx, δy,
-                                      d, κ, φ)
+    return BorderedSolver{UPLO, T, I}(kkt, d, κ, φ)
 end
 
 function initkkt!(
-        bw::BorderedSolver{T},
-        x2::AbstractVector{T},
-        y2::AbstractVector{T},
-        A::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        c::AbstractVector{T},
-        e::AbstractVector{T},
-        d::AbstractVector{T},
-        φ::T;
-        δ::T,
-        rgmin::T,
-    ) where {T}
-    bw.δ[] = δ
+        bw::BorderedSolver,
+        x2::AbstractVector,
+        y2::AbstractVector,
+        A::BlockSparseMatrix,
+        B::BlockSparseMatrix,
+        c::AbstractVector,
+        e::AbstractVector,
+        d::AbstractVector,
+        φ::Real;
+        δ::Real,
+    )
     bw.φ[] = φ
 
-    ok, ρ, witer, wpass, κ = initkkt!(bw.divwrk, bw.itrwrk, bw.hist, bw.F, bw.L, bw.facwrk,
-                               bw.δf, bw.δg, bw.δx, bw.δy,
-                               x2, y2, A, B, c, e, d, φ; δ, rgmin)
+    flag, witer, wpass, κ = initkkt!(bw.kkt, x2, y2, A, B, c, e, d, φ; δ)
     copyto!(bw.d, d)
     bw.κ[] = κ
 
-    return ok, ρ, witer, wpass
+    return flag, witer, wpass
 end
 
 function initkkt!(
-        divwrk::DivisionWorkspace{T},
-        itrwrk::CGWorkspace{T},
-        hist::AbstractVector{T},
-        F::AbstractMatrix{T},
-        L::BlockSparseMatrix{T},
-        facwrk::FactorizationWorkspace{T},
-        δf::AbstractVector{T},
-        δg::AbstractVector{T},
-        δx::AbstractVector{T},
-        δy::AbstractVector{T},
-        x2::AbstractVector{T},
-        y2::AbstractVector{T},
-        A::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        c::AbstractVector{T},
-        e::AbstractVector{T},
-        d::AbstractVector{T},
-        φ::T;
-        δ::T,
-        rgmin::T,
-    ) where {T}
+        kkt::UzawaSolver,
+        x2::AbstractVector,
+        y2::AbstractVector,
+        A::BlockSparseMatrix,
+        B::BlockSparseMatrix,
+        c::AbstractVector,
+        e::AbstractVector,
+        d::AbstractVector,
+        φ::Real;
+        δ::Real,
+    )
     m, n = size(B)
 
     @assert length(x2) == n
@@ -101,40 +63,37 @@ function initkkt!(
     @assert length(e)  == m
     @assert length(d)  == n
     @assert size(A, 1) == n
-    @assert size(L, 1) == n
-    @assert δ     ≥ 0
-    @assert rgmin ≥ 0
+    @assert δ ≥ 0
 
     witer = 0
     wpass = 0
-    κ = zero(T)
     #
     # factor the augmented matrix
     #
-    #   F Fᵀ = δ A + Bᵀ B + ρ I
+    #   F Fᵀ = δ A + Bᵀ B
     #
-    ok, ρ = initkkt!(facwrk, F, L, A, δ, rgmin)
+    flag = initkkt!(kkt, A; δ)
 
-    if ok
+    if flag
         #
         # solve the Woodbury system
         #
         #   [ A -Bᵀ ] [ x₂ ] = [ c ]
         #   [ B  0  ] [ y₂ ]   [ e ]
         #
-        ncg, nir, _ = solvekkt!(divwrk, itrwrk, hist, F, δf, δg, δx, δy, δ,
-                                x2, y2, A, B, c, e; warm = true, rfmax = 1, cgmax = 0)
-        #
-        # compute the capacitance
-        #
-        #   κ ← dᵀ x₂ + eᵀ y₂ + φ
-        #
-        κ = dot(d, x2) + dot(e, y2) + φ
+        ncg, nir, _ = solvekkt!(kkt, x2, y2, A, B, c, e;
+                                warm = true, gtol = 0, ftol = 0, stall = 0, irmax = 1, cgmax = 0)
         witer = ncg
         wpass = nir
     end
+    #
+    # compute the capacitance
+    #
+    #   κ ← dᵀ x₂ + eᵀ y₂ + φ
+    #
+    κ = dot(d, x2) + dot(e, y2) + φ
 
-    return ok, ρ, witer, wpass, κ
+    return flag, witer, wpass, κ
 end
 
 #
@@ -160,45 +119,35 @@ end
 #
 function solvekkt!(bw::BorderedSolver, args...; kw...)
     niter, npass, witer, wpass, status, ζ, δmin, δmax, κ =
-        solvekkt!(bw.divwrk, bw.itrwrk, bw.hist, bw.F, bw.δf, bw.δg, bw.δx, bw.δy,
-                  bw.d, bw.κ[], bw.φ[], bw.δ[],
-                  args...; kw...)
+        solvekkt!(bw.kkt, bw.d, bw.κ[], bw.φ[], args...; kw...)
     bw.κ[] = κ
     return niter, npass, witer, wpass, status, ζ, δmin, δmax
 end
 
 function solvekkt!(
-        divwrk::DivisionWorkspace{T},
-        itrwrk::CGWorkspace{T},
-        hist::AbstractVector{T},
-        L::AbstractMatrix{T},
-        δf::AbstractVector{T},
-        δg::AbstractVector{T},
-        δx::AbstractVector{T},
-        δy::AbstractVector{T},
-        d::AbstractVector{T},
-        κ::T,
-        φ::T,
-        δ::T,
-        x::AbstractVector{T},
-        y::AbstractVector{T},
-        x2::AbstractVector{T},
-        y2::AbstractVector{T},
-        A::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        c::AbstractVector{T},
-        e::AbstractVector{T},
-        f::AbstractVector{T},
-        g::AbstractVector{T},
-        η::T;
-        warm::Bool = false,
-        gtol::T = √eps(T),
-        ftol::T = √eps(T),
-        ηtol::T = √eps(T),
-        stall::T = T(0.5),
-        rfmax::Int = 10,
-        cgmax::Int = 100,
-    ) where {T}
+        kkt::UzawaSolver,
+        d::AbstractVector,
+        κ::Real,
+        φ::Real,
+        x::AbstractVector,
+        y::AbstractVector,
+        x2::AbstractVector,
+        y2::AbstractVector,
+        A::AbstractMatrix,
+        B::AbstractMatrix,
+        c::AbstractVector,
+        e::AbstractVector,
+        f::AbstractVector,
+        g::AbstractVector,
+        η::Real;
+        warm::Bool,
+        gtol::Real,
+        ftol::Real,
+        ηtol::Real,
+        stall::Real,
+        irmax::Int,
+        cgmax::Int,
+    )
     m, n = size(B)
 
     @assert length(x)  == n
@@ -211,9 +160,9 @@ function solvekkt!(
     @assert length(e)  == m
     @assert length(d)  == n
     @assert size(A, 1) == n
-    @assert size(L, 1) == n
 
-    witer = 0; wpass = 0; ζ = T(NaN)
+    witer = 0
+    wpass = 0
     #
     # solve the KKT system
     #
@@ -225,70 +174,76 @@ function solvekkt!(
     #   ‖ Ax - Bᵀy - f ‖ ≤ 1/2 ftol
     #   ‖ Bx       - g ‖ ≤ 1/2 gtol
     #
-    niter, npass, status, δmin, δmax = solvekkt!(divwrk, itrwrk, hist, L, δf, δg, δx, δy, δ,
-                                x, y, A, B, f, g; warm, ftol = ftol / 2, gtol = gtol / 2, stall, rfmax, cgmax)
+    niter, npass, nstat, δmin, δmax = solvekkt!(kkt, x, y, A, B, f, g;
+                                warm, ftol = ftol / 2, gtol = gtol / 2, stall, irmax, cgmax)
+    #
+    # compute the residual
+    #
+    #   δη = η - dᵀx - eᵀy
+    #
+    δη = η - dot(d, x) - dot(e, y)
+    #
+    # compute ζ
+    #
+    #   ζ = κ⁻¹ δη
+    #
+    ζ  = δη / κ
 
-    if status === KKT_SOLVED
+    wstat = KKT_SOLVED
+    #
+    # refine the Woodbury system
+    #
+    #   [ A -Bᵀ ] [ x₂ ] = [ c ]
+    #   [ B  0  ] [ y₂ ]   [ e ]
+    #
+    # until
+    #
+    #   ‖ A x₂ - Bᵀy₂ - c ‖ ≤ 1/(2|ζ|) ftol
+    #   ‖ B x₂        - e ‖ ≤ 1/(2|ζ|) gtol
+    #
+    if !iszero(ζ)
+        ncg2, nir2, wstat = solvekkt!(kkt, x2, y2, A, B, c, e; warm = true,
+                                ftol = ftol / 2abs(ζ), gtol = gtol / 2abs(ζ), stall, irmax, cgmax)
+        witer += ncg2
+        wpass += nir2
         #
-        # compute the residual
+        # compute the capacitance
         #
-        #   δη = η - dᵀx - eᵀy
+        #   κ ← dᵀ x₂ + eᵀ y₂ + φ
         #
-        δη = η - dot(d, x) - dot(e, y)
+        κ = dot(d, x2) + dot(e, y2) + φ
         #
-        # compute ζ
+        # re-compute ζ
         #
         #   ζ = κ⁻¹ δη
         #
-        ζ  = δη / κ
-        #
-        # refine the Woodbury system
-        #
-        #   [ A -Bᵀ ] [ x₂ ] = [ c ]
-        #   [ B  0  ] [ y₂ ]   [ e ]
-        #
-        # until
-        #
-        #   ‖ A x₂ - Bᵀy₂ - c ‖ ≤ 1/(2|ζ|) ftol
-        #   ‖ B x₂        - e ‖ ≤ 1/(2|ζ|) gtol
-        #
-        if !iszero(ζ)
-            ncg2, nir2, status = solvekkt!(divwrk, itrwrk, hist, L, δf, δg, δx, δy, δ,
-                                    x2, y2, A, B, c, e; warm = true,
-                                    ftol = ftol / 2abs(ζ), gtol = gtol / 2abs(ζ), stall, rfmax, cgmax)
-            witer += ncg2
-            wpass += nir2
-            #
-            # compute the capacitance
-            #
-            #   κ ← dᵀ x₂ + eᵀ y₂ + φ
-            #
-            κ = dot(d, x2) + dot(e, y2) + φ
-            #
-            # re-compute ζ
-            #
-            #   ζ = κ⁻¹ δη
-            #
-            ζ = δη / κ
-        end
-        #
-        # lift x and y:
-        #
-        #   x ← x + ζ x₂
-        #   y ← y + ζ y₂
-        #
-        axpy!(ζ, x2, x)
-        axpy!(ζ, y2, y)
-        #
-        # compute the residual norm
-        #
-        #   ηres = | dᵀ x + eᵀ y + φ ζ - η |
-        #
-        ηres = abs(η - dot(d, x) - dot(e, y) - φ * ζ)
+        ζ = δη / κ
+    end
+    #
+    # lift x and y:
+    #
+    #   x ← x + ζ x₂
+    #   y ← y + ζ y₂
+    #
+    axpy!(ζ, x2, x)
+    axpy!(ζ, y2, y)
+    #
+    # compute the residual norm
+    #
+    #   ηres = | dᵀ x + eᵀ y + φ ζ - η |
+    #
+    ηres = abs(η - dot(d, x) - dot(e, y) - φ * ζ)
 
-        if ηres > ηtol
-            status = KKT_STAGNATED
-        end
+    if nstat === KKT_NUMERICAL_FAILURE || wstat === KKT_NUMERICAL_FAILURE
+        status = KKT_NUMERICAL_FAILURE
+    elseif nstat !== KKT_SOLVED
+        status = nstat
+    elseif wstat !== KKT_SOLVED
+        status = wstat
+    elseif ηres > ηtol
+        status = KKT_STAGNATED
+    else
+        status = KKT_SOLVED
     end
 
     return niter, npass, witer, wpass, status, ζ, δmin, δmax, κ

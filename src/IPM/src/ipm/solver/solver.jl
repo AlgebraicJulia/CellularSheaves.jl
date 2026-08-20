@@ -7,10 +7,6 @@ include("ipm.jl")
 include("hsd.jl")
 include("utils.jl")
 
-function initreg(nB::T) where {T}
-    return eps(T) / 2 * nB^2
-end
-
 function isoptimal(s::AbstractSolver, pobj, dobj, pres, dres)
     return isoptimal(pobj, dobj, pres, dres; gap_tol=s.settings.gap_tol, feas_tol=s.settings.feas_tol)
 end
@@ -54,10 +50,120 @@ function isnearoptimal(s::AbstractSolver)
 end
 
 function initkkt!(s::AbstractSolver{T}) where {T}
-    flag, ρ = initkkt!(s.kkt, s.H; δ=s.δ[], rgmin=s.ρ[])
-    s.ρ[] = max(s.ρ[], ρ)
-    return flag, ρ
+    return initkkt!(s.kkt, s.H; δ=s.δ[])
 end
+
+############################################################################################
+# maxsteps
+############################################################################################
+
+function maxsteps(
+        cone::AbstractCone,
+        v::Integer,
+        p::AbstractVector,
+        d::AbstractVector,
+        Δp::AbstractVector,
+        Δd::AbstractVector,
+        caches::Caches,
+        B::BlockSparseMatrix,
+        conewrk::ConeWorkspace,
+        step_frac::Real,
+    )
+    r = colrange(B, v)
+    τp, τd = maxsteps(view(p, r), view(Δp, r), view(d, r), view(Δd, r), cache(caches, v, cone), conewrk)
+
+    if !(cone isa CofreeCone)
+        τp *= step_frac
+        τd *= step_frac
+    end
+
+    return τp, τd
+end
+
+function maxsteps(s::AbstractSolver, Δp::AbstractVector, Δd::AbstractVector, step_frac::Real)
+    return maxsteps(s.sched, s.K, s.p, s.d, Δp, Δd, s.caches, s.B, s.wrk.step, step_frac)
+end
+
+function maxsteps(
+        sched::ConeSchedule,
+        K::AbstractVector,
+        p::AbstractVector,
+        d::AbstractVector,
+        Δp::AbstractVector,
+        Δd::AbstractVector,
+        caches::Caches,
+        B::BlockSparseMatrix,
+        step::AbstractVector,
+        step_frac::Real,
+    )
+    if sched.nsmll <= 1
+        maxsteps_st(sched, K, p, d, Δp, Δd, caches, B, step, step_frac)
+    else
+        maxsteps_mt(sched, K, p, d, Δp, Δd, caches, B, step, step_frac)
+    end
+
+    return minimum(step)
+end
+
+function maxsteps_st(
+        sched::ConeSchedule,
+        K::AbstractVector,
+        p::AbstractVector,
+        d::AbstractVector,
+        Δp::AbstractVector,
+        Δd::AbstractVector,
+        caches::Caches,
+        B::BlockSparseMatrix,
+        step::AbstractVector,
+        step_frac::Real,
+    )
+    @inbounds for v in vtxs(B)
+        a, b = maxsteps(K[v], v, p, d, Δp, Δd, caches, B, sched.large, step_frac)
+        step[v] = min(a, b)
+    end
+
+    return
+end
+
+function maxsteps_mt(
+        sched::ConeSchedule{<:Any, I},
+        K::AbstractVector,
+        p::AbstractVector,
+        d::AbstractVector,
+        Δp::AbstractVector,
+        Δd::AbstractVector,
+        caches::Caches,
+        B::BlockSparseMatrix,
+        step::AbstractVector,
+        step_frac::Real,
+    ) where {I}
+    @inbounds for v in vtxs(B)
+        if ncols(B, v) > SMALL_CONE_THRESHOLD
+            a, b = maxsteps(K[v], v, p, d, Δp, Δd, caches, B, sched.large, step_frac)
+            step[v] = min(a, b)
+        end
+    end
+
+    @threads for s in oneto(sched.nsmll)
+        ws = sched.small[s]
+
+        sstrt = sched.xsmll[s]
+        sstop = sched.xsmll[s + one(I)] - one(I)
+
+        @inbounds for v in sstrt:sstop
+            if ncols(B, v) <= SMALL_CONE_THRESHOLD
+                a, b = maxsteps(K[v], v, p, d, Δp, Δd, caches, B, ws, step_frac)
+                step[v] = min(a, b)
+            end
+        end
+    end
+
+    return
+end
+
+############################################################################################
+# scale!
+############################################################################################
 
 function scale!(
         cone::AbstractCone,
@@ -89,88 +195,6 @@ function scale!(
     error()
 end
 
-function initcorrector!(
-        cone::AbstractCone,
-        v::Integer,
-        f::AbstractVector,
-        caches::Caches,
-        p::AbstractVector,
-        d::AbstractVector,
-        Δp::AbstractVector,
-        Δd::AbstractVector,
-        σμ::Real,
-        B::BlockSparseMatrix,
-        conewrk::ConeWorkspace,
-    )
-    r = colrange(B, v)
-    cv = cache(caches, v, cone)
-    corr!(view(f, r), view(p, r), view(d, r), view(Δp, r), view(Δd, r), σμ, cv, conewrk)
-    return
-end
-
-function maxsteps(
-        cone::AbstractCone,
-        v::Integer,
-        p::AbstractVector{T},
-        d::AbstractVector{T},
-        Δp::AbstractVector{T},
-        Δd::AbstractVector{T},
-        caches::Caches{T},
-        B::BlockSparseMatrix{T},
-        conewrk::ConeWorkspace{T};
-        step_frac::T = one(T),
-    ) where {T}
-    r = colrange(B, v)
-    τp, τd = maxsteps(view(p, r), view(Δp, r), view(d, r), view(Δd, r), cache(caches, v, cone), conewrk)
-
-    if !(cone isa CofreeCone)
-        τp *= step_frac
-        τd *= step_frac
-    end
-
-    return τp, τd
-end
-
-function maxsteps(
-        sched::ConeSchedule{T, I},
-        K::AbstractVector,
-        p::AbstractVector{T},
-        d::AbstractVector{T},
-        Δp::AbstractVector{T},
-        Δd::AbstractVector{T},
-        caches::Caches,
-        B::BlockSparseMatrix{T},
-        step::AbstractVector{T};
-        step_frac::T,
-    ) where {T, I}
-    @inbounds for v in vtxs(B)
-        if ncols(B, v) > SMALL_CONE_THRESHOLD
-            a, b = maxsteps(K[v], v, p, d, Δp, Δd, caches, B, sched.large; step_frac)
-            step[v] = min(a, b)
-        end
-    end
-
-    @threads for s in oneto(sched.nsmll)
-        ws = sched.small[s]
-
-        sstrt = sched.xsmll[s]
-        sstop = sched.xsmll[s + one(I)] - one(I)
-
-        @inbounds for v in sstrt:sstop
-            if ncols(B, v) <= SMALL_CONE_THRESHOLD
-                a, b = maxsteps(K[v], v, p, d, Δp, Δd, caches, B, ws; step_frac)
-                step[v] = min(a, b)
-            end
-        end
-    end
-
-    return min(one(T), minimum(step))
-end
-
-function maxsteps(s::AbstractSolver{T}, Δp::AbstractVector{T}, Δd::AbstractVector{T}; step_frac::T=one(T)) where {T}
-    return maxsteps(s.sched, s.K, s.p, s.d, Δp, Δd, s.caches, s.B, s.wrk.step; step_frac)
-end
-
 #
 # compute the Hessian
 #
@@ -188,6 +212,44 @@ function scale!(s::AbstractSolver)
 end
 
 function scale!(
+        sched::ConeSchedule,
+        K::AbstractVector,
+        H::BlockSparseMatrix,
+        Q::BlockSparseMatrix,
+        caches::Caches,
+        p::AbstractVector,
+        d::AbstractVector,
+        B::BlockSparseMatrix,
+        flags::AbstractVector,
+    )
+    if sched.nsmll <= 1
+        scale_st!(sched, K, H, Q, caches, p, d, B, flags)
+    else
+        scale_mt!(sched, K, H, Q, caches, p, d, B, flags)
+    end
+
+    return all(flags)
+end
+
+function scale_st!(
+        sched::ConeSchedule,
+        K::AbstractVector,
+        H::BlockSparseMatrix,
+        Q::BlockSparseMatrix,
+        caches::Caches,
+        p::AbstractVector,
+        d::AbstractVector,
+        B::BlockSparseMatrix,
+        flags::AbstractVector,
+    )
+    @inbounds for v in vtxs(B)
+        flags[v] = scale!(K[v], v, H, Q, caches, p, d, B, sched.large)
+    end
+
+    return
+end
+
+function scale_mt!(
         sched::ConeSchedule{<:Any, I},
         K::AbstractVector,
         H::BlockSparseMatrix,
@@ -217,10 +279,73 @@ function scale!(
         end
     end
 
-    return all(flags)
+    return
+end
+
+############################################################################################
+# initcorrector!
+############################################################################################
+
+function initcorrector!(
+        cone::AbstractCone,
+        v::Integer,
+        f::AbstractVector,
+        caches::Caches,
+        p::AbstractVector,
+        d::AbstractVector,
+        Δp::AbstractVector,
+        Δd::AbstractVector,
+        σμ::Real,
+        B::BlockSparseMatrix,
+        conewrk::ConeWorkspace,
+    )
+    r = colrange(B, v)
+    cv = cache(caches, v, cone)
+    corr!(view(f, r), view(p, r), view(d, r), view(Δp, r), view(Δd, r), σμ, cv, conewrk)
+    return
 end
 
 function initcorrector!(
+        sched::ConeSchedule,
+        K::AbstractVector,
+        f::AbstractVector,
+        caches::Caches,
+        p::AbstractVector,
+        d::AbstractVector,
+        Δp::AbstractVector,
+        Δd::AbstractVector,
+        σμ::Real,
+        B::BlockSparseMatrix,
+    )
+    if sched.nsmll <= 1
+        initcorrector_st!(sched, K, f, caches, p, d, Δp, Δd, σμ, B)
+    else
+        initcorrector_mt!(sched, K, f, caches, p, d, Δp, Δd, σμ, B)
+    end
+
+    return
+end
+
+function initcorrector_st!(
+        sched::ConeSchedule,
+        K::AbstractVector,
+        f::AbstractVector,
+        caches::Caches,
+        p::AbstractVector,
+        d::AbstractVector,
+        Δp::AbstractVector,
+        Δd::AbstractVector,
+        σμ::Real,
+        B::BlockSparseMatrix,
+    )
+    @inbounds for v in vtxs(B)
+        initcorrector!(K[v], v, f, caches, p, d, Δp, Δd, σμ, B, sched.large)
+    end
+
+    return
+end
+
+function initcorrector_mt!(
         sched::ConeSchedule{<:Any, I},
         K::AbstractVector,
         f::AbstractVector,

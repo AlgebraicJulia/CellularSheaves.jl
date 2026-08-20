@@ -12,17 +12,17 @@ struct UzawaSolver{UPLO, T, I <: Integer} <: KKTSolver{T}
     δy::FVector{T}
 end
 
-function UzawaSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), rfmax::Integer = 10) where {T, I <: Integer}
+function UzawaSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {T, I <: Integer}
     F = FChordalTriangular{:N, :L, T, I}(S)
-    return UzawaSolver(F, B; cgmax, rfmax)
+    return UzawaSolver(F, B; cgmax, irmax)
 end
 
-function UzawaSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), rfmax::Integer = 10) where {UPLO, T, I <: Integer}
+function UzawaSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {UPLO, T, I <: Integer}
     m, n = size(B)
     facwrk = FactorizationWorkspace(F)
     divwrk = DivisionWorkspace(F, 1)
     itrwrk = CGWorkspace{T}(m, n; itmax = cgmax)
-    hist = FVector{T}(undef, rfmax + 2)
+    hist = FVector{T}(undef, irmax + 2)
     δ = FScalar{T}(undef)
     δf = FVector{T}(undef, n)
     δg = FVector{T}(undef, m)
@@ -31,19 +31,18 @@ function UzawaSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix
     return UzawaSolver(F, B' * B, facwrk, divwrk, itrwrk, hist, δ, δf, δg, δx, δy)
 end
 
-function initkkt!(wrk::UzawaSolver{UPLO, T}, A::BlockSparseMatrix; δ::T, rgmin::T) where {UPLO, T}
+function initkkt!(wrk::UzawaSolver{UPLO, T}, A::BlockSparseMatrix; δ::T) where {UPLO, T}
     wrk.δ[] = δ
-    return initkkt!(wrk.facwrk, wrk.F, wrk.L, A, δ, rgmin)
+    return initkkt!(wrk.facwrk, wrk.F, wrk.L, A, δ)
 end
 
 function initkkt!(
-        facwrk::FactorizationWorkspace{T},
-        F::ChordalTriangular{:N, UPLO, T},
-        L::BlockSparseMatrix{T},
-        A::BlockSparseMatrix{T},
-        δ::T,
-        rgmin::T,
-    ) where {UPLO, T}
+        facwrk::FactorizationWorkspace,
+        F::ChordalTriangular,
+        L::BlockSparseMatrix,
+        A::BlockSparseMatrix,
+        δ::Real,
+    )
     @assert size(F, 1) == size(L, 1) == size(A, 1)
     #
     # factorize the augmented matrix
@@ -54,42 +53,7 @@ function initkkt!(
     axpy!(δ, A, F)
     info = cholesky!(facwrk, F; check=false)
 
-    ρ = zero(T)
-
-    if !iszero(info)
-        #
-        # on failure, factorize the perturbed matrix
-        #
-        #   F Fᵀ = δ A + Bᵀ B + ρ I
-        #
-        # with an increasing sequence of perturbations
-        #
-        #   ρ = rgmin, 8 rgmin, 8² rgmin, ...
-        #
-        ρ = rgmin
-
-        for _ in 1:10
-            #
-            # factorize the perturbed matrix
-            #
-            #   F Fᵀ = δ A + Bᵀ B + ρ I
-            #
-            copyto!(F, L)
-            axpy!(δ, A, F)
-            axpy!(ρ, I, F)
-            info = cholesky!(facwrk, F; check=false)
-
-            iszero(info) && break
-            #
-            # on failure, increase ρ
-            #
-            #   ρ ← 8 ρ
-            #
-            ρ *= 8
-        end
-    end
-
-    return iszero(info), ρ
+    return iszero(info)
 end
 
 #
@@ -122,7 +86,11 @@ end
 #
 # Beware! This estimate can be very poor.
 #
-function kktwindow(rhist::AbstractVector{T}, chist::AbstractVector{T}, δ::T, nir::Int, ncg::Int; gtol::T, ftol::T) where {T}
+function kktwindow(rhist::AbstractVector{T}, chist::AbstractVector{T}, δ, nir::Int, ncg::Int, ftol, gtol) where {T}
+    return kktwindow(rhist, chist, convert(T, δ), nir, ncg, convert(T, ftol), convert(T, gtol))
+end
+
+function kktwindow(rhist::AbstractVector{T}, chist::AbstractVector{T}, δ::T, nir::Int, ncg::Int, ftol::T, gtol::T) where {T}
     δmin = δmax = T(NaN)
 
     if nir ≥ 1
@@ -173,28 +141,28 @@ function solvekkt!(wrk::UzawaSolver, x, y, A, B, f, g; kw...)
 end
 
 function solvekkt!(
-        divwrk::DivisionWorkspace{T},
-        itrwrk::CGWorkspace{T},
-        hist::AbstractVector{T},
-        L::AbstractMatrix{T},
-        δf::AbstractVector{T},
-        δg::AbstractVector{T},
-        δx::AbstractVector{T},
-        δy::AbstractVector{T},
-        δ::T,
-        x::AbstractVector{T},
-        y::AbstractVector{T},
-        A::BlockSparseMatrix{T},
-        B::BlockSparseMatrix{T},
-        f::AbstractVector{T},
-        g::AbstractVector{T};
-        warm::Bool = false,
-        gtol::T = √eps(T),
-        ftol::T = √eps(T),
-        stall::T = T(0.5),
-        rfmax::Int = 10,
-        cgmax::Int = 100,
-    ) where {T}
+        divwrk::DivisionWorkspace,
+        itrwrk::CGWorkspace,
+        hist::AbstractVector,
+        L::AbstractMatrix,
+        δf::AbstractVector,
+        δg::AbstractVector,
+        δx::AbstractVector,
+        δy::AbstractVector,
+        δ::Real,
+        x::AbstractVector,
+        y::AbstractVector,
+        A::AbstractMatrix,
+        B::AbstractMatrix,
+        f::AbstractVector,
+        g::AbstractVector;
+        warm::Bool,
+        gtol::Real,
+        ftol::Real,
+        stall::Real,
+        irmax::Int,
+        cgmax::Int,
+    )
     m, n = size(B)
 
     @assert length(x) == n
@@ -207,7 +175,7 @@ function solvekkt!(
     @assert δ > 0
     @assert gtol ≥ 0
     @assert ftol ≥ 0
-    @assert rfmax ≥ 0
+    @assert irmax ≥ 0
     @assert cgmax ≥ 0
 
     α = inv(δ)
@@ -225,23 +193,23 @@ function solvekkt!(
     #
     if warm
         mulkkt!(δf, δg, A, B, x, y)
-        axpby!(one(T), f, -one(T), δf)
-        axpby!(one(T), g, -one(T), δg)
+        axpby!(1, f, -1, δf)
+        axpby!(1, g, -1, δg)
     else
         copyto!(δf, f)
         copyto!(δg, g)
-        fill!(x, zero(T))
-        fill!(y, zero(T))
+        fill!(x, 0)
+        fill!(y, 0)
     end
 
     fprv = fres = norm(δf); hist[1] = fres
 
     if fres ≤ ftol
-        status = KKT_SOLVED
-    elseif nir ≥ rfmax
-        status = KKT_RFMAX
+        irstat = KKT_SOLVED
+    elseif nir ≥ irmax
+        irstat = KKT_IRMAX
     else
-        status = KKT_CONTINUE
+        irstat = KKT_CONTINUE
     end
     #
     # refine the KKT system
@@ -253,7 +221,7 @@ function solvekkt!(
     #
     #   ‖ A x - Bᵀ y - f ‖ ≤ ftol
     #
-    while status === KKT_CONTINUE
+    while irstat === KKT_CONTINUE
         nir += 1
         #
         # solve for the corrections δx and δy
@@ -263,17 +231,17 @@ function solvekkt!(
         #
         copyto!(δx, δf)
         rmul!(δx, δ)
-        mul!(δx, B', δg, one(T), one(T))
+        mul!(δx, B', δg, 1, 1)
         ldiv!(divwrk, L,  δx)
         ldiv!(divwrk, L', δx)
-        mul!(δg, B, δx, -one(T), one(T))
+        mul!(δg, B, δx, -1, 1)
         #
         # update x and y:
         #
         #   x ← x + δx
         #   y ← y + δy
         #
-        axpy!(one(T), δx, x)
+        axpy!(1, δx, x)
         axpy!(α, δg, y)
         #
         # compute the residuals
@@ -286,19 +254,19 @@ function solvekkt!(
         #   fres = ‖ δf ‖
         #
         mulkkt!(δf, δg, A, B, x, y)
-        axpby!(one(T), f, -one(T), δf)
-        axpby!(one(T), g, -one(T), δg)
+        axpby!(1, f, -1, δf)
+        axpby!(1, g, -1, δg)
         fres = norm(δf)
         hist[nir + 1] = fres
 
         if fres ≤ ftol
-            status = KKT_SOLVED
-        elseif fres > (one(T) - stall) * fprv
-            status = KKT_STAGNATED
-        elseif nir ≥ rfmax
-            status = KKT_RFMAX
+            irstat = KKT_SOLVED
+        elseif fres > (1 - stall) * fprv
+            irstat = KKT_STAGNATED
+        elseif nir ≥ irmax
+            irstat = KKT_IRMAX
         else
-            status = KKT_CONTINUE
+            irstat = KKT_CONTINUE
         end
 
         fprv = fres
@@ -319,17 +287,19 @@ function solvekkt!(
     #   x ← x +     δx
     #   y ← y + 1/δ δy - 1/δ B δx
     #
-    if status === KKT_SOLVED
-        axpy!(-α, δg, y)
-        ncg, cgstat = cg!(itrwrk, B, L, divwrk, x, δy, δg; atol = gtol, itmax = cgmax)
-        axpy!(α, δy, y)
-        axpy!(α, δg, y)
+    axpy!(-α, δg, y)
+    ncg, cgstat = cg!(itrwrk, B, L, divwrk, x, δy, δg; atol = gtol, itmax = cgmax)
+    axpy!(α, δy, y)
+    axpy!(α, δg, y)
 
-        if cgstat === CG_NUMERICAL_FAILURE
-            status = KKT_NUMERICAL_FAILURE
-        elseif cgstat === CG_ITMAX
-            status = KKT_ITMAX
-        end
+    if cgstat === CG_NUMERICAL_FAILURE
+        status = KKT_NUMERICAL_FAILURE
+    elseif irstat === KKT_STAGNATED
+        status = KKT_STAGNATED
+    elseif irstat === KKT_IRMAX || cgstat === CG_ITMAX
+        status = KKT_ITMAX
+    else
+        status = KKT_SOLVED
     end
     #
     # estimate the minimum-cost interval
@@ -352,11 +322,7 @@ function solvekkt!(
     #
     # beware! this estimate can be very poor.
     #
-    if status === KKT_NUMERICAL_FAILURE
-        δmin = δmax = δ
-    else
-        δmin, δmax = kktwindow(hist, itrwrk.hist, δ, nir, ncg; gtol, ftol)
-    end
+    δmin, δmax = kktwindow(hist, itrwrk.hist, δ, nir, ncg, ftol, gtol)
 
     return ncg, nir, status, δmin, δmax
 end

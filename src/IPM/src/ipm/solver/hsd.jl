@@ -14,11 +14,10 @@ struct HSDSolver{T, I, V} <: AbstractSolver{T}
     wrk::HSDWorkspace{T}
     caches::Caches{T, I}
     sched::ConeSchedule{T, I}
-    kkt::BorderedSolver{T, :L, I}
+    kkt::BorderedSolver{:L, T, I}
     hist::HSDHistory{T}
     ν::Int
     settings::HSDSettings{T}
-    ρ::FScalar{T}
     τ::FScalar{T}
     κ::FScalar{T}
     Δp2::FVector{T}
@@ -181,14 +180,14 @@ end
 function solvepredictor!(s::HSDSolver{T}, gap::T; ptol::T, ytol::T, τtol::T) where {T}
     return solvepredictor!(
         s.wrk, s.kkt, s.Δp2, s.Δy2, s.settings, s.H, s.B, s.Q, s.f, s.g, s.d,
-        s.τ[], s.κ[], gap;
+        s.τ[], s.κ[], gap, s.timers;
         ptol, ytol, τtol,
     )
 end
 
 function solvepredictor!(
         w::HSDWorkspace{T},
-        kkt::BorderedSolver{T},
+        kkt::BorderedSolver,
         Δp2::AbstractVector{T},  # Woodbury column primal (HSD-owned; threaded to solvekkt!) (n)
         Δy2::AbstractVector{T},  # Woodbury column dual (physical multiplier)                (m)
         set::HSDSettings{T},
@@ -200,7 +199,8 @@ function solvepredictor!(
         d::AbstractVector{T},
         τ::T,
         κ::T,
-        gap::T;
+        gap::T,
+        timers::TimerOutput;
         ptol::T,
         ytol::T,
         τtol::T,
@@ -214,9 +214,9 @@ function solvepredictor!(
     #   [  B           0              -g ] [ Δya ] = [ rp     ]
     #   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
-    piter, ppass, pwiter, pwpass, pstat, Δτa, dmin, dmax = solvekkt!(
+    piter, ppass, pwiter, pwpass, pstat, Δτa, dmin, dmax = @timeit timers "solve" solvekkt!(
         kkt, w.Δpa, w.Δya, Δp2, Δy2, H, B, f, g, w.f, w.rp, gap;
-        gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
+        warm=false, gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, irmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
     #
     # recover Δda:
@@ -251,14 +251,14 @@ function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T; pto
     return solvecorrector!(
         s.wrk, s.kkt, s.Δp2, s.Δy2, s.settings, s.H, s.B, s.Q, s.f, s.g, s.K, s.p, s.d,
         s.caches, s.sched, s.ν, s.τ[], s.κ[], s.δ[],
-        μ, gap, Δτa, Δκa;
+        μ, gap, Δτa, Δκa, s.timers;
         ptol, ytol, τtol,
     )
 end
 
 function solvecorrector!(
         w::HSDWorkspace{T},
-        kkt::BorderedSolver{T},
+        kkt::BorderedSolver,
         Δp2::AbstractVector{T},  # Woodbury column primal (HSD-owned; threaded to solvekkt!) (n)
         Δy2::AbstractVector{T},  # Woodbury column dual (physical multiplier)                (m)
         set::HSDSettings{T},
@@ -279,7 +279,8 @@ function solvecorrector!(
         μ::T,
         gap::T,
         Δτa::T,
-        Δκa::T;
+        Δκa::T,
+        timers::TimerOutput;
         ptol::T,
         ytol::T,
         τtol::T,
@@ -296,7 +297,7 @@ function solvecorrector!(
     #
     # lie within their respective cones
     #
-    αa = maxsteps(sched, K, p, d, w.Δpa, w.Δda, caches, B, w.step; step_frac=one(T))
+    αa = @timeit timers "maxsteps" maxsteps(sched, K, p, d, w.Δpa, w.Δda, caches, B, w.step, one(T))
 
     if Δτa < 0
         αa = min(αa, -τ / Δτa)
@@ -339,7 +340,7 @@ function solvecorrector!(
     #
     # where e is the Jordan identity element e ∈ K.
     #
-    initcorrector!(sched, K, w.f, caches, p, d, w.Δpa, w.Δda, σμ, B)
+    @timeit timers "init" initcorrector!(sched, K, w.f, caches, p, d, w.Δpa, w.Δda, σμ, B)
 
     axpy!(1, w.rd, w.f)
     #
@@ -360,9 +361,9 @@ function solvecorrector!(
     #   [ B            0                -g ] [ Δy ] = [ rp                          ]
     #   [ fᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
-    citer, cpass, cwiter, cwpass, cstat, Δτ, _, _ = solvekkt!(
+    citer, cpass, cwiter, cwpass, cstat, Δτ, _, _ = @timeit timers "solve" solvekkt!(
         kkt, w.Δp, w.Δy, Δp2, Δy2, H, B, f, g, w.f, w.rp, fτ;
-        warm=true, gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
+        warm=true, gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, irmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
     #
     # recover Δd:
@@ -423,14 +424,7 @@ function HSDSolver(prob::IPMProblem{T, I}, settings::HSDSettings{T}) where {T, I
     m = size(prob.B, 1)
     ν = conedegree(prob.K, prob.B)
 
-    weights, graph = weightedgraph(prob.B, prob.Q)
-    D, C, S = symbolic(weights, graph; alg=settings.elim_alg)
-
-    B = selectvtxs(prob.B, D.perm)
-    Q = halfselectvtxs(halfselectvtxs(prob.Q, D.perm), D.perm)
-    f = C * prob.f
-    g = copy(prob.g)
-    cones = tounion(prob.K, D.perm)
+    S, B, Q, f, g, cones, C, R = symbkkt(prob, settings.elim_alg)
 
     scaling = HSDScaling{T}(n, m)
 
@@ -439,10 +433,7 @@ function HSDSolver(prob::IPMProblem{T, I}, settings::HSDSettings{T}) where {T, I
         update!(scaling, f, g)   # Stage 2: equilibrate the f/g embedding border → τ ≈ 1
     end
 
-    kkt = BorderedSolver(S, B; cgmax=settings.newton_max_iter, rfmax=settings.refine_max_iter)   # HSD solves the 3-row bordered system
-
-    C = C * prob.C
-    R = prob.R
+    kkt = BorderedSolver(S, B; cgmax=settings.newton_max_iter, irmax=settings.refine_max_iter)   # HSD solves the 3-row bordered system
 
     p = FVector{T}(undef, n)
     d = FVector{T}(undef, n)
@@ -454,7 +445,6 @@ function HSDSolver(prob::IPMProblem{T, I}, settings::HSDSettings{T}) where {T, I
     sched = ConeSchedule{T}(cones, B, nthreads())
     hsdwrk = HSDWorkspace{T}(m, n, nvtxs(B))
     hist = HSDHistory{T}()
-    ρ = FScalar{T}(undef)
     τ = FScalar{T}(undef)
     κ = FScalar{T}(undef)
     nf = FScalar{T}(undef)
@@ -469,13 +459,12 @@ function HSDSolver(prob::IPMProblem{T, I}, settings::HSDSettings{T}) where {T, I
     ng[] = norm(g)
     sg[] = scalenorm(g, scaling.rscl)
     sf[] = scalenorm(f, scaling.cscl)
-    ρ[] = initreg(nB[])
     Δp2 = FVector{T}(undef, n)
     Δy2 = FVector{T}(undef, m)
 
     solver = HSDSolver(Q, H, B, f, g, p, d, y, cones,
         scaling, C, R, hsdwrk, caches, sched, kkt,
-        hist, ν, settings, ρ, τ, κ, Δp2, Δy2, nf, ng, sg, sf, nB, δ, TimerOutput()
+        hist, ν, settings, τ, κ, Δp2, Δy2, nf, ng, sg, sf, nB, δ, TimerOutput()
     )
 
     return reinit!(solver)
@@ -600,12 +589,11 @@ function initkkt!(s::HSDSolver{T}) where {T}
     d  = s.wrk.aτ
     copyto!(d, s.f); axpby!(-2 / τ, Qp, one(T), d)
     φ  = dot(s.p, Qp) / τ^2 + s.κ[] / τ
-    flag, ρ, wbase_iter, wbase_pass = initkkt!(
+    flag, wbase_iter, wbase_pass = initkkt!(
         s.kkt, s.Δp2, s.Δy2, s.H, s.B, s.f, s.g, d, φ;
-        δ=s.δ[], rgmin=s.ρ[],
+        δ=s.δ[],
     )
-    s.ρ[] = max(s.ρ[], ρ)
-    return flag, ρ, wbase_iter, wbase_pass
+    return flag, wbase_iter, wbase_pass
 end
 
 function step!(s::HSDSolver{T}) where {T}
@@ -617,7 +605,6 @@ function step!(s::HSDSolver{T}) where {T}
 
     step = zero(T)
     dmin = dmax = T(NaN)   # per-solve min-cost δ-window (bordered solvekkt!)
-    ρ = zero(T)      # ρ-shift actually applied this step (0 = none / no factorization); recorded below
 
     w = s.wrk
     τ = s.τ[]
@@ -701,7 +688,7 @@ function step!(s::HSDSolver{T}) where {T}
             #   [ H  -Bᵀ ] [ Δp2 ]   [ f ]
             #   [ B   0  ] [ Δy2 ] = [ g ] ,   S = Δp2ᵀ W Δp2 + (Δp2 - p/τ)ᵀ Q (Δp2 - p/τ) + κ/τ
             #
-            initok, ρ, wbase_iter, wbase_pass = @timeit s.timers "initkkt" initkkt!(s)
+            initok, wbase_iter, wbase_pass = @timeit s.timers "initkkt" initkkt!(s)
             if !initok
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
@@ -761,7 +748,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   τ + step Δτ ≥ 0
                 #   κ + step Δκ ≥ 0
                 #
-                step = @timeit s.timers "maxsteps" maxsteps(s, w.Δp, w.Δd; step_frac=s.settings.step_frac)
+                step = @timeit s.timers "maxsteps" maxsteps(s, w.Δp, w.Δd, s.settings.step_frac)
 
                 if Δτ < 0
                     step = min(step, s.settings.step_frac * (-τ / Δτ))
@@ -797,7 +784,7 @@ function step!(s::HSDSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, pobj, dobj, δ=s.δ[], ρ, τ=s.τ[], κ=s.κ[],
+    push!(s.hist, (; μ, step, pres, dres, pobj, dobj, δ=s.δ[], τ=s.τ[], κ=s.κ[],
         piter, ppass, pstat, citer, cpass, cstat, witer, wpass,
         dmin, dmax))
 

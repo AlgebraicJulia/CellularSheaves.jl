@@ -18,7 +18,6 @@ struct IPMSolver{T, I, V} <: AbstractSolver{T}
     hist::IPMHistory{T}
     ν::Int
     settings::IPMSettings{T}
-    ρ::FScalar{T}
     nf::FScalar{T}
     ng::FScalar{T}
     sg::FScalar{T}     # ‖g‖ in original (unscaled) units — stopping-test primal denominator
@@ -105,7 +104,7 @@ end
 #
 function solvepredictor!(s::IPMSolver{T}; ptol::T, ytol::T) where {T}
     return solvepredictor!(
-        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.d;
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.d, s.timers;
         ptol, ytol,
     )
 end
@@ -117,7 +116,8 @@ function solvepredictor!(
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
         Q::BlockSparseMatrix{T},
-        d::AbstractVector{T};
+        d::AbstractVector{T},
+        timers::TimerOutput;
         ptol::T,
         ytol::T,
     ) where {T}
@@ -129,9 +129,9 @@ function solvepredictor!(
     #   [ H  -Bᵀ ] [ Δpa ]   [ rd - d ]
     #   [ B   0  ] [ Δya ] = [ rp     ]
     #
-    piter, ppass, pstat, dmin, dmax = solvekkt!(
+    piter, ppass, pstat, dmin, dmax = @timeit timers "solve" solvekkt!(
         kkt, w.Δpa, w.Δya, H, B, w.f, w.rp;
-        gtol=ptol, ftol=ytol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
+        warm=false, gtol=ptol, ftol=ytol, stall=set.refine_stall_tol, irmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
     #
     # recover Δda:
@@ -156,7 +156,7 @@ end
 function solvecorrector!(s::IPMSolver{T}, μ::T; ptol::T, ytol::T) where {T}
     return solvecorrector!(
         s.wrk, s.kkt, s.settings, s.H, s.B, s.Q, s.K, s.p, s.d,
-        s.caches, s.sched, s.ν, μ;
+        s.caches, s.sched, s.ν, μ, s.timers;
         ptol, ytol,
     )
 end
@@ -174,7 +174,8 @@ function solvecorrector!(
         caches::Caches{T},
         sched::ConeSchedule{T},
         ν::Integer,
-        μ::T;
+        μ::T,
+        timers::TimerOutput;
         ptol::T,
         ytol::T,
     ) where {T}
@@ -187,7 +188,7 @@ function solvecorrector!(
     #
     # lie within their respective cones
     #
-    τa = maxsteps(sched, K, p, d, w.Δpa, w.Δda, caches, B, w.step; step_frac=one(T))
+    τa = @timeit timers "maxsteps" maxsteps(sched, K, p, d, w.Δpa, w.Δda, caches, B, w.step, one(T))
     #
     # compute the centering parameter
     #
@@ -216,7 +217,7 @@ function solvecorrector!(
     #
     # where e is the Jordan identity element e ∈ K.
     #
-    initcorrector!(sched, K, w.f, caches, p, d, w.Δpa, w.Δda, σμ, B)
+    @timeit timers "init" initcorrector!(sched, K, w.f, caches, p, d, w.Δpa, w.Δda, σμ, B)
 
     axpy!(1, w.rd, w.f)
     #
@@ -228,9 +229,9 @@ function solvecorrector!(
     copyto!(w.Δp, w.Δpa)
     copyto!(w.Δy, w.Δya)
 
-    citer, cpass, cstat, _, _ = solvekkt!(
+    citer, cpass, cstat, _, _ = @timeit timers "solve" solvekkt!(
         kkt, w.Δp, w.Δy, H, B, w.f, w.rp;
-        warm=true, gtol=ptol, ftol=ytol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
+        warm=true, gtol=ptol, ftol=ytol, stall=set.refine_stall_tol, irmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
     #
     # recover Δd:
@@ -341,14 +342,7 @@ function IPMSolver(prob::IPMProblem{T, I}, settings::IPMSettings{T}; p0=nothing,
     m = size(prob.B, 1)
     ν = conedegree(prob.K, prob.B)
 
-    weights, graph = weightedgraph(prob.B, prob.Q)
-    D, C, S = symbolic(weights, graph; alg=settings.elim_alg)
-
-    B = selectvtxs(prob.B, D.perm)
-    Q = halfselectvtxs(halfselectvtxs(prob.Q, D.perm), D.perm)
-    f = C * prob.f
-    g = copy(prob.g)
-    cones = tounion(prob.K, D.perm)
+    S, B, Q, f, g, cones, C, R = symbkkt(prob, settings.elim_alg)
 
     scaling = IPMScaling{T}(n, m)
 
@@ -356,10 +350,7 @@ function IPMSolver(prob::IPMProblem{T, I}, settings::IPMSettings{T}; p0=nothing,
         equilibrate!(scaling, B, Q, f, g; itmax=settings.scale_max_iter)
     end
 
-    kkt = UzawaSolver(S, B; cgmax=settings.newton_max_iter, rfmax=settings.refine_max_iter)
-
-    C = C * prob.C
-    R = prob.R
+    kkt = UzawaSolver(S, B; cgmax=settings.newton_max_iter, irmax=settings.refine_max_iter)
 
     p = FVector{T}(undef, n)
     d = FVector{T}(undef, n)
@@ -371,7 +362,6 @@ function IPMSolver(prob::IPMProblem{T, I}, settings::IPMSettings{T}; p0=nothing,
     sched = ConeSchedule{T}(cones, B, nthreads())
     ipmwrk = IPMWorkspace{T}(m, n, nvtxs(B))
     hist = IPMHistory{T}()
-    ρ = FScalar{T}(undef)
     nf = FScalar{T}(undef)
     ng = FScalar{T}(undef)
     sg = FScalar{T}(undef)
@@ -384,11 +374,10 @@ function IPMSolver(prob::IPMProblem{T, I}, settings::IPMSettings{T}; p0=nothing,
     ng[] = norm(g)
     sg[] = scalenorm(g, scaling.rscl)
     sf[] = scalenorm(f, scaling.cscl)
-    ρ[] = initreg(nB[])
 
     solver = IPMSolver(Q, H, B, f, g, p, d, y, cones,
         scaling, C, R, ipmwrk, caches, sched, kkt,
-        hist, ν, settings, ρ, nf, ng, sg, sf, nB, δ, TimerOutput()
+        hist, ν, settings, nf, ng, sg, sf, nB, δ, TimerOutput()
     )
 
     return reinit!(solver; p0, d0, y0)
@@ -445,7 +434,6 @@ function step!(s::IPMSolver{T}) where {T}
     pstat = cstat = KKT_SOLVED   # refinement exit status per role
     step = zero(T)
     dmin = dmax = T(NaN)   # per-solve min-cost δ-window (kktwindow!)
-    ρ = zero(T)      # ρ-shift actually applied this step (0 = none / no factorization); recorded below
 
     w = s.wrk
     #
@@ -503,7 +491,7 @@ function step!(s::IPMSolver{T}) where {T}
             #
             setaug!(s)
 
-            initok, ρ = @timeit s.timers "initkkt" initkkt!(s)
+            initok = @timeit s.timers "initkkt" initkkt!(s)
 
             if !initok
                 if s.settings.verbose > 1
@@ -565,7 +553,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #   p + αp Δp ∈ K
                 #   d + αd Δd ∈ K*
                 #
-                step = @timeit s.timers "maxsteps" maxsteps(s, w.Δp, w.Δd; step_frac=s.settings.step_frac)
+                step = @timeit s.timers "maxsteps" maxsteps(s, w.Δp, w.Δd, s.settings.step_frac)
                 #
                 # compute the updated iterates
                 #
@@ -587,7 +575,7 @@ function step!(s::IPMSolver{T}) where {T}
         end
     end
 
-    push!(s.hist, (; μ, step, pres, dres, pobj, dobj, δ=s.δ[], ρ, piter, ppass, pstat, citer, cpass, cstat,
+    push!(s.hist, (; μ, step, pres, dres, pobj, dobj, δ=s.δ[], piter, ppass, pstat, citer, cpass, cstat,
         dmin, dmax))
 
     return status

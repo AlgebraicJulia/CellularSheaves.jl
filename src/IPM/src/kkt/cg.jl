@@ -39,8 +39,8 @@ end
 #   y ←       δy
 #   u ← u - B δx
 #
-function cg!(wrk::CGWorkspace{T}, B, L, divwrk, x, y, u; kwargs...) where {T}
-    return cg!(wrk.p, wrk.w, B, L, divwrk, x, y, u, wrk.hist; kwargs...)
+function cg!(wrk::CGWorkspace{T}, B, L, divwrk, x, y, u; kw...) where {T}
+    return cg!(wrk.p, wrk.w, B, L, divwrk, x, y, u, wrk.hist; kw...)
 end
 
 function cg!(
@@ -53,8 +53,8 @@ function cg!(
         y::AbstractVector{T},
         u::AbstractVector{T},
         hist::AbstractVector{T};
-        atol::T  = √eps(T),
-        itmax::Int = 2size(B, 2),
+        atol::Real,
+        itmax::Int,
     ) where {T}
 
     @assert size(L, 1) == size(B, 2)
@@ -72,7 +72,7 @@ function cg!(
     nu² = dot(u, u); hist[1] = nu = sqrt(nu²)
     np² = nu²
 
-    fill!(y, zero(T))
+    fill!(y, 0)
 
     status = CG_SOLVED
 
@@ -115,7 +115,7 @@ function cg!(
                     α = nu² / ep²
                     axpy!(α, p, y)
                     axpy!(α, w, x)
-                    mul!(u, B, w, -α, one(T))
+                    mul!(u, B, w, -α, 1)
                     #
                     # compute the norm of the residual u:
                     #
@@ -134,7 +134,7 @@ function cg!(
                         #   β ← pnu⁻² nu²,  p ← u + β p,  np² ← nu² + β² np²
                         #
                         β = nu² / pnu²
-                        axpby!(one(T), u, β, p)
+                        axpby!(1, u, β, p)
                         np² = nu² + β^2 * np²
                     end
                 end
