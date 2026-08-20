@@ -62,13 +62,13 @@ function initkkt!(
     bw.δ[] = δ
     bw.φ[] = φ
 
-    ok, ρ, nwood, κ = initkkt!(bw.divwrk, bw.itrwrk, bw.hist, bw.F, bw.L, bw.facwrk,
+    ok, ρ, witer, wpass, κ = initkkt!(bw.divwrk, bw.itrwrk, bw.hist, bw.F, bw.L, bw.facwrk,
                                bw.δf, bw.δg, bw.δx, bw.δy,
                                x2, y2, A, B, c, e, d, φ; δ, rgmin)
     copyto!(bw.d, d)
     bw.κ[] = κ
 
-    return ok, ρ, nwood
+    return ok, ρ, witer, wpass
 end
 
 function initkkt!(
@@ -105,7 +105,8 @@ function initkkt!(
     @assert δ     ≥ 0
     @assert rgmin ≥ 0
 
-    nwood = 0
+    witer = 0
+    wpass = 0
     κ = zero(T)
     #
     # factor the augmented matrix
@@ -129,10 +130,11 @@ function initkkt!(
         #   κ ← dᵀ x₂ + eᵀ y₂ + φ
         #
         κ = dot(d, x2) + dot(e, y2) + φ
-        nwood = nir + ncg
+        witer = ncg
+        wpass = nir
     end
 
-    return ok, ρ, nwood, κ
+    return ok, ρ, witer, wpass, κ
 end
 
 #
@@ -157,12 +159,12 @@ end
 #   | dᵀx + eᵀy  + φ ζ - η | ≤ ηtol.
 #
 function solvekkt!(bw::BorderedSolver, args...; kw...)
-    niter, nwood, npass, status, ζ, δmin, δmax, κ =
+    niter, npass, witer, wpass, status, ζ, δmin, δmax, κ =
         solvekkt!(bw.divwrk, bw.itrwrk, bw.hist, bw.F, bw.δf, bw.δg, bw.δx, bw.δy,
                   bw.d, bw.κ[], bw.φ[], bw.δ[],
                   args...; kw...)
     bw.κ[] = κ
-    return niter, nwood, npass, status, ζ, δmin, δmax
+    return niter, npass, witer, wpass, status, ζ, δmin, δmax
 end
 
 function solvekkt!(
@@ -211,7 +213,7 @@ function solvekkt!(
     @assert size(A, 1) == n
     @assert size(L, 1) == n
 
-    nwood = 0; ζ = T(NaN)
+    witer = 0; wpass = 0; ζ = T(NaN)
     #
     # solve the KKT system
     #
@@ -254,7 +256,8 @@ function solvekkt!(
             ncg2, nir2, status = solvekkt!(divwrk, itrwrk, hist, L, δf, δg, δx, δy, δ,
                                     x2, y2, A, B, c, e; warm = true,
                                     ftol = ftol / 2abs(ζ), gtol = gtol / 2abs(ζ), stall, rfmax, cgmax)
-            nwood += nir2 + ncg2
+            witer += ncg2
+            wpass += nir2
             #
             # compute the capacitance
             #
@@ -288,5 +291,5 @@ function solvekkt!(
         end
     end
 
-    return niter, nwood, npass, status, ζ, δmin, δmax, κ
+    return niter, npass, witer, wpass, status, ζ, δmin, δmax, κ
 end

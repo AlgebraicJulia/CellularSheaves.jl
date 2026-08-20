@@ -48,7 +48,7 @@ function result(s::IPMSolver{T}, status::IPMStatus) where {T}
 
     for row in s.hist
         niter += 1
-        nsolve += row.piter + row.citer
+        nsolve += row.piter + row.ppass + row.citer + row.cpass
     end
 
     w = s.wrk; scl = s.scaling

@@ -56,7 +56,7 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
 
     for row in s.hist
         niter += 1
-        nsolve += row.piter + row.citer + row.witer
+        nsolve += row.piter + row.ppass + row.citer + row.cpass + row.witer + row.wpass
     end
     #
     # C5 (addendum): the answer at the returned point, in user frame. pres/dres are recomputed
@@ -214,7 +214,7 @@ function solvepredictor!(
     #   [  B           0              -g ] [ Δya ] = [ rp     ]
     #   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
-    piter, pncol, ppass, pstat, Δτa, dmin, dmax = solvekkt!(
+    piter, ppass, pwiter, pwpass, pstat, Δτa, dmin, dmax = solvekkt!(
         kkt, w.Δpa, w.Δya, Δp2, Δy2, H, B, f, g, w.f, w.rp, gap;
         gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
@@ -233,7 +233,7 @@ function solvepredictor!(
     #   Δκa = -κ (1 + 1/τ Δτa)
     #
     Δκa = -κ * (τ + Δτa) / τ
-    return piter, pncol, ppass, pstat, Δτa, Δκa, dmin, dmax
+    return piter, ppass, pwiter, pwpass, pstat, Δτa, Δκa, dmin, dmax
 end
 
 #
@@ -360,7 +360,7 @@ function solvecorrector!(
     #   [ B            0                -g ] [ Δy ] = [ rp                          ]
     #   [ fᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
-    citer, cncol, cpass, cstat, Δτ, _, _ = solvekkt!(
+    citer, cpass, cwiter, cwpass, cstat, Δτ, _, _ = solvekkt!(
         kkt, w.Δp, w.Δy, Δp2, Δy2, H, B, f, g, w.f, w.rp, fτ;
         warm=true, gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, rfmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
@@ -379,7 +379,7 @@ function solvecorrector!(
     #   Δκ ← (fκ - κ Δτ) / τ
     #
     Δκ = (fκ - κ * Δτ) / τ
-    return citer, cncol, cpass, cstat, Δτ, Δκ
+    return citer, cpass, cwiter, cwpass, cstat, Δτ, Δκ
 end
 
 ############################################################################################
@@ -600,19 +600,19 @@ function initkkt!(s::HSDSolver{T}) where {T}
     d  = s.wrk.aτ
     copyto!(d, s.f); axpby!(-2 / τ, Qp, one(T), d)
     φ  = dot(s.p, Qp) / τ^2 + s.κ[] / τ
-    flag, ρ, wbase = initkkt!(
+    flag, ρ, wbase_iter, wbase_pass = initkkt!(
         s.kkt, s.Δp2, s.Δy2, s.H, s.B, s.f, s.g, d, φ;
         δ=s.δ[], rgmin=s.ρ[],
     )
     s.ρ[] = max(s.ρ[], ρ)
-    return flag, ρ, wbase
+    return flag, ρ, wbase_iter, wbase_pass
 end
 
 function step!(s::HSDSolver{T}) where {T}
     status = CONTINUE
 
-    piter = citer = witer = 0   # total CG per role (base + refinement; woodbury = column base + tightening)
-    ppass = cpass = 0   # refinement passes per role
+    piter = citer = witer = 0   # CG iterations per role (predictor / corrector direction; woodbury column)
+    ppass = cpass = wpass = 0   # refinement passes per role
     pstat = cstat = KKT_SOLVED   # refinement exit status per role
 
     step = zero(T)
@@ -701,7 +701,7 @@ function step!(s::HSDSolver{T}) where {T}
             #   [ H  -Bᵀ ] [ Δp2 ]   [ f ]
             #   [ B   0  ] [ Δy2 ] = [ g ] ,   S = Δp2ᵀ W Δp2 + (Δp2 - p/τ)ᵀ Q (Δp2 - p/τ) + κ/τ
             #
-            initok, ρ, wbase = @timeit s.timers "initkkt" initkkt!(s)
+            initok, ρ, wbase_iter, wbase_pass = @timeit s.timers "initkkt" initkkt!(s)
             if !initok
                 if s.settings.verbose > 1
                     @warn "Failed to initialize KKT solver."
@@ -716,7 +716,7 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δya ] = [ rp     ]
                 #   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
                 #
-                piter, pncol, ppass, pstat, Δτa, Δκa, dmin, dmax = @timeit s.timers "predictor" solvepredictor!(s, gap; ptol, ytol, τtol)
+                piter, ppass, pwiter, pwpass, pstat, Δτa, Δκa, dmin, dmax = @timeit s.timers "predictor" solvepredictor!(s, gap; ptol, ytol, τtol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -730,17 +730,18 @@ function step!(s::HSDSolver{T}) where {T}
                 #   [  B           0              -g ] [ Δy ] = [ rp                          ]
                 #   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
                 #
-                citer, cncol, cpass, cstat, Δτ, Δκ = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
+                citer, cpass, cwiter, cwpass, cstat, Δτ, Δκ = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
                 #
                 # The Woodbury column (s.Δp2/s.Δy2) is threaded in/out of initkkt!/predictor/corrector, so
                 # the final column already lives in it — no copy-back. It seeds next iteration's column base
                 # (the KKT solver is memoryless; initkkt! reseeds/wipes from it).
                 #
-                # Woodbury role: wbase (1, the initkkt! column base) + wrefn (predictor + corrector column
-                # tightening) → witer. piter/citer report the DIRECTION solves only, deconfounded from it.
+                # Woodbury column work = seed (initkkt!) + predictor tightening + corrector tightening,
+                # split into CG iterations (witer) and refinement passes (wpass) like the direction roles.
+                # piter/citer/ppass/cpass report the DIRECTION solves only, deconfounded from the column.
                 #
-                wrefn = pncol + cncol
-                witer = wbase + wrefn
+                witer = wbase_iter + pwiter + cwiter
+                wpass = wbase_pass + pwpass + cwpass
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -797,7 +798,7 @@ function step!(s::HSDSolver{T}) where {T}
     end
 
     push!(s.hist, (; μ, step, pres, dres, pobj, dobj, δ=s.δ[], ρ, τ=s.τ[], κ=s.κ[],
-        piter, ppass, pstat, citer, cpass, cstat, witer,
+        piter, ppass, pstat, citer, cpass, cstat, witer, wpass,
         dmin, dmax))
 
     return status

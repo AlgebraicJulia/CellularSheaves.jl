@@ -1,7 +1,7 @@
 const HSDHistoryRow{T} = @NamedTuple{μ::T, step::T, pres::T, dres::T, pobj::T, dobj::T, δ::T, ρ::T, τ::T, κ::T,
     piter::Int, ppass::Int, pstat::KKTStatus,
     citer::Int, cpass::Int, cstat::KKTStatus,
-    witer::Int,
+    witer::Int, wpass::Int,
     dmin::T, dmax::T}
 
 struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
@@ -22,6 +22,7 @@ struct HSDHistory{T} <: AbstractVector{HSDHistoryRow{T}}
     cpass::Vector{Int}
     cstat::Vector{KKTStatus}
     witer::Vector{Int}
+    wpass::Vector{Int}
     dmin::Vector{T}
     dmax::Vector{T}
 end
@@ -30,7 +31,7 @@ function HSDHistory{T}() where {T}
     return HSDHistory{T}(T[], T[], T[], T[], T[], T[], T[], T[], T[], T[],
         Int[], Int[], KKTStatus[],
         Int[], Int[], KKTStatus[],
-        Int[],
+        Int[], Int[],
         T[], T[])
 end
 
@@ -47,10 +48,10 @@ function Base.getindex(hist::HSDHistory, i::Int)
     κ       = hist.κ[i]
     piter   = hist.piter[i]; ppass = hist.ppass[i]; pstat = hist.pstat[i]
     citer   = hist.citer[i]; cpass = hist.cpass[i]; cstat = hist.cstat[i]
-    witer   = hist.witer[i]
+    witer   = hist.witer[i]; wpass = hist.wpass[i]
     dmin   = hist.dmin[i]; dmax = hist.dmax[i]
     return (; μ, step, pres, dres, pobj, dobj, δ, ρ, τ, κ,
-        piter, ppass, pstat, citer, cpass, cstat, witer,
+        piter, ppass, pstat, citer, cpass, cstat, witer, wpass,
         dmin, dmax)
 end
 
@@ -67,7 +68,7 @@ function Base.push!(hist::HSDHistory, row::NamedTuple)
     push!(hist.κ,       row.κ)
     push!(hist.piter,   row.piter); push!(hist.ppass, row.ppass); push!(hist.pstat, row.pstat)
     push!(hist.citer,   row.citer); push!(hist.cpass, row.cpass); push!(hist.cstat, row.cstat)
-    push!(hist.witer,   row.witer)
+    push!(hist.witer,   row.witer); push!(hist.wpass, row.wpass)
     push!(hist.dmin, row.dmin); push!(hist.dmax, row.dmax)
     return hist
 end
@@ -85,7 +86,7 @@ function Base.empty!(hist::HSDHistory)
     empty!(hist.κ)
     empty!(hist.piter); empty!(hist.ppass); empty!(hist.pstat)
     empty!(hist.citer); empty!(hist.cpass); empty!(hist.cstat)
-    empty!(hist.witer)
+    empty!(hist.witer); empty!(hist.wpass)
     empty!(hist.dmin); empty!(hist.dmax)
     return hist
 end
@@ -114,8 +115,9 @@ function showrow(io::IO, i::Integer, row::HSDHistoryRow; indent::Integer=0)
     pad = " "^indent
     println(io, pad, "├──────┼──────────┼──────────┼───────────┼───────────┼────────┼───────┼──────────┼──────────┼──────────┼──────────┼──────────┤")
     print(io, pad)
-    # solve = total solve (CG) iterations this step (base + refinement, all three solves); δ = penalty, ρ = regularization.
-    solve = row.piter + row.citer + row.witer
+    # solve = total triangular solve-pairs this step (predictor + corrector directions + woodbury column,
+    # each counting CG iterations and refinement passes); δ = penalty, ρ = regularization.
+    solve = row.piter + row.ppass + row.citer + row.cpass + row.witer + row.wpass
     @printf(io, "│ %4d │ %8.2e │ %8.2e │ %9.2e │ %9.2e │ %6.4f │ %5d │ %8.2e │ %8.2e │ %8.2e │ %8.2e │ %8.2e │\n",
             i, row.pres, row.dres, row.pobj, row.dobj, row.step, solve, row.δ, row.ρ, row.μ, row.τ, row.κ)
     return

@@ -99,8 +99,9 @@ function showrow(io::IO, i::Integer, row::IPMHistoryRow; indent::Integer=0)
     pad = " "^indent
     println(io, pad, "├──────┼──────────┼──────────┼───────────┼───────────┼────────┼───────┼──────────┼──────────┼──────────┤")
     print(io, pad)
-    # solve = total solve (CG) iterations this step (base + refinement, both solves); δ = penalty, ρ = regularization.
-    solve = row.piter + row.citer
+    # solve = total triangular solve-pairs this step (predictor + corrector, each counting CG
+    # iterations and refinement passes); δ = penalty, ρ = regularization.
+    solve = row.piter + row.ppass + row.citer + row.cpass
     @printf(io, "│ %4d │ %8.2e │ %8.2e │ %9.2e │ %9.2e │ %6.4f │ %5d │ %8.2e │ %8.2e │ %8.2e │\n",
             i, row.pres, row.dres, row.pobj, row.dobj, row.step, solve, row.δ, row.ρ, row.μ)
     return
