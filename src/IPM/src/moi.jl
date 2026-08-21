@@ -16,35 +16,18 @@
 #
 import MathOptInterface as MOI
 
+############################################################################################
+# constants
+############################################################################################
+
 # cones we accept a VectorOfVariables in — one cone block each
 const SupportedCone = Union{
     MOI.Nonnegatives,
     MOI.SecondOrderCone,
-    MOI.PositiveSemidefiniteConeTriangle,
     MOI.ExponentialCone,
     MOI.PowerCone,
+    MOI.Scaled{MOI.PositiveSemidefiniteConeTriangle},
 }
-
-# IPM cone for a MOI set (dimension comes from the block width)
-function ipmcone(::MOI.Nonnegatives)
-    return PositiveCone()
-end
-
-function ipmcone(::MOI.SecondOrderCone)
-    return SecondOrderCone()
-end
-
-function ipmcone(::MOI.PositiveSemidefiniteConeTriangle)
-    return SemidefiniteCone()
-end
-
-function ipmcone(::MOI.ExponentialCone)
-    return ExponentialCone()
-end
-
-function ipmcone(set::MOI.PowerCone)
-    return PowerCone(set.exponent)
-end
 
 const _TERM = Dict(
     OPTIMAL                 => MOI.OPTIMAL,
@@ -60,25 +43,122 @@ const _TERM = Dict(
     NEAR_ILL_POSED          => MOI.ALMOST_INFEASIBLE,
 )
 
+############################################################################################
+# Optimizer
+############################################################################################
+
 mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     settings::IPMSettings{T}
-    silent::Bool
     # the assembled primal-form problem (built by copy_to, solved by optimize!)
-    problem::Union{Nothing, IPMProblem}
+    problem::Union{Nothing, IPMProblem{T}}
     result::Union{Nothing, IPMResult{T}}
-    vmap::Dict{MOI.VariableIndex, Int}  # MOI variable → IPM column
+    jmap::Dict{MOI.VariableIndex, Int}                  # MOI variable → IPM column j
+    # CSC-style cone layout: vmap gives each cone's slice (colptr), vidx the flat
+    # IPM columns in MOI coordinate order (row indices) read back through it
+    vmap::Dict{MOI.ConstraintIndex, UnitRange{Int}}     # cone (block-column v) → its slice in vidx
+    vidx::Vector{Int}
+    umap::Dict{MOI.ConstraintIndex, UnitRange{Int}}     # Zeros (block-row u) → IPM (B, y) rows (irng)
     sense::MOI.OptimizationSense
     objconst::T
     solvetime::Float64
 
     function Optimizer{T}() where {T}
-        return new{T}(IPMSettings{T}(), false, nothing, nothing, Dict{MOI.VariableIndex, Int}(), MOI.MIN_SENSE, zero(T), 0.0)
+        return new{T}(
+            IPMSettings{T}(), nothing, nothing,
+            Dict{MOI.VariableIndex, Int}(),
+            Dict{MOI.ConstraintIndex, UnitRange{Int}}(),
+            Int[],
+            Dict{MOI.ConstraintIndex, UnitRange{Int}}(),
+            MOI.MIN_SENSE, zero(T), 0.0,
+        )
     end
 end
 
 function Optimizer()
     return Optimizer{Float64}()
 end
+
+# +1 for MIN (IPM's native sense), −1 for MAX
+function _sensesign(::Type{T}, sense::MOI.OptimizationSense) where {T}
+    if sense == MOI.MAX_SENSE
+        return -one(T)
+    else
+        return one(T)
+    end
+end
+
+function _sensesign(opt::Optimizer{T}) where {T}
+    return _sensesign(T, opt.sense)
+end
+
+############################################################################################
+# ipmcone
+############################################################################################
+
+# IPM cone for a MOI set (dimension comes from the block width)
+function ipmcone(::MOI.Nonnegatives)
+    return PositiveCone()
+end
+
+# MOI's SecondOrderCone is (t, x) with t ≥ ‖x‖; the IPM cone's coordinate 1 is
+# the same scalar bound, so the block maps across with no reordering
+function ipmcone(::MOI.SecondOrderCone)
+    return SecondOrderCone()
+end
+
+# MOI's ExponentialCone (x,y,z) is y·exp(x/y) ≤ z; the IPM cone (a,b,c) is
+# b·log(a/b) ≥ c, i.e. (a,b,c) = (z,y,x) — the reversed triple (see coneperm)
+function ipmcone(::MOI.ExponentialCone)
+    return ExponentialCone()
+end
+
+# MOI's PowerCone(α) (x,y,z): x^α·y^(1-α) ≥ |z| matches the IPM cone directly
+function ipmcone(set::MOI.PowerCone)
+    return PowerCone(set.exponent)
+end
+
+# MOI's Scaled PSD-triangle already carries the √2 off-diagonal scaling the IPM
+# svec uses; only the ordering differs (upper vs lower col-major, see coneperm)
+function ipmcone(::MOI.Scaled{MOI.PositiveSemidefiniteConeTriangle})
+    return SemidefiniteCone()
+end
+
+# coneperm(set) gives the order in which MOI coordinates are appended to build
+# the IPM cone's coordinate layout: identity where the conventions agree, a
+# reversal for the exponential cone.
+function coneperm(set::MOI.Nonnegatives)
+    return 1:MOI.dimension(set)
+end
+
+function coneperm(set::MOI.SecondOrderCone)
+    return 1:MOI.dimension(set)
+end
+
+function coneperm(::MOI.ExponentialCone)
+    return (3, 2, 1)
+end
+
+function coneperm(set::MOI.PowerCone)
+    return 1:MOI.dimension(set)
+end
+
+# MOI packs the PSD triangle upper-column-major (entry (i,j), i≤j, at index
+# j(j-1)/2 + i); the IPM svec packs lower-column-major (column j: (j,j) then
+# (i,j) for i>j). Emit the MOI index of each IPM slot's entry.
+function coneperm(set::MOI.Scaled{MOI.PositiveSemidefiniteConeTriangle})
+    d = MOI.side_dimension(set)
+    order = Int[]
+    for j in 1:d
+        for i in j:d
+            push!(order, div((i - 1) * i, 2) + j)
+        end
+    end
+    return order
+end
+
+############################################################################################
+# solver attributes
+############################################################################################
 
 function MOI.get(::Optimizer, ::MOI.SolverName)
     return "CellularSheaves IPM"
@@ -89,13 +169,16 @@ function MOI.supports_incremental_interface(::Optimizer)
 end
 
 function MOI.is_empty(opt::Optimizer)
-    return isnothing(opt.result) && isempty(opt.vmap)
+    return isnothing(opt.result) && isempty(opt.jmap)
 end
 
 function MOI.empty!(opt::Optimizer{T}) where {T}
     opt.problem = nothing
     opt.result = nothing
-    opt.vmap = Dict{MOI.VariableIndex, Int}()
+    opt.jmap = Dict{MOI.VariableIndex, Int}()
+    opt.vmap = Dict{MOI.ConstraintIndex, UnitRange{Int}}()
+    opt.vidx = Int[]
+    opt.umap = Dict{MOI.ConstraintIndex, UnitRange{Int}}()
     opt.sense = MOI.MIN_SENSE
     opt.objconst = zero(T)
     opt.solvetime = 0.0
@@ -106,12 +189,14 @@ function MOI.supports(::Optimizer, ::MOI.Silent)
     return true
 end
 
+# Silent is just a view onto verbose: silent ⇔ verbose == 0; un-silencing
+# restores the iteration log (verbose = 1)
 function MOI.get(opt::Optimizer, ::MOI.Silent)
-    return opt.silent
+    return opt.settings.verbose == 0
 end
 
 function MOI.set(opt::Optimizer, ::MOI.Silent, v::Bool)
-    opt.silent = v
+    opt.settings = IPMSettings(opt.settings; verbose = v ? 0 : 1)
     return
 end
 
@@ -127,6 +212,10 @@ function MOI.set(opt::Optimizer, a::MOI.RawOptimizerAttribute, v)
     opt.settings = IPMSettings(opt.settings; Symbol(a.name) => v)
     return
 end
+
+############################################################################################
+# supported objective / constraints
+############################################################################################
 
 function MOI.supports(::Optimizer, ::MOI.ObjectiveSense)
     return true
@@ -144,121 +233,167 @@ function MOI.supports_constraint(::Optimizer, ::Type{MOI.VectorOfVariables}, ::T
     return true
 end
 
+############################################################################################
+# copy_to
+############################################################################################
+
 #
 # lay out the columns: each VoV-in-cone block contiguous, then the free
-# variables as a trailing CofreeCone block. Returns (vmap, K, s), where
-# vmap maps each MOI variable to its IPM column. (vinv, the column → variable
-# ordering, is the build-time intermediate that fixes the layout.)
+# variables as a trailing CofreeCone block. Returns (jmap, K, s, vmap, vidx,
+# jdup, ncol), where jmap maps each MOI variable to its (first) IPM column,
+# (vmap, vidx) are the CSC-style cone layout — vmap gives each cone's slice and
+# vidx the flat IPM columns in MOI coordinate order — and ncol is the total
+# column count.
+#
+# A variable already claimed by one cone that reappears in a second cone can't
+# share a column, so the second block gets a fresh synthesized column z and we
+# record jdup[z] = x: _equalities pins z = x with an internal row. This is the
+# slack reformulation MOI's VectorSlackBridge applies to affine-in-cone, done
+# here for the variable-in-two-cones case.
 #
 function _layout(src::MOI.ModelLike)
     vars = MOI.get(src, MOI.ListOfVariableIndices())
 
     K = AbstractCone[]
     s = Int[]
-    vinv = MOI.VariableIndex[]
-    incone = Set{MOI.VariableIndex}()
+    jmap = Dict{MOI.VariableIndex, Int}()
+    vmap = Dict{MOI.ConstraintIndex, UnitRange{Int}}()
+    vidx = Int[]
+    jdup = Dict{Int, Int}()   # synthesized column z → the claimed column x it copies
+    j = 0
 
     for (F, S) in MOI.get(src, MOI.ListOfConstraintTypesPresent())
-        if !(F === MOI.VectorOfVariables && S <: SupportedCone)
-            continue
-        end
+        if F === MOI.VectorOfVariables && S <: SupportedCone
+            for vx in MOI.get(src, MOI.ListOfConstraintIndices{F, S}())
+                fun = MOI.get(src, MOI.ConstraintFunction(), vx)
+                set = MOI.get(src, MOI.ConstraintSet(), vx)
 
-        for ci in MOI.get(src, MOI.ListOfConstraintIndices{F, S}())
-            fun = MOI.get(src, MOI.ConstraintFunction(), ci)
-            set = MOI.get(src, MOI.ConstraintSet(), ci)
-            for v in fun.variables
-                v in incone && error("variable in more than one cone block (unsupported)")
-                push!(incone, v)
+                jstrt = j
+                d = length(fun.variables)
+                resize!(vidx, jstrt + d)
+
+                # lay members out in the IPM cone's coordinate order; write each
+                # MOI coordinate k's column into its vidx slot for ordered readback
+                for k in coneperm(set)
+                    j += 1
+                    jx = fun.variables[k]
+
+                    if haskey(jmap, jx)
+                        jdup[j] = jmap[jx]
+                    else
+                        jmap[jx] = j
+                    end
+
+                    vidx[jstrt + k] = j
+                end
+
+                push!(K, ipmcone(set))
+                push!(s, d)
+                vmap[vx] = jstrt + 1:j
             end
-            push!(K, ipmcone(set))
-            push!(s, length(fun.variables))
-            append!(vinv, fun.variables)
         end
     end
 
-    free = [v for v in vars if v ∉ incone]
-    if !isempty(free)
-        push!(K, CofreeCone())
-        push!(s, length(free))
-        append!(vinv, free)
+    jstrt = j
+
+    for jx in vars
+        if !haskey(jmap, jx)
+            j += 1
+            jmap[jx] = j
+        end
     end
 
-    vmap = Dict(v => c for (c, v) in enumerate(vinv))
-    return vmap, K, s
+    if jstrt < j
+        push!(K, CofreeCone())
+        push!(s, j - jstrt)
+    end
+
+    return jmap, K, s, vmap, vidx, jdup, j
 end
 
 #
-# equalities Bp = g from VectorAffineFunction-in-Zeros. Returns (B, g).
+# equalities Bp = g from VectorAffineFunction-in-Zeros, plus the internal z = x
+# rows pinning each synthesized column to the variable it copies. Returns
+# (B, g, umap), where umap maps each Zeros constraint (block-row u) to its rows
+# in (B, y); the coupling rows carry no umap entry (they aren't MOI constraints).
 #
-function _equalities(::Type{T}, src::MOI.ModelLike, vmap) where {T}
-    n = length(vmap)
-
-    Bi = Int[]
-    Bj = Int[]
-    Bv = T[]
+function _equalities(::Type{T}, src::MOI.ModelLike, jmap, ncol, jdup) where {T}
+    I = Int[]
+    J = Int[]
+    V = T[]
     g = T[]
-    row = 0
-    for ci in MOI.get(src, MOI.ListOfConstraintIndices{MOI.VectorAffineFunction{T}, MOI.Zeros}())
-        fun = MOI.get(src, MOI.ConstraintFunction(), ci)
+    umap = Dict{MOI.ConstraintIndex, UnitRange{Int}}()
+    i = 0
+
+    for ux in MOI.get(src, MOI.ListOfConstraintIndices{MOI.VectorAffineFunction{T}, MOI.Zeros}())
+        fun = MOI.get(src, MOI.ConstraintFunction(), ux)
         d = MOI.output_dimension(fun)
+
         for t in fun.terms
-            push!(Bi, row + t.output_index)
-            push!(Bj, vmap[t.scalar_term.variable])
-            push!(Bv, t.scalar_term.coefficient)
+            push!(I, i + t.output_index)
+            push!(J, jmap[t.scalar_term.variable])
+            push!(V, t.scalar_term.coefficient)
         end
+
         for k in 1:d                 # Ax + b = 0  ⇒  Ax = -b
             push!(g, -fun.constants[k])
         end
-        row += d
+
+        umap[ux] = i + 1:i + d
+        i += d
     end
 
-    return sparse(Bi, Bj, Bv, row, n), g
+    for (j, k) in jdup               # column j copies column k:  j − k = 0
+        i += 1
+        push!(I, i); push!(J, j); push!(V,  one(T))
+        push!(I, i); push!(J, k); push!(V, -one(T))
+        push!(g, zero(T))
+    end
+
+    return sparse(I, J, V, i, ncol), g, umap
 end
 
 #
 # objective ½pᵀQp − fᵀp. Returns (Q, f, sense, objconst).
 #
-function _objective(::Type{T}, src::MOI.ModelLike, vmap) where {T}
-    n = length(vmap)
-
+function _objective(::Type{T}, src::MOI.ModelLike, jmap, ncol) where {T}
     sense = MOI.get(src, MOI.ObjectiveSense())
     F = MOI.get(src, MOI.ObjectiveFunctionType())
     obj = MOI.get(src, MOI.ObjectiveFunction{F}())
 
-    Qi = Int[]
-    Qj = Int[]
-    Qv = T[]
-    f = zeros(T, n)
+    I = Int[]
+    J = Int[]
+    V = T[]
+    f = zeros(T, ncol)
 
-    if sense == MOI.MAX_SENSE   # IPM minimizes
-        σ = -one(T)
-    else
-        σ = one(T)
-    end
+    σ = _sensesign(T, sense)   # IPM minimizes
 
     if obj isa MOI.ScalarQuadraticFunction
-        for qt in obj.quadratic_terms
-            a = vmap[qt.variable_1]
-            b = vmap[qt.variable_2]
-            push!(Qi, a)
-            push!(Qj, b)
-            push!(Qv, σ * qt.coefficient)
+        for term in obj.quadratic_terms
+            a = jmap[term.variable_1]
+            b = jmap[term.variable_2]
+
+            push!(I, a)
+            push!(J, b)
+            push!(V, σ * term.coefficient)
+
             if a != b
-                push!(Qi, b)
-                push!(Qj, a)
-                push!(Qv, σ * qt.coefficient)
+                push!(I, b)
+                push!(J, a)
+                push!(V, σ * term.coefficient)
             end
         end
+
         aff = obj.affine_terms
     else
         aff = obj.terms
     end
 
-    for at in aff
-        f[vmap[at.variable]] -= σ * at.coefficient   # min σ·(aᵀp) = −fᵀp
+    for term in aff
+        f[jmap[term.variable]] -= σ * term.coefficient   # min σ·(aᵀp) = −fᵀp
     end
 
-    return sparse(Qi, Qj, Qv, n, n), f, sense, MOI.constant(obj)
+    return sparse(I, J, V, ncol, ncol), f, sense, MOI.constant(obj)
 end
 
 #
@@ -267,32 +402,35 @@ end
 function MOI.copy_to(dest::Optimizer{T}, src::MOI.ModelLike) where {T}
     MOI.empty!(dest)
 
-    vmap, K, s = _layout(src)
-    B, g = _equalities(T, src, vmap)
-    Q, f, sense, objconst = _objective(T, src, vmap)
+    jmap, K, s, vmap, vidx, jdup, ncol = _layout(src)
+    B, g, umap = _equalities(T, src, jmap, ncol, jdup)
+    Q, f, sense, objconst = _objective(T, src, jmap, ncol)
 
+    dest.jmap = jmap
     dest.vmap = vmap
+    dest.vidx = vidx
+    dest.umap = umap
     dest.sense = sense
     dest.objconst = objconst
     dest.problem = IPMProblem(Q, B, f, g, K, s)
     return MOI.Utilities.identity_index_map(src)
 end
 
-#
-# optimize!: solve the assembled problem
-#
-function MOI.optimize!(opt::Optimizer)
-    settings = opt.silent ? IPMSettings(opt.settings; verbose = 0) : opt.settings
+############################################################################################
+# optimize!
+############################################################################################
 
+function MOI.optimize!(opt::Optimizer)
     t0 = time()
-    opt.result = solve(opt.problem, settings)
+    opt.result = solve(opt.problem, opt.settings)
     opt.solvetime = time() - t0
     return
 end
 
-#
+############################################################################################
 # results
-#
+############################################################################################
+
 function MOI.get(opt::Optimizer, ::MOI.RawStatusString)
     return string(opt.result.status)
 end
@@ -310,27 +448,58 @@ function MOI.get(opt::Optimizer, ::MOI.TerminationStatus)
     return get(_TERM, opt.result.status, MOI.OTHER_ERROR)
 end
 
-function _solved_ok(opt::Optimizer)
-    return !isnothing(opt.result) && opt.result.status in (OPTIMAL, NEAR_OPTIMAL)
-end
-
 function MOI.get(opt::Optimizer, attr::MOI.PrimalStatus)
-    (attr.result_index == 1 && _solved_ok(opt)) || return MOI.NO_SOLUTION
+    ok = !isnothing(opt.result) && opt.result.status in (OPTIMAL, NEAR_OPTIMAL)
+    (attr.result_index == 1 && ok) || return MOI.NO_SOLUTION
     return MOI.FEASIBLE_POINT
 end
 
 function MOI.get(opt::Optimizer, attr::MOI.DualStatus)
-    (attr.result_index == 1 && _solved_ok(opt)) || return MOI.NO_SOLUTION
+    ok = !isnothing(opt.result) && opt.result.status in (OPTIMAL, NEAR_OPTIMAL)
+    (attr.result_index == 1 && ok) || return MOI.NO_SOLUTION
     return MOI.FEASIBLE_POINT
 end
 
-function MOI.get(opt::Optimizer, attr::MOI.VariablePrimal, vi::MOI.VariableIndex)
+function MOI.get(opt::Optimizer, attr::MOI.VariablePrimal, jx::MOI.VariableIndex)
     MOI.check_result_index_bounds(opt, attr)
-    return opt.result.p[opt.vmap[vi]]
+    return opt.result.p[opt.jmap[jx]]
+end
+
+# ConstraintPrimal: VoV-in-cone → the variable values p; Zeros → Bp − g (≈ 0)
+function MOI.get(opt::Optimizer, attr::MOI.ConstraintPrimal, vx::MOI.ConstraintIndex{MOI.VectorOfVariables, <:SupportedCone})
+    MOI.check_result_index_bounds(opt, attr)
+    return opt.result.p[opt.vidx[opt.vmap[vx]]]
+end
+
+function MOI.get(opt::Optimizer{T}, attr::MOI.ConstraintPrimal, ux::MOI.ConstraintIndex{MOI.VectorAffineFunction{T}, MOI.Zeros}) where {T}
+    MOI.check_result_index_bounds(opt, attr)
+    prob = opt.problem
+    # prob.B, prob.g are stored permuted (C cols, R rows); result.p is original.
+    # match coordinates: original cols → internal, apply B − g, internal → original
+    r = prob.R \ (prob.B * (prob.C * opt.result.p) - prob.g)
+    return r[opt.umap[ux]]
+end
+
+# ConstraintDual: VoV-in-cone → the conic dual d ∈ K*; Zeros → the equality
+# multiplier y. A ConstraintDual lives in the dual cone and its sign is pinned
+# by that geometry, so it does not flip with objective sense (unlike the
+# recovered ObjectiveValue below).
+function MOI.get(opt::Optimizer, attr::MOI.ConstraintDual, vx::MOI.ConstraintIndex{MOI.VectorOfVariables, <:SupportedCone})
+    MOI.check_result_index_bounds(opt, attr)
+    return opt.result.d[opt.vidx[opt.vmap[vx]]]
+end
+
+function MOI.get(opt::Optimizer{T}, attr::MOI.ConstraintDual, ux::MOI.ConstraintIndex{MOI.VectorAffineFunction{T}, MOI.Zeros}) where {T}
+    MOI.check_result_index_bounds(opt, attr)
+    return opt.result.y[opt.umap[ux]]
 end
 
 function MOI.get(opt::Optimizer{T}, attr::MOI.ObjectiveValue) where {T}
     MOI.check_result_index_bounds(opt, attr)
-    σ = opt.sense == MOI.MAX_SENSE ? -one(T) : one(T)
-    return σ * opt.result.pobj + opt.objconst
+    return _sensesign(opt) * opt.result.pobj + opt.objconst
+end
+
+function MOI.get(opt::Optimizer{T}, attr::MOI.DualObjectiveValue) where {T}
+    MOI.check_result_index_bounds(opt, attr)
+    return _sensesign(opt) * opt.result.dobj + opt.objconst
 end
