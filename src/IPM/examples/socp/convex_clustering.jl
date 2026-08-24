@@ -177,8 +177,8 @@ end
 
 function benchmark(; k = 10, phi = 0.5, gamma = 1.0, tol = 1e-6,
                      clarabel = false, mosek = false)
-    @printf("%-9s %3s %6s %9s %9s %9s %9s %8s\n",
-            "dataset", "d", "n", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+    @printf("%-9s %3s %6s %9s %9s %9s %9s %8s %8s\n",
+            "dataset", "d", "n", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for (name, A) in load_datasets()
         d, n = size(A)
@@ -200,10 +200,11 @@ function benchmark(; k = 10, phi = 0.5, gamma = 1.0, tol = 1e-6,
             mk = (t = NaN, status = "—", obj = NaN)
         end
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-        @printf("%-9s %3d %6d %s %s %s %s %8s\n",
-                name, d, n, fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+        @printf("%-9s %3d %6d %s %s %s %s %8s %8s\n",
+                name, d, n, fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
     end
 end
 
@@ -214,10 +215,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-14 (--clarabel --mosek), tol = 1e-6, γ = 1, k = 10.
+# Sample run: 2026-08-24 (--clarabel --mosek), tol = 1e-6, γ = 1, k = 10.
 #
-#   dataset     d      n       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   Iris        4    150   20.2ms   23.8ms   27.5ms   22.1ms     1.36
-#   WINE       13    178  144.9ms  179.5ms  700.9ms  150.9ms     4.84
-#   MNIST-1k   10   1000 1522.7ms 1803.7ms 24618.5ms 1824.5ms    16.17
+#   dataset     d      n       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   Iris        4    150   19.3ms   22.8ms   27.5ms   21.8ms     1.42     1.13
+#   WINE       13    178  140.9ms  177.5ms  704.2ms  144.4ms     5.00     1.02
+#   MNIST-1k   10   1000 1540.4ms 1732.2ms 24435.3ms 2478.5ms    15.86     1.61
 # =============================================================================

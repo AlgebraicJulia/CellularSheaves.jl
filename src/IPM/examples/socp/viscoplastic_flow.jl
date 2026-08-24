@@ -426,8 +426,8 @@ const PROBLEMS = [
 ]
 
 function benchmark(; Bi = 500.0, tol = 1e-6, clarabel = false, mosek = false)
-    @printf("%-11s %6s %7s %7s %9s %9s %9s %9s %8s\n",
-            "problem", "NE", "n", "m", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+    @printf("%-11s %6s %7s %7s %9s %9s %9s %9s %8s %8s\n",
+            "problem", "NE", "n", "m", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for (name, N) in PROBLEMS
         prob = build_bingham(N; Bi)
@@ -447,11 +447,12 @@ function benchmark(; Bi = 500.0, tol = 1e-6, clarabel = false, mosek = false)
             mk = (t = NaN, status = "—", obj = NaN)
         end
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-        @printf("%-11s %6d %7d %7d %s %s %s %s %8s\n",
+        @printf("%-11s %6d %7d %7d %s %s %s %s %8s %8s\n",
                 name, 2N^2, size(prob.B, 2), size(prob.B, 1),
-                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
     end
 end
 
@@ -482,10 +483,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-14 (Apple M-series, --clarabel --mosek), tol = 1e-6, Bi = 500.
+# Sample run: 2026-08-24 (Apple M-series, --clarabel --mosek), tol = 1e-6, Bi = 500.
 #
-#   problem      NE       n       m       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   Cavity-11   242    3060    2178   22.5ms   25.8ms   22.5ms   39.9ms     1.00
-#   Cavity-32  2048   26370   18432  276.2ms  315.4ms  335.3ms  445.6ms     1.21
-#   Cavity-54  5832   75386   52488 1095.2ms 1299.0ms 2187.9ms 2084.7ms     2.00
+#   problem         NE       n       m       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   Cavity-11      242    3060    2178   21.6ms   25.1ms   22.7ms   39.9ms     1.05     1.85
+#   Cavity-32     2048   26370   18432  265.3ms  310.5ms  335.9ms  445.6ms     1.27     1.68
+#   Cavity-54     5832   75386   52488 1049.3ms 1288.2ms 2215.0ms 2085.2ms     2.11     1.99
 # =============================================================================

@@ -338,8 +338,8 @@ end
 
 function benchmark(; ps = (3.0, 10.0), nlab = 5, tol = 1.0e-6,
                      clarabel = false, mosek = false)
-    @printf("%-12s %6s %7s %4s %9s %9s %9s %9s %8s\n",
-            "dataset", "n", "|E|", "p", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+    @printf("%-12s %6s %7s %4s %9s %9s %9s %9s %8s %8s\n",
+            "dataset", "n", "|E|", "p", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for (name, n, E, w, y) in load_instances()
         labels = pick_labels(y, nlab)
@@ -362,10 +362,11 @@ function benchmark(; ps = (3.0, 10.0), nlab = 5, tol = 1.0e-6,
                 mk = (t = NaN, status = "—", obj = NaN)
             end
 
-            ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+            cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+            mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-            @printf("%-12s %6d %7d %4.0f %s %s %s %s %8s\n",
-                    name, n, length(E), p, fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+            @printf("%-12s %6d %7d %4.0f %s %s %s %s %8s %8s\n",
+                    name, n, length(E), p, fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
         end
     end
 end
@@ -408,13 +409,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-18 (-t 8, --clarabel --mosek), tol = 1e-6. Mosek via Dualization.
+# Sample run: 2026-08-24 (-t 8, --clarabel --mosek), tol = 1e-6. Mosek via Dualization.
+# * = non-optimal solve (Clarabel SLOW_PROGRESS on Moons-2k).
 #
-#   dataset          n     |E|    p       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   Moons-2k      2000   12138    3   226.2ms   293.0ms  487.4ms†   466.1ms     2.16
-#   Moons-2k      2000   12138   10   222.9ms   301.4ms  803.1ms†   433.4ms     3.60
-#   MNIST38-2k    2000   13802    3   366.9ms   435.7ms 2283.8ms    568.8ms     6.22
-#   MNIST38-2k    2000   13802   10   721.2ms   432.5ms 2312.9ms    518.8ms     3.21
-#
-#   † Clarabel SLOW_PROGRESS
+#   dataset           n     |E|    p       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   Moons-2k       2000   12138    3  197.2ms  272.5ms 485.6ms*  467.9ms     2.46     2.37
+#   Moons-2k       2000   12138   10  195.3ms  281.3ms 809.7ms*  434.9ms     4.15     2.23
+#   MNIST38-2k     2000   13802    3  341.7ms  415.2ms 2272.6ms  570.5ms     6.65     1.67
+#   MNIST38-2k     2000   13802   10  667.8ms  413.2ms 2288.7ms  526.1ms     3.43     0.79
 # =============================================================================

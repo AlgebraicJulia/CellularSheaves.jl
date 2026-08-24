@@ -344,8 +344,8 @@ const CASES = [
 ]
 
 function benchmark(; tol = 1.0e-8, clarabel = false, mosek = false, runhsd = true, cases = CASES)
-    @printf("%-11s %6s %6s %6s %9s %9s %9s %9s\n",
-            "problem", "bodies", "cts", "stalks", "IPM", "HSD", "Clarabel", "Mosek")
+    @printf("%-11s %6s %6s %6s %9s %9s %9s %9s %9s %9s\n",
+            "problem", "bodies", "cts", "stalks", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for (name, rel) in cases
         path = joinpath(FCLIB_DIR, rel)
@@ -380,10 +380,13 @@ function benchmark(; tol = 1.0e-8, clarabel = false, mosek = false, runhsd = tru
             (t = NaN, status = "-", obj = NaN)
         end
 
-        @printf("%-11s %6d %6d %6d %s %s %s %s\n",
+        cratio = (isfinite(cla.t) && isfinite(ipm.t)) ? @sprintf("%.2f", cla.t / ipm.t) : "—"
+        mratio = (isfinite(mos.t) && isfinite(ipm.t)) ? @sprintf("%.2f", mos.t / ipm.t) : "—"
+
+        @printf("%-11s %6d %6d %6d %s %s %s %s %9s %9s\n",
                 name, length(prob.K) - length(mu), length(mu), length(prob.K),
                 fmt_time(ipm; width = 9), fmt_time(hsd; width = 9),
-                fmt_time(cla; width = 9), fmt_time(mos; width = 9))
+                fmt_time(cla; width = 9), fmt_time(mos; width = 9), cratio, mratio)
     end
 
     return
@@ -395,11 +398,11 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-15 (--clarabel --mosek --no-hsd), tol = 1e-8.
+# Sample run: 2026-08-24 (--clarabel --mosek --no-hsd), tol = 1e-8.
 # IPM / Clarabel solve the velocity form (1); Mosek the reduced (Gram) form.
 #
-#   problem       bodies    cts stalks       IPM   HSD  Clarabel     Mosek
-#   BoxStacks-552    450    552   1002    26.1ms     —    28.1ms    17.6ms
-#   Chute-1885      6144   1885   8029   107.2ms     —   159.4ms   112.5ms
-#   Chute-3248      8448   3248  11696   198.8ms     —   400.6ms   235.7ms
+#   problem     bodies    cts stalks       IPM       HSD  Clarabel     Mosek   Cla/IPM   Mos/IPM
+#   BoxStacks-552    450    552   1002    24.9ms —            27.7ms    16.4ms      1.11      0.66
+#   Chute-1885    6144   1885   8029   103.8ms —           159.1ms   105.3ms      1.53      1.01
+#   Chute-3248    8448   3248  11696   192.0ms —           393.9ms   218.4ms      2.05      1.14
 # =============================================================================

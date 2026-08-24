@@ -177,8 +177,8 @@ const PROBLEMS = [
 ]
 
 function benchmark(; tol = 1e-6, clarabel = false, mosek = false)
-    @printf("%-11s %6s %6s %9s %9s %9s %9s %8s\n",
-            "problem", "n", "m", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+    @printf("%-11s %6s %6s %9s %9s %9s %9s %8s %8s\n",
+            "problem", "n", "m", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for (name, make) in PROBLEMS
         n, E, noise = make()
@@ -201,10 +201,11 @@ function benchmark(; tol = 1e-6, clarabel = false, mosek = false)
             mk = (t = NaN, status = "—", obj = NaN)
         end
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-        @printf("%-11s %6d %6d %s %s %s %s %8s\n",
-                name, n, length(E), fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+        @printf("%-11s %6d %6d %s %s %s %s %8s %8s\n",
+                name, n, length(E), fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
     end
 end
 
@@ -215,10 +216,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-15 (--clarabel --mosek), tol = 1e-6.
+# Sample run: 2026-08-24 (--clarabel --mosek), tol = 1e-6.
 #
-#   problem          n      m       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   RandReg-1     1000   3000   37.8ms   73.5ms  135.6ms    70.0ms     3.59
-#   RandReg-10    1000   3000   42.4ms   63.9ms  136.3ms    75.3ms     3.21
-#   RandReg-1-lg  2500   7500  229.1ms  442.5ms 1925.6ms   211.0ms     8.40
+#   problem          n      m       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   RandReg-1     1000   3000   34.8ms   64.7ms  135.6ms   69.2ms*     3.90     1.99
+#   RandReg-10    1000   3000   38.1ms   55.4ms  135.8ms   74.7ms*     3.56     1.96
+#   RandReg-1-lg  2500   7500  216.4ms  427.0ms 1904.6ms  205.1ms*     8.80     0.95
 # =============================================================================

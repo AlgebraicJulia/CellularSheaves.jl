@@ -416,8 +416,8 @@ end
 
 function benchmark(; ps = (1.5, 3.0), Ns = (8, 16, 32), K = 1.0, tol = 1.0e-5,
                      clarabel = false, mosek = false)
-    @printf("%-6s %6s %6s %4s %9s %9s %9s %9s %8s\n",
-            "N", "nv", "cones", "p", "IPM+E1", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+    @printf("%-6s %6s %6s %4s %9s %9s %9s %9s %8s %8s\n",
+            "N", "nv", "cones", "p", "IPM+E1", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for N in Ns, p in ps
         prob = build_powerlaw(N; K, p)
@@ -437,12 +437,13 @@ function benchmark(; ps = (1.5, 3.0), Ns = (8, 16, 32), K = 1.0, tol = 1.0e-5,
             mk = (t = NaN, status = "—", obj = NaN)
         end
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
         ncones = 2 * 3 * 2 * N * N
 
-        @printf("%-6d %6d %6d %4.1f %s %s %s %s %8s\n",
+        @printf("%-6d %6d %6d %4.1f %s %s %s %s %8s %8s\n",
                 N, 2 * (N - 1)^2, ncones, p,
-                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
     end
 end
 
@@ -453,16 +454,14 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-18 (Apple M-series, -t 8, --clarabel --mosek), tol = 1e-5.
-# IPM+E1 = E1+ warm start; HSD "—" = not converged.
+# Sample run: 2026-08-24 (Apple M-series, -t 8, --clarabel --mosek), tol = 1e-5.
+# IPM+E1 = E1+ warm start; HSD "—" = not converged; * = non-optimal solve.
 #
-#   N      nv  cones    p    IPM+E1      HSD  Clarabel     Mosek  Cla/IPM
-#   8      98    768  1.5   28.4ms   36.2ms   26.4ms   33.5ms     0.93
-#   8      98    768  3.0   34.5ms        —   34.6ms   38.1ms     1.00
-#  16     450   3072  1.5  109.9ms        —  195.5ms  259.1ms     1.78
-#  16     450   3072  3.0  129.2ms  250.8ms  102.7ms  278.4ms     0.80
-#  32    1922  12288  1.5  475.9ms  808.5ms 3472.5ms 3232.6ms     7.30
-#  32    1922  12288  3.0  895.4ms        —  671.0ms 3457.0ms     0.75
-#
-# Clarabel did not reach OPTIMAL at (16, 3.0), (32, 1.5), (32, 3.0).
+#   N          nv  cones    p    IPM+E1       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   8          98    768  1.5   26.9ms   34.0ms   26.2ms   33.6ms     0.97     1.25
+#   8          98    768  3.0   31.9ms   58.5ms   34.7ms   38.3ms     1.08     1.20
+#   16        450   3072  1.5  100.7ms —         197.1ms  261.5ms     1.96     2.60
+#   16        450   3072  3.0  112.4ms  279.9ms 103.1ms*  281.3ms     0.92     2.50
+#   32       1922  12288  1.5  448.7ms  620.2ms 3518.6ms* 3248.0ms     7.84     7.24
+#   32       1922  12288  3.0  670.7ms 1712.3ms 676.5ms* 3481.6ms     1.01     5.19
 # =============================================================================

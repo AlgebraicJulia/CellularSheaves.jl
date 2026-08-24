@@ -274,8 +274,8 @@ const SAMPLE = [(2, 10000), (10, 1000), (50, 200)]
 # it — Dualization rejects the power cone); Mosek the dualized model, fan-in for
 # n ≤ 10 and chain above. Cla/IPM is Clarabel's best over IPM's best.
 function benchmark(; tol = 1.0e-6, clarabel = false, mosek = false, problems = PROBLEMS)
-    @printf("%-4s %6s %7s %8s %9s %9s %9s %9s %8s\n",
-            "n", "m", "cones", "cols", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+    @printf("%-4s %6s %7s %8s %9s %9s %9s %9s %8s %8s\n",
+            "n", "m", "cones", "cols", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for (n, m) in problems
         inst = mixed_norm_instance(n, m)
@@ -298,11 +298,12 @@ function benchmark(; tol = 1.0e-6, clarabel = false, mosek = false, problems = P
             mk = (t = NaN, status = "—", obj = NaN)
         end
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-        @printf("%-4d %6d %7d %8d %s %s %s %s %8s\n",
+        @printf("%-4d %6d %7d %8d %s %s %s %s %8s %8s\n",
                 n, m, m * n, size(prob.B, 2),
-                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
         flush(stdout)
     end
 end
@@ -317,13 +318,13 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-18 (Apple M1 Pro, -t 8, --clarabel --mosek), tol = 1e-6,
+# Sample run: 2026-08-24 (Apple M1 Pro, -t 8, --clarabel --mosek), tol = 1e-6,
 # seed 0. Fastest formulation per solver: IPM fan-in for n ≤ 10 and chain above;
 # Clarabel fan-in primal (dualization rejects the power cone); Mosek dualized,
 # fan-in for n ≤ 10 and chain above.
 #
-#   n         m   cones     cols       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   2     10000   20000    70002  459.0ms  535.7ms  444.1ms  688.7ms     0.97
-#   10     1000   10000    31010  304.9ms  358.0ms  222.2ms  387.7ms     0.73
-#   50      200   10000    40050  341.7ms  314.3ms  254.8ms  497.9ms     0.75
+#   n         m   cones     cols       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   2     10000   20000    70002  440.3ms  516.9ms  439.1ms  714.1ms     1.00     1.62
+#   10     1000   10000    31010  294.1ms  334.4ms  224.7ms  403.0ms     0.76     1.37
+#   50      200   10000    40050  308.5ms  303.4ms  257.8ms  529.9ms     0.84     1.72
 # =============================================================================

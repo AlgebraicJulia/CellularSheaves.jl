@@ -419,9 +419,9 @@ end
 const CASES = [(200, 5, 0.25), (400, 10, 0.20), (800, 20, 0.12)]
 
 function benchmark(; nf = 0.1, tol = 1.0e-6, clarabel = false, mosek = false, cases = CASES)
-    @printf("%-6s %5s %6s %6s %6s %7s %9s %9s %9s %9s %8s\n",
+    @printf("%-6s %5s %6s %6s %6s %7s %9s %9s %9s %9s %8s %8s\n",
             "n", "m", "rd", "sens", "|Nx|", "cols",
-            "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+            "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for (n, m, rd) in cases
         inst = snl_instance(n, m, rd; nf)
@@ -442,11 +442,12 @@ function benchmark(; nf = 0.1, tol = 1.0e-6, clarabel = false, mosek = false, ca
             mk = (t = NaN, status = "—", obj = NaN)
         end
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-        @printf("%-6d %5d %6.3f %6d %6d %7d %s %s %s %s %8s\n",
+        @printf("%-6d %5d %6.3f %6d %6d %7d %s %s %s %s %8s %8s\n",
                 n, m, rd, nsensors(inst), length(inst.Nx), size(prob.B, 2),
-                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
         flush(stdout)
     end
 end
@@ -468,11 +469,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-14 (Apple M-series, --clarabel --mosek, tol = 1e-6; Mosek via Dualization):
+# Sample run: 2026-08-24 (Apple M-series, --clarabel --mosek, tol = 1e-6; Mosek via Dualization):
+# * = time from a NEAR_OPTIMAL (not fully OPTIMAL) solve.
 #
-#   n      m     rd   sens   |Nx|    cols       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   200    5  0.250   195    1153   14555   165.3ms   194.1ms   360.0ms   346.5ms    2.18
-#   400   10  0.200   390    2432   30600   482.8ms   598.7ms  1049.0ms   902.8ms    2.17
-#   800   20  0.120   780    4722   59472  1312.4ms  1124.4ms  2266.2ms  2196.6ms    1.73
+#   n          m     rd   sens   |Nx|    cols       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   200        5  0.250    195   1153   14555 136.1ms* 177.0ms*  353.0ms  345.1ms     2.59     2.54
+#   400       10  0.200    390   2432   30600  471.7ms 750.8ms* 1048.1ms  868.2ms     2.22     1.84
+#   800       20  0.120    780   4722   59472 874.9ms* 1656.2ms* 2235.5ms 2152.3ms     2.56     2.46
 #
 # =============================================================================

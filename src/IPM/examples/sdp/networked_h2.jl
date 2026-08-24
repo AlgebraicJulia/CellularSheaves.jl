@@ -367,9 +367,9 @@ end
 const CASES = [20, 40, 80]
 
 function benchmark(; tol = 1.0e-6, clarabel = false, mosek = false, cases = CASES)
-    @printf("%-6s %6s %7s %7s %9s %9s %9s %9s %8s\n",
+    @printf("%-6s %6s %7s %7s %9s %9s %9s %9s %8s %8s\n",
             "n", "N", "cols", "rows",
-            "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+            "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for n in cases
         inst = chain_instance(n)
@@ -390,11 +390,12 @@ function benchmark(; tol = 1.0e-6, clarabel = false, mosek = false, cases = CASE
             mk = (t = NaN, status = "—", obj = NaN)
         end
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-        @printf("%-6d %6d %7d %7d %s %s %s %s %8s\n",
+        @printf("%-6d %6d %7d %7d %s %s %s %s %8s %8s\n",
                 n, nstate(inst), size(prob.B, 2), size(prob.B, 1),
-                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
         flush(stdout)
     end
 end
@@ -428,12 +429,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-14 (--clarabel --mosek), tol = 1e-6; accuracy at 1e-8.
+# Sample run: 2026-08-24 (--clarabel --mosek), tol = 1e-6; accuracy at 1e-8.
 #
-#   n       N    cols    rows       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   20    142    2706    1548   117.5ms   160.2ms   432.7ms   371.1ms     3.68
-#   40    288    5635    3234   309.3ms   341.4ms   837.8ms  1392.3ms     2.71
-#   80    585   11803    6757   736.4ms  1030.9ms  2418.0ms  7938.3ms     3.28
+#   n           N    cols    rows       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   20        142    2706    1548  119.0ms  166.5ms  424.2ms  388.8ms     3.56     3.27
+#   40        288    5635    3234  311.8ms  355.8ms  822.1ms 1425.7ms     2.64     4.57
+#   80        585   11803    6757  738.3ms 1066.3ms 2432.9ms 7961.1ms     3.30    10.78
 #
 #   n       true       IPM       gap
 #   20    7.8201    9.0634  +1.2e+00

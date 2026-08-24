@@ -221,8 +221,8 @@ end
 
 function benchmark(; sizes = (50, 200, 800, 3200), sigma = 0.5, bound = 1.0,
                      tol = 1e-6, clarabel = false, mosek = false)
-    @printf("%-9s %6s %9s %9s %9s %9s %8s\n",
-            "model", "N", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+    @printf("%-9s %6s %9s %9s %9s %9s %8s %8s\n",
+            "model", "N", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for N in sizes
         m = spline_model(N; sigma)
@@ -243,10 +243,11 @@ function benchmark(; sizes = (50, 200, 800, 3200), sigma = 0.5, bound = 1.0,
             mk = (t = NaN, status = "—", obj = NaN)
         end
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-        @printf("%-9s %6d %s %s %s %s %8s\n",
-                "spline", N, fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+        @printf("%-9s %6d %s %s %s %s %8s %8s\n",
+                "spline", N, fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
     end
 end
 
@@ -257,11 +258,11 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-14 (--clarabel --mosek), tol = 1e-6.
+# Sample run: 2026-08-24 (--clarabel --mosek), tol = 1e-6.
 #
-#   model          N       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   spline        50     0.7ms    0.9ms    0.3ms    0.9ms     0.46
-#   spline       200     3.6ms    4.2ms    1.8ms    4.4ms     0.50
-#   spline       800    12.7ms   17.6ms    9.4ms   18.5ms     0.74
-#   spline      3200    67.3ms   76.1ms  146.6ms   77.0ms     2.18
+#   model          N       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   spline        50     0.7ms    0.8ms    0.3ms    0.9ms     0.51     1.29
+#   spline       200     3.5ms    3.7ms    1.8ms    4.4ms     0.52     1.26
+#   spline       800    12.1ms   14.9ms    9.4ms   18.5ms     0.78     1.53
+#   spline      3200    67.4ms   69.4ms  147.2ms   76.9ms     2.18     1.14
 # =============================================================================

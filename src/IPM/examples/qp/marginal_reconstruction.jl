@@ -403,8 +403,8 @@ const PROBLEMS = [
 
 function benchmark(; tol = 1.0e-6, clarabel = false, mosek = false,
                    problems = PROBLEMS, ε = 1.0)
-    @printf("%-9s %4s %6s %9s %9s %9s %9s %9s %8s\n",
-            "dataset", "d", "marg", "cols", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+    @printf("%-9s %4s %6s %9s %9s %9s %9s %9s %8s %8s\n",
+            "dataset", "d", "marg", "cols", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for (name, attrs) in problems
         inst = load_instance(name; attrs, ε)
@@ -423,11 +423,12 @@ function benchmark(; tol = 1.0e-6, clarabel = false, mosek = false,
             measure_jump(() -> build_mr_jump(inst; optimizer = mosek_opt(; tol))) :
             (t = NaN, status = "—", obj = NaN)
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-        @printf("%-9s %4d %6d %9d %s %s %s %s %8s\n",
+        @printf("%-9s %4d %6d %9d %s %s %s %s %8s %8s\n",
                 name, length(inst.card), length(inst.W), size(prob.B, 2),
-                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+                fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
         flush(stdout)
     end
 end
@@ -442,12 +443,12 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-18 (Apple M1 Pro, -t 8, --clarabel --mosek), tol = 1e-6,
+# Sample run: 2026-08-24 (Apple M1 Pro, -t 8, --clarabel --mosek), tol = 1e-6,
 # real Titanic data (EMR_DATA), ε = 1, seed 0. Clarabel dualized, Mosek primal —
 # each its faster formulation on this QP (measured).
 #
-#   dataset      d   marg      cols       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   titanic      5     10      1360   31.9ms   37.6ms  117.2ms   57.2ms     3.68
-#   titanic      6     20      2288   55.2ms   55.8ms  199.0ms   88.9ms     3.61
-#   titanic      7     35      6332  385.9ms  468.5ms 2454.3ms  561.8ms     6.36
+#   dataset      d   marg      cols       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   titanic      5     10      1360   37.1ms   39.3ms  117.1ms   57.2ms     3.16     1.54
+#   titanic      6     20      2288   67.0ms   58.1ms  198.6ms   89.1ms     2.96     1.33
+#   titanic      7     35      6332  411.5ms  489.0ms 2460.7ms  586.0ms     5.98     1.42
 # =============================================================================

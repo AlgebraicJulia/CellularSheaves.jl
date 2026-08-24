@@ -256,8 +256,8 @@ end
 
 function benchmark(; sides = (33, 65, 129), tol = 1.0e-8,
                      clarabel = false, mosek = false)
-    @printf("%-6s %7s %9s %9s %9s %9s %8s\n",
-            "L", "n", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM")
+    @printf("%-6s %7s %9s %9s %9s %9s %8s %8s\n",
+            "L", "n", "IPM", "HSD", "Clarabel", "Mosek", "Cla/IPM", "Mos/IPM")
 
     for L in sides
         n = (L - 2)^2
@@ -278,10 +278,11 @@ function benchmark(; sides = (33, 65, 129), tol = 1.0e-8,
             mk = (t = NaN, status = "—", obj = NaN)
         end
 
-        ratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        cratio = (isfinite(mc.t) && isfinite(mi.t)) ? @sprintf("%.2f", mc.t / mi.t) : "—"
+        mratio = (isfinite(mk.t) && isfinite(mi.t)) ? @sprintf("%.2f", mk.t / mi.t) : "—"
 
-        @printf("%-6d %7d %s %s %s %s %8s\n",
-                L, n, fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), ratio)
+        @printf("%-6d %7d %s %s %s %s %8s %8s\n",
+                L, n, fmt_time(mi), fmt_time(mh), fmt_time(mc), fmt_time(mk), cratio, mratio)
     end
 end
 
@@ -302,10 +303,10 @@ if abspath(PROGRAM_FILE) == @__FILE__
 end
 
 # =============================================================================
-# Sample run: 2026-08-14 (--clarabel --mosek), tol = 1e-8.
+# Sample run: 2026-08-24 (--clarabel --mosek), tol = 1e-8.
 #
-#   L        n       IPM       HSD  Clarabel     Mosek  Cla/IPM
-#   33     961     5.9ms     6.9ms    6.4ms    32.3ms     1.08
-#   65    3969    29.6ms    30.7ms   36.7ms   185.0ms     1.24
-#   129  16129   154.7ms   146.6ms  252.1ms  1105.3ms     1.63
+#   L            n       IPM       HSD  Clarabel     Mosek  Cla/IPM  Mos/IPM
+#   33         961    5.1ms    5.7ms    6.3ms   32.3ms     1.25     6.34
+#   65        3969   26.5ms   26.1ms   36.7ms  191.5ms     1.38     7.23
+#   129      16129  137.9ms  123.3ms  252.6ms 1121.5ms     1.83     8.13
 # =============================================================================
