@@ -2,6 +2,10 @@
 # utils.jl — shared utilities for IPM examples
 # =============================================================================
 
+@static if Sys.isapple()
+    using AppleAccelerate
+end
+
 using Printf
 using JuMP
 using Clarabel

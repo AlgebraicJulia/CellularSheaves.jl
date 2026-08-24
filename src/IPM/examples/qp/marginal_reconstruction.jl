@@ -88,7 +88,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Random, Printf, Combinatorics, DelimitedFiles, JSON
 
 using CellularSheaves.IPM

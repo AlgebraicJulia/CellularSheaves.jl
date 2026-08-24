@@ -45,7 +45,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Statistics, Printf
 using Graphs, NearestNeighbors
 import MLDatasets, DataFrames

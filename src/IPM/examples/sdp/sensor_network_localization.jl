@@ -65,7 +65,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Printf, Random
 using Dualization
 

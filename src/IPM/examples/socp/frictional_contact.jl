@@ -77,7 +77,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Printf, SparseArrays
 using HDF5
 

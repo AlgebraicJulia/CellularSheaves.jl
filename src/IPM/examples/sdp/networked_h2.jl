@@ -57,7 +57,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Printf, Random
 using SparseArrays
 using Dualization

@@ -31,7 +31,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Random, Printf
 using Graphs
 

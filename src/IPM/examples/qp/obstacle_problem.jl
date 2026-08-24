@@ -57,7 +57,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Printf
 using Dualization
 

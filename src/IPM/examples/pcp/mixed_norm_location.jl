@@ -46,7 +46,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Random, Printf
 
 using CellularSheaves.IPM

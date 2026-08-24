@@ -53,7 +53,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Random, Statistics, Printf
 using NearestNeighbors
 using Dualization

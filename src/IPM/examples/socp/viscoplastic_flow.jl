@@ -66,7 +66,6 @@
 #
 # =============================================================================
 
-using AppleAccelerate
 using LinearAlgebra, Printf
 
 using CellularSheaves.IPM
