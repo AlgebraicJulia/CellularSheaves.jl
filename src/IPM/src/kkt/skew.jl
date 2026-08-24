@@ -1,29 +1,28 @@
-struct BorderedSolver{UPLO, T, I} <: KKTSolver{T}
-    kkt::UzawaSolver{UPLO, T, I}
+struct SkewSolver{T, KKT}
+    kkt::KKT
     d::FVector{T}
-    κ::FScalar{T}
-    φ::FScalar{T}
+    σ::FScalar{T}
+    γ::FScalar{T}
 end
 
-function BorderedSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {T, I <: Integer}
-    F = FChordalTriangular{:N, :L, T, I}(S)
-    return BorderedSolver(F, B; cgmax, irmax)
-end
-
-function BorderedSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {UPLO, T, I <: Integer}
+function SkewSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10, pivot::Bool = false) where {T, I <: Integer}
     n = size(B, 2)
 
-    kkt = UzawaSolver(F, B; cgmax, irmax)
+    if pivot
+        kkt = PivotedUzawaSolver(S, B; cgmax, irmax)
+    else
+        kkt = UzawaSolver(S, B; cgmax, irmax)
+    end
 
     d = FVector{T}(undef, n)
-    κ = FScalar{T}(undef)
-    φ = FScalar{T}(undef)
+    σ = FScalar{T}(undef)
+    γ = FScalar{T}(undef)
 
-    return BorderedSolver{UPLO, T, I}(kkt, d, κ, φ)
+    return SkewSolver(kkt, d, σ, γ)
 end
 
 function initkkt!(
-        bw::BorderedSolver,
+        bw::SkewSolver,
         x2::AbstractVector,
         y2::AbstractVector,
         A::BlockSparseMatrix,
@@ -31,20 +30,20 @@ function initkkt!(
         c::AbstractVector,
         e::AbstractVector,
         d::AbstractVector,
-        φ::Real;
+        γ::Real;
         δ::Real,
     )
-    bw.φ[] = φ
+    bw.γ[] = γ
 
-    flag, witer, wpass, κ = initkkt!(bw.kkt, x2, y2, A, B, c, e, d, φ; δ)
+    flag, witer, wpass, σ = initkkt!(bw.kkt, x2, y2, A, B, c, e, d, γ; δ)
     copyto!(bw.d, d)
-    bw.κ[] = κ
+    bw.σ[] = σ
 
     return flag, witer, wpass
 end
 
 function initkkt!(
-        kkt::UzawaSolver,
+        kkt::KKTSolver,
         x2::AbstractVector,
         y2::AbstractVector,
         A::BlockSparseMatrix,
@@ -52,7 +51,7 @@ function initkkt!(
         c::AbstractVector,
         e::AbstractVector,
         d::AbstractVector,
-        φ::Real;
+        γ::Real;
         δ::Real,
     )
     m, n = size(B)
@@ -76,7 +75,7 @@ function initkkt!(
 
     if flag
         #
-        # solve the Woodbury system
+        # solve the τ column
         #
         #   [ A -Bᵀ ] [ x₂ ] = [ c ]
         #   [ B  0  ] [ y₂ ]   [ e ]
@@ -89,19 +88,19 @@ function initkkt!(
     #
     # compute the capacitance
     #
-    #   κ ← dᵀ x₂ + eᵀ y₂ + φ
+    #   σ ← dᵀ x₂ + eᵀ y₂ + γ
     #
-    κ = dot(d, x2) + dot(e, y2) + φ
+    σ = dot(d, x2) + dot(e, y2) + γ
 
-    return flag, witer, wpass, κ
+    return flag, witer, wpass, σ
 end
 
 #
 # Solve the bordered KKT system
 #
-#   [ A    -Bᵀ  -c ] [ x ]   [ f ]
-#   [ B     0   -e ] [ y ] = [ g ]
-#   [ dᵀ    eᵀ   φ ] [ ζ ]   [ η ]
+#   [ A    -Bᵀ  -c ] [ x ]   [ h ]
+#   [ B     0   -e ] [ y ] = [ i ]
+#   [ dᵀ    eᵀ   γ ] [ ζ ]   [ κ ]
 #
 #
 # where A is a n x n positive-definite
@@ -113,22 +112,21 @@ end
 #
 # The solution (x, y, ζ) meets the tolerances
 #
-#   ‖ A x - Bᵀ y - c ζ - f ‖ ≤ ftol
-#   ‖ B x        - e ζ - g ‖ ≤ gtol
-#   | dᵀx + eᵀy  + φ ζ - η | ≤ ηtol.
+#   ‖ A x - Bᵀ y - c ζ - h ‖ ≤ htol
+#   ‖ B x        - e ζ - i ‖ ≤ itol
 #
-function solvekkt!(bw::BorderedSolver, args...; kw...)
-    niter, npass, witer, wpass, status, ζ, δmin, δmax, κ =
-        solvekkt!(bw.kkt, bw.d, bw.κ[], bw.φ[], args...; kw...)
-    bw.κ[] = κ
+function solvekkt!(bw::SkewSolver, args...; kw...)
+    niter, npass, witer, wpass, status, ζ, δmin, δmax, σ =
+        solvekkt!(bw.kkt, bw.d, bw.σ[], bw.γ[], args...; kw...)
+    bw.σ[] = σ
     return niter, npass, witer, wpass, status, ζ, δmin, δmax
 end
 
 function solvekkt!(
-        kkt::UzawaSolver,
+        kkt::KKTSolver,
         d::AbstractVector,
-        κ::Real,
-        φ::Real,
+        σ::Real,
+        γ::Real,
         x::AbstractVector,
         y::AbstractVector,
         x2::AbstractVector,
@@ -137,13 +135,12 @@ function solvekkt!(
         B::AbstractMatrix,
         c::AbstractVector,
         e::AbstractVector,
-        f::AbstractVector,
-        g::AbstractVector,
-        η::Real;
+        h::AbstractVector,
+        i::AbstractVector,
+        κ::Real;
         warm::Bool,
-        gtol::Real,
-        ftol::Real,
-        ηtol::Real,
+        htol::Real,
+        itol::Real,
         stall::Real,
         irmax::Int,
         cgmax::Int,
@@ -154,8 +151,8 @@ function solvekkt!(
     @assert length(y)  == m
     @assert length(x2) == n
     @assert length(y2) == m
-    @assert length(f)  == n
-    @assert length(g)  == m
+    @assert length(h)  == n
+    @assert length(i)  == m
     @assert length(c)  == n
     @assert length(e)  == m
     @assert length(d)  == n
@@ -166,58 +163,58 @@ function solvekkt!(
     #
     # solve the KKT system
     #
-    #   [ A -Bᵀ ] [ x ] = [ f ]
-    #   [ B  0  ] [ y ]   [ g ]
+    #   [ A -Bᵀ ] [ x ] = [ h ]
+    #   [ B  0  ] [ y ]   [ i ]
     #
     # to the tolerances
     #
-    #   ‖ Ax - Bᵀy - f ‖ ≤ 1/2 ftol
-    #   ‖ Bx       - g ‖ ≤ 1/2 gtol
+    #   ‖ Ax - Bᵀy - h ‖ ≤ 1/2 htol
+    #   ‖ Bx       - i ‖ ≤ 1/2 itol
     #
-    niter, npass, nstat, δmin, δmax = solvekkt!(kkt, x, y, A, B, f, g;
-                                warm, ftol = ftol / 2, gtol = gtol / 2, stall, irmax, cgmax)
+    niter, npass, nstat, δmin, δmax = solvekkt!(kkt, x, y, A, B, h, i;
+                                warm, ftol = htol / 2, gtol = itol / 2, stall, irmax, cgmax)
     #
     # compute the residual
     #
-    #   δη = η - dᵀx - eᵀy
+    #   δκ = κ - dᵀx - eᵀy
     #
-    δη = η - dot(d, x) - dot(e, y)
+    δκ = κ - dot(d, x) - dot(e, y)
     #
     # compute ζ
     #
-    #   ζ = κ⁻¹ δη
+    #   ζ = σ⁻¹ δκ
     #
-    ζ  = δη / κ
+    ζ  = δκ / σ
 
     wstat = KKT_SOLVED
     #
-    # refine the Woodbury system
+    # refine the τ column
     #
     #   [ A -Bᵀ ] [ x₂ ] = [ c ]
     #   [ B  0  ] [ y₂ ]   [ e ]
     #
     # until
     #
-    #   ‖ A x₂ - Bᵀy₂ - c ‖ ≤ 1/(2|ζ|) ftol
-    #   ‖ B x₂        - e ‖ ≤ 1/(2|ζ|) gtol
+    #   ‖ A x₂ - Bᵀy₂ - c ‖ ≤ 1/(2|ζ|) htol
+    #   ‖ B x₂        - e ‖ ≤ 1/(2|ζ|) itol
     #
     if !iszero(ζ)
         ncg2, nir2, wstat = solvekkt!(kkt, x2, y2, A, B, c, e; warm = true,
-                                ftol = ftol / 2abs(ζ), gtol = gtol / 2abs(ζ), stall, irmax, cgmax)
+                                ftol = htol / 2abs(ζ), gtol = itol / 2abs(ζ), stall, irmax, cgmax)
         witer += ncg2
         wpass += nir2
         #
         # compute the capacitance
         #
-        #   κ ← dᵀ x₂ + eᵀ y₂ + φ
+        #   σ ← dᵀ x₂ + eᵀ y₂ + γ
         #
-        κ = dot(d, x2) + dot(e, y2) + φ
+        σ = dot(d, x2) + dot(e, y2) + γ
         #
         # re-compute ζ
         #
-        #   ζ = κ⁻¹ δη
+        #   ζ = σ⁻¹ δκ
         #
-        ζ = δη / κ
+        ζ = δκ / σ
     end
     #
     # lift x and y:
@@ -227,12 +224,6 @@ function solvekkt!(
     #
     axpy!(ζ, x2, x)
     axpy!(ζ, y2, y)
-    #
-    # compute the residual norm
-    #
-    #   ηres = | dᵀ x + eᵀ y + φ ζ - η |
-    #
-    ηres = abs(η - dot(d, x) - dot(e, y) - φ * ζ)
 
     if nstat === KKT_NUMERICAL_FAILURE || wstat === KKT_NUMERICAL_FAILURE
         status = KKT_NUMERICAL_FAILURE
@@ -240,11 +231,9 @@ function solvekkt!(
         status = nstat
     elseif wstat !== KKT_SOLVED
         status = wstat
-    elseif ηres > ηtol
-        status = KKT_STAGNATED
     else
         status = KKT_SOLVED
     end
 
-    return niter, npass, witer, wpass, status, ζ, δmin, δmax, κ
+    return niter, npass, witer, wpass, status, ζ, δmin, δmax, σ
 end

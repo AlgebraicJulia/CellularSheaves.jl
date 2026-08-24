@@ -16,6 +16,14 @@ function isoptimal(pobj::T, dobj::T, pres::T, dres::T; gap_tol::T, feas_tol::T) 
         pres < feas_tol && dres < feas_tol
 end
 
+function fnorm(Δf::AbstractVector, pscl::AbstractVector, sf::Real)
+    return scalenorm(Δf, pscl) / (1 + sf)
+end
+
+function gnorm(Δg::AbstractVector, yscl::AbstractVector, sg::Real)
+    return scalenorm(Δg, yscl) / (1 + sg)
+end
+
 function setaug!(s::AbstractSolver{T}) where {T}
     if iszero(s.nB[])
         s.δ[] = one(T)

@@ -83,10 +83,10 @@ function infnorms!(rnrm::AbstractVector, vnrm::AbstractVector, B::BlockSparseMat
 end
 
 #
-# B ← E B D  and  Q ← D Q D, where E = diag(rscl) (per row) and D = diag with the
+# B ← E B D  and  Q ← D Q D, where E = diag(yscl) (per row) and D = diag with the
 # block-constant value vscl[v] on block v. Applied in place to the working copies.
 #
-function applyscaling!(B::BlockSparseMatrix, Q::BlockSparseMatrix, rscl::AbstractVector, vscl::AbstractVector)
+function applyscaling!(B::BlockSparseMatrix, Q::BlockSparseMatrix, yscl::AbstractVector, vscl::AbstractVector)
     for v in vtxs(B)
         sv = vscl[v]
 
@@ -97,7 +97,7 @@ function applyscaling!(B::BlockSparseMatrix, Q::BlockSparseMatrix, rscl::Abstrac
 
             for jloc in axes(Be, 2)
                 for iloc in axes(Be, 1)
-                    Be[iloc, jloc] *= rscl[ru[iloc]] * sv
+                    Be[iloc, jloc] *= yscl[ru[iloc]] * sv
                 end
             end
         end
@@ -132,8 +132,8 @@ function equilibrate!(
     nrow = nrows(B)
     nvtx = nvtxs(B)
 
-    cscl = scaling.cscl
-    rscl = scaling.rscl
+    pscl  = scaling.pscl
+    yscl  = scaling.yscl
 
     vscl = ones(T, nvtx)
     vnrm = zeros(T, nvtx)
@@ -160,7 +160,7 @@ function equilibrate!(
             d = max(d, abs(one(T) - n))
 
             if !iszero(n)
-                rscl[i] *= rswp[i] = inv(n)
+                yscl[i] *= rswp[i] = inv(n)
             end
         end
 
@@ -173,12 +173,12 @@ function equilibrate!(
         s = vscl[v]
 
         for j in colrange(B, v)
-            f[j] *= cscl[j] = s
+            f[j] *= pscl[j] = s
         end
     end
 
     for i in rows(B)
-        g[i] *= rscl[i]
+        g[i] *= yscl[i]
     end
 
     return scaling
@@ -192,9 +192,9 @@ Apply forward scaling to vectors in place:
     p ← D⁻¹ p,   d ← D d,   y ← E⁻¹ y
 """
 function scale!(p::AbstractVector, d::AbstractVector, y::AbstractVector, scaling::AbstractScaling)
-    p ./= scaling.cscl
-    d .*= scaling.cscl
-    y ./= scaling.rscl
+    p ./= scaling.pscl
+    d .*= scaling.pscl
+    y ./= scaling.yscl
     return p, d, y
 end
 
@@ -206,8 +206,8 @@ Apply inverse scaling to vectors in place:
     p ← D p,   d ← D⁻¹ d,   y ← E y
 """
 function unscale!(p::AbstractVector, d::AbstractVector, y::AbstractVector, scaling::AbstractScaling)
-    p .*= scaling.cscl
-    d ./= scaling.cscl
-    y .*= scaling.rscl
+    p .*= scaling.pscl
+    d ./= scaling.pscl
+    y .*= scaling.yscl
     return p, d, y
 end

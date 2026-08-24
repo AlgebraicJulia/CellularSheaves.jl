@@ -49,6 +49,7 @@ const _TERM = Dict(
 
 mutable struct Optimizer{T} <: MOI.AbstractOptimizer
     settings::IPMSettings{T}
+    compress::Float64                                   # column-compression threshold (IPMProblem)
     # the assembled primal-form problem (built by copy_to, solved by optimize!)
     problem::Union{Nothing, IPMProblem{T}}
     result::Union{Nothing, IPMResult{T}}
@@ -64,7 +65,7 @@ mutable struct Optimizer{T} <: MOI.AbstractOptimizer
 
     function Optimizer{T}() where {T}
         return new{T}(
-            IPMSettings{T}(), nothing, nothing,
+            IPMSettings{T}(), 1.0, nothing, nothing,
             Dict{MOI.VariableIndex, Int}(),
             Dict{MOI.ConstraintIndex, UnitRange{Int}}(),
             Int[],
@@ -205,11 +206,20 @@ function MOI.supports(::Optimizer, ::MOI.RawOptimizerAttribute)
 end
 
 function MOI.get(opt::Optimizer, a::MOI.RawOptimizerAttribute)
+    if a.name == "compress"
+        return opt.compress
+    end
+
     return getfield(opt.settings, Symbol(a.name))
 end
 
 function MOI.set(opt::Optimizer, a::MOI.RawOptimizerAttribute, v)
-    opt.settings = IPMSettings(opt.settings; Symbol(a.name) => v)
+    if a.name == "compress"
+        opt.compress = v
+    else
+        opt.settings = IPMSettings(opt.settings; Symbol(a.name) => v)
+    end
+
     return
 end
 
@@ -412,7 +422,7 @@ function MOI.copy_to(dest::Optimizer{T}, src::MOI.ModelLike) where {T}
     dest.umap = umap
     dest.sense = sense
     dest.objconst = objconst
-    dest.problem = IPMProblem(Q, B, f, g, K, s)
+    dest.problem = IPMProblem(Q, B, f, g, K, s; compress = dest.compress)
     return MOI.Utilities.identity_index_map(src)
 end
 
@@ -474,9 +484,10 @@ end
 function MOI.get(opt::Optimizer{T}, attr::MOI.ConstraintPrimal, ux::MOI.ConstraintIndex{MOI.VectorAffineFunction{T}, MOI.Zeros}) where {T}
     MOI.check_result_index_bounds(opt, attr)
     prob = opt.problem
-    # prob.B, prob.g are stored permuted (C cols, R rows); result.p is original.
-    # match coordinates: original cols → internal, apply B − g, internal → original
-    r = prob.R \ (prob.B * (prob.C * opt.result.p) - prob.g)
+    # equality rows are (B, g); result.p is original. match coordinates: original
+    # cols → internal, apply A − b, then internal rows → original through P1
+    pint = prob.P2 * opt.result.p
+    r = prob.P1 \ (prob.B * pint - prob.g)
     return r[opt.umap[ux]]
 end
 

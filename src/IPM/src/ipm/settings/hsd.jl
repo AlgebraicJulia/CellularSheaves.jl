@@ -11,6 +11,7 @@
     refine_max_iter::Int = 10   # max KKT iterative-refinement passes
     newton_max_iter::Int = 100  # max CG iterations per KKT (Newton-system) solve
     aug_tol::T = 1e-7           # relative augmentation, in initial-problem units (the anchored knob)
+    pivot::Bool = false         # rank-revealing pivoted base factorization
     elim_alg::E = DEFAULT_ELIMINATION_ALGORITHM   # KKT elimination ordering (construction-time)
     # HSD-specific
     illposed_tol::T = 1e-10

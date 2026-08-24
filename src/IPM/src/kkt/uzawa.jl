@@ -1,8 +1,10 @@
+abstract type KKTSolver{T} end
+
 struct UzawaSolver{UPLO, T, I <: Integer} <: KKTSolver{T}
     F::FChordalTriangular{:N, UPLO, T, I}
     L::BlockSparseMatrix{T, I}
     facwrk::FactorizationWorkspace{T, I}
-    divwrk::DivisionWorkspace{T, I}
+    divwrk::DivisionWorkspace{T}
     itrwrk::CGWorkspace{T}
     hist::FVector{T}
     δ::FScalar{T}
@@ -12,15 +14,28 @@ struct UzawaSolver{UPLO, T, I <: Integer} <: KKTSolver{T}
     δy::FVector{T}
 end
 
-function UzawaSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {T, I <: Integer}
-    F = FChordalTriangular{:N, :L, T, I}(S)
-    return UzawaSolver(F, B; cgmax, irmax)
+struct PivotedUzawaSolver{UPLO, T, I <: Integer} <: KKTSolver{T}
+    F::FChordalTriangular{:N, UPLO, T, I}
+    L::BlockSparseMatrix{T, I}
+    facwrk::FactorizationWorkspace{T, I}
+    divwrk::DivisionWorkspace{T}
+    itrwrk::CGWorkspace{T}
+    hist::FVector{T}
+    δ::FScalar{T}
+    δf::FVector{T}
+    δg::FVector{T}
+    δx::FVector{T}
+    δy::FVector{T}
+    S::ChordalSymbolic{I}
+    P::FPermutation{I}
+    w::FVector{T}
 end
 
-function UzawaSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {UPLO, T, I <: Integer}
+function UzawaSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {T, I <: Integer}
+    F = FChordalTriangular{:N, :L, T, I}(S)
     m, n = size(B)
     facwrk = FactorizationWorkspace(F)
-    divwrk = DivisionWorkspace(F, 1)
+    divwrk = DivisionWorkspace{T}(F.S, 1)
     itrwrk = CGWorkspace{T}(m, n; itmax = cgmax)
     hist = FVector{T}(undef, irmax + 2)
     δ = FScalar{T}(undef)
@@ -30,6 +45,27 @@ function UzawaSolver(F::FChordalTriangular{:N, UPLO, T, I}, B::BlockSparseMatrix
     δy = FVector{T}(undef, m)
     return UzawaSolver(F, B' * B, facwrk, divwrk, itrwrk, hist, δ, δf, δg, δx, δy)
 end
+
+function PivotedUzawaSolver(S::ChordalSymbolic{I}, B::BlockSparseMatrix{T, I}; cgmax::Integer = 2size(B, 2), irmax::Integer = 10) where {T, I <: Integer}
+    F = FChordalTriangular{:N, :L, T, I}(S)
+    m, n = size(B)
+    facwrk = FactorizationWorkspace(F)
+    divwrk = DivisionWorkspace{T}(F.S, 1)
+    itrwrk = CGWorkspace{T}(m, n; itmax = cgmax)
+    hist = FVector{T}(undef, irmax + 2)
+    δ = FScalar{T}(undef)
+    δf = FVector{T}(undef, n)
+    δg = FVector{T}(undef, m)
+    δx = FVector{T}(undef, n)
+    δy = FVector{T}(undef, m)
+    P = FPermutation{I}(n)
+    w = FVector{T}(undef, n)
+    return PivotedUzawaSolver(F, B' * B, facwrk, divwrk, itrwrk, hist, δ, δf, δg, δx, δy, copy(F.S), P, w)
+end
+
+# ============================================================================
+# initkkt!
+# ============================================================================
 
 function initkkt!(wrk::UzawaSolver{UPLO, T}, A::BlockSparseMatrix; δ::T) where {UPLO, T}
     wrk.δ[] = δ
@@ -55,6 +91,41 @@ function initkkt!(
 
     return iszero(info)
 end
+
+function initkkt!(wrk::PivotedUzawaSolver{UPLO, T}, A::BlockSparseMatrix; δ::T) where {UPLO, T}
+    wrk.δ[] = δ
+    return initkkt!(wrk.facwrk, wrk.F, wrk.S, wrk.P, wrk.L, A, δ)
+end
+
+function initkkt!(
+        facwrk::FactorizationWorkspace,
+        F::ChordalTriangular,
+        S::ChordalSymbolic,
+        P::Permutation,
+        L::BlockSparseMatrix,
+        A::BlockSparseMatrix,
+        δ::Real,
+    )
+    @assert size(F, 1) == size(L, 1) == size(A, 1)
+
+    copyto!(F.S, S)
+    copyto!(P.perm, axes(F, 1))
+    copyto!(P.invp, axes(F, 1))
+    #
+    # factorize the augmented matrix
+    #
+    #   F Fᵀ = P (δ A + Bᵀ B) Pᵀ
+    #
+    copyto!(F, L)
+    axpy!(δ, A, F)
+    cholesky!(facwrk, F, P, RowMaximum(); check = false, tol = 0)
+
+    return true
+end
+
+# ============================================================================
+# kktwindow
+# ============================================================================
 
 #
 # Estimate the minimum-cost interval
@@ -116,6 +187,10 @@ function kktwindow(rhist::AbstractVector{T}, chist::AbstractVector{T}, δ::T, ni
     return δmin, δmax
 end
 
+# ============================================================================
+# solvekkt!
+# ============================================================================
+
 #
 # Solve the KKT system
 #
@@ -135,16 +210,67 @@ end
 #   ‖ A x - Bᵀ y - f ‖ ≤ ftol
 #   ‖ B x        - g ‖ ≤ gtol.
 #
-function solvekkt!(wrk::UzawaSolver, x, y, A, B, f, g; kw...)
-    return solvekkt!(wrk.divwrk, wrk.itrwrk, wrk.hist, wrk.F, wrk.δf, wrk.δg,
+function solvekkt!(
+        wrk::UzawaSolver,
+        x::AbstractVector,
+        y::AbstractVector,
+        A::AbstractMatrix,
+        B::AbstractMatrix,
+        f::AbstractVector,
+        g::AbstractVector;
+        kw...,
+    )
+    F = wrk.F
+    dw = wrk.divwrk
+
+    function L!(v)
+        return ldiv!(dw, F, v)
+    end
+
+    function U!(v)
+        return ldiv!(dw, F', v)
+    end
+
+    return solvekkt!(L!, U!, wrk.itrwrk, wrk.hist, wrk.δf, wrk.δg,
             wrk.δx, wrk.δy, wrk.δ[], x, y, A, B, f, g; kw...)
 end
 
 function solvekkt!(
-        divwrk::DivisionWorkspace,
+        wrk::PivotedUzawaSolver,
+        x::AbstractVector,
+        y::AbstractVector,
+        A::AbstractMatrix,
+        B::AbstractMatrix,
+        f::AbstractVector,
+        g::AbstractVector;
+        kw...,
+    )
+    F = wrk.F
+    dw = wrk.divwrk
+    P = wrk.P
+    w = wrk.w
+
+    function L!(v)
+        mul!(w, P, v)
+        lpdiv!(dw, F, w)
+        return copyto!(v, w)
+    end
+
+    function U!(v)
+        lpdiv!(dw, F', v)
+        mul!(w, P', v)
+        return copyto!(v, w)
+    end
+
+    return solvekkt!(L!, U!, wrk.itrwrk, wrk.hist, wrk.δf, wrk.δg,
+            wrk.δx, wrk.δy, wrk.δ[], x, y, A, B, f, g; kw...)
+end
+
+function solvekkt!(
+        L!::Function,
+        U!::Function,
         itrwrk::CGWorkspace,
         hist::AbstractVector,
-        L::AbstractMatrix,
         δf::AbstractVector,
         δg::AbstractVector,
         δx::AbstractVector,
@@ -169,7 +295,6 @@ function solvekkt!(
     @assert length(y) == m
     @assert length(f) == n
     @assert length(g) == m
-    @assert size(L, 1) == n
     @assert size(A, 1) == n
 
     @assert δ > 0
@@ -232,8 +357,8 @@ function solvekkt!(
         copyto!(δx, δf)
         rmul!(δx, δ)
         mul!(δx, B', δg, 1, 1)
-        ldiv!(divwrk, L,  δx)
-        ldiv!(divwrk, L', δx)
+        L!(δx)
+        U!(δx)
         mul!(δg, B, δx, -1, 1)
         #
         # update x and y:
@@ -288,7 +413,7 @@ function solvekkt!(
     #   y ← y + 1/δ δy - 1/δ B δx
     #
     axpy!(-α, δg, y)
-    ncg, cgstat = cg!(itrwrk, B, L, divwrk, x, δy, δg; atol = gtol, itmax = cgmax)
+    ncg, cgstat = cg!(L!, U!, itrwrk, B, x, δy, δg; atol = gtol, itmax = cgmax)
     axpy!(α, δy, y)
     axpy!(α, δg, y)
 

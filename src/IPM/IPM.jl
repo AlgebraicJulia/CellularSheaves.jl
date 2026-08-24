@@ -1,7 +1,7 @@
 module IPM
 
 using LinearAlgebra
-using LinearAlgebra: chkstride1, BlasFloat, BlasInt, LowerTriangular, Adjoint
+using LinearAlgebra: chkstride1, BlasFloat, BlasInt, LowerTriangular, Adjoint, RowMaximum
 using Random: Xoshiro
 using DoubleFloats: Double64, HI, LO
 using Printf: @sprintf, @printf
@@ -11,6 +11,7 @@ using Base: require_one_based_indexing, ReshapedArray, @propagate_inbounds, prom
 using FixedSizeArrays: FixedSizeArrayDefault
 using SparseArrays
 using TimerOutputs
+using FillArrays: Falses
 using Base.Threads: @threads, nthreads
 
 const FArray{T, N} = FixedSizeArrayDefault{T, N}
@@ -24,7 +25,7 @@ const FVectorView{T} = SubArray{T, 1, FVector{T}, Tuple{UnitRange{Int64}}, true}
 const FMatrixView{T} = ReshapedArray{T, 2, FVectorView{T}, Tuple{}}
 
 using CliqueTrees: BipartiteGraph, linegraph, uniongraph, EliminationAlgorithm, DEFAULT_ELIMINATION_ALGORITHM
-using CliqueTrees.Multifrontal: cholesky!, ChordalTriangular, FChordalTriangular, ChordalSymbolic, triangular, fronts, diagblock, offdblock,
+using CliqueTrees.Multifrontal: cholesky!, lpdiv!, ChordalTriangular, FChordalTriangular, ChordalSymbolic, triangular, fronts, diagblock, offdblock,
                                  DivisionWorkspace, FactorizationWorkspace, symbolic, FPermutation, Permutation
 using ..BlockSparseArrays: BlockSparseMatrix, block, colrange, rowrange, srcrange, nvtxs, vtxs, ncols, nrows, nouts, outs, nbnzs, narcs, blocksparse, selectvtxs, halfselectvtxs, rows, cols, twins, compress2
 using CommonSolve: init, solve!, solve

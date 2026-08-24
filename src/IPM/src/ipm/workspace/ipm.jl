@@ -1,9 +1,9 @@
 struct IPMWorkspace{T} <: AbstractWorkspace{T}
     #
-    # residuals
+    # residuals: Δf dual (n), Δg B-primal (m)
     #
-    rp::FVector{T}
-    rd::FVector{T}
+    Δf::FVector{T}
+    Δg::FVector{T}
     #
     # Newton right-hand-side
     #
@@ -21,23 +21,16 @@ struct IPMWorkspace{T} <: AbstractWorkspace{T}
     Δy::FVector{T}
     Δd::FVector{T}
     #
-    # iterative refinement workspace
-    #
-    sp::FVector{T}
-    sy::FVector{T}
-    dp::FVector{T}
-    dy::FVector{T}
-    #
     # step-length and status
     #
     step::FVector{T}
     flag::FVector{Bool}
 end
 
-function IPMWorkspace{T}(m::Integer, n::Integer, k::Integer) where {T}
+function IPMWorkspace{T}(m::Integer, n::Integer, nv::Integer) where {T}
     return IPMWorkspace{T}(
-        FVector{T}(undef, m),  # rp
-        FVector{T}(undef, n),  # rd
+        FVector{T}(undef, n),  # Δf
+        FVector{T}(undef, m),  # Δg
         FVector{T}(undef, n),  # f
         FVector{T}(undef, n),  # Δpa
         FVector{T}(undef, m),  # Δya
@@ -45,11 +38,7 @@ function IPMWorkspace{T}(m::Integer, n::Integer, k::Integer) where {T}
         FVector{T}(undef, n),  # Δp
         FVector{T}(undef, m),  # Δy
         FVector{T}(undef, n),  # Δd
-        FVector{T}(undef, n),  # sp
-        FVector{T}(undef, m),  # sy
-        FVector{T}(undef, n),  # dp
-        FVector{T}(undef, m),  # dy
-        FVector{T}(undef, k),     # step
-        FVector{Bool}(undef, k),  # flag
+        FVector{T}(undef, nv),     # step
+        FVector{Bool}(undef, nv),  # flag
     )
 end

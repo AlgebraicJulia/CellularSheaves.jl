@@ -1,4 +1,4 @@
-struct HSDSolver{T, I, V} <: AbstractSolver{T}
+struct HSDSolver{T, I, V, KKT} <: AbstractSolver{T}
     Q::BlockSparseMatrix{T, I}
     H::BlockSparseMatrix{T, I}
     B::BlockSparseMatrix{T, I}
@@ -9,12 +9,12 @@ struct HSDSolver{T, I, V} <: AbstractSolver{T}
     y::FVector{T}
     K::FVector{V}
     scaling::HSDScaling{T}
-    C::FPermutation{I}
-    R::FPermutation{I}
+    P2::FPermutation{I}
+    P1::FPermutation{I}
     wrk::HSDWorkspace{T}
     caches::Caches{T, I}
     sched::ConeSchedule{T, I}
-    kkt::BorderedSolver{:L, T, I}
+    kkt::SkewSolver{T, KKT}
     hist::HSDHistory{T}
     ν::Int
     settings::HSDSettings{T}
@@ -24,8 +24,8 @@ struct HSDSolver{T, I, V} <: AbstractSolver{T}
     Δy2::FVector{T}
     nf::FScalar{T}
     ng::FScalar{T}
-    sg::FScalar{T}     # ‖g‖ in original (unscaled) units — stopping-test primal denominator
-    sf::FScalar{T}     # ‖f‖ in original (unscaled) units — stopping-test dual denominator
+    sg::FScalar{T}     # ‖g‖ in original (unscaled) units — B-primal stopping-test denominator
+    sf::FScalar{T}     # ‖f‖ in original (unscaled) units — dual stopping-test denominator
     nB::FScalar{T}      # ‖B‖ — fixed for the solver's lifetime; the cold-start augmentation anchor
     δ::FScalar{T}       # reciprocal augmentation 1/α; owned by setaug!
     timers::TimerOutput
@@ -43,7 +43,8 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
         ldiv!(τ, du)
         ldiv!(τ, yu)
     elseif status in (PRIMAL_INFEASIBLE, NEAR_PRIMAL_INFEASIBLE)
-        ldiv!(norm(yu), yu)
+        nrm = norm(yu)
+        ldiv!(nrm, yu)
     elseif status in (DUAL_INFEASIBLE, NEAR_DUAL_INFEASIBLE)
         np = norm(pu)
         ldiv!(np, pu)
@@ -59,8 +60,8 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
     end
     #
     # C5 (addendum): the answer at the returned point, in user frame. pres/dres are recomputed
-    # from a fresh residual pass (the last step's w.rp/w.rd describe the pre-update iterate), then
-    # the residual VECTOR is un-scaled per-element (÷rscl for rows, ÷cscl for cols) BEFORE norming
+    # from a fresh residual pass (the last step's w.Δg/w.Δf describe the pre-update iterate), then
+    # the residual VECTOR is un-scaled per-element (÷yscl for rows, ÷pscl for cols) BEFORE norming
     # — the E/D equilibration reweighting destroys the mass distribution, so un-scaling the stored
     # embedding norm would be wrong. Objectives are bilinear (equilibration-invariant); mu is
     # evaluated directly (the τκ / ν+1→ν wedges are full-size at off-path floors).
@@ -77,9 +78,10 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
     elseif status == ILL_POSED || status == NEAR_ILL_POSED || isempty(s.hist)
         mu = pres = dres = pobj = dobj = T(NaN)
     else
-        residuals!(s)   # refresh w.rp (m), w.rd (n), w.Qp = Q·p at the terminal iterate
-        pres = norm(w.rp ./ scl.rscl) / τ / (1 + norm(s.g ./ scl.rscl))
-        dres = norm(w.rd ./ scl.cscl) / τ / (1 + norm(s.f ./ scl.cscl))
+        residuals!(s)   # refresh w.Δg (m), w.Δf (n), w.Qp = Q·p at the terminal iterate
+        pres = gnorm(w.Δg, scl.yscl, s.sg[]) / τ
+        dres = fnorm(w.Δf, scl.pscl, s.sf[]) / τ
+
         mu   = dot(s.p, s.d) / (s.ν * τ^2)
         pQp  = dot(s.p, w.Qp) / τ^2
         # f, g carry the embedding border scale bscl (update!); undo it on the linear terms,
@@ -90,11 +92,13 @@ function result(s::HSDSolver{T}, status::IPMStatus) where {T}
 
     p = Vector{T}(undef, length(pu))
     d = Vector{T}(undef, length(du))
-    y = Vector{T}(undef, length(yu))
 
-    ldiv!(p, s.C, pu)
-    ldiv!(d, s.C, du)
-    ldiv!(y, s.R, yu)
+    ldiv!(p, s.P2, pu)
+    ldiv!(d, s.P2, du)
+    #
+    # the B-row dual un-permutes through P1 into user space
+    #
+    y = s.P1 \ yu
 
     return HSDResult{T}(p, d, y, status, niter, nsolve, τ, κ, s.hist, s.timers,
                         mu, pres, dres, pobj, dobj)
@@ -107,17 +111,17 @@ end
 #
 # compute the negated residuals
 #
-#   [ rd ]   [ d  ]   [ Q   -Bᵀ  -f ] [ p ]
-#   [ rp ] = [ 0  ] - [ B    0   -g ] [ y ]
-#   [ rτ ]   [ κ  ]   [ fᵀ   gᵀ   0 ] [ τ ]
+#   [ Δf ]   [ d  ]   [ Q   -Bᵀ -f ] [ p ]
+#   [ Δg ] = [ 0  ] - [ B    0  -g ] [ y ]
+#   [ rτ ]   [ κ  ]   [ fᵀ   gᵀ  0 ] [ τ ]
 #
 # then correct rτ:
 #
 #   rτ ← rτ + pᵀQp/τ
 #
 function residuals!(
-        rd::AbstractVector{T},
-        rp::AbstractVector{T},
+        Δf::AbstractVector{T},
+        Δg::AbstractVector{T},
         Qp::AbstractVector{T},
         τ::T,
         κ::T,
@@ -132,22 +136,22 @@ function residuals!(
     #
     # compute the matrix-vector product
     #
-    #   [ rd ]   [ Q   -Bᵀ  -f ] [ p ]
-    #   [ rp ] = [ B    0   -g ] [ y ]
-    #   [ rτ ]   [ fᵀ   gᵀ   0 ] [ τ ]
+    #   [ Δf ]   [ Q   -Bᵀ -f ] [ p ]
+    #   [ Δg ] = [ B    0  -g ] [ y ]
+    #   [ rτ ]   [ fᵀ   gᵀ  0 ] [ τ ]
     #
-    mulkkt!(rd, rp, Q, B, p, y)
-    axpy!(-τ, f, rd)
-    axpy!(-τ, g, rp)
+    mulkkt!(Δf, Δg, Q, B, p, y)
+    axpy!(-τ, f, Δf)
+    axpy!(-τ, g, Δg)
     rτ = dot(f, p) + dot(g, y)
     #
-    # correct rd and rp
+    # correct Δf and Δg
     #
-    #   rd ← -rd + d
-    #   rp ← -rp
+    #   Δf ← -Δf + d
+    #   Δg ← -Δg
     #
-    axpby!(one(T), d, -one(T), rd)
-    lmul!(-one(T), rp)
+    axpby!(one(T), d, -one(T), Δf)
+    lmul!(-one(T), Δg)
     #
     # correct rτ:
     #
@@ -159,7 +163,7 @@ end
 function residuals!(s::HSDSolver)
     w = s.wrk
     mul!(w.Qp, s.Q, s.p)
-    return residuals!(w.rd, w.rp, w.Qp, s.τ[], s.κ[], s.B, s.p, s.d, s.y, s.f, s.g, s.Q)
+    return residuals!(w.Δf, w.Δg, w.Qp, s.τ[], s.κ[], s.B, s.p, s.d, s.y, s.f, s.g, s.Q)
 end
 
 ############################################################################################
@@ -169,27 +173,27 @@ end
 #
 # solve for the Mehrotra predictor direction
 #
-#   [  H          -Bᵀ             -f ] [ Δpa ]   [ rd - d ]
-#   [  B           0              -g ] [ Δya ] = [ rp     ]
-#   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
+#   [  H          -Bᵀ          -f ] [ Δpa ]   [ Δf - d ]
+#   [  B           0           -g ] [ Δya ] = [ Δg     ]
+#   [ fᵀ - 2pᵀQ/τ  gᵀ pᵀQp/τ²+κ/τ ] [ Δτa ]   [ rτ - κ ]
 #
 # and recover
 #
 #   Δκa = -κ (1 + Δτa/τ)
 #
-function solvepredictor!(s::HSDSolver{T}, gap::T; ptol::T, ytol::T, τtol::T) where {T}
+function solvepredictor!(s::HSDSolver{T}, gap::T; ftol::T, gtol::T) where {T}
     return solvepredictor!(
         s.wrk, s.kkt, s.Δp2, s.Δy2, s.settings, s.H, s.B, s.Q, s.f, s.g, s.d,
         s.τ[], s.κ[], gap, s.timers;
-        ptol, ytol, τtol,
+        ftol, gtol,
     )
 end
 
 function solvepredictor!(
         w::HSDWorkspace{T},
-        kkt::BorderedSolver,
-        Δp2::AbstractVector{T},  # Woodbury column primal (HSD-owned; threaded to solvekkt!) (n)
-        Δy2::AbstractVector{T},  # Woodbury column dual (physical multiplier)                (m)
+        kkt::SkewSolver,
+        Δp2::AbstractVector{T},  # τ-column primal (HSD-owned; threaded to solvekkt!) (n)
+        Δy2::AbstractVector{T},  # τ-column B-dual (physical multiplier)                (m)
         set::HSDSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -201,32 +205,31 @@ function solvepredictor!(
         κ::T,
         gap::T,
         timers::TimerOutput;
-        ptol::T,
-        ytol::T,
-        τtol::T,
+        ftol::T,
+        gtol::T,
     ) where {T}
     axpby!(-1,  d, 0, w.f)
-    axpby!( 1, w.rd, 1, w.f)
+    axpby!( 1, w.Δf, 1, w.f)
     #
-    # solve for the directions Δpa, Δya, and Δτa (bordered base + 3-row refinement)
+    # solve for the directions Δpa, Δya, and Δτa (bordered base + 2-row refinement)
     #
-    #   [  H          -Bᵀ             -f ] [ Δpa ]   [ rd - d ]
-    #   [  B           0              -g ] [ Δya ] = [ rp     ]
-    #   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
+    #   [  H          -Bᵀ          -f ] [ Δpa ]   [ Δf - d ]
+    #   [  B           0           -g ] [ Δya ] = [ Δg     ]
+    #   [ fᵀ - 2pᵀQ/τ  gᵀ pᵀQp/τ²+κ/τ ] [ Δτa ]   [ rτ - κ ]
     #
     piter, ppass, pwiter, pwpass, pstat, Δτa, dmin, dmax = @timeit timers "solve" solvekkt!(
-        kkt, w.Δpa, w.Δya, Δp2, Δy2, H, B, f, g, w.f, w.rp, gap;
-        warm=false, gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, irmax=set.refine_max_iter, cgmax=set.newton_max_iter,
+        kkt, w.Δpa, w.Δya, Δp2, Δy2, H, B, f, g, w.f, w.Δg, gap;
+        warm=false, htol=ftol, itol=gtol, stall=set.refine_stall_tol, irmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
     #
     # recover Δda:
     #
-    #   Δda ← Q Δpa - Δτa f - Bᵀ Δya - rd
+    #   Δda ← Q Δpa - Δτa f - Bᵀ Δya - Δf
     #
     mul!(w.Δda, Q, w.Δpa)
     axpy!(-Δτa, f, w.Δda)
     mul!(w.Δda, B', w.Δya, -one(T), one(T))
-    axpy!(-one(T), w.rd, w.Δda)
+    axpy!(-one(T), w.Δf, w.Δda)
     #
     # recover Δκa:
     #
@@ -239,28 +242,28 @@ end
 #
 # solve for the Mehrotra combined direction
 #
-#   [ H           -Bᵀ               -f ] [ Δp ]   [ rd*                         ]
-#   [ B            0                -g ] [ Δy ] = [ rp                          ]
-#   [ fᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
+#   [ H           -Bᵀ           -f ] [ Δp ]   [ Δf*                         ]
+#   [ B            0            -g ] [ Δy ] = [ Δg                          ]
+#   [ fᵀ - 2pᵀQ/τ  gᵀ pᵀQp/τ²+κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
 #
-# where rd* is the corrected dual residual, and recover
+# where Δf* is the corrected dual residual, and recover
 #
 #   Δκ = (σμ - τκ - Δτa·Δκa - κ·Δτ) / τ
 #
-function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T; ptol::T, ytol::T, τtol::T) where {T}
+function solvecorrector!(s::HSDSolver{T}, μ::T, gap::T, Δτa::T, Δκa::T; ftol::T, gtol::T) where {T}
     return solvecorrector!(
         s.wrk, s.kkt, s.Δp2, s.Δy2, s.settings, s.H, s.B, s.Q, s.f, s.g, s.K, s.p, s.d,
         s.caches, s.sched, s.ν, s.τ[], s.κ[], s.δ[],
         μ, gap, Δτa, Δκa, s.timers;
-        ptol, ytol, τtol,
+        ftol, gtol,
     )
 end
 
 function solvecorrector!(
         w::HSDWorkspace{T},
-        kkt::BorderedSolver,
-        Δp2::AbstractVector{T},  # Woodbury column primal (HSD-owned; threaded to solvekkt!) (n)
-        Δy2::AbstractVector{T},  # Woodbury column dual (physical multiplier)                (m)
+        kkt::SkewSolver,
+        Δp2::AbstractVector{T},  # τ-column primal (HSD-owned; threaded to solvekkt!) (n)
+        Δy2::AbstractVector{T},  # τ-column B-dual (physical multiplier)                (m)
         set::HSDSettings{T},
         H::BlockSparseMatrix{T},
         B::BlockSparseMatrix{T},
@@ -281,9 +284,8 @@ function solvecorrector!(
         Δτa::T,
         Δκa::T,
         timers::TimerOutput;
-        ptol::T,
-        ytol::T,
-        τtol::T,
+        ftol::T,
+        gtol::T,
     ) where {T}
     #
     # compute the largest step length αa ∈ (0, 1]
@@ -342,7 +344,7 @@ function solvecorrector!(
     #
     @timeit timers "init" initcorrector!(sched, K, w.f, caches, p, d, w.Δpa, w.Δda, σμ, B)
 
-    axpy!(1, w.rd, w.f)
+    axpy!(1, w.Δf, w.f)
     #
     # warm-start the corrector from the predictor's column-free directions (Δy2 is the physical
     # column multiplier):
@@ -357,23 +359,23 @@ function solvecorrector!(
     #
     # solve for the directions Δp, Δy, and Δτ
     #
-    #   [ H           -Bᵀ               -f ] [ Δp ]   [ rd*                         ]
-    #   [ B            0                -g ] [ Δy ] = [ rp                          ]
-    #   [ fᵀ - 2pᵀQ/τ  gᵀ    pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
+    #   [ H           -Bᵀ           -f ] [ Δp ]   [ Δf*                         ]
+    #   [ B            0            -g ] [ Δy ] = [ Δg                          ]
+    #   [ fᵀ - 2pᵀQ/τ  gᵀ pᵀQp/τ²+κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
     #
     citer, cpass, cwiter, cwpass, cstat, Δτ, _, _ = @timeit timers "solve" solvekkt!(
-        kkt, w.Δp, w.Δy, Δp2, Δy2, H, B, f, g, w.f, w.rp, fτ;
-        warm=true, gtol=ptol, ftol=ytol, ηtol=τtol, stall=set.refine_stall_tol, irmax=set.refine_max_iter, cgmax=set.newton_max_iter,
+        kkt, w.Δp, w.Δy, Δp2, Δy2, H, B, f, g, w.f, w.Δg, fτ;
+        warm=true, htol=ftol, itol=gtol, stall=set.refine_stall_tol, irmax=set.refine_max_iter, cgmax=set.newton_max_iter,
     )
     #
     # recover Δd:
     #
-    #   Δd ← Q Δp - Δτ f - Bᵀ Δy - rd
+    #   Δd ← Q Δp - Δτ f - Bᵀ Δy - Δf
     #
     mul!(w.Δd, Q, w.Δp)
     axpy!(-Δτ, f, w.Δd)
     mul!(w.Δd, B', w.Δy, -one(T), one(T))
-    axpy!(-one(T), w.rd, w.Δd)
+    axpy!(-one(T), w.Δf, w.Δd)
     #
     # recover Δκ:
     #
@@ -424,7 +426,7 @@ function HSDSolver(prob::IPMProblem{T, I}, settings::HSDSettings{T}) where {T, I
     m = size(prob.B, 1)
     ν = conedegree(prob.K, prob.B)
 
-    S, B, Q, f, g, cones, C, R = symbkkt(prob, settings.elim_alg)
+    S, Q, B, f, g, cones, P1, P2 = symbkkt(prob, settings.elim_alg)
 
     scaling = HSDScaling{T}(n, m)
 
@@ -433,7 +435,7 @@ function HSDSolver(prob::IPMProblem{T, I}, settings::HSDSettings{T}) where {T, I
         update!(scaling, f, g)   # Stage 2: equilibrate the f/g embedding border → τ ≈ 1
     end
 
-    kkt = BorderedSolver(S, B; cgmax=settings.newton_max_iter, irmax=settings.refine_max_iter)   # HSD solves the 3-row bordered system
+    kkt = SkewSolver(S, B; cgmax=settings.newton_max_iter, irmax=settings.refine_max_iter, pivot=settings.pivot)   # HSD solves the bordered system
 
     p = FVector{T}(undef, n)
     d = FVector{T}(undef, n)
@@ -457,13 +459,13 @@ function HSDSolver(prob::IPMProblem{T, I}, settings::HSDSettings{T}) where {T, I
     nB[] = norm(B)
     nf[] = norm(f)
     ng[] = norm(g)
-    sg[] = scalenorm(g, scaling.rscl)
-    sf[] = scalenorm(f, scaling.cscl)
+    sg[] = scalenorm(g, scaling.yscl)
+    sf[] = scalenorm(f, scaling.pscl)
     Δp2 = FVector{T}(undef, n)
     Δy2 = FVector{T}(undef, m)
 
     solver = HSDSolver(Q, H, B, f, g, p, d, y, cones,
-        scaling, C, R, hsdwrk, caches, sched, kkt,
+        scaling, P2, P1, hsdwrk, caches, sched, kkt,
         hist, ν, settings, τ, κ, Δp2, Δy2, nf, ng, sg, sf, nB, δ, TimerOutput()
     )
 
@@ -533,8 +535,8 @@ function isdualinfeasible(w, τ, κ, B, p, f, nf, rtol, atol)
         flag = cp > atol * np * (1 + nf)
 
         if flag
-            mul!(w.sy, B, p)
-            flag = max(norm(w.sy), norm(w.Qp)) < rtol * abs(cp)
+            mul!(w.Δya, B, p)   # Δya is free scratch here (the predictor overwrites it next)
+            flag = max(norm(w.Δya), norm(w.Qp)) < rtol * abs(cp)
         end
     end
 
@@ -612,9 +614,9 @@ function step!(s::HSDSolver{T}) where {T}
     #
     # compute negated residuals
     #
-    #   [ rd ]   [ d ]   [ Q   -Bᵀ  -f       ] [ p ]
-    #   [ rp ] = [ 0 ] - [ B    0   -g       ] [ y ]
-    #   [ rτ ]   [ κ ]   [ fᵀ   gᵀ  -pᵀQp/τ² ] [ τ ]
+    #   [ Δf ]   [ d ]   [ Q   -Bᵀ -f       ] [ p ]
+    #   [ Δg ] = [ 0 ] - [ B    0  -g       ] [ y ]
+    #   [ rτ ]   [ κ ]   [ fᵀ   gᵀ -pᵀQp/τ² ] [ τ ]
     #
     gap = residuals!(s)
     #
@@ -624,8 +626,8 @@ function step!(s::HSDSolver{T}) where {T}
     #
     μ = mu(s)
     τu = s.scaling.bscl[] * τ
-    pres = scalenorm(w.rp, s.scaling.rscl) / τu / (1 + s.sg[])
-    dres = scalenorm(w.rd, s.scaling.cscl) / τu / (1 + s.sf[])
+    pres = gnorm(w.Δg, s.scaling.yscl, s.sg[]) / τu
+    dres = fnorm(w.Δf, s.scaling.pscl, s.sf[]) / τu
 
     pQp = dot(s.p, w.Qp)
     pobj = (pQp / (2 * τ^2) - dot(s.f, s.p) / τ) / s.scaling.bscl[]^2
@@ -679,9 +681,8 @@ function step!(s::HSDSolver{T}) where {T}
             μ1 = isempty(s.hist.μ) ? μ : first(s.hist.μ)
 
             tol = min(FORCING_FRAC * μ / μ1, FORCING_CEIL)
-            ptol = tol * (1 + s.ng[])
-            ytol = tol * (1 + s.nf[])
-            τtol = tol * (1 + s.ng[] + s.nf[])   # border-row target (bordered predictor/corrector only)
+            ftol = tol * (1 + s.nf[])
+            gtol = tol * (1 + s.ng[])
             #
             # factor F and solve/cache the Woodbury column w₂ + capacitance (the bordered do-once)
             #
@@ -699,11 +700,11 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 # solve for the Mehrota predictor direction
                 #
-                #   [  H          -Bᵀ             -f ] [ Δpa ]   [ rd - d ]
-                #   [  B           0              -g ] [ Δya ] = [ rp     ]
-                #   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτa ]   [ rτ - κ ]
+                #   [  H          -Bᵀ          -f ] [ Δpa ]   [ Δf - d ]
+                #   [  B           0           -g ] [ Δya ] = [ Δg     ]
+                #   [ fᵀ - 2pᵀQ/τ  gᵀ pᵀQp/τ²+κ/τ ] [ Δτa ]   [ rτ - κ ]
                 #
-                piter, ppass, pwiter, pwpass, pstat, Δτa, Δκa, dmin, dmax = @timeit s.timers "predictor" solvepredictor!(s, gap; ptol, ytol, τtol)
+                piter, ppass, pwiter, pwpass, pstat, Δτa, Δκa, dmin, dmax = @timeit s.timers "predictor" solvepredictor!(s, gap; ftol, gtol)
 
                 for v in vtxs(s.B)
                     if s.K[v] isa CofreeCone
@@ -713,11 +714,11 @@ function step!(s::HSDSolver{T}) where {T}
                 #
                 # solve for the Mehrotra combined direction
                 #
-                #   [  H          -Bᵀ             -f ] [ Δp ]   [ rd*                         ]
-                #   [  B           0              -g ] [ Δy ] = [ rp                          ]
-                #   [ fᵀ - 2pᵀQ/τ  gᵀ  pᵀQp/τ² + κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
+                #   [  H          -Bᵀ          -f ] [ Δp ]   [ Δf*                         ]
+                #   [  B           0           -g ] [ Δy ] = [ Δg                          ]
+                #   [ fᵀ - 2pᵀQ/τ  gᵀ pᵀQp/τ²+κ/τ ] [ Δτ ]   [ rτ - κ + (σμ - Δτa·Δκa) / τ ]
                 #
-                citer, cpass, cwiter, cwpass, cstat, Δτ, Δκ = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ptol, ytol, τtol)
+                citer, cpass, cwiter, cwpass, cstat, Δτ, Δκ = @timeit s.timers "corrector" solvecorrector!(s, μ, gap, Δτa, Δκa; ftol, gtol)
                 #
                 # The Woodbury column (s.Δp2/s.Δy2) is threaded in/out of initkkt!/predictor/corrector, so
                 # the final column already lives in it — no copy-back. It seeds next iteration's column base
@@ -790,4 +791,3 @@ function step!(s::HSDSolver{T}) where {T}
 
     return status
 end
-

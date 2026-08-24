@@ -24,21 +24,21 @@ struct IPMProblem{T, I, V <: AbstractCone}
     f::FVector{T}
     g::FVector{T}
     K::FVector{V}
-    R::FPermutation{I}
-    C::FPermutation{I}
+    P1::FPermutation{I}      # row permutation
+    P2::FPermutation{I}      # column permutation
 
-    function IPMProblem{T, I, V}(Q::BlockSparseMatrix, B::BlockSparseMatrix, f::FVector, g::FVector, K::FVector, R::FPermutation, C::FPermutation) where {T, I, V <: AbstractCone}
+    function IPMProblem{T, I, V}(Q::BlockSparseMatrix, B::BlockSparseMatrix, f::FVector, g::FVector, K::FVector, P1::FPermutation, P2::FPermutation) where {T, I, V <: AbstractCone}
         @assert nrows(B) == length(g)
         @assert ncols(B) == ncols(Q) == length(f)
         @assert nvtxs(B) == nvtxs(Q) == length(K)
-        @assert length(R.perm) == nrows(B)
-        @assert length(C.perm) == ncols(B)
+        @assert length(P1.perm) == nrows(B)
+        @assert length(P2.perm) == ncols(B)
 
         for v in vtxs(B)
             @assert ncols(B, v) == ncols(Q, v)
         end
 
-        return new{T, I, V}(Q, B, f, g, K, R, C)
+        return new{T, I, V}(Q, B, f, g, K, P1, P2)
     end
 end
 
@@ -48,16 +48,16 @@ end
 Construct an [`IPMProblem`](@ref).
 """
 function IPMProblem(Q::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I}, f::AbstractVector{T}, g::AbstractVector{T}, K::AbstractVector{V}) where {T, I, V <: AbstractCone}
-    R = FPermutation{I}(rows(B))
-    C = FPermutation{I}(cols(B))
-    return IPMProblem{T, I, V}(Q, B, f, g, K, R, C)
+    P1 = FPermutation{I}(rows(B))
+    P2 = FPermutation{I}(cols(B))
+    return IPMProblem{T, I, V}(Q, B, f, g, K, P1, P2)
 end
 
-function IPMProblem(Q::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I}, f::AbstractVector{T}, g::AbstractVector{T}, K::AbstractVector{V}, R::FPermutation{I}, C::FPermutation{I}) where {T, I, V <: AbstractCone}
-    return IPMProblem{T, I, V}(Q, B, f, g, K, R, C)
+function IPMProblem(Q::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I}, f::AbstractVector{T}, g::AbstractVector{T}, K::AbstractVector{V}, P1::FPermutation{I}, P2::FPermutation{I}) where {T, I, V <: AbstractCone}
+    return IPMProblem{T, I, V}(Q, B, f, g, K, P1, P2)
 end
 
-function IPMProblem{T, I, V}(Q::BlockSparseMatrix, B::BlockSparseMatrix, f::AbstractVector, g::AbstractVector, K::AbstractVector, R::FPermutation, C::FPermutation) where {T, I, V <: AbstractCone}
+function IPMProblem{T, I, V}(Q::BlockSparseMatrix, B::BlockSparseMatrix, f::AbstractVector, g::AbstractVector, K::AbstractVector, P1::FPermutation, P2::FPermutation) where {T, I, V <: AbstractCone}
     if !(f isa FVector{T})
         f = FVector{T}(f)
     end
@@ -70,11 +70,11 @@ function IPMProblem{T, I, V}(Q::BlockSparseMatrix, B::BlockSparseMatrix, f::Abst
         K = FVector{V}(K)
     end
 
-    return IPMProblem{T, I, V}(Q, B, f, g, K, R, C)
+    return IPMProblem{T, I, V}(Q, B, f, g, K, P1, P2)
 end
 
 function symbkkt(prob::IPMProblem, alg::EliminationAlgorithm)
-    return symbkkt(prob.B, prob.Q, prob.f, prob.g, prob.K, prob.C, prob.R, alg)
+    return symbkkt(prob.Q, prob.B, prob.f, prob.g, prob.K, prob.P1, prob.P2, alg)
 end
 
 """
@@ -89,43 +89,41 @@ function IPMProblem(
         g::AbstractVector,
         K::AbstractVector,
         s::AbstractVector;
-        tau::Real = 1.0,
+        compress::Real = 1.0,
     ) where {T}
     m, n = size(B); k = length(K)
 
-    @assert size(Q, 1) == n
-    @assert size(Q, 2) == n
-    @assert length(f)  == n
-    @assert length(g)  == m
-    @assert length(s)  == k
-    @assert    sum(s)  == n
-    @assert  0 <  tau  <= 1
+    @assert size(Q, 1)   == n
+    @assert size(Q, 2)   == n
+    @assert length(f)    == n
+    @assert length(g)    == m
+    @assert length(s)    == k
+    @assert    sum(s)    == n
+    @assert 0 < compress <= 1
 
     Q = dropoffdz(Q)
     B = dropzeros(B)
 
-    nvtx, xcol, colperm, K = colpartition(B, Q, K, s, tau)
-    C = colcompress(B, nvtx, xcol, colperm)
-    nout, xrow, rowperm = twins(C, transpose(C), tau)
+    nvtx, xcol, colperm, K = colpartition(B, Q, K, s, compress)
+    Bc = colcompress(B, nvtx, xcol, colperm)
+    nout, xrow, rowperm = twins(Bc, transpose(Bc), compress)
+
+    P1 = FPermutation{Int}(rowperm)
+    P2 = Permutation(colperm)
 
     Bp = permute(B, rowperm, colperm)
     Qp = permute(Q, colperm, colperm)
 
-    Bb = compress2(Bp, nvtx, nout, xcol, xrow)
-    Qb = compress2(Qp, nvtx, nvtx, xcol, xcol)
+    Bp = compress2(Bp, nvtx, nout, xcol, xrow)
+    Qp = compress2(Qp, nvtx, nvtx, xcol, xcol)
 
-    cp = FVector{T}(undef, n)
+    fp = FVector{T}(undef, n)
     gp = FVector{T}(undef, m)
 
-    for j in 1:n
-        cp[j] = f[colperm[j]]
-    end
+    mul!(fp, P2, f)
+    mul!(gp, P1, g)
 
-    for i in 1:m
-        gp[i] = g[rowperm[i]]
-    end
-
-    return IPMProblem(Qb, Bb, cp, gp, K, Permutation(rowperm), Permutation(colperm))
+    return IPMProblem(Qp, Bp, fp, gp, K, P1, P2)
 end
 
 function dropoffdz(Q::SparseMatrixCSC{T, I}) where {T, I}

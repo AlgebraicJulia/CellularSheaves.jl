@@ -39,16 +39,16 @@ end
 #   y ←       δy
 #   u ← u - B δx
 #
-function cg!(wrk::CGWorkspace{T}, B, L, divwrk, x, y, u; kw...) where {T}
-    return cg!(wrk.p, wrk.w, B, L, divwrk, x, y, u, wrk.hist; kw...)
+function cg!(L!::Function, U!::Function, wrk::CGWorkspace{T}, B, x, y, u; kw...) where {T}
+    return cg!(L!, U!, wrk.p, wrk.w, B, x, y, u, wrk.hist; kw...)
 end
 
 function cg!(
+        L!::Function,
+        U!::Function,
         p::AbstractVector{T},
         w::AbstractVector{T},
         B::AbstractMatrix{T},
-        L::AbstractMatrix{T},
-        divwrk::DivisionWorkspace{T},
         x::AbstractVector{T},
         y::AbstractVector{T},
         u::AbstractVector{T},
@@ -56,9 +56,6 @@ function cg!(
         atol::Real,
         itmax::Int,
     ) where {T}
-
-    @assert size(L, 1) == size(B, 2)
-    @assert size(L, 2) == size(B, 2)
 
     @assert length(w) == size(B, 2)
     @assert length(x) == size(B, 2)
@@ -91,7 +88,7 @@ function cg!(
                 #   L w = Bᵀ p
                 #
                 mul!(w, B', p)
-                ldiv!(divwrk, L, w)
+                L!(w)
                 #
                 # compute the squared elliptic norm of the direction p
                 #
@@ -106,7 +103,7 @@ function cg!(
                     #
                     #   Lᵀ w = w
                     #
-                    ldiv!(divwrk, L', w)
+                    U!(w)
                     #
                     # solution update: advance the CG iterate
                     #

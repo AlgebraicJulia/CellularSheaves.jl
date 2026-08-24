@@ -1,5 +1,3 @@
-abstract type KKTSolver{T} end
-
 @enum KKTStatus KKT_CONTINUE KKT_SOLVED KKT_STAGNATED KKT_ITMAX KKT_NUMERICAL_FAILURE KKT_IRMAX
 
 #
@@ -22,37 +20,38 @@ function mulkkt!(
     return
 end
 
-#
-# symbolic KKT setup: pick a fill-reducing elimination ordering for the
-# KKT system and permute the problem data into that ordering.
-#
-# returns the symbolic factorization S, the permuted problem data
-# (B, Q, f, g, cones), and the column/row permutations (C, R) composed
-# against the caller's own.
-#
 function symbkkt(
-        B::AbstractMatrix,
-        Q::AbstractMatrix,
-        f::AbstractVector,
-        g::AbstractVector,
+        Q::AbstractMatrix{T},
+        B::AbstractMatrix{T},
+        f::AbstractVector{T},
+        g::AbstractVector{T},
         K::AbstractVector,
-        C::AbstractMatrix,
-        R::AbstractMatrix,
+        P1::AbstractMatrix,
+        P2::AbstractMatrix,
         alg::EliminationAlgorithm,
-    )
+    ) where {T}
+    m, n = size(B)
+
     weights, graph = weightedgraph(B, Q)
     D, P, S = symbolic(weights, graph; alg)
 
-    B = selectvtxs(B, D.perm)
-    Q = halfselectvtxs(halfselectvtxs(Q, D.perm), D.perm)
-    f = P * f
-    g = copy(g)
-    K = tounion(K, D.perm)
-    C = P * C
+    sQ = halfselectvtxs(halfselectvtxs(Q, D.perm), D.perm)
+    sB = selectvtxs(B, D.perm)
 
-    return S, B, Q, f, g, K, C, R
+    sf = FVector{T}(undef, n)
+    sg = FVector{T}(undef, m)
+
+    mul!(sf, P, f)
+    copyto!(sg, g)
+
+    sK = tounion(K, D.perm)
+
+    sP1 =     P1
+    sP2 = P * P2
+
+    return S, sQ, sB, sf, sg, sK, sP1, sP2
 end
 
 include("cg.jl")
 include("uzawa.jl")
-include("bordered.jl")
+include("skew.jl")

@@ -1,6 +1,6 @@
 struct IPMScaling{T} <: AbstractScaling{T}
-    cscl::FVector{T}   # length n: per-column scaling (constant on each cone block)
-    rscl::FVector{T}   # length m: per-row scaling
+    pscl::FVector{T}   # length n: per-column scaling (constant on each cone block)
+    yscl::FVector{T}   # length m: per-B-row scaling
 end
 
 """
@@ -9,11 +9,11 @@ end
 Construct an identity (trivial) scaling with all entries equal to 1.
 """
 function IPMScaling{T}(n::Int, m::Int) where {T}
-    cscl = FVector{T}(undef, n)
-    rscl = FVector{T}(undef, m)
+    pscl  = FVector{T}(undef, n)
+    yscl  = FVector{T}(undef, m)
 
-    fill!(cscl, one(T))
-    fill!(rscl, one(T))
+    fill!(pscl,  one(T))
+    fill!(yscl,  one(T))
 
-    return IPMScaling{T}(cscl, rscl)
+    return IPMScaling{T}(pscl, yscl)
 end
