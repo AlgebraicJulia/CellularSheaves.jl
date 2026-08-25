@@ -5,6 +5,7 @@ using ..BlockSparseArrays
 
 include("SheafInterface.jl")
 include("EuclideanSheaves.jl")
+include("ConicSheaves.jl")
 include("DistributedSolve.jl")
 include("PotentialSheaves.jl")
 include("ADT.jl")
@@ -20,6 +21,7 @@ include("Formations.jl")
 @reexport using ..BlockSparseArrays
 @reexport using .SheafInterface
 @reexport using .EuclideanSheaves
+@reexport using .ConicSheaves
 @reexport using .DistributedSolve
 @reexport using .PotentialSheaves
 @reexport using .CellularSheafTerm
