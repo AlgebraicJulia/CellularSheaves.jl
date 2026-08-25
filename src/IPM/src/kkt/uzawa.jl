@@ -211,6 +211,21 @@ end
 #   ‖ B x        - g ‖ ≤ gtol.
 #
 function solvekkt!(
+        wrk::KKTSolver,
+        x::AbstractVector,
+        y::AbstractVector,
+        A::AbstractMatrix,
+        B::AbstractMatrix,
+        f::AbstractVector,
+        g::AbstractVector;
+        kw...,
+    )
+    return solvekkt!(_ -> false, _ -> false, wrk, x, y, A, B, f, g; kw...)
+end
+
+function solvekkt!(
+        fstop::Function,
+        gstop::Function,
         wrk::UzawaSolver,
         x::AbstractVector,
         y::AbstractVector,
@@ -221,21 +236,23 @@ function solvekkt!(
         kw...,
     )
     F = wrk.F
-    dw = wrk.divwrk
+    d = wrk.divwrk
 
     function L!(v)
-        return ldiv!(dw, F, v)
+        return ldiv!(d, F, v)
     end
 
     function U!(v)
-        return ldiv!(dw, F', v)
+        return ldiv!(d, F', v)
     end
 
-    return solvekkt!(L!, U!, wrk.itrwrk, wrk.hist, wrk.δf, wrk.δg,
+    return solvekkt!(fstop, gstop, L!, U!, wrk.itrwrk, wrk.hist, wrk.δf, wrk.δg,
             wrk.δx, wrk.δy, wrk.δ[], x, y, A, B, f, g; kw...)
 end
 
 function solvekkt!(
+        fstop::Function,
+        gstop::Function,
         wrk::PivotedUzawaSolver,
         x::AbstractVector,
         y::AbstractVector,
@@ -246,27 +263,29 @@ function solvekkt!(
         kw...,
     )
     F = wrk.F
-    dw = wrk.divwrk
+    d = wrk.divwrk
     P = wrk.P
     w = wrk.w
 
     function L!(v)
         mul!(w, P, v)
-        lpdiv!(dw, F, w)
+        lpdiv!(d, F, w)
         return copyto!(v, w)
     end
 
     function U!(v)
-        lpdiv!(dw, F', v)
+        lpdiv!(d, F', v)
         mul!(w, P', v)
         return copyto!(v, w)
     end
 
-    return solvekkt!(L!, U!, wrk.itrwrk, wrk.hist, wrk.δf, wrk.δg,
+    return solvekkt!(fstop, gstop, L!, U!, wrk.itrwrk, wrk.hist, wrk.δf, wrk.δg,
             wrk.δx, wrk.δy, wrk.δ[], x, y, A, B, f, g; kw...)
 end
 
 function solvekkt!(
+        fstop::Function,
+        gstop::Function,
         L!::Function,
         U!::Function,
         itrwrk::CGWorkspace,
@@ -329,7 +348,7 @@ function solvekkt!(
 
     fprv = fres = norm(δf); hist[1] = fres
 
-    if fres ≤ ftol
+    if fres ≤ ftol || fstop(δf)
         irstat = KKT_SOLVED
     elseif nir ≥ irmax
         irstat = KKT_IRMAX
@@ -384,7 +403,7 @@ function solvekkt!(
         fres = norm(δf)
         hist[nir + 1] = fres
 
-        if fres ≤ ftol
+        if fres ≤ ftol || fstop(δf)
             irstat = KKT_SOLVED
         elseif fres > (1 - stall) * fprv
             irstat = KKT_STAGNATED
@@ -413,7 +432,7 @@ function solvekkt!(
     #   y ← y + 1/δ δy - 1/δ B δx
     #
     axpy!(-α, δg, y)
-    ncg, cgstat = cg!(L!, U!, itrwrk, B, x, δy, δg; atol = gtol, itmax = cgmax)
+    ncg, cgstat = cg!(gstop, L!, U!, itrwrk, B, x, δy, δg; atol = gtol, itmax = cgmax)
     axpy!(α, δy, y)
     axpy!(α, δg, y)
 

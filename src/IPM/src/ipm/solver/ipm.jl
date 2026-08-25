@@ -248,6 +248,49 @@ function solvecorrector!(
 end
 
 ############################################################################################
+# solveexact!
+############################################################################################
+
+function solveexact!(s::IPMSolver{T}) where {T}
+    return solveexact!(
+        s.wrk, s.kkt, s.settings, s.H, s.B, s.scaling, s.sf[], s.sg[], s.timers,
+    )
+end
+
+function solveexact!(
+        w::IPMWorkspace{T},
+        kkt::KKTSolver{T},
+        set::IPMSettings{T},
+        H::BlockSparseMatrix{T},
+        B::BlockSparseMatrix{T},
+        scaling::IPMScaling{T},
+        sf::T,
+        sg::T,
+        timers::TimerOutput,
+    ) where {T}
+    #
+    # solve the KKT system
+    #
+    #   [ H  -Bᵀ ] [ Δpa ]   [ Δf ]
+    #   [ B   0  ] [ Δya ] = [ Δg ]
+    #
+    function fstop(δf)
+        return fnorm(δf, scaling.pscl, sf) ≤ set.feas_tol
+    end
+
+    function gstop(δg)
+        return gnorm(δg, scaling.yscl, sg) ≤ set.feas_tol
+    end
+
+    piter, ppass, pstat, dmin, dmax = @timeit timers "solve" solvekkt!(
+        fstop, gstop, kkt, w.Δpa, w.Δya, H, B, w.Δf, w.Δg;
+        warm=false, ftol=eps(T), gtol=eps(T), stall=set.refine_stall_tol, irmax=set.refine_max_iter, cgmax=set.newton_max_iter,
+    )
+
+    return piter, ppass, pstat, dmin, dmax
+end
+
+############################################################################################
 # startingpoint!
 ############################################################################################
 
@@ -291,16 +334,30 @@ end
 # constructor / reinit! / init
 ############################################################################################
 
-function reinit!(s::IPMSolver; p0=nothing, d0=nothing, y0=nothing)
-    return reinit!(s, p0, d0, y0)
+function reinit!(s::IPMSolver; p0=nothing, d0=nothing, y0=nothing, f=nothing, g=nothing)
+    return reinit!(s, p0, d0, y0, f, g)
 end
 
-function reinit!(s::IPMSolver{T}, p0, d0, y0) where {T}
+function reinit!(s::IPMSolver, p0, d0, y0, f, g)
+    if !isnothing(f)
+        mul!(s.f, s.P2, f)
+        s.f .*= s.scaling.pscl
+        s.nf[] = norm(s.f)
+        s.sf[] = scalenorm(s.f, s.scaling.pscl)
+    end
+
+    if !isnothing(g)
+        mul!(s.g, s.P1, g)
+        s.g .*= s.scaling.yscl
+        s.ng[] = norm(s.g)
+        s.sg[] = scalenorm(s.g, s.scaling.yscl)
+    end
+
     if isnothing(p0) && isnothing(d0)
         startingpoint!(s.p, s.d, s.B, s.Q, s.g, s.f, s.K)
 
         if isnothing(y0)
-            fill!(s.y, zero(T))
+            fill!(s.y, false)
         else
             mul!(s.y, s.P1, y0)
             s.y ./= s.scaling.yscl
@@ -309,20 +366,18 @@ function reinit!(s::IPMSolver{T}, p0, d0, y0) where {T}
         isnothing(p0) || mul!(s.p, s.P2, p0)
         isnothing(d0) || mul!(s.d, s.P2, d0)
 
-        if isnothing(d0)
-            for v in vtxs(s.B)
-                r = colrange(s.B, v)
+        for v in vtxs(s.B)
+            r = colrange(s.B, v)
+
+            if isnothing(d0)
                 dualshadow!(view(s.d, r), view(s.p, r), cache(s.caches, v, s.K[v]), s.sched.large)
-            end
-        elseif isnothing(p0)
-            for v in vtxs(s.B)
-                r = colrange(s.B, v)
+            elseif isnothing(p0)
                 primalshadow!(view(s.p, r), view(s.d, r), cache(s.caches, v, s.K[v]), s.sched.large)
             end
         end
 
         if isnothing(y0)
-            fill!(s.y, zero(T))
+            fill!(s.y, false)
         else
             mul!(s.y, s.P1, y0)
         end
@@ -464,6 +519,41 @@ function step!(s::IPMSolver{T}) where {T}
 
     if isoptimal(s, pobj, dobj, pres, dres)
         status = OPTIMAL
+    elseif iszero(s.ν)
+        #
+        # choose augmentation parameter δ
+        #
+        setaug!(s)
+
+        initok = @timeit s.timers "initkkt" initkkt!(s)
+
+        if !initok
+            if s.settings.verbose > 1
+                @warn "Failed to initialize KKT solver."
+            end
+
+            status = nearstatus(s, NUMERICAL_FAILURE)
+        else
+            #
+            # solve the KKT system
+            #
+            #   [ H  -Bᵀ ] [ Δpa ]   [ Δf ]
+            #   [ B   0  ] [ Δya ] = [ Δg ]
+            #
+            piter, ppass, pstat, dmin, dmax = @timeit s.timers "exact" solveexact!(s)
+
+            step = one(T)
+            axpy!(step, w.Δpa, s.p)
+            axpy!(step, w.Δya, s.y)
+
+            if isstalled(s)
+                if s.settings.verbose > 1
+                    @warn "Stalling detected."
+                end
+
+                status = nearstatus(s, STALLED)
+            end
+        end
     elseif !(μ > 0)
         if s.settings.verbose > 1
             @warn "Nonpositive μ."
@@ -509,8 +599,7 @@ function step!(s::IPMSolver{T}) where {T}
                 #
                 # compute tolerances for predictor and corrector solves
                 #
-                #   force: min(θ μ/μ₁, ceil)
-                #   floor: 100ϵ (1 + max(‖Δg‖, ‖Δf‖))
+                #   ϵ = min(θ μ/μ₁, ceil)
                 #
                 if isempty(s.hist.μ)
                     μ1 = μ

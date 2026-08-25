@@ -403,9 +403,40 @@ end
 # constructor / reinit! / init
 ############################################################################################
 
-function reinit!(s::HSDSolver{T}) where {T}
+function reinit!(s::HSDSolver; f=nothing, g=nothing)
+    return reinit!(s, f, g)
+end
+
+function reinit!(s::HSDSolver, f, g)
+    if !isnothing(f) || !isnothing(g)
+        invb = inv(s.scaling.bscl[])
+
+        if isnothing(f)
+            s.f .*= invb
+        else
+            mul!(s.f, s.P2, f)
+            s.f .*= s.scaling.pscl
+        end
+
+        if isnothing(g)
+            s.g .*= invb
+        else
+            mul!(s.g, s.P1, g)
+            s.g .*= s.scaling.yscl
+        end
+
+        if s.settings.scale_max_iter > 0
+            update!(s.scaling, s.f, s.g)
+        end
+
+        s.nf[] = norm(s.f)
+        s.sf[] = scalenorm(s.f, s.scaling.pscl)
+        s.ng[] = norm(s.g)
+        s.sg[] = scalenorm(s.g, s.scaling.yscl)
+    end
+
     identitypoint!(s.p, s.d, s.B, s.K)
-    fill!(s.y, zero(T))
+    fill!(s.y, false)
 
     for v in vtxs(s.B)
         initcache!(cache(s.caches, v, s.K[v]))
@@ -413,8 +444,8 @@ function reinit!(s::HSDSolver{T}) where {T}
 
     empty!(s.hist)
 
-    s.τ[] = one(T)
-    s.κ[] = one(T)
+    s.τ[] = true
+    s.κ[] = true
     fill!(s.Δp2, false)
     fill!(s.Δy2, false)
 

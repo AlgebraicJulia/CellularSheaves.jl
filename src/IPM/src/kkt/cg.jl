@@ -39,11 +39,35 @@ end
 #   y ←       δy
 #   u ← u - B δx
 #
-function cg!(L!::Function, U!::Function, wrk::CGWorkspace{T}, B, x, y, u; kw...) where {T}
-    return cg!(L!, U!, wrk.p, wrk.w, B, x, y, u, wrk.hist; kw...)
+function cg!(
+        L!::Function,
+        U!::Function,
+        wrk::CGWorkspace,
+        B::AbstractMatrix,
+        x::AbstractVector,
+        y::AbstractVector,
+        u::AbstractVector;
+        kw...,
+    )
+    return cg!(_ -> false, L!, U!, wrk, B, x, y, u; kw...)
 end
 
 function cg!(
+        stop::Function,
+        L!::Function,
+        U!::Function,
+        wrk::CGWorkspace,
+        B::AbstractMatrix,
+        x::AbstractVector,
+        y::AbstractVector,
+        u::AbstractVector;
+        kw...,
+    )
+    return cg!(stop, L!, U!, wrk.p, wrk.w, B, x, y, u, wrk.hist; kw...)
+end
+
+function cg!(
+        stop::Function,
         L!::Function,
         U!::Function,
         p::AbstractVector{T},
@@ -73,7 +97,7 @@ function cg!(
 
     status = CG_SOLVED
 
-    if nu > atol
+    if nu > atol && !stop(u)
         status = CG_ITMAX
 
         if itmax > 0
@@ -121,7 +145,7 @@ function cg!(
                     pnu² = nu²
                     nu² = dot(u, u); hist[niter + 1] = nu = sqrt(nu²)
 
-                    if nu ≤ atol || one(T) + nu ≤ one(T)
+                    if nu ≤ atol || one(T) + nu ≤ one(T) || stop(u)
                         status = CG_SOLVED
                     elseif niter ≥ itmax
                         status = CG_ITMAX
