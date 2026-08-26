@@ -21,7 +21,7 @@ const FMatrixView{T} = ReshapedArray{T, 2, FVectorView{T}, Tuple{}}
 
 using CliqueTrees: BipartiteGraph, linegraph
 using CliqueTrees.Multifrontal: cholesky!, ChordalTriangular, FChordalTriangular, triangular, fronts, diagblock, offdblock,
-                                 DivisionWorkspace, FactorizationWorkspace, symbolic, FPermutation
+                                 DivisionWorkspace, AbstractDivisionWorkspace, FactorizationWorkspace, symbolic, FPermutation
 using Krylov: cg!, CgWorkspace, cr!, CrWorkspace
 using LinearOperators: LinearOperator
 using ..BlockSparseArrays: BlockSparseMatrix, block, colrange, rowrange, srcrange, nvtxs, vtxs, ncols, nrows, nouts, outs, nbnzs, narcs, blocksparse, selectvtxs, halfselectvtxs, rows, cols

@@ -26,7 +26,7 @@ struct UzawaWorkspace{UPLO, T, I <: Integer, ItrWrk <: IterationWorkspace{T}} <:
     F::FChordalTriangular{:N, UPLO, T, I}
     L::BlockSparseMatrix{T, I}
     facwrk::FactorizationWorkspace{T, I}
-    divwrk::DivisionWorkspace{T, I}
+    divwrk::DivisionWorkspace{T}
     itrwrk::ItrWrk
     r::Vector{T}
     α::Scalar{T}
@@ -36,7 +36,7 @@ end
 function UzawaWorkspace(F::FChordalTriangular{:N, UPLO, T, I}, L::BlockSparseMatrix{T, I}, B::BlockSparseMatrix{T, I}) where {UPLO, T, I <: Integer}
     m = size(B, 1)
     facwrk = FactorizationWorkspace(F)
-    divwrk = DivisionWorkspace(F, 1)
+    divwrk = AbstractDivisionWorkspace{T}(F, 1)
     itrwrk = CgWorkspace(m, m, Vector{T})
     r = zeros(T, m)
     α = ones(T)
