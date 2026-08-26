@@ -141,7 +141,8 @@ hline!([central_bytes / 1024]; linestyle = :dash, color = :black, linewidth = 2,
 #
 # Nothing else differs. The control law each agent applies is the same sheaf feedback.
 
-workers_pids = addprocs(nchunk; exeflags = "--project=$(Base.active_project())")
+workers_pids = addprocs(nchunk; exeflags = ["--project=$(Base.active_project())",
+        "--sysimage=$(unsafe_string(Base.JLOptions().image_file))"])
 @everywhere workers_pids using CellularSheaves
 
 # The chordal factorisation applies an internal fill-reducing permutation, so the tree solve
