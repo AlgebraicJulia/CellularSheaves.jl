@@ -24,29 +24,33 @@ if !no_literate
     config["repo_root_url"] = "https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs"
   end
 
+  # Pass 1: copy any committed assets that sit beside a literate source. They are
+  # referenced by relative path from the generated markdown, so they must land in
+  # the output directory. Done first so that an example which regenerates its own
+  # figures overwrites the committed copy rather than the other way round.
+  for (root, dirs, files) in walkdir(literate_dir)
+    out_dir = joinpath(generated_dir, relpath(root, literate_dir))
+    for file in files
+      last(splitext(file)) == ".jl" && continue
+      mkpath(out_dir)
+      cp(joinpath(root, file), joinpath(out_dir, file); force=true)
+    end
+  end
+
+  # Pass 2: render the examples. The `asynch` pages plot from data generated out
+  # of band by docs/scripts/acc26_experiments.jl, so they are the only ones not
+  # executed here.
   for (root, dirs, files) in walkdir(literate_dir)
     out_dir = joinpath(generated_dir, relpath(root, literate_dir))
     for file in files
       f, l = splitext(file)
-      src_path = joinpath(root, file)
       if l == ".jl" && !startswith(f, "_")
-        # Match on the file name, not the whole path: `contains(path, "escort.jl")`
-        # also matches `multilayer_escort.jl`. Both are listed here on purpose --
-        # they ship committed animation GIFs instead of being run at build time.
-        no_execute = ("escort.jl", "escort_feedforward.jl", "layered_scenario5.jl",
-                      "multilayer_escort.jl")
-        execute = !(contains(src_path, "asynch") || contains(src_path, "distributed") ||
-                    file in no_execute)
+        src_path = joinpath(root, file)
+        execute = !contains(src_path, "asynch")
         Literate.markdown(src_path, out_dir;
           execute=execute, config=config, documenter=false, credit=false)
         Literate.notebook(src_path, out_dir;
           execute=false, documenter=false, credit=false)
-      elseif l != ".jl"
-        # Committed assets living beside a literate source (animation GIFs for the
-        # examples we do not execute) are referenced by relative path from the
-        # generated markdown, so they have to be copied into the output directory.
-        mkpath(out_dir)
-        cp(src_path, joinpath(out_dir, file); force=true)
       end
     end
   end

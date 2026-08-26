@@ -86,7 +86,9 @@ add_sheaf_edge!(sheaf, 2, 4, R_yz, R_yz)
 # Ensure we have enough worker processes
 workers_pids = workers()
 if length(workers_pids) < NA
-    addprocs(NA - length(workers_pids))
+    addprocs(NA - length(workers_pids);
+        exeflags = ["--project=$(Base.active_project())",
+            "--sysimage=$(unsafe_string(Base.JLOptions().image_file))"])
     workers_pids = workers()
     @eval @everywhere using CellularSheaves
     @eval @everywhere using CellularSheaves.ControlSheaves.AgentControllers
@@ -167,3 +169,6 @@ nothing # hide
 # ![Scenario 5 [fixed targets]](scenario5_fixed.gif)
 
 # ![Scenario 5 [bobbing targets]](scenario5_bobbing.gif)
+
+# Clean up worker processes
+rmprocs(workers_pids)

@@ -57,7 +57,8 @@ target1_pos(node, t) = [0.5cos(0.5*t), 0.5sin(0.5*t), 1.5 + 0.1sin(1.0*t), 1.0]
 # ## Provision Worker Processes
 
 # Provision exactly NA worker processes (one for each agent's flight computer)
-workers_pids = addprocs(NA; exeflags = "--project=$(Base.active_project())")
+workers_pids = addprocs(NA; exeflags = ["--project=$(Base.active_project())",
+        "--sysimage=$(unsafe_string(Base.JLOptions().image_file))"])
 
 # Provide the cellular sheaves environment to all workers
 @everywhere workers_pids begin
