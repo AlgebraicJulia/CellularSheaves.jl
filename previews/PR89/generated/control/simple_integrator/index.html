@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Controlled Trajectory Examples: 0 — Scalar Integrator · CellularSheaves.jl</title><meta name="title" content="Controlled Trajectory Examples: 0 — Scalar Integrator · CellularSheaves.jl"/><meta property="og:title" content="Controlled Trajectory Examples: 0 — Scalar Integrator · CellularSheaves.jl"/><meta property="twitter:title" content="Controlled Trajectory Examples: 0 — Scalar Integrator · CellularSheaves.jl"/><meta name="description" content="Documentation for CellularSheaves.jl."/><meta property="og:description" content="Documentation for CellularSheaves.jl."/><meta property="twitter:description" content="Documentation for CellularSheaves.jl."/><script data-outdated-warner src="../../../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="../../.."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../../../assets/documenter.js"></script><script src="../../../search_index.js"></script><script src="../../../siteinfo.js"></script><script src="../../../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../../../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../../../assets/themeswap.js"></script><link href="../../../assets/benchtables.css" rel="stylesheet" type="text/css"/></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../../../">CellularSheaves.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../../../">CellularSheaves.jl</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../../literate_example/">Code Example</a></li><li><a class="tocitem" href="../../sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../nullspace/">Computing the Nullspace of the Sheaf Laplacian</a></li><li><a class="tocitem" href="../../nearest_global_section_iterative/">Nearest Global Section: Iterative Method</a></li><li><a class="tocitem" href="../../pushforward/">Pushforward of a Sheaf along a Graph Homomorphism</a></li><li><a class="tocitem" href="../../trajectory_sheaf/">Spring Oscillator: Four Colocation Methods Compared</a></li><li><input class="collapse-toggle" id="menuitem-2-7" type="checkbox" checked/><label class="tocitem" for="menuitem-2-7"><span class="docs-label">Control Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li class="is-active"><a class="tocitem" href>Controlled Trajectory Examples: 0 — Scalar Integrator</a><ul class="internal"><li><a class="tocitem" href="#Why-start-here?"><span>Why start here?</span></a></li><li><a class="tocitem" href="#Physical-system"><span>Physical system</span></a></li><li><a class="tocitem" href="#Setup:-discrete-time-parameters"><span>Setup: discrete time parameters</span></a></li><li><a class="tocitem" href="#Define-the-continuous-and-discrete-models"><span>Define the continuous and discrete models</span></a></li><li><a class="tocitem" href="#Define-boundary-conditions"><span>Define boundary conditions</span></a></li><li><a class="tocitem" href="#Feasible-trajectories:-the-affine-subspace"><span>Feasible trajectories: the affine subspace</span></a></li><li><a class="tocitem" href="#Verify-the-particular-solution"><span>Verify the particular solution</span></a></li><li><a class="tocitem" href="#PART-1:-Visualize-the-feasible-trajectory-space"><span>PART 1: Visualize the feasible trajectory space</span></a></li><li><a class="tocitem" href="#PART-2:-LQR-objective-and-optimization"><span>PART 2: LQR objective and optimization</span></a></li><li><a class="tocitem" href="#Solve-the-reduced-quadratic-program"><span>Solve the reduced quadratic program</span></a></li><li><a class="tocitem" href="#Verify-optimality"><span>Verify optimality</span></a></li><li><a class="tocitem" href="#PART-3:-Compare-optimal-and-particular-solutions"><span>PART 3: Compare optimal and particular solutions</span></a></li><li><a class="tocitem" href="#PART-4:-Explore-the-nullspace-basis-(if-r-0)"><span>PART 4: Explore the nullspace basis (if r &gt; 0)</span></a></li></ul></li><li><a class="tocitem" href="../controlled_double_integrator/">Controlled Trajectory Examples: 1 — Double Integrator</a></li><li><a class="tocitem" href="../controlled_vehicle_platoon/">Controlled Trajectory Examples: 2 — Vehicle Platoon</a></li><li><a class="tocitem" href="../controlled_planar_quadrotor/">Controlled Trajectory Examples: 3 — Planar Quadrotor</a></li><li><a class="tocitem" href="../controlled_mass_spring_damper_chain/">Controlled Trajectory Examples: 4 — Mass-Spring-Damper Chain</a></li><li><a class="tocitem" href="../../../control/single_integrator_target_tracking/">Single‑Integrator Target Tracking (DSL Version)</a></li><li><a class="tocitem" href="../multi_quadrotor_target_tracking/">Multi-Agent Target Tracking via a Time-Expanded Cellular Sheaf</a></li><li><a class="tocitem" href="../mpc_target_tracking/">Receding-Horizon MPC via a Cached Harmonic Extension</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-8" type="checkbox"/><label class="tocitem" for="menuitem-2-8"><span class="docs-label">Layered Control Architecture Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../layered/distributed_harmonic_tracking/">Distributed Harmonic Extension: Tracking Without a Central Solver</a></li><li><a class="tocitem" href="../../layered/tikhonov_harmonic_tracking/">Tikhonov-Filtered Harmonic Extension</a></li><li><a class="tocitem" href="../../layered/layered_scenario5/">Layered Control Architecture for Multi-Quadrotor Tracking (Scenario 5)</a></li><li><a class="tocitem" href="../../layered/escort/">Layered Control Architecture for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/escort_feedforward/">Feedforward Layered Control for 6-Agent Escort Formation (<span>$SE(3)$</span> Homogeneous Sheaf)</a></li><li><a class="tocitem" href="../../layered/diffusion_vs_direct/">Diffusion versus Direct: Two Routes to the Harmonic Extension</a></li><li><a class="tocitem" href="../../layered/multilayer_escort/">Multilayer Hierarchical Control for Team-of-Teams Escort Formation</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-9" type="checkbox"/><label class="tocitem" for="menuitem-2-9"><span class="docs-label">Nested Systems Examples</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../nested/centroid_formation_tracking/">Centroid-Coupled Formation Tracking</a></li><li><a class="tocitem" href="../../nested/wheel_formation/">Hub-and-Spoke Wheel Escort Formation</a></li><li><a class="tocitem" href="../../nested/n_ring_formation/">N-Ring Cyclic Escort Formation</a></li><li><a class="tocitem" href="../../nested/rescaling_formation/">Emergent Rescaling: A Rigid Team Absorbing Divergent Targets Through Scale</a></li><li><a class="tocitem" href="../../nested/hierarchical_fleet/">A Four-Level Fleet, Written in the Nested DSL</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-2-10" type="checkbox"/><label class="tocitem" for="menuitem-2-10"><span class="docs-label">Asynchronous Diffusion</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../asynch/convergence_vs_delay/">Convergence vs. Delay Parameter B</a></li><li><a class="tocitem" href="../../asynch/step_size_comparison/">Step Size Comparison: Optimal vs. Conservative</a></li><li><a class="tocitem" href="../../asynch/restriction_map_comparison/">Restriction Map Type Comparison</a></li><li><a class="tocitem" href="../../asynch/orthogonal_projection/">Convergence Bounds vs. Maximum Delay B</a></li></ul></li></ul></li><li><span class="tocitem">Feature Guides</span><ul><li><a class="tocitem" href="../../../features/core_sheaf_workflows/">Core Sheaf Workflows</a></li><li><a class="tocitem" href="../../../features/morphisms_and_pushforwards/">Morphisms and Pushforwards</a></li><li><a class="tocitem" href="../../../features/trajectory_and_control/">Trajectory and Control</a></li><li><input class="collapse-toggle" id="menuitem-3-4" type="checkbox"/><label class="tocitem" for="menuitem-3-4"><span class="docs-label">Distributed Sheaf Solve</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/">Distributed Sheaf Solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_coordination/">Coordination as a harmonic extension</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_multifrontal/">The multifrontal factorization</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/theory_distributed/">Distributing the solve</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/comparison/">Three methods, one communication model</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../features/distributed_sheaf_solve/api/">Usage and API</a></li></ul></li><li><input class="collapse-toggle" id="menuitem-3-5" type="checkbox"/><label class="tocitem" for="menuitem-3-5"><span class="docs-label">Tikhonov Harmonic Tracking</span><i class="docs-chevron"></i></label><ul class="collapsed"><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/">Tikhonov Harmonic Tracking</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/harmonic_manifold/">The Harmonic Manifold</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/stability/">Boundary-Layer Stability and ISS</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/feedforward/">Analytic Feedforward</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/scenarios/">Complete Tracking Scenarios</a></li><li><a class="tocitem" href="../../../features/tikhonov_harmonic_tracking/api/">Usage and API</a></li></ul></li></ul></li><li><span class="tocitem">Benchmarks</span><ul><li><a class="tocitem" href="../../../benchmarks/">Benchmarks</a></li><li><a class="tocitem" href="../../../benchmark_report/">Benchmark report</a></li></ul></li><li><span class="tocitem">API Reference</span><ul><li><a class="tocitem" href="../../../api/">API Reference</a></li><li><a class="tocitem" href="../../../api/network_sheaves/">Network Sheaves</a></li><li><a class="tocitem" href="../../../api/sheaf_interface/">Sheaf Interface</a></li><li><a class="tocitem" href="../../../api/euclidean_sheaves/">Euclidean Sheaves</a></li><li><a class="tocitem" href="../../../api/distributed_solve/">Distributed Solve</a></li><li><a class="tocitem" href="../../../api/graph_homomorphisms/">Graph Homomorphisms</a></li><li><a class="tocitem" href="../../../api/sheaf_morphisms/">Sheaf Morphisms</a></li><li><a class="tocitem" href="../../../api/pushforwards/">Pushforwards</a></li><li><a class="tocitem" href="../../../api/pushouts/">Pushouts</a></li><li><a class="tocitem" href="../../../api/dsl/">Cellular Sheaf DSL</a></li><li><a class="tocitem" href="../../../api/block_sparse_arrays/">Block Sparse Arrays</a></li><li><a class="tocitem" href="../../../api/potential_sheaves/">Potential Sheaves</a></li><li><a class="tocitem" href="../../../api/formations/">Formations</a></li><li><a class="tocitem" href="../../../api/trajectory_sheaves/">Trajectory Sheaves</a></li><li><a class="tocitem" href="../../../api/tikhonov/">Tikhonov</a></li><li><a class="tocitem" href="../../../api/agent_controllers/">Agent Controllers</a></li><li><a class="tocitem" href="../../../api/distributed_layered_control/">Distributed Layered Control</a></li><li><a class="tocitem" href="../../../api/layered/">Layered Escort Architecture</a></li><li><a class="tocitem" href="../../../api/nested_systems/">Nested Systems: Sheaf Tower Compiler</a></li><li><a class="tocitem" href="../../../api/nested_dsl/">NestedDSL</a></li><li><a class="tocitem" href="../../../api/coordination_benchmarks/">Coordination Benchmarks</a></li><li><a class="tocitem" href="../../../api/herding_platoon/">Herding Platoon Utilities</a></li><li><a class="tocitem" href="../../../api/multi_agent_tracking/">Multi-Agent Tracking</a></li><li><a class="tocitem" href="../../../api/quadratic_costs/">Quadratic Costs</a></li><li><a class="tocitem" href="../../../api/asynch/">Asynchronous Sheaf Diffusion</a></li><li><a class="tocitem" href="../../../api/tracking_dsl/">TrackingDSL</a></li><li><a class="tocitem" href="../../../api/ipm/">IPM</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Examples</a></li><li><a class="is-disabled">Control Examples</a></li><li class="is-active"><a href>Controlled Trajectory Examples: 0 — Scalar Integrator</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Controlled Trajectory Examples: 0 — Scalar Integrator</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs/src/generated/control/simple_integrator.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Controlled-Trajectory-Examples:-0-—-Scalar-Integrator"><a class="docs-heading-anchor" href="#Controlled-Trajectory-Examples:-0-—-Scalar-Integrator">Controlled Trajectory Examples: 0 — Scalar Integrator</a><a id="Controlled-Trajectory-Examples:-0-—-Scalar-Integrator-1"></a><a class="docs-heading-anchor-permalink" href="#Controlled-Trajectory-Examples:-0-—-Scalar-Integrator" title="Permalink"></a></h1><p>This is a <strong>simplified prerequisite</strong> example that establishes the basic workflow with a scalar integrator system—the simplest possible LQR problem with exact closed-form solutions.</p><h2 id="Why-start-here?"><a class="docs-heading-anchor" href="#Why-start-here?">Why start here?</a><a id="Why-start-here?-1"></a><a class="docs-heading-anchor-permalink" href="#Why-start-here?" title="Permalink"></a></h2><p>The scalar integrator has <strong>no drift dynamics</strong> and admits exact analytical solutions to both the feasibility and optimization problems. This makes it ideal for:</p><ul><li>Understanding the affine structure of feasible trajectories.</li><li>Visualizing the nullspace basis (here, just lines in 2D).</li><li>Checking that the sheaf machinery produces expected results.</li><li>Verifying plotting and analysis routines before scaling to larger systems.</li></ul><h2 id="Physical-system"><a class="docs-heading-anchor" href="#Physical-system">Physical system</a><a id="Physical-system-1"></a><a class="docs-heading-anchor-permalink" href="#Physical-system" title="Permalink"></a></h2><p>A single point whose position is directly commanded by a scalar control input:</p><p class="math-container">\[x_t \in \mathbb{R}, \quad u_t \in \mathbb{R}, \quad x_{t+1} = x_t + h \cdot u_t.\]</p><p>The state dimension is <code>n = 1</code>; the control dimension is <code>m = 1</code>.</p><p><strong>Reference:</strong></p><ul><li>Anderson, B. D. O. &amp; Moore, J. B. (1990). <em>Optimal Control: Linear Quadratic Methods</em>.</li></ul><pre><code class="language-julia hljs">using CellularSheaves
+using LinearAlgebra
+using BlockArrays
+using Plots
+using SparseArrays
+using CellularSheaves.TrajectorySheaves
+using CellularSheaves.TrajectorySheaves: nullspace_trajectory_family</code></pre><h2 id="Setup:-discrete-time-parameters"><a class="docs-heading-anchor" href="#Setup:-discrete-time-parameters">Setup: discrete time parameters</a><a id="Setup:-discrete-time-parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Setup:-discrete-time-parameters" title="Permalink"></a></h2><pre><code class="language-julia hljs">n = 1      # state dimension (scalar position)
+m = 1      # control dimension (scalar control)
+h = 0.5    # sample period (seconds)
+k = 5      # number of discrete time steps
+
+setup_summary = (; n, m, h, k)
+setup_summary</code></pre><pre><code class="nohighlight hljs">(n = 1, m = 1, h = 0.5, k = 5)</code></pre><h2 id="Define-the-continuous-and-discrete-models"><a class="docs-heading-anchor" href="#Define-the-continuous-and-discrete-models">Define the continuous and discrete models</a><a id="Define-the-continuous-and-discrete-models-1"></a><a class="docs-heading-anchor-permalink" href="#Define-the-continuous-and-discrete-models" title="Permalink"></a></h2><p>For the pure integrator, the continuous-time system is simply:</p><p class="math-container">\[\dot{x} = u.\]</p><p>With zero-order hold discretization, this becomes:</p><p class="math-container">\[x_{t+1} = x_t + h \cdot u_t.\]</p><pre><code class="language-julia hljs">Ac = reshape([0.0], 1, 1)   # continuous: ẋ = 0·x + u
+Bc = reshape([1.0], 1, 1)   # continuous: ẋ = u</code></pre><pre><code class="nohighlight hljs">1×1 Matrix{Float64}:
+ 1.0</code></pre><p>Build the trajectory sheaf.  The base sheaf is a single vertex with 1D stalk.</p><pre><code class="language-julia hljs">F  = EuclideanSheaf{Float64}(fill(n, 1))
+ts = ControlledTrajectorySheaf(F, Ac, Bc, h, k)
+
+dynamics_summary = (; Ad=ts.Ad, Bd=ts.Bd)
+dynamics_summary</code></pre><pre><code class="nohighlight hljs">(Ad = [1.0;;], Bd = [0.5;;])</code></pre><h2 id="Define-boundary-conditions"><a class="docs-heading-anchor" href="#Define-boundary-conditions">Define boundary conditions</a><a id="Define-boundary-conditions-1"></a><a class="docs-heading-anchor-permalink" href="#Define-boundary-conditions" title="Permalink"></a></h2><p>We want to steer from initial position x₁ to final position xₖ₊₁.</p><pre><code class="language-julia hljs">x1  = [0.0]    # start at position 0
+xk1 = [2.0]    # reach position 2
+
+boundary_summary = (; x1=x1[1], xk1=xk1[1])
+boundary_summary</code></pre><pre><code class="nohighlight hljs">(x1 = 0.0, xk1 = 2.0)</code></pre><h2 id="Feasible-trajectories:-the-affine-subspace"><a class="docs-heading-anchor" href="#Feasible-trajectories:-the-affine-subspace">Feasible trajectories: the affine subspace</a><a id="Feasible-trajectories:-the-affine-subspace-1"></a><a class="docs-heading-anchor-permalink" href="#Feasible-trajectories:-the-affine-subspace" title="Permalink"></a></h2><p>The feasible trajectory space is affine: all trajectories satisfying the boundary conditions and dynamics form an affine subspace of dimension <strong>r</strong> = (k+1) - 2 = k - 1 (since we have k+1 time steps and 2 boundary constraints).</p><p><code>feasible_control_trajectory_basis</code> returns:</p><ul><li><code>z_p</code> — the <strong>particular solution</strong> (harmonic extension of boundary data)</li><li><code>N</code>   — columns spanning the <strong>nullspace</strong> (endpoint-preserving perturbations)</li></ul><pre><code class="language-julia hljs">z_p_raw, N = feasible_control_trajectory_basis(ts, x1, xk1)</code></pre><pre><code class="nohighlight hljs">([0.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 4.0], [0.0 0.0 0.0 0.0; 0.0 0.0 0.0 1.0; 0.0 0.0 0.5 1.0; 0.0 0.5 0.5 1.0; 0.5 0.5 0.5 1.0; 0.0 0.0 0.0 0.0; 0.0 0.0 0.0 2.0; 0.0 0.0 1.0 0.0; 0.0 1.0 0.0 0.0; 1.0 0.0 0.0 0.0; -1.0 -1.0 -1.0 -2.0])</code></pre><p>Convert to BlockArray for easier component access.</p><pre><code class="language-julia hljs">z_p_block = BlockArray(z_p_raw, vcat([n for _ in 1:k+1], [m for _ in 1:k]))
+
+r = size(N, 2)
+p_total = (k + 1) * n + k * m
+
+trajectory_summary = (; p_total, state_entries=(k + 1) * n, control_entries=k * m, r)
+trajectory_summary
+
+if r &lt;=0
+    error(&quot;No free parameters in the trajectory space.\n  The particular solution is the unique feasible trajectory.\n  This problem is designed to have nontrivial kernel so this is a problem.&quot;)
+end</code></pre><h2 id="Verify-the-particular-solution"><a class="docs-heading-anchor" href="#Verify-the-particular-solution">Verify the particular solution</a><a id="Verify-the-particular-solution-1"></a><a class="docs-heading-anchor-permalink" href="#Verify-the-particular-solution" title="Permalink"></a></h2><p>Check that <code>z_p</code> satisfies the boundary conditions and dynamics.</p><pre><code class="language-julia hljs">x_p = [Array(z_p_block[Block(t)])[1] for t in 1:k+1]
+u_p = [Array(z_p_block[Block(k+1+t)])[1] for t in 1:k]</code></pre><pre><code class="nohighlight hljs">5-element Vector{Float64}:
+ 0.0
+ 0.0
+ 0.0
+ 0.0
+ 4.0</code></pre><p>Check dynamics: x<em>p[t+1] ≈ x</em>p[t] + h * u_p[t]</p><pre><code class="language-julia hljs">dyn_errs = [x_p[t+1] - (x_p[t] + ts.Bd[1,1] * u_p[t]) for t in 1:k]
+
+particular_solution_check = (
+    x1_match=x_p[1] ≈ x1[1],
+    xk1_match=x_p[end] ≈ xk1[1],
+    max_dynamics_error=maximum(abs, dyn_errs),
+)
+particular_solution_check</code></pre><pre><code class="nohighlight hljs">(x1_match = true, xk1_match = true, max_dynamics_error = 0.0)</code></pre><h2 id="PART-1:-Visualize-the-feasible-trajectory-space"><a class="docs-heading-anchor" href="#PART-1:-Visualize-the-feasible-trajectory-space">PART 1: Visualize the feasible trajectory space</a><a id="PART-1:-Visualize-the-feasible-trajectory-space-1"></a><a class="docs-heading-anchor-permalink" href="#PART-1:-Visualize-the-feasible-trajectory-space" title="Permalink"></a></h2><p>Since we have r = k-1 free parameters, we can sample the affine subspace and visualize several feasible trajectories. Each is of the form</p><p class="math-container">\[z(\alpha) = z_p + N\alpha, \quad \alpha \in \mathbb{R}^r.\]</p><pre><code class="language-julia hljs">times_state   = h .* (0:k)
+times_control = h .* (0:k-1)</code></pre><pre><code class="nohighlight hljs">0.0:0.5:2.0</code></pre><p>Sample the nullspace using standard basis vectors. Each α is a standard basis vector (one component = 1, others = 0). This shows the effect of each nullspace column in isolation.</p><pre><code class="language-julia hljs">α_samples = [Vector{Float64}(I(r)[:, j]) for j in 1:r]
+
+feasible_trajectories = []
+for α in α_samples
+    z = Array(z_p_block) + N * α
+    zb = BlockArray(z, vcat([n for _ in 1:k+1], [m for _ in 1:k]))
+    push!(feasible_trajectories, zb)
+end</code></pre><p>Plot the state trajectories (feasible set).</p><pre><code class="language-julia hljs">p_feasible_state = plot(
+    xlabel=&quot;time (s)&quot;, ylabel=&quot;position&quot;,
+    title=&quot;Feasible trajectories (state space)&quot;,
+    legend=:topright, size=(600, 350))
+
+for (i, zf) in enumerate(feasible_trajectories)
+    positions = [Array(zf[Block(t)])[1] for t in 1:k+1]
+    if r == 0
+        plot!(p_feasible_state, times_state, positions;
+            lw=2, color=:blue, marker=:circle, label=&quot;&quot;)
+    else
+        plot!(p_feasible_state, times_state, positions;
+            lw=1.5, alpha=0.6, marker=:circle, markersize=4,
+            label=i==1 ? &quot;samples&quot; : &quot;&quot;)
+    end
+end</code></pre><p>Highlight the particular solution.</p><pre><code class="language-julia hljs">plot!(p_feasible_state, times_state, x_p;
+    lw=3, color=:red, marker=:square, markersize=5,
+    label=&quot;particular solution&quot;)
+
+p_feasible_state</code></pre><p><img src="../simple_integrator-26.svg" alt/></p><p>Plot the corresponding control trajectories as step functions (zero-order hold).</p><pre><code class="language-julia hljs">p_feasible_ctrl = plot(
+    xlabel=&quot;time (s)&quot;, ylabel=&quot;control&quot;,
+    title=&quot;Feasible control trajectories&quot;,
+    legend=:topright, size=(600, 350),
+    xlim=(0, h*k))
+
+for (i, zf) in enumerate(feasible_trajectories)
+    controls = [Array(zf[Block(k+1+t)])[1] for t in 1:k]
+    if r == 0
+        plot!(p_feasible_ctrl, times_control, controls;
+            lw=2, color=:blue, seriestype=:steppost, label=&quot;&quot;)
+    else
+        plot!(p_feasible_ctrl, times_control, controls;
+            lw=1.5, alpha=0.6, seriestype=:steppost,
+            label=i==1 ? &quot;samples&quot; : &quot;&quot;)
+    end
+end
+
+plot!(p_feasible_ctrl, times_control, u_p;
+    lw=3, color=:red, seriestype=:steppost,
+    label=&quot;particular solution&quot;)
+
+p_feasible_ctrl</code></pre><p><img src="../simple_integrator-28.svg" alt/></p><p>Combine feasible-space plots.</p><pre><code class="language-julia hljs">feasible_plot = plot(p_feasible_state, p_feasible_ctrl;
+    layout=(2, 1), size=(700, 500))
+feasible_plot</code></pre><p><img src="../simple_integrator-30.svg" alt/></p><h2 id="PART-2:-LQR-objective-and-optimization"><a class="docs-heading-anchor" href="#PART-2:-LQR-objective-and-optimization">PART 2: LQR objective and optimization</a><a id="PART-2:-LQR-objective-and-optimization-1"></a><a class="docs-heading-anchor-permalink" href="#PART-2:-LQR-objective-and-optimization" title="Permalink"></a></h2><p>To recover the straight-line state trajectory, we use a <strong>pure minimum-control- effort</strong> objective. The running state penalty <code>Q</code> is set to zero; otherwise it biases the optimizer toward smaller intermediate states and bends the path away from the linear interpolation between endpoints.</p><p>We therefore minimize the quadratic cost</p><p class="math-container">\[J(z) = \tfrac{1}{2} \sum_{t=1}^{k} \bigl( Q x_t^2 + R_u u_t^2 \bigr)
+  + \tfrac{1}{2} Q_f x_{k+1}^2.\]</p><p>Since <code>x_{k+1}</code> is already fixed as a hard boundary condition, the terminal term involving <code>Q_f</code> is constant over the feasible set and does not affect the optimizer. The active part of the objective is therefore just <code>\tfrac{1}{2} \sum_{t=1}^{k} R_u u_t^2</code>.</p><pre><code class="language-julia hljs">Q  = 0.0    # no running state penalty: recover the minimum-energy straight line
+Ru = 1.0    # weight on control effort
+Qf = 10.0   # terminal penalty is constant here because x_{k+1} is fixed
+
+lqr_weights = (; Q, Ru, Qf)
+lqr_weights</code></pre><pre><code class="nohighlight hljs">(Q = 0.0, Ru = 1.0, Qf = 10.0)</code></pre><p>Assemble the cost Hessian. For a scalar system, this is straightforward.</p><pre><code class="language-julia hljs">H, f, _ = lqr_objective(ts, reshape([Q], 1, 1), reshape([Ru], 1, 1); Qf=reshape([Qf], 1, 1))
+
+objective_shapes = (; H_size=size(H), f_size=size(f))
+objective_shapes</code></pre><pre><code class="nohighlight hljs">(H_size = (11, 11), f_size = (11,))</code></pre><h2 id="Solve-the-reduced-quadratic-program"><a class="docs-heading-anchor" href="#Solve-the-reduced-quadratic-program">Solve the reduced quadratic program</a><a id="Solve-the-reduced-quadratic-program-1"></a><a class="docs-heading-anchor-permalink" href="#Solve-the-reduced-quadratic-program" title="Permalink"></a></h2><p><code>optimal_control_trajectory</code> solves:</p><p class="math-container">\[\min_{\alpha} \tfrac{1}{2} \alpha^\top (N^\top H N) \alpha + \alpha^\top N^\top (H z_p + f).\]</p><pre><code class="language-julia hljs">z_opt, α_opt, z_p_returned, null_basis = optimal_control_trajectory(ts, x1, xk1, H, f)
+
+z_opt_block = BlockArray(z_opt, vcat([n for _ in 1:k+1], [m for _ in 1:k]))
+
+x_opt = [Array(z_opt_block[Block(t)])[1] for t in 1:k+1]
+u_opt = [Array(z_opt_block[Block(k+1+t)])[1] for t in 1:k]</code></pre><pre><code class="nohighlight hljs">5-element Vector{Float64}:
+ 0.7999999999999998
+ 0.8000000000000003
+ 0.7999999999999998
+ 0.8
+ 0.7999999999999998</code></pre><p>Compute the optimal cost.</p><pre><code class="language-julia hljs">J_opt = 0.5 * Array(z_opt)&#39; * H * Array(z_opt) + Array(z_opt)&#39; * f</code></pre><pre><code class="nohighlight hljs">21.6</code></pre><p>Compare to the particular solution cost.</p><pre><code class="language-julia hljs">J_p = 0.5 * Array(z_p_returned)&#39; * H * Array(z_p_returned) + Array(z_p_returned)&#39; * f
+
+optimal_solution_summary = (
+    x1_match=x_opt[1] ≈ x1[1],
+    xk1_match=x_opt[end] ≈ xk1[1],
+    optimal_cost=J_opt[1],
+    particular_cost=J_p[1],
+)
+optimal_solution_summary</code></pre><pre><code class="nohighlight hljs">(x1_match = true, xk1_match = true, optimal_cost = 21.6, particular_cost = 28.0)</code></pre><h2 id="Verify-optimality"><a class="docs-heading-anchor" href="#Verify-optimality">Verify optimality</a><a id="Verify-optimality-1"></a><a class="docs-heading-anchor-permalink" href="#Verify-optimality" title="Permalink"></a></h2><p>For the reduced problem, check that the gradient vanishes.</p><pre><code class="language-julia hljs">if r &gt; 0
+    Rred = null_basis&#39; * H * null_basis
+    rred = null_basis&#39; * (H * Array(z_p_returned) + f)
+    grad_norm = norm(Rred * α_opt + rred)
+    optimality_check = (; grad_norm)
+    optimality_check
+end</code></pre><pre><code class="nohighlight hljs">(grad_norm = 4.440892098500626e-16,)</code></pre><h2 id="PART-3:-Compare-optimal-and-particular-solutions"><a class="docs-heading-anchor" href="#PART-3:-Compare-optimal-and-particular-solutions">PART 3: Compare optimal and particular solutions</a><a id="PART-3:-Compare-optimal-and-particular-solutions-1"></a><a class="docs-heading-anchor-permalink" href="#PART-3:-Compare-optimal-and-particular-solutions" title="Permalink"></a></h2><p>Visualize both the particular (harmonic) and optimal solutions. With <code>Q = 0</code>, the optimal state trajectory should be the straight-line interpolation between <code>x1</code> and <code>xk1</code>, corresponding to constant control.</p><pre><code class="language-julia hljs">p_compare_state = plot(
+    xlabel=&quot;time (s)&quot;, ylabel=&quot;position&quot;,
+    title=&quot;Particular vs. optimal trajectory (state)&quot;,
+    legend=:topright, size=(700, 350))
+
+plot!(p_compare_state, times_state, x_p;
+    lw=2.5, marker=:circle, color=:red, label=&quot;particular (harmonic)&quot;)
+plot!(p_compare_state, times_state, x_opt;
+    lw=2.5, marker=:square, color=:blue, linestyle=:dash, label=&quot;optimal&quot;)
+
+p_compare_state
+
+p_compare_ctrl = plot(
+    xlabel=&quot;time (s)&quot;, ylabel=&quot;control&quot;,
+    title=&quot;Particular vs. optimal trajectory (control)&quot;,
+    legend=:topright, size=(700, 350),
+    xlim=(0, h*k))
+
+plot!(p_compare_ctrl, times_control, u_p;
+    lw=2.5, color=:red, seriestype=:steppost, label=&quot;particular (harmonic)&quot;)
+plot!(p_compare_ctrl, times_control, u_opt;
+    lw=2.5, color=:blue, linestyle=:dash, seriestype=:steppost, label=&quot;optimal&quot;)
+
+p_compare_ctrl
+
+comparison_plot = plot(p_compare_state, p_compare_ctrl;
+    layout=(2, 1), size=(700, 500))
+comparison_plot</code></pre><p><img src="../simple_integrator-44.svg" alt/></p><h2 id="PART-4:-Explore-the-nullspace-basis-(if-r-0)"><a class="docs-heading-anchor" href="#PART-4:-Explore-the-nullspace-basis-(if-r-0)">PART 4: Explore the nullspace basis (if r &gt; 0)</a><a id="PART-4:-Explore-the-nullspace-basis-(if-r-0)-1"></a><a class="docs-heading-anchor-permalink" href="#PART-4:-Explore-the-nullspace-basis-(if-r-0)" title="Permalink"></a></h2><p>Each column of <code>null_basis</code> represents an endpoint-preserving perturbation direction.</p><pre><code class="language-julia hljs">nullspace_summary = (; r, basis_size=size(null_basis))
+nullspace_summary</code></pre><pre><code class="nohighlight hljs">(r = 4, basis_size = (11, 4))</code></pre><p>Spy plot of the nullspace basis.</p><pre><code class="language-julia hljs">state_rows = (k + 1) * n
+p_spy = spy(null_basis; markersize=3,
+    title=&quot;Sparsity of nullspace basis (endpoint-preserving directions)&quot;,
+    xlabel=&quot;basis vector&quot;, ylabel=&quot;trajectory component&quot;)
+hline!(p_spy, [state_rows + 0.5]; color=:red, lw=2, label=&quot;state/control split&quot;)
+annotate!(p_spy, 1, state_rows - 0.5, text(&quot;state rows&quot;, 9, :left))
+annotate!(p_spy, 1, state_rows + 1.5, text(&quot;control rows&quot;, 9, :left))
+p_spy</code></pre><p><img src="../simple_integrator-48.svg" alt/></p><p>Visualize basis vectors as trajectories.</p><pre><code class="language-julia hljs">family = nullspace_trajectory_family(ts, Array(z_p_returned), null_basis; amplitude=0.5)
+
+p_family_state = plot(
+    xlabel=&quot;time (s)&quot;, ylabel=&quot;state&quot;,
+    title=&quot;Nullspace basis: state perturbations (amplitude = 0.5)&quot;,
+    legend=:topright, size=(700, 350))
+
+for (j, zf) in enumerate(family)
+    pj = [Array(zf[Block(t)])[1] for t in 1:k+1]
+    plot!(p_family_state, times_state, pj;
+        lw=1.5, alpha=0.5, marker=:circle, markersize=3, label=&quot;n$j&quot;)
+end
+
+plot!(p_family_state, times_state, x_p;
+    lw=2, color=:black, marker=:square, label=&quot;particular&quot;)
+plot!(p_family_state, times_state, x_opt;
+    lw=2, color=:green, linestyle=:dash, marker=:diamond, label=&quot;optimal&quot;)
+
+p_family_state
+
+p_family_ctrl = plot(
+    xlabel=&quot;time (s)&quot;, ylabel=&quot;control&quot;,
+    title=&quot;Nullspace basis: control perturbations (amplitude = 0.5)&quot;,
+        legend=:topright, size=(700, 350),
+        xlim=(0, h*k))
+
+for (j, zf) in enumerate(family)
+    uj = [Array(zf[Block(k+1+t)])[1] for t in 1:k]
+    plot!(p_family_ctrl, times_control, uj;
+        lw=1.5, alpha=0.5, seriestype=:steppost, label=&quot;n$j&quot;)
+end
+
+plot!(p_family_ctrl, times_control, u_p;
+    lw=2, color=:black, seriestype=:steppost, label=&quot;particular&quot;)
+plot!(p_family_ctrl, times_control, u_opt;
+    lw=2, color=:green, linestyle=:dash, seriestype=:steppost, label=&quot;optimal&quot;)
+
+p_family_ctrl
+
+family_plot = plot(p_family_state, p_family_ctrl;
+    layout=(2, 1), size=(700, 500))
+family_plot</code></pre><p><img src="../simple_integrator-50.svg" alt/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../trajectory_sheaf/">« Spring Oscillator: Four Colocation Methods Compared</a><a class="docs-footer-nextpage" href="../controlled_double_integrator/">Controlled Trajectory Examples: 1 — Double Integrator »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Wednesday 26 August 2026 20:50">Wednesday 26 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
