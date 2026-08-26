@@ -28,13 +28,25 @@ if !no_literate
     out_dir = joinpath(generated_dir, relpath(root, literate_dir))
     for file in files
       f, l = splitext(file)
+      src_path = joinpath(root, file)
       if l == ".jl" && !startswith(f, "_")
-        src_path = joinpath(root, file)
-        execute = !(contains(src_path, "asynch") || contains(src_path, "distributed") || contains(src_path, "escort.jl") || contains(src_path, "escort_feedforward") || contains(src_path, "scenario5"))
+        # Match on the file name, not the whole path: `contains(path, "escort.jl")`
+        # also matches `multilayer_escort.jl`. Both are listed here on purpose --
+        # they ship committed animation GIFs instead of being run at build time.
+        no_execute = ("escort.jl", "escort_feedforward.jl", "layered_scenario5.jl",
+                      "multilayer_escort.jl")
+        execute = !(contains(src_path, "asynch") || contains(src_path, "distributed") ||
+                    file in no_execute)
         Literate.markdown(src_path, out_dir;
           execute=execute, config=config, documenter=false, credit=false)
         Literate.notebook(src_path, out_dir;
           execute=false, documenter=false, credit=false)
+      elseif l != ".jl"
+        # Committed assets living beside a literate source (animation GIFs for the
+        # examples we do not execute) are referenced by relative path from the
+        # generated markdown, so they have to be copied into the output directory.
+        mkpath(out_dir)
+        cp(src_path, joinpath(out_dir, file); force=true)
       end
     end
   end
