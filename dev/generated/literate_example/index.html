@@ -13,31 +13,31 @@ sheaf = @cellular_sheaf A, B, C begin
 
 end</code></pre><pre><code class="nohighlight hljs">A network sheaf with 3 vertex stalks and 3 edge stalks.
 </code></pre><p>Let&#39;s compute a global section of this sheaf. We start with a random 0-cochain:</p><pre><code class="language-julia hljs">x0 = rand(sum(vertex_stalks(sheaf)))</code></pre><pre><code class="nohighlight hljs">12-element Vector{Float64}:
- 0.0020045199109339773
- 0.9516163375011799
- 0.5640900276141493
- 0.9776799269344862
- 0.4115025333542317
- 0.881262303426521
- 0.3925728349363278
- 0.24241971741228707
- 0.7117100923589506
- 0.6414776054272978
- 0.027773594592654827
- 0.13435496347756848</code></pre><p>We use the deterministic direct LDLt backend to guarantee a result.</p><pre><code class="language-julia hljs">global_section = nearest_global_section(sheaf, x0; method=:ldl)</code></pre><pre><code class="nohighlight hljs">3-blocked 12-element BlockVector{Float64}:
- 0.04938686902458024 
- 0.9516163375011799  
- 0.6114723767277955  
- 0.9776799269344862  
- ────────────────────
- 0.4149710308471602  
- 0.881262303426521   
- 0.3925728349363278  
- 0.2458882149052156  
- ────────────────────
- 0.6608592457523758  
- 0.6414776054272978  
- 0.027773594592654827
- 0.13435496347756848 </code></pre><p>Now we can check that this is indeed a global section by verifying that the coboundary map applied to it is zero.</p><pre><code class="language-julia hljs">d = coboundary_map(sheaf)
+ 0.69409996154618
+ 0.9840756958533826
+ 0.7176294059540133
+ 0.16639286962869604
+ 0.5179366841326856
+ 0.4478268691593501
+ 0.5881355711002596
+ 0.4047067850401903
+ 0.7100517951156654
+ 0.7992347891131538
+ 0.9019572877814998
+ 0.5938009515950424</code></pre><p>We use the deterministic direct LDLt backend to guarantee a result.</p><pre><code class="language-julia hljs">global_section = nearest_global_section(sheaf, x0; method=:ldl)</code></pre><pre><code class="nohighlight hljs">3-blocked 12-element BlockVector{Float64}:
+ 0.4575448311591334 
+ 0.9840756958533826 
+ 0.48107427556696664
+ 0.16639286962869604
+ ───────────────────
+ 0.5259245029092976 
+ 0.4478268691593501 
+ 0.5881355711002596 
+ 0.41269460381680234
+ ───────────────────
+ 0.9386191067261    
+ 0.7992347891131538 
+ 0.9019572877814998 
+ 0.5938009515950424 </code></pre><p>Now we can check that this is indeed a global section by verifying that the coboundary map applied to it is zero.</p><pre><code class="language-julia hljs">d = coboundary_map(sheaf)
 
-norm(d * global_section)</code></pre><pre><code class="nohighlight hljs">2.7755575615628914e-17</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../">« CellularSheaves.jl</a><a class="docs-footer-nextpage" href="../sheaf_morphisms/">Sheaf Morphisms »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Saturday 8 August 2026 19:50">Saturday 8 August 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+norm(d * global_section)</code></pre><pre><code class="nohighlight hljs">1.5700924586837752e-16</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../../">« CellularSheaves.jl</a><a class="docs-footer-nextpage" href="../sheaf_morphisms/">Sheaf Morphisms »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Wednesday 26 August 2026 21:22">Wednesday 26 August 2026</span>. Using Julia version 1.12.7.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

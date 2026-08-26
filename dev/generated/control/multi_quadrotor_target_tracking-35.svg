@@ -45,11 +45,11 @@
 <polyline clip-path="url(#clip292)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:4; stroke-opacity:1; fill:none" points="1135.31,123.472 1135.31,1451.89 1449.83,1451.89 1449.83,123.472 1135.31,123.472 "/>
 <path clip-path="url(#clip292)" d="M1528.46 681.914 L1528.46 1451.89 L1842.98 1451.89 L1842.98 681.914 L1528.46 681.914 L1528.46 681.914  Z" fill="#dc143c" fill-rule="evenodd" fill-opacity="1"/>
 <polyline clip-path="url(#clip292)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:4; stroke-opacity:1; fill:none" points="1528.46,681.914 1528.46,1451.89 1842.98,1451.89 1842.98,681.914 1528.46,681.914 "/>
-<path clip-path="url(#clip292)" d="M1921.61 859.601 L1921.61 1451.89 L2236.13 1451.89 L2236.13 859.601 L1921.61 859.601 L1921.61 859.601  Z" fill="#800080" fill-rule="evenodd" fill-opacity="1"/>
-<polyline clip-path="url(#clip292)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:4; stroke-opacity:1; fill:none" points="1921.61,859.601 1921.61,1451.89 2236.13,1451.89 2236.13,859.601 1921.61,859.601 "/>
+<path clip-path="url(#clip292)" d="M1921.61 876.523 L1921.61 1451.89 L2236.13 1451.89 L2236.13 876.523 L1921.61 876.523 L1921.61 876.523  Z" fill="#800080" fill-rule="evenodd" fill-opacity="1"/>
+<polyline clip-path="url(#clip292)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:4; stroke-opacity:1; fill:none" points="1921.61,876.523 1921.61,1451.89 2236.13,1451.89 2236.13,876.523 1921.61,876.523 "/>
 <circle clip-path="url(#clip292)" style="fill:#4682b4; stroke:none; fill-opacity:0" cx="506.273" cy="1434.97" r="2"/>
 <circle clip-path="url(#clip292)" style="fill:#ff8c00; stroke:none; fill-opacity:0" cx="899.423" cy="1037.29" r="2"/>
 <circle clip-path="url(#clip292)" style="fill:#008000; stroke:none; fill-opacity:0" cx="1292.57" cy="123.472" r="2"/>
 <circle clip-path="url(#clip292)" style="fill:#dc143c; stroke:none; fill-opacity:0" cx="1685.72" cy="681.914" r="2"/>
-<circle clip-path="url(#clip292)" style="fill:#800080; stroke:none; fill-opacity:0" cx="2078.87" cy="859.601" r="2"/>
+<circle clip-path="url(#clip292)" style="fill:#800080; stroke:none; fill-opacity:0" cx="2078.87" cy="876.523" r="2"/>
 </svg>
