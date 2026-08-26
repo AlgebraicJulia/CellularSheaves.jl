@@ -80,7 +80,8 @@ target1_accel(node, t) = [-0.125cos(0.5*t), -0.125sin(0.5*t), -0.1sin(1.0*t), 0.
 
 # ## Provision Worker Processes
 
-workers_pids = addprocs(NA; exeflags = "--project=$(Base.active_project())")
+workers_pids = addprocs(NA; exeflags = ["--project=$(Base.active_project())",
+        "--sysimage=$(unsafe_string(Base.JLOptions().image_file))"])
 
 @everywhere workers_pids begin
     using CellularSheaves

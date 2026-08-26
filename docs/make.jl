@@ -24,13 +24,29 @@ if !no_literate
     config["repo_root_url"] = "https://github.com/AlgebraicJulia/CellularSheaves.jl/blob/main/docs"
   end
 
+  # Pass 1: copy any committed assets that sit beside a literate source. They are
+  # referenced by relative path from the generated markdown, so they must land in
+  # the output directory. Done first so that an example which regenerates its own
+  # figures overwrites the committed copy rather than the other way round.
+  for (root, dirs, files) in walkdir(literate_dir)
+    out_dir = joinpath(generated_dir, relpath(root, literate_dir))
+    for file in files
+      last(splitext(file)) == ".jl" && continue
+      mkpath(out_dir)
+      cp(joinpath(root, file), joinpath(out_dir, file); force=true)
+    end
+  end
+
+  # Pass 2: render the examples. The `asynch` pages plot from data generated out
+  # of band by docs/scripts/acc26_experiments.jl, so they are the only ones not
+  # executed here.
   for (root, dirs, files) in walkdir(literate_dir)
     out_dir = joinpath(generated_dir, relpath(root, literate_dir))
     for file in files
       f, l = splitext(file)
       if l == ".jl" && !startswith(f, "_")
         src_path = joinpath(root, file)
-        execute = !(contains(src_path, "asynch") || contains(src_path, "distributed") || contains(src_path, "escort.jl") || contains(src_path, "escort_feedforward") || contains(src_path, "scenario5"))
+        execute = !contains(src_path, "asynch")
         Literate.markdown(src_path, out_dir;
           execute=execute, config=config, documenter=false, credit=false)
         Literate.notebook(src_path, out_dir;
