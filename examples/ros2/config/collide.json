@@ -1,0 +1,70 @@
+{
+  "_scenario": "A deliberate head-on conflict, to test the CBF safety filter against its own absence. Two quadrotors, no consensus edges, each pinned through an identity map to its own waypoint target. The two targets sweep the two diagonals of the arena at the same speed and in phase, so they are both at the origin at t = 5.3 s and again every 10.6 s after that. The sheaf is perfectly happy with this: each agent has a global section of its own and tracks it, and the two sections intersect. Nothing in the control law objects, which is the point.",
+  "_how_to_run": "Start the server on this config (SHEAF_CBF=0 to disable the filter), drive it with scripts/fake_sim.py --csv, and score the CSV with scripts/analyze_run.py --config config/collide.json, whose 'min separation' line is the verdict here. fake_sim's own RESULT line is not: with no consensus edges the consensus residual is identically zero, so its converging test has nothing to compare and reports NOT converging whatever happens.",
+  "rate_hz": 20.0,
+  "zmq_endpoint": "tcp://127.0.0.1:5601",
+  "watchdog_ms": 250,
+  "safety": {
+    "z_max": 2.3,
+    "z_min": 0.3,
+    "arena_radius": 6.0,
+    "min_separation": {
+      "air_air": 1.0,
+      "air_ground": 0.8,
+      "ground_ground": 0.8,
+      "alpha": 2.0
+    }
+  },
+  "agents": [
+    {
+      "name": "uav0",
+      "kind": "px4",
+      "ns": "/uav0",
+      "instance": 0,
+      "spawn": [-3.0, -3.0, 0.0],
+      "z_ref": 1.4,
+      "v_max": 1.2,
+      "formation": [0.0, 0.0, 0.0],
+      "gz_model": "x500_0",
+      "pose_topic": "/mocap/x500_0/pose"
+    },
+    {
+      "name": "uav1",
+      "kind": "px4",
+      "ns": "/uav1",
+      "instance": 1,
+      "spawn": [-3.0, 3.0, 0.0],
+      "z_ref": 1.4,
+      "v_max": 1.2,
+      "formation": [0.0, 0.0, 0.0],
+      "gz_model": "x500_1",
+      "pose_topic": "/mocap/x500_1/pose"
+    }
+  ],
+  "targets": [
+    {
+      "name": "diag_up",
+      "kind": "waypoints",
+      "points": [[-3.0, -3.0, 1.4], [3.0, 3.0, 1.4]],
+      "speed": 0.8,
+      "color": [0.95, 0.12, 0.1]
+    },
+    {
+      "name": "diag_down",
+      "kind": "waypoints",
+      "points": [[-3.0, 3.0, 1.4], [3.0, -3.0, 1.4]],
+      "speed": 0.8,
+      "color": [0.1, 0.4, 0.95]
+    }
+  ],
+  "edges": [],
+  "pinning": [
+    { "agent": 0, "target": 0, "map": "identity" },
+    { "agent": 1, "target": 1, "map": "identity" }
+  ],
+  "gains": {
+    "consensus": 0.8,
+    "tracking": 0.9
+  },
+  "visualize": true
+}

@@ -1,0 +1,175 @@
+<?xml version="1.0" ?>
+<!--
+  autonomy_park.sdf : Gazebo Harmonic world standing in for the UF Autonomy Park
+  indoor flight volume.
+
+  The park wiki documents an OptiTrack/Motive capture setup but publishes no
+  capture-volume dimensions (its "Lab Dimensions" page is referenced, not filled
+  in), so the extent below is a placeholder: 10 m x 8 m with the ceiling marker at
+  2.5 m, which is the Astro SOP altitude cap. Update the wall poses once the real
+  numbers are known. Nothing else depends on them except arena_radius in
+  config/swarm.json.
+
+  Walls and the ceiling plane are visual only (no collision geometry). They are
+  there to make the flight envelope legible on screen; the envelope is actually
+  enforced in software, by the geofence in server.jl, which is where it also has
+  to live on real hardware.
+
+  PX4 attaches to this world when started with PX4_GZ_STANDALONE=1 and
+  PX4_GZ_WORLD=autonomy_park.
+-->
+<sdf version="1.9">
+  <world name="autonomy_park">
+
+    <physics type="ode">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
+    <plugin filename="gz-sim-air-pressure-system" name="gz::sim::systems::AirPressure"/>
+    <plugin filename="gz-sim-navsat-system" name="gz::sim::systems::NavSat"/>
+    <plugin filename="gz-sim-apply-link-wrench-system" name="gz::sim::systems::ApplyLinkWrench"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <gravity>0 0 -9.8066</gravity>
+    <magnetic_field>6.0e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <atmosphere type="adiabatic"/>
+
+    <!--
+      Required by PX4, not optional scenery. The x500 airframe enables the
+      simulated GPS (SENS_EN_GPSSIM), which needs both the NavSat system and a
+      georeference to produce a fix. Without them ekf2 starves ("Preflight Fail:
+      ekf2 missing data"), the compass check fails behind it, and the vehicle
+      refuses to arm while happily reporting OFFBOARD.
+
+      Coordinates are Gainesville, so the simulated GPS lands the swarm at the
+      Autonomy Park rather than in Zurich, where PX4's stock world puts it.
+      Indoors the real vehicles will fly on mocap instead, which is an EKF2
+      aiding change (vision pose in, GPS out) and not a world change.
+    -->
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>29.643946</latitude_deg>
+      <longitude_deg>-82.355659</longitude_deg>
+      <elevation>34.0</elevation>
+    </spherical_coordinates>
+
+    <scene>
+      <grid>false</grid>
+      <ambient>0.55 0.57 0.60 1</ambient>
+      <background>0.30 0.33 0.38 1</background>
+      <shadows>false</shadows>
+    </scene>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.25 0.25 0.25 1</specular>
+      <direction>-0.4 0.3 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <!-- A thick slab, not a plane. A plane's collision is an infinitely
+             thin surface acting from above: a model dragged below z=0 with the
+             GUI translate tool simply falls forever (observed: two robots at
+             z=-2800 while the demo ran on without them). Inside a slab, the
+             solver pushes intruders back up instead. -->
+        <collision name="collision">
+          <pose>0 0 -10 0 0 0</pose>
+          <geometry><box><size>120 120 20</size></box></geometry>
+          <surface>
+            <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+          <material>
+            <ambient>0.24 0.25 0.27 1</ambient>
+            <diffuse>0.32 0.33 0.35 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Mocap volume markers. Visual only: 10 m x 8 m footprint, 2.5 m ceiling. -->
+    <model name="mocap_volume">
+      <static>true</static>
+      <link name="link">
+
+        <!-- The volume is drawn as EDGES ONLY: four corner posts and a top
+             perimeter rail at the 2.5 m ceiling. Earlier versions used solid
+             translucent walls and a ceiling slab, which made the volume the
+             single most clickable thing in the scene: any drag attempt on a
+             robot selected a wall first and shoved the whole volume around.
+             Thin edge geometry keeps the boundary legible while leaving the
+             interior transparent to mouse picking. No <collision> anywhere:
+             the flight envelope is enforced by the controller geofence, and a
+             quadrotor must not be able to hit a marker. -->
+
+        <visual name="post_ne">
+          <pose>5 4 1.25 0 0 0</pose>
+          <geometry><box><size>0.06 0.06 2.5</size></box></geometry>
+          <material><ambient>0.20 0.55 0.75 1</ambient><diffuse>0.25 0.6 0.8 1</diffuse></material>
+        </visual>
+        <visual name="post_nw">
+          <pose>-5 4 1.25 0 0 0</pose>
+          <geometry><box><size>0.06 0.06 2.5</size></box></geometry>
+          <material><ambient>0.20 0.55 0.75 1</ambient><diffuse>0.25 0.6 0.8 1</diffuse></material>
+        </visual>
+        <visual name="post_se">
+          <pose>5 -4 1.25 0 0 0</pose>
+          <geometry><box><size>0.06 0.06 2.5</size></box></geometry>
+          <material><ambient>0.20 0.55 0.75 1</ambient><diffuse>0.25 0.6 0.8 1</diffuse></material>
+        </visual>
+        <visual name="post_sw">
+          <pose>-5 -4 1.25 0 0 0</pose>
+          <geometry><box><size>0.06 0.06 2.5</size></box></geometry>
+          <material><ambient>0.20 0.55 0.75 1</ambient><diffuse>0.25 0.6 0.8 1</diffuse></material>
+        </visual>
+
+        <!-- Top rails at the Astro SOP ceiling height (2.5 m). -->
+        <visual name="rail_north">
+          <pose>0 4 2.5 0 0 0</pose>
+          <geometry><box><size>10 0.06 0.06</size></box></geometry>
+          <material><ambient>0.85 0.35 0.25 1</ambient><diffuse>0.9 0.4 0.3 1</diffuse></material>
+        </visual>
+        <visual name="rail_south">
+          <pose>0 -4 2.5 0 0 0</pose>
+          <geometry><box><size>10 0.06 0.06</size></box></geometry>
+          <material><ambient>0.85 0.35 0.25 1</ambient><diffuse>0.9 0.4 0.3 1</diffuse></material>
+        </visual>
+        <visual name="rail_east">
+          <pose>5 0 2.5 0 0 0</pose>
+          <geometry><box><size>0.06 8 0.06</size></box></geometry>
+          <material><ambient>0.85 0.35 0.25 1</ambient><diffuse>0.9 0.4 0.3 1</diffuse></material>
+        </visual>
+        <visual name="rail_west">
+          <pose>-5 0 2.5 0 0 0</pose>
+          <geometry><box><size>0.06 8 0.06</size></box></geometry>
+          <material><ambient>0.85 0.35 0.25 1</ambient><diffuse>0.9 0.4 0.3 1</diffuse></material>
+        </visual>
+
+        <!-- Origin marker: where the OptiTrack calibration square goes. -->
+        <visual name="origin_marker">
+          <pose>0 0 0.005 0 0 0</pose>
+          <geometry><box><size>0.5 0.5 0.01</size></box></geometry>
+          <material><ambient>0.95 0.85 0.20 1</ambient><diffuse>0.95 0.85 0.20 1</diffuse></material>
+        </visual>
+
+      </link>
+    </model>
+
+  </world>
+</sdf>

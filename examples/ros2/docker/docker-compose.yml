@@ -1,0 +1,90 @@
+# Two containers off one image: `sim` runs Gazebo, PX4 and the ROS 2 bridge;
+# `brain` runs the Julia sheaf server. They share the host network so that ZMQ
+# reaches loopback and DDS discovery behaves the way it will at the park, where
+# every robot sits on one flat 192.168.1.0/24 subnet.
+#
+#   cd examples/ros2/docker
+#   docker compose build
+#   docker compose run --rm sim      # then, in another shell:
+#   docker compose run --rm brain
+#
+# Splitting them is not cosmetic: it is the same split that exists on hardware,
+# where the brain is a Julia process on the robot's Jetson and the bridge is a
+# ROS 2 node beside it. Anything that only works because both happen to be in one
+# container is something that will break on the robot.
+
+services:
+  sim:
+    image: sheaf-apark:humble
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    network_mode: host
+    ipc: host
+    privileged: true
+    # mem_limit == memswap_limit pins the container in RAM (its cgroup gets
+    # memory.swap.max=0). A swapped-out PX4 process leaves its quadrotor flying
+    # open-loop on the last latched motor command; on a memory-pressured host
+    # that reads as random mid-flight attitude failures. Better to OOM loudly
+    # than to crash quadrotors quietly.
+    mem_limit: 6g
+    memswap_limit: 6g
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=42
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - SHEAF_CONFIG=/ws/repo/examples/ros2/config/swarm.json
+      - PX4_DIR=/opt/PX4-Autopilot
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ../../..:/ws/repo:rw
+      # An empty file mounted over the repo's root Manifest.toml. That manifest is
+      # untracked developer state: it dev-depends on sibling checkouts such as
+      # ../CliqueTrees.jl that exist next to the repo on a workstation and nowhere
+      # in an image. Pkg.develop collects a developed package's own manifest as
+      # fixed dependencies, so without this mask resolution fails with
+      # "expected package CliqueTrees to exist at /home/<you>/...". Masking it makes
+      # the container resolve from the registry, which is what it should do anyway.
+      - ./empty-manifest.toml:/ws/repo/Manifest.toml:ro
+      - sheaf-ros-ws:/ws/ros2_ws
+    working_dir: /ws/repo/examples/ros2
+    stdin_open: true
+    tty: true
+
+  brain:
+    image: sheaf-apark:humble
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    network_mode: host
+    mem_limit: 4g
+    memswap_limit: 4g
+    environment:
+      - SHEAF_CONFIG=/ws/repo/examples/ros2/config/swarm.json
+      - JULIA_DEPOT_PATH=/ws/julia_depot
+      - JULIA_ENV_DIR=/ws/julia_env
+    volumes:
+      - ../../..:/ws/repo:rw
+      # An empty file mounted over the repo's root Manifest.toml. That manifest is
+      # untracked developer state: it dev-depends on sibling checkouts such as
+      # ../CliqueTrees.jl that exist next to the repo on a workstation and nowhere
+      # in an image. Pkg.develop collects a developed package's own manifest as
+      # fixed dependencies, so without this mask resolution fails with
+      # "expected package CliqueTrees to exist at /home/<you>/...". Masking it makes
+      # the container resolve from the registry, which is what it should do anyway.
+      - ./empty-manifest.toml:/ws/repo/Manifest.toml:ro
+      - sheaf-julia-depot:/ws/julia_depot
+      - sheaf-julia-env:/ws/julia_env
+    working_dir: /ws/repo/examples/ros2
+    command:
+      - bash
+      - -lc
+      - ./scripts/setup_julia.sh && julia --heap-size-hint=1G --project=$$JULIA_ENV_DIR ./server.jl
+    stdin_open: true
+    tty: true
+
+volumes:
+  sheaf-ros-ws:
+  sheaf-julia-depot:
+  sheaf-julia-env:

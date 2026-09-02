@@ -1,0 +1,62 @@
+# CI for examples/ros2. Deliberately separate from julia_ci.yml: that one runs the
+# package test suite on the self-hosted HPC runner through Slurm, while everything
+# here is small enough for a stock GitHub runner and should gate every pull request.
+#
+# Neither job needs ROS 2, Gazebo, PX4 or Docker. The unit tests are pure Python,
+# and `make loop` drives the real controller over the real wire protocol against a
+# kinematic swarm, which is exactly the regression that used to be caught only by
+# someone running it by hand.
+name: ROS 2 example
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["examples/ros2/**", ".github/workflows/ros2_example.yml"]
+  pull_request:
+    paths: ["examples/ros2/**", ".github/workflows/ros2_example.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: ros2-example-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  protocol-tests:
+    name: "protocol and transforms (13 tests)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install pytest
+      - name: unit tests
+        run: make -C examples/ros2 test
+
+  control-loop:
+    name: "control loop converges"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install pyzmq
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.10"
+      - uses: julia-actions/cache@v2
+      - name: instantiate the example environment
+        run: |
+          julia --project=examples/ros2 -e '
+            using Pkg
+            Pkg.develop(PackageSpec(path = pwd()))
+            Pkg.instantiate()'
+      # Fails the build if the swarm does not converge, which is what a protocol
+      # or gain regression looks like from the outside. A scenario that is
+      # over-constrained on purpose reports "settled" and still passes.
+      - name: make loop
+        run: make -C examples/ros2 loop
+      - name: server log on failure
+        if: failure()
+        run: tail -50 /tmp/sheaf_loop.log || true

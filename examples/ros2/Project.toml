@@ -1,0 +1,9 @@
+[deps]
+CellularSheaves = "bbe41592-74b8-4681-9d9c-4481e725304d"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+ZMQ = "c2297ded-f4af-51ae-bb23-16f91089e4e1"
+
+[compat]
+julia = "1.10"

@@ -1,0 +1,1346 @@
+[
+ {
+  "name": "editor-demo",
+  "cfg": {
+   "_scenario": "One moving target in R^3. Three quadrotors are pinned to it through identity maps, each with a formation offset placing it at a vertex of an equilateral triangle CENTERED on the target -- so the whole triangle translates with the target in x, y and z. A ground robot is pinned through PROJECT_XY and shadows the target's ground track directly beneath the triangle's centroid. The consensus edges hold the triangle rigid; the pinning edges drag it around.",
+   "rate_hz": 20.0,
+   "zmq_endpoint": "tcp://127.0.0.1:5599",
+   "watchdog_ms": 250,
+   "safety": {
+    "z_max": 2.3,
+    "z_min": 0.3,
+    "arena_radius": 6.0,
+    "_min_separation_note": "CBF safety filter radii [m]. air_air is measured in R^3, the two radii involving a rover horizontally only (a quadrotor at 1.4 m cannot hit a rover however close their ground tracks are). alpha is the class-K gain in hdot >= -alpha h. Sized against this scenario: the triangle side is 2.08 m and the rover sits 1.2 m horizontally from each quadrotor, so once the formation is assembled nothing is near a constraint and the filter is inert (bit-identical trajectory from t = 30 s). It exists for the transients: on the way to its slot the rover passed 0.970 m horizontally from uav1, inside a radius of this bound, and with the filter that approach becomes 1.001 m.",
+    "min_separation": {
+     "air_air": 1.0,
+     "air_ground": 0.8,
+     "ground_ground": 0.8,
+     "alpha": 2.0
+    }
+   },
+   "agents": [
+    {
+     "name": "uav0",
+     "kind": "px4",
+     "ns": "/uav0",
+     "instance": 0,
+     "spawn": [
+      0.6,
+      1.4,
+      0.0
+     ],
+     "z_ref": 1.4,
+     "v_max": 1.2,
+     "formation": [
+      0.0,
+      1.2,
+      0.0
+     ],
+     "gz_model": "x500_0",
+     "pose_topic": "/mocap/x500_0/pose",
+     "gz_aliases": [
+      "x500_cam0_0"
+     ],
+     "camera_topic": "cam0"
+    },
+    {
+     "name": "uav1",
+     "kind": "px4",
+     "ns": "/uav1",
+     "instance": 1,
+     "spawn": [
+      0.3,
+      -1.2,
+      0.0
+     ],
+     "z_ref": 1.4,
+     "v_max": 1.2,
+     "formation": [
+      -1.039,
+      -0.6,
+      0.0
+     ],
+     "gz_model": "x500_1",
+     "pose_topic": "/mocap/x500_1/pose",
+     "gz_aliases": [
+      "x500_cam1_1"
+     ],
+     "camera_topic": "cam1"
+    },
+    {
+     "name": "uav2",
+     "kind": "px4",
+     "ns": "/uav2",
+     "instance": 2,
+     "spawn": [
+      2.0,
+      0.6,
+      0.0
+     ],
+     "z_ref": 1.4,
+     "v_max": 1.2,
+     "formation": [
+      1.039,
+      -0.6,
+      0.0
+     ],
+     "gz_model": "x500_2",
+     "pose_topic": "/mocap/x500_2/pose",
+     "gz_aliases": [
+      "x500_cam2_2"
+     ],
+     "camera_topic": "cam2"
+    },
+    {
+     "name": "jackal0",
+     "kind": "diffdrive",
+     "gz_model": "jackal0",
+     "spawn": [
+      -2.6,
+      2.6,
+      0.1
+     ],
+     "z_ref": 0.0,
+     "v_max": 1.0,
+     "omega_max": 2.5,
+     "offset": 0.2,
+     "formation": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_topic": "/mocap/jackal0/pose"
+    }
+   ],
+   "targets": [
+    {
+     "name": "target0",
+     "kind": "orbit3d",
+     "center": [
+      0.0,
+      0.0,
+      1.4
+     ],
+     "radius": 1.8,
+     "period": 55.0,
+     "z_amp": 0.55,
+     "z_period": 33.0,
+     "color": [
+      0.95,
+      0.12,
+      0.1
+     ]
+    }
+   ],
+   "edges": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     2
+    ],
+    [
+     2,
+     0
+    ]
+   ],
+   "_pinning_note": "map names the restriction R^3 -> edge stalk applied to BOTH endpoints. 'xy' is the R^2 ground projection, 'z' the R^1 altitude projection, 'identity' all of R^3. This is the whole scenario in four lines.",
+   "pinning": [
+    {
+     "agent": 3,
+     "target": 0,
+     "map": "xy"
+    },
+    {
+     "agent": 0,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 1,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 2,
+     "target": 0,
+     "map": "identity"
+    }
+   ],
+   "gains": {
+    "consensus": 0.8,
+    "tracking": 0.9,
+    "_note": "Sized for stability through the physical inner loop, not tracking speed: target motion is carried by velocity feedforward, so the gradient only assembles the formation and rejects disturbance. k*lambda_max(L) must clear ~0.5 s of PX4 velocity-loop lag plus tick latency."
+   },
+   "visualize": true,
+   "mocap": {
+    "source": "sim",
+    "_source_note": "'sim' republishes Gazebo ground truth (sheaf_ros2 mocap_bridge). 'natnet' talks to the park's OptiTrack/Motive over NatNet (sheaf_ros2 mocap_natnet). The launch file starts exactly one of them, because two publishers on the same pose_topic interleave silently.",
+    "server": "127.0.0.1",
+    "local": "0.0.0.0",
+    "multicast": "239.255.42.99",
+    "command_port": 1510,
+    "data_port": 1511,
+    "up_axis": "y",
+    "vision_rate_hz": 30.0,
+    "max_age_s": 0.25,
+    "_park_note": "At the park: server = the Motive machine's address, local = the address of the interface on THIS host that can reach it (Motive answers only the interface it is bound to), up_axis = whatever Motive's Streaming pane says. Set multicast to \"\" for unicast streaming. Per agent, mocap_body names the rigid body in Motive (defaults to the agent name) and mocap_id pins its streaming id if the take's assets cannot be discovered by name."
+   },
+   "_mocap_note": "pose_topic makes each adapter take world-frame truth instead of its own estimator. In simulation that truth is Gazebo's, republished by sheaf_ros2's mocap_node; at the Autonomy Park it is OptiTrack, and only the publisher changes. Without it the rover runs on wheel dead-reckoning (it cannot even see itself being dragged) and each quadrotor's frame is anchored wherever it booted.",
+   "_formation_note": "Offsets sum to zero, so the triangle's centroid IS the target and the rover sits directly beneath it. Side length r*sqrt(3) = 2.08 m. All three quadrotors fly the target's altitude; separation comes from the triangle itself, and the pad-to-slot transits are short because the spawns roughly face their vertices."
+  },
+  "cam": {
+   "az": -2.3,
+   "el": 0.4,
+   "dist": 9.5,
+   "center": [
+    0,
+    0,
+    0.9
+   ]
+  },
+  "t": 40
+ },
+ {
+  "name": "editor-formation",
+  "cfg": {
+   "rate_hz": 20.0,
+   "zmq_endpoint": "tcp://127.0.0.1:5599",
+   "watchdog_ms": 250,
+   "safety": {
+    "z_max": 2.3,
+    "z_min": 0.3,
+    "arena_radius": 6.0
+   },
+   "agents": [
+    {
+     "name": "uav0",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav0",
+     "instance": 0,
+     "spawn": [
+      0.0,
+      1.45,
+      0
+     ],
+     "z_ref": 1.05,
+     "v_max": 1.2,
+     "formation": [
+      0.0,
+      1.45,
+      -0.4
+     ],
+     "gz_model": "x500_0",
+     "pose_topic": "/mocap/x500_0/pose",
+     "gz_aliases": [
+      "x500_cam0_0"
+     ]
+    },
+    {
+     "name": "uav1",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav1",
+     "instance": 1,
+     "spawn": [
+      -1.26,
+      0.73,
+      0
+     ],
+     "z_ref": 1.21,
+     "v_max": 1.2,
+     "formation": [
+      -1.256,
+      0.725,
+      -0.24
+     ],
+     "gz_model": "x500_1",
+     "pose_topic": "/mocap/x500_1/pose",
+     "gz_aliases": [
+      "x500_cam1_1"
+     ]
+    },
+    {
+     "name": "uav2",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav2",
+     "instance": 2,
+     "spawn": [
+      -1.26,
+      -0.72,
+      0
+     ],
+     "z_ref": 1.37,
+     "v_max": 1.2,
+     "formation": [
+      -1.256,
+      -0.725,
+      -0.08
+     ],
+     "gz_model": "x500_2",
+     "pose_topic": "/mocap/x500_2/pose",
+     "gz_aliases": [
+      "x500_cam2_2"
+     ]
+    },
+    {
+     "name": "uav3",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav3",
+     "instance": 3,
+     "spawn": [
+      -0.0,
+      -1.45,
+      0
+     ],
+     "z_ref": 1.53,
+     "v_max": 1.2,
+     "formation": [
+      -0.0,
+      -1.45,
+      0.08
+     ],
+     "gz_model": "x500_3",
+     "pose_topic": "/mocap/x500_3/pose",
+     "gz_aliases": [
+      "x500_cam3_3"
+     ]
+    },
+    {
+     "name": "uav4",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav4",
+     "instance": 4,
+     "spawn": [
+      1.26,
+      -0.73,
+      0
+     ],
+     "z_ref": 1.69,
+     "v_max": 1.2,
+     "formation": [
+      1.256,
+      -0.725,
+      0.24
+     ],
+     "gz_model": "x500_4",
+     "pose_topic": "/mocap/x500_4/pose",
+     "gz_aliases": [
+      "x500_cam4_4"
+     ]
+    },
+    {
+     "name": "uav5",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav5",
+     "instance": 5,
+     "spawn": [
+      1.26,
+      0.72,
+      0
+     ],
+     "z_ref": 1.85,
+     "v_max": 1.2,
+     "formation": [
+      1.256,
+      0.725,
+      0.4
+     ],
+     "gz_model": "x500_5",
+     "pose_topic": "/mocap/x500_5/pose",
+     "gz_aliases": [
+      "x500_cam5_5"
+     ]
+    },
+    {
+     "name": "husky0",
+     "kind": "diffdrive",
+     "platform": "husky",
+     "gz_model": "husky0",
+     "spawn": [
+      -1.1,
+      -3.0,
+      0.1
+     ],
+     "z_ref": 0.0,
+     "v_max": 1.0,
+     "omega_max": 2.0,
+     "offset": 0.2,
+     "formation": [
+      -1.1,
+      0.0,
+      0.0
+     ],
+     "pose_topic": "/mocap/husky0/pose"
+    },
+    {
+     "name": "jackal0",
+     "kind": "diffdrive",
+     "platform": "jackal",
+     "gz_model": "jackal0",
+     "spawn": [
+      0.0,
+      -3.0,
+      0.1
+     ],
+     "z_ref": 0.0,
+     "v_max": 1.0,
+     "omega_max": 2.5,
+     "offset": 0.2,
+     "formation": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_topic": "/mocap/jackal0/pose"
+    },
+    {
+     "name": "go10",
+     "kind": "diffdrive",
+     "platform": "go1",
+     "gz_model": "go10",
+     "spawn": [
+      1.1,
+      -3.0,
+      0.1
+     ],
+     "z_ref": 0.0,
+     "v_max": 1.5,
+     "omega_max": 3.0,
+     "offset": 0.2,
+     "formation": [
+      1.1,
+      0.0,
+      0.0
+     ],
+     "pose_topic": "/mocap/go10/pose"
+    }
+   ],
+   "targets": [
+    {
+     "name": "target0",
+     "kind": "lissajous",
+     "center": [
+      0,
+      0,
+      1.45
+     ],
+     "amp": [
+      2.4,
+      1.7,
+      0.0
+     ],
+     "freq": [
+      1,
+      2,
+      0
+     ],
+     "phase": [
+      0,
+      0,
+      0
+     ],
+     "period": 50.0,
+     "color": [
+      0.95,
+      0.12,
+      0.1
+     ]
+    }
+   ],
+   "edges": [
+    [
+     0,
+     1
+    ],
+    [
+     0,
+     3
+    ],
+    [
+     1,
+     2
+    ],
+    [
+     1,
+     4
+    ],
+    [
+     2,
+     3
+    ],
+    [
+     2,
+     5
+    ],
+    [
+     3,
+     4
+    ],
+    [
+     4,
+     5
+    ],
+    [
+     5,
+     0
+    ],
+    [
+     0,
+     6
+    ],
+    [
+     3,
+     8
+    ]
+   ],
+   "pinning": [
+    {
+     "agent": 0,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 1,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 2,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 3,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 4,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 5,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 6,
+     "target": 0,
+     "map": "xy"
+    },
+    {
+     "agent": 7,
+     "target": 0,
+     "map": "xy"
+    },
+    {
+     "agent": 8,
+     "target": 0,
+     "map": "xy"
+    }
+   ],
+   "gains": {
+    "consensus": 0.8,
+    "tracking": 0.9
+   },
+   "visualize": true
+  },
+  "cam": {
+   "az": -2.0,
+   "el": 0.46,
+   "dist": 11.5,
+   "center": [
+    0,
+    0,
+    1.0
+   ]
+  },
+  "t": 62
+ },
+ {
+  "name": "editor-checks",
+  "cfg": {
+   "_scenario": "One moving target in R^3. Three quadrotors are pinned to it through identity maps, each with a formation offset placing it at a vertex of an equilateral triangle CENTERED on the target -- so the whole triangle translates with the target in x, y and z. A ground robot is pinned through PROJECT_XY and shadows the target's ground track directly beneath the triangle's centroid. The consensus edges hold the triangle rigid; the pinning edges drag it around.",
+   "rate_hz": 20.0,
+   "zmq_endpoint": "tcp://127.0.0.1:5599",
+   "watchdog_ms": 250,
+   "safety": {
+    "z_max": 2.3,
+    "z_min": 0.3,
+    "arena_radius": 6.0,
+    "_min_separation_note": "CBF safety filter radii [m]. air_air is measured in R^3, the two radii involving a rover horizontally only (a quadrotor at 1.4 m cannot hit a rover however close their ground tracks are). alpha is the class-K gain in hdot >= -alpha h. Sized against this scenario: the triangle side is 2.08 m and the rover sits 1.2 m horizontally from each quadrotor, so nothing here is ever near a constraint and the filter stays inert -- it exists for the transients, where a pre-filter run came within 1.398 m.",
+    "min_separation": {
+     "air_air": 1.0,
+     "air_ground": 0.8,
+     "ground_ground": 0.8,
+     "alpha": 2.0
+    }
+   },
+   "agents": [
+    {
+     "name": "uav0",
+     "kind": "px4",
+     "ns": "/uav0",
+     "instance": 0,
+     "spawn": [
+      0.6,
+      1.4,
+      0.0
+     ],
+     "z_ref": 1.4,
+     "v_max": 1.2,
+     "formation": [
+      0.0,
+      1.2,
+      0.0
+     ],
+     "gz_model": "x500_0",
+     "pose_topic": "/mocap/x500_0/pose",
+     "gz_aliases": [
+      "x500_cam0_0"
+     ],
+     "camera_topic": "cam0"
+    },
+    {
+     "name": "uav1",
+     "kind": "px4",
+     "ns": "/uav1",
+     "instance": 1,
+     "spawn": [
+      0.3,
+      -1.2,
+      0.0
+     ],
+     "z_ref": 1.4,
+     "v_max": 1.2,
+     "formation": [
+      -1.039,
+      -0.6,
+      0.0
+     ],
+     "gz_model": "x500_1",
+     "pose_topic": "/mocap/x500_1/pose",
+     "gz_aliases": [
+      "x500_cam1_1"
+     ],
+     "camera_topic": "cam1"
+    },
+    {
+     "name": "uav2",
+     "kind": "px4",
+     "ns": "/uav2",
+     "instance": 2,
+     "spawn": [
+      2.0,
+      0.6,
+      0.0
+     ],
+     "z_ref": 1.4,
+     "v_max": 1.2,
+     "formation": [
+      0.0,
+      1.2,
+      0.0
+     ],
+     "gz_model": "x500_2",
+     "pose_topic": "/mocap/x500_2/pose",
+     "gz_aliases": [
+      "x500_cam2_2"
+     ],
+     "camera_topic": "cam2"
+    },
+    {
+     "name": "jackal0",
+     "kind": "diffdrive",
+     "gz_model": "jackal0",
+     "spawn": [
+      -2.6,
+      2.6,
+      0.1
+     ],
+     "z_ref": 0.0,
+     "v_max": 1.0,
+     "omega_max": 2.5,
+     "offset": 0.2,
+     "formation": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_topic": "/mocap/jackal0/pose"
+    }
+   ],
+   "targets": [
+    {
+     "name": "target0",
+     "kind": "orbit3d",
+     "center": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 1.8,
+     "period": 55.0,
+     "z_amp": 0.55,
+     "z_period": 33.0,
+     "color": [
+      0.95,
+      0.12,
+      0.1
+     ]
+    }
+   ],
+   "edges": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     2
+    ],
+    [
+     2,
+     0
+    ]
+   ],
+   "_pinning_note": "map names the restriction R^3 -> edge stalk applied to BOTH endpoints. 'xy' is the R^2 ground projection, 'z' the R^1 altitude projection, 'identity' all of R^3. This is the whole scenario in four lines.",
+   "pinning": [
+    {
+     "agent": 3,
+     "target": 0,
+     "map": "xy"
+    },
+    {
+     "agent": 0,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 1,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 2,
+     "target": 0,
+     "map": "identity"
+    }
+   ],
+   "gains": {
+    "consensus": 0.8,
+    "tracking": 0.9,
+    "_note": "Sized for stability through the physical inner loop, not tracking speed: target motion is carried by velocity feedforward, so the gradient only assembles the formation and rejects disturbance. k*lambda_max(L) must clear ~0.5 s of PX4 velocity-loop lag plus tick latency."
+   },
+   "visualize": true,
+   "mocap": {
+    "source": "sim",
+    "_source_note": "'sim' republishes Gazebo ground truth (sheaf_ros2 mocap_bridge). 'natnet' talks to the park's OptiTrack/Motive over NatNet (sheaf_ros2 mocap_natnet). The launch file starts exactly one of them, because two publishers on the same pose_topic interleave silently.",
+    "server": "127.0.0.1",
+    "local": "0.0.0.0",
+    "multicast": "239.255.42.99",
+    "command_port": 1510,
+    "data_port": 1511,
+    "up_axis": "y",
+    "vision_rate_hz": 30.0,
+    "max_age_s": 0.25,
+    "_park_note": "At the park: server = the Motive machine's address, local = the address of the interface on THIS host that can reach it (Motive answers only the interface it is bound to), up_axis = whatever Motive's Streaming pane says. Set multicast to \"\" for unicast streaming. Per agent, mocap_body names the rigid body in Motive (defaults to the agent name) and mocap_id pins its streaming id if the take's assets cannot be discovered by name."
+   },
+   "_mocap_note": "pose_topic makes each adapter take world-frame truth instead of its own estimator. In simulation that truth is Gazebo's, republished by sheaf_ros2's mocap_node; at the Autonomy Park it is OptiTrack, and only the publisher changes. Without it the rover runs on wheel dead-reckoning (it cannot even see itself being dragged) and each quadrotor's frame is anchored wherever it booted.",
+   "_formation_note": "Offsets sum to zero, so the triangle's centroid IS the target and the rover sits directly beneath it. Side length r*sqrt(3) = 2.08 m. All three quadrotors fly the target's altitude; separation comes from the triangle itself, and the pad-to-slot transits are short because the spawns roughly face their vertices."
+  },
+  "cam": {
+   "az": -2.2,
+   "el": 0.45,
+   "dist": 9.5,
+   "center": [
+    0,
+    0,
+    0.6
+   ]
+  }
+ },
+ {
+  "name": "editor-generate",
+  "cfg": {
+   "rate_hz": 20.0,
+   "zmq_endpoint": "tcp://127.0.0.1:5599",
+   "watchdog_ms": 250,
+   "safety": {
+    "z_max": 2.3,
+    "z_min": 0.3,
+    "arena_radius": 6.0
+   },
+   "agents": [
+    {
+     "name": "uav0",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav0",
+     "instance": 0,
+     "spawn": [
+      0.0,
+      1.45,
+      0
+     ],
+     "z_ref": 1.05,
+     "v_max": 1.2,
+     "formation": [
+      0.0,
+      1.45,
+      -0.4
+     ],
+     "gz_model": "x500_0",
+     "pose_topic": "/mocap/x500_0/pose",
+     "gz_aliases": [
+      "x500_cam0_0"
+     ]
+    },
+    {
+     "name": "uav1",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav1",
+     "instance": 1,
+     "spawn": [
+      -1.26,
+      0.73,
+      0
+     ],
+     "z_ref": 1.21,
+     "v_max": 1.2,
+     "formation": [
+      -1.256,
+      0.725,
+      -0.24
+     ],
+     "gz_model": "x500_1",
+     "pose_topic": "/mocap/x500_1/pose",
+     "gz_aliases": [
+      "x500_cam1_1"
+     ]
+    },
+    {
+     "name": "uav2",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav2",
+     "instance": 2,
+     "spawn": [
+      -1.26,
+      -0.72,
+      0
+     ],
+     "z_ref": 1.37,
+     "v_max": 1.2,
+     "formation": [
+      -1.256,
+      -0.725,
+      -0.08
+     ],
+     "gz_model": "x500_2",
+     "pose_topic": "/mocap/x500_2/pose",
+     "gz_aliases": [
+      "x500_cam2_2"
+     ]
+    },
+    {
+     "name": "uav3",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav3",
+     "instance": 3,
+     "spawn": [
+      -0.0,
+      -1.45,
+      0
+     ],
+     "z_ref": 1.53,
+     "v_max": 1.2,
+     "formation": [
+      -0.0,
+      -1.45,
+      0.08
+     ],
+     "gz_model": "x500_3",
+     "pose_topic": "/mocap/x500_3/pose",
+     "gz_aliases": [
+      "x500_cam3_3"
+     ]
+    },
+    {
+     "name": "uav4",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav4",
+     "instance": 4,
+     "spawn": [
+      1.26,
+      -0.73,
+      0
+     ],
+     "z_ref": 1.69,
+     "v_max": 1.2,
+     "formation": [
+      1.256,
+      -0.725,
+      0.24
+     ],
+     "gz_model": "x500_4",
+     "pose_topic": "/mocap/x500_4/pose",
+     "gz_aliases": [
+      "x500_cam4_4"
+     ]
+    },
+    {
+     "name": "uav5",
+     "kind": "px4",
+     "platform": "x500",
+     "ns": "/uav5",
+     "instance": 5,
+     "spawn": [
+      1.26,
+      0.72,
+      0
+     ],
+     "z_ref": 1.85,
+     "v_max": 1.2,
+     "formation": [
+      1.256,
+      0.725,
+      0.4
+     ],
+     "gz_model": "x500_5",
+     "pose_topic": "/mocap/x500_5/pose",
+     "gz_aliases": [
+      "x500_cam5_5"
+     ]
+    },
+    {
+     "name": "husky0",
+     "kind": "diffdrive",
+     "platform": "husky",
+     "gz_model": "husky0",
+     "spawn": [
+      -1.1,
+      -3.0,
+      0.1
+     ],
+     "z_ref": 0.0,
+     "v_max": 1.0,
+     "omega_max": 2.0,
+     "offset": 0.2,
+     "formation": [
+      -1.1,
+      0.0,
+      0.0
+     ],
+     "pose_topic": "/mocap/husky0/pose"
+    },
+    {
+     "name": "jackal0",
+     "kind": "diffdrive",
+     "platform": "jackal",
+     "gz_model": "jackal0",
+     "spawn": [
+      0.0,
+      -3.0,
+      0.1
+     ],
+     "z_ref": 0.0,
+     "v_max": 1.0,
+     "omega_max": 2.5,
+     "offset": 0.2,
+     "formation": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_topic": "/mocap/jackal0/pose"
+    },
+    {
+     "name": "go10",
+     "kind": "diffdrive",
+     "platform": "go1",
+     "gz_model": "go10",
+     "spawn": [
+      1.1,
+      -3.0,
+      0.1
+     ],
+     "z_ref": 0.0,
+     "v_max": 1.5,
+     "omega_max": 3.0,
+     "offset": 0.2,
+     "formation": [
+      1.1,
+      0.0,
+      0.0
+     ],
+     "pose_topic": "/mocap/go10/pose"
+    }
+   ],
+   "targets": [
+    {
+     "name": "target0",
+     "kind": "lissajous",
+     "center": [
+      0,
+      0,
+      1.45
+     ],
+     "amp": [
+      2.4,
+      1.7,
+      0.0
+     ],
+     "freq": [
+      1,
+      2,
+      0
+     ],
+     "phase": [
+      0,
+      0,
+      0
+     ],
+     "period": 50.0,
+     "color": [
+      0.95,
+      0.12,
+      0.1
+     ]
+    }
+   ],
+   "edges": [
+    [
+     0,
+     1
+    ],
+    [
+     0,
+     3
+    ],
+    [
+     1,
+     2
+    ],
+    [
+     1,
+     4
+    ],
+    [
+     2,
+     3
+    ],
+    [
+     2,
+     5
+    ],
+    [
+     3,
+     4
+    ],
+    [
+     4,
+     5
+    ],
+    [
+     5,
+     0
+    ],
+    [
+     0,
+     6
+    ],
+    [
+     3,
+     8
+    ]
+   ],
+   "pinning": [
+    {
+     "agent": 0,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 1,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 2,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 3,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 4,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 5,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 6,
+     "target": 0,
+     "map": "xy"
+    },
+    {
+     "agent": 7,
+     "target": 0,
+     "map": "xy"
+    },
+    {
+     "agent": 8,
+     "target": 0,
+     "map": "xy"
+    }
+   ],
+   "gains": {
+    "consensus": 0.8,
+    "tracking": 0.9
+   },
+   "visualize": true
+  },
+  "tab": "gen",
+  "cam": {
+   "az": -2.0,
+   "el": 0.46,
+   "dist": 11.5,
+   "center": [
+    0,
+    0,
+    1.0
+   ]
+  },
+  "t": 62,
+  "prompt": "six quadrotors in a hexagon at staggered altitudes tracking one target on a figure eight, with a Husky, a Jackal and a Unitree Go1 following its ground track",
+  "status": "<b>6 quadrotor(s), 3 ground, 1 target(s), 8 edges, 9 pins.</b> See Checks below, press Play to watch it, then Save swarm.json."
+ },
+ {
+  "name": "editor-pinning",
+  "cfg": {
+   "_scenario": "One moving target in R^3. Three quadrotors are pinned to it through identity maps, each with a formation offset placing it at a vertex of an equilateral triangle CENTERED on the target -- so the whole triangle translates with the target in x, y and z. A ground robot is pinned through PROJECT_XY and shadows the target's ground track directly beneath the triangle's centroid. The consensus edges hold the triangle rigid; the pinning edges drag it around.",
+   "rate_hz": 20.0,
+   "zmq_endpoint": "tcp://127.0.0.1:5599",
+   "watchdog_ms": 250,
+   "safety": {
+    "z_max": 2.3,
+    "z_min": 0.3,
+    "arena_radius": 6.0,
+    "_min_separation_note": "CBF safety filter radii [m]. air_air is measured in R^3, the two radii involving a rover horizontally only (a quadrotor at 1.4 m cannot hit a rover however close their ground tracks are). alpha is the class-K gain in hdot >= -alpha h. Sized against this scenario: the triangle side is 2.08 m and the rover sits 1.2 m horizontally from each quadrotor, so once the formation is assembled nothing is near a constraint and the filter is inert (bit-identical trajectory from t = 30 s). It exists for the transients: on the way to its slot the rover passed 0.970 m horizontally from uav1, inside a radius of this bound, and with the filter that approach becomes 1.001 m.",
+    "min_separation": {
+     "air_air": 1.0,
+     "air_ground": 0.8,
+     "ground_ground": 0.8,
+     "alpha": 2.0
+    }
+   },
+   "agents": [
+    {
+     "name": "uav0",
+     "kind": "px4",
+     "ns": "/uav0",
+     "instance": 0,
+     "spawn": [
+      0.6,
+      1.4,
+      0.0
+     ],
+     "z_ref": 1.4,
+     "v_max": 1.2,
+     "formation": [
+      0.0,
+      1.2,
+      0.0
+     ],
+     "gz_model": "x500_0",
+     "pose_topic": "/mocap/x500_0/pose",
+     "gz_aliases": [
+      "x500_cam0_0"
+     ],
+     "camera_topic": "cam0"
+    },
+    {
+     "name": "uav1",
+     "kind": "px4",
+     "ns": "/uav1",
+     "instance": 1,
+     "spawn": [
+      0.3,
+      -1.2,
+      0.0
+     ],
+     "z_ref": 1.4,
+     "v_max": 1.2,
+     "formation": [
+      -1.039,
+      -0.6,
+      0.0
+     ],
+     "gz_model": "x500_1",
+     "pose_topic": "/mocap/x500_1/pose",
+     "gz_aliases": [
+      "x500_cam1_1"
+     ],
+     "camera_topic": "cam1"
+    },
+    {
+     "name": "uav2",
+     "kind": "px4",
+     "ns": "/uav2",
+     "instance": 2,
+     "spawn": [
+      2.0,
+      0.6,
+      0.0
+     ],
+     "z_ref": 1.4,
+     "v_max": 1.2,
+     "formation": [
+      1.039,
+      -0.6,
+      0.0
+     ],
+     "gz_model": "x500_2",
+     "pose_topic": "/mocap/x500_2/pose",
+     "gz_aliases": [
+      "x500_cam2_2"
+     ],
+     "camera_topic": "cam2"
+    },
+    {
+     "name": "jackal0",
+     "kind": "diffdrive",
+     "gz_model": "jackal0",
+     "spawn": [
+      -2.6,
+      2.6,
+      0.1
+     ],
+     "z_ref": 0.0,
+     "v_max": 1.0,
+     "omega_max": 2.5,
+     "offset": 0.2,
+     "formation": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "pose_topic": "/mocap/jackal0/pose"
+    }
+   ],
+   "targets": [
+    {
+     "name": "target0",
+     "kind": "orbit3d",
+     "center": [
+      0.0,
+      0.0,
+      1.4
+     ],
+     "radius": 1.8,
+     "period": 55.0,
+     "z_amp": 0.55,
+     "z_period": 33.0,
+     "color": [
+      0.95,
+      0.12,
+      0.1
+     ]
+    }
+   ],
+   "edges": [
+    [
+     0,
+     1
+    ],
+    [
+     1,
+     2
+    ],
+    [
+     2,
+     0
+    ]
+   ],
+   "_pinning_note": "map names the restriction R^3 -> edge stalk applied to BOTH endpoints. 'xy' is the R^2 ground projection, 'z' the R^1 altitude projection, 'identity' all of R^3. This is the whole scenario in four lines.",
+   "pinning": [
+    {
+     "agent": 3,
+     "target": 0,
+     "map": "xy"
+    },
+    {
+     "agent": 0,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 1,
+     "target": 0,
+     "map": "identity"
+    },
+    {
+     "agent": 2,
+     "target": 0,
+     "map": "identity"
+    }
+   ],
+   "gains": {
+    "consensus": 0.8,
+    "tracking": 0.9,
+    "_note": "Sized for stability through the physical inner loop, not tracking speed: target motion is carried by velocity feedforward, so the gradient only assembles the formation and rejects disturbance. k*lambda_max(L) must clear ~0.5 s of PX4 velocity-loop lag plus tick latency."
+   },
+   "visualize": true,
+   "mocap": {
+    "source": "sim",
+    "_source_note": "'sim' republishes Gazebo ground truth (sheaf_ros2 mocap_bridge). 'natnet' talks to the park's OptiTrack/Motive over NatNet (sheaf_ros2 mocap_natnet). The launch file starts exactly one of them, because two publishers on the same pose_topic interleave silently.",
+    "server": "127.0.0.1",
+    "local": "0.0.0.0",
+    "multicast": "239.255.42.99",
+    "command_port": 1510,
+    "data_port": 1511,
+    "up_axis": "y",
+    "vision_rate_hz": 30.0,
+    "max_age_s": 0.25,
+    "_park_note": "At the park: server = the Motive machine's address, local = the address of the interface on THIS host that can reach it (Motive answers only the interface it is bound to), up_axis = whatever Motive's Streaming pane says. Set multicast to \"\" for unicast streaming. Per agent, mocap_body names the rigid body in Motive (defaults to the agent name) and mocap_id pins its streaming id if the take's assets cannot be discovered by name."
+   },
+   "_mocap_note": "pose_topic makes each adapter take world-frame truth instead of its own estimator. In simulation that truth is Gazebo's, republished by sheaf_ros2's mocap_node; at the Autonomy Park it is OptiTrack, and only the publisher changes. Without it the rover runs on wheel dead-reckoning (it cannot even see itself being dragged) and each quadrotor's frame is anchored wherever it booted.",
+   "_formation_note": "Offsets sum to zero, so the triangle's centroid IS the target and the rover sits directly beneath it. Side length r*sqrt(3) = 2.08 m. All three quadrotors fly the target's altitude; separation comes from the triangle itself, and the pad-to-slot transits are short because the spawns roughly face their vertices."
+  },
+  "mode": "pin",
+  "select": {
+   "type": "target",
+   "i": 0
+  },
+  "cam": {
+   "az": -2.4,
+   "el": 0.28,
+   "dist": 8,
+   "center": [
+    0,
+    0,
+    0.8
+   ]
+  }
+ }
+]

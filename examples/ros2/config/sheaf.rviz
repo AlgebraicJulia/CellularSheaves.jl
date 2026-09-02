@@ -1,0 +1,67 @@
+# RViz2 layout for the sheaf overlay. Fixed frame is "world" (the mocap frame);
+# every marker is stamped directly in it, so no TF tree is required and this
+# same file works against simulation and against the park's OptiTrack.
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Tree Height: 500
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 12
+      Color: 100; 105; 115
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Sheaf
+      Enabled: true
+      Topic:
+        Value: /sheaf/viz
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Image
+      Name: uav0 camera
+      Enabled: true
+      Topic:
+        Value: /uav0/camera
+        Reliability Policy: Best Effort
+    - Class: rviz_default_plugins/Image
+      Name: uav1 camera
+      Enabled: false
+      Topic:
+        Value: /uav1/camera
+        Reliability Policy: Best Effort
+    - Class: rviz_default_plugins/Image
+      Name: uav2 camera
+      Enabled: false
+      Topic:
+        Value: /uav2/camera
+        Reliability Policy: Best Effort
+  Global Options:
+    Background Color: 38; 41; 48
+    Fixed Frame: world
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 12
+      Pitch: 0.62
+      Yaw: 0.78
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 1.2
+Window Geometry:
+  Height: 900
+  Width: 1400

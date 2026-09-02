@@ -1,0 +1,91 @@
+{
+  "_scenario": "Keep-out zones, built so the controller wants to fly through them. One quadrotor is pinned through an identity map to a horizontal orbit of radius 1.8 m about the origin, and that circle passes exactly through the axis of the 'pillar' column at [1.8, 0] and exactly through the centre of the 'net' sphere at [-1.8, 0, 1.4]. One rover is pinned through PROJECT_XY to a waypoint lane that runs straight along y = 0 from x = -2.5 to x = 4.5 and back, straight through the same pillar. The sheaf has no objection to any of this: both agents have a global section of their own and both sections intersect solid geometry. Nothing in the gradient flow knows the obstacles exist, which is the point -- the CBF filter is the only thing between the command and the pillar.",
+  "_what_each_zone_shows": "The pillar is a cylinder with applies=all: a column measured on HORIZONTAL distance over the z span [0.0, 2.5], so it constrains the quadrotor at 1.4 m and the rover at 0.1 m alike, and would constrain neither above 2.75 m (the span plus the 0.25 m switch-on pad). The net is a sphere with applies=air, measured in R^3: it turns the quadrotor away, and the rover drives under it untouched even though it passes 1.30 m from the centre, inside the 1.5 m radius. Change applies to 'all' and the rover is turned away too -- that one field is the whole difference.",
+  "_how_to_run": "Start the server on this config, drive it with scripts/fake_sim.py --csv, and read the minimum distance from each zone centre out of the CSV. Run it once with the keep_out list present and once with it deleted (or with SHEAF_CBF=0) to see the difference. fake_sim's own RESULT line is not the verdict here, for the same reason it is not in config/collide.json: with no consensus edges the consensus residual is identically zero, so its converging test has nothing to compare, and an agent held off a zone is supposed to carry a nonzero tracking residual.",
+  "rate_hz": 20.0,
+  "zmq_endpoint": "tcp://127.0.0.1:5602",
+  "watchdog_ms": 250,
+  "safety": {
+    "z_max": 2.3,
+    "z_min": 0.3,
+    "arena_radius": 6.0,
+    "min_separation": {
+      "air_air": 1.0,
+      "air_ground": 0.8,
+      "ground_ground": 0.8,
+      "alpha": 2.0
+    },
+    "keep_out": [
+      {
+        "name": "pillar",
+        "kind": "cylinder",
+        "center": [1.8, 0.0, 0.0],
+        "radius": 0.9,
+        "height": 2.5,
+        "applies": "all"
+      },
+      {
+        "name": "net",
+        "kind": "sphere",
+        "center": [-1.8, 0.0, 1.4],
+        "radius": 1.5,
+        "applies": "air"
+      }
+    ]
+  },
+  "agents": [
+    {
+      "name": "uav0",
+      "kind": "px4",
+      "ns": "/uav0",
+      "instance": 0,
+      "spawn": [0.0, -1.8, 0.0],
+      "z_ref": 1.4,
+      "v_max": 1.2,
+      "formation": [0.0, 0.0, 0.0],
+      "gz_model": "x500_0",
+      "pose_topic": "/mocap/x500_0/pose"
+    },
+    {
+      "name": "jackal0",
+      "kind": "diffdrive",
+      "gz_model": "jackal0",
+      "spawn": [-2.5, 0.0, 0.1],
+      "z_ref": 0.0,
+      "v_max": 1.0,
+      "omega_max": 2.5,
+      "offset": 0.2,
+      "formation": [0.0, 0.0, 0.0],
+      "pose_topic": "/mocap/jackal0/pose"
+    }
+  ],
+  "targets": [
+    {
+      "name": "orbit",
+      "kind": "orbit3d",
+      "center": [0.0, 0.0, 1.4],
+      "radius": 1.8,
+      "period": 40.0,
+      "z_amp": 0.0,
+      "z_period": 33.0,
+      "color": [0.95, 0.12, 0.1]
+    },
+    {
+      "name": "lane",
+      "kind": "waypoints",
+      "points": [[-2.5, 0.0, 0.0], [4.5, 0.0, 0.0]],
+      "speed": 0.5,
+      "color": [0.1, 0.4, 0.95]
+    }
+  ],
+  "edges": [],
+  "pinning": [
+    { "agent": 0, "target": 0, "map": "identity" },
+    { "agent": 1, "target": 1, "map": "xy" }
+  ],
+  "gains": {
+    "consensus": 0.8,
+    "tracking": 0.9
+  },
+  "visualize": true
+}
