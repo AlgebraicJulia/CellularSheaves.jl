@@ -1140,7 +1140,7 @@ function checks() {
     const grp = idx.map(i=>cfg.agents[i]);
     // skip when any of them also tracks something else: see repairConfig
     const solo = !idx.some(i => cfg.pinning.filter(p=>p.agent===i).length > 1);
-    if (grp.length && solo) {
+    if (grp.length > 1 && solo) {
       const s = [0,1,2].map(d => grp.reduce((acc,a)=>acc+(a.formation[d]||0),0));
       if (Math.hypot(...s) > 1e-6)
         out.push(`offsets of the ${grp.length} agents pinned to ${t.name} sum to (${s.map(v=>v.toFixed(2))}), not zero: their centroid will not sit on it`);
@@ -1153,6 +1153,21 @@ function checks() {
   // Where each single-pinned agent is actually asked to sit. Two of these on top
   // of each other is a collision, and a flying one at ground level is a scenario
   // that looks fine in JSON and never takes off.
+  // Slots are evaluated ALONG the trajectory, not at the target's centre. Several
+  // targets can share one centre and still be far apart at every instant (a
+  // shared orbit separated by phase is exactly that), and judging them by their
+  // centres reports every agent as sitting on top of every other one.
+  const slotAt = (i, time) => {
+    const a = cfg.agents[i], ps = cfg.pinning.filter(p=>p.agent===i);
+    if (ps.length !== 1) return null;
+    const t = cfg.targets[ps[0].target]; if (!t) return null;
+    const c = targetPos(t, time), off = ps[0].offset || a.formation, map = ps[0].map;
+    if (map === "z") return null;
+    const own = a.kind === "px4" ? (a.z_ref ?? 0) : (a.spawn[2] ?? 0.1);
+    return [c[0]+off[0], c[1]+off[1], map === "xy" ? own : c[2]+off[2]];
+  };
+  const SLOT_SAMPLES = 32;
+  const horizon = cfg.targets.reduce((m,t)=>Math.max(m, t.period || 0), 0) || 40;
   const slots = cfg.agents.map((a,i) => {
     const ps = cfg.pinning.filter(p=>p.agent===i);
     if (ps.length !== 1) return null;
@@ -1174,7 +1189,14 @@ function checks() {
     const planar = !air(i) || !air(j);
     const key = air(i) && air(j) ? "air_air" : (planar && (air(i) || air(j)) ? "air_ground" : "ground_ground");
     const dims = planar ? [0,1] : [0,1,2];
-    const d = Math.hypot(...dims.map(k=>slots[i].p[k]-slots[j].p[k]));
+    // closest the two slots ever come over one period of the slowest target
+    let d = Infinity;
+    for (let n=0;n<SLOT_SAMPLES;n++) {
+      const time = horizon*n/SLOT_SAMPLES;
+      const pi = slotAt(i, time), pj = slotAt(j, time);
+      if (!pi || !pj) { d = Math.hypot(...dims.map(k=>slots[i].p[k]-slots[j].p[k])); break; }
+      d = Math.min(d, Math.hypot(...dims.map(k=>pi[k]-pj[k])));
+    }
     const dmin = sepOf(key);
     if (d < dmin)
       out.push(`${ai.name} and ${aj.name} are asked to sit ${d.toFixed(2)} m apart, inside the ${dmin} m ${key.replace("_","-")} separation the safety filter enforces: it will hold them apart and the formation will not close`);
@@ -1305,6 +1327,16 @@ function toast(msg) {
 }
 document.getElementById("saveBtn").onclick = async () => {
   syncIO();
+  // The checks strip is easy to fly past, and the scenarios that waste an
+  // afternoon in Gazebo are the ones saved over the top of it. Say it once, at
+  // the moment it matters, and still let it through: an over-constrained
+  // scenario is sometimes exactly what is wanted.
+  if (LAST_WARNINGS.length) {
+    const head = LAST_WARNINGS.slice(0,4).map(w=>"  - "+w).join("\n");
+    const more = LAST_WARNINGS.length > 4 ? `\n  ...and ${LAST_WARNINGS.length-4} more` : "";
+    if (!confirm(`This scenario has ${LAST_WARNINGS.length} issue(s):\n\n${head}${more}\n\nSave it anyway?`))
+      return;
+  }
   const text = io.value;
   if (window.showSaveFilePicker) {
     try {
@@ -1493,6 +1525,11 @@ How the controller reads it:
   asked to occupy the same point. Give every member of a group a distinct
   offset, and make the offsets of the agents pinned to one target sum to
   [0,0,0] so the group is centred on it.
+- Formations that track different targets must not overlap in space. Two rings
+  around the same centre, or two groups whose targets cross, will be held apart
+  by the safety filter and neither will ever close: separate their radii by more
+  than air_air, or give them different altitudes. A formation the filter has to
+  fight is not a formation.
 - safety.min_separation is the smallest gap a control-barrier filter will let a
   pair of robots reach, in metres: air_air between two quadrotors, air_ground and
   ground_ground measured horizontally. Formation offsets must be wider than these
@@ -1767,13 +1804,17 @@ const EXAMPLES = {
   },
   "Counter-rotating rings": () => {
     const inner = ring(4, 1.1), outer = ring(4, 2.2, 0);
-    const ag = inner.map((p,i)=>exQuad(i,p,1.2))
-      .concat(outer.map((p,i)=>exQuad(4+i,p,1.9)));
+    const ag = inner.map((p,i)=>exQuad(i,p,1.0))
+      .concat(outer.map((p,i)=>exQuad(4+i,p,2.1)));
     const e = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4]];
-    const T = (name,per,col) => ({ name, kind:"lissajous", center:[0,0,1.5],
+    // The two rings sweep overlapping ground, so they are separated in ALTITUDE
+    // by more than the air-air radius. Rings that intersect are held apart by
+    // the safety filter and then neither ever closes: a formation the filter has
+    // to fight is not a formation.
+    const T = (name,per,z,col) => ({ name, kind:"lissajous", center:[0,0,z],
       amp:[1.4,1.4,0], freq:[1,1,0], phase:[0,per>0?90:-90,0],
       period:Math.abs(per), color:col });
-    return exBase(ag, [T("inner",34,[0.95,0.12,0.1]), T("outer",-48,[0.2,0.5,0.9])], e,
+    return exBase(ag, [T("inner",34,1.0,[0.95,0.12,0.1]), T("outer",-48,2.1,[0.2,0.5,0.9])], e,
       [0,1,2,3].map(i=>({agent:i,target:0,map:"identity"}))
         .concat([4,5,6,7].map(i=>({agent:i,target:1,map:"identity"}))));
   },
