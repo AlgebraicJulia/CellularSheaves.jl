@@ -1,0 +1,165 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <model name="apark_husky">
+
+    <!-- Numbers below are the A200's own: base_link is the centre of the bottom
+         plate, the wheels hang 0.03282 below it and have a 0.1651 radius, so the
+         plate rides 0.13228 above the ground and every visual mesh can be placed
+         at its link origin exactly as clearpath_platform_description does. -->
+    <link name="base_link">
+      <pose>0 0 0.13228 0 0 0</pose>
+      <inertial>
+        <mass>46.034</mass>
+        <pose>-0.00065 -0.085 0.062 0 0 0</pose>
+        <inertia>
+          <ixx>0.6022</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1.7386</iyy><iyz>0</iyz>
+          <izz>2.0296</izz>
+        </inertia>
+      </inertial>
+      <!-- Two stacked boxes, same split the A200 URDF uses: the lower one is the
+           chassis tub, the upper the shorter top plate. Collision stays boxes so
+           the physics cost does not depend on the mesh's triangle count. -->
+      <collision name="collision_lower">
+        <pose>0 0 0.061875 0 0 0</pose>
+        <geometry><box><size>0.9874 0.5709 0.123750</size></box></geometry>
+      </collision>
+      <collision name="collision_upper">
+        <pose>0 0 0.175625 0 0 0</pose>
+        <geometry><box><size>0.78992 0.5709 0.103750</size></box></geometry>
+      </collision>
+      <visual name="base_link_visual">
+        <geometry>
+          <mesh><uri>file:///opt/ros/humble/share/clearpath_platform_description/meshes/a200/base_link.dae</uri></mesh>
+        </geometry>
+      </visual>
+      <visual name="top_chassis_visual">
+        <geometry>
+          <mesh><uri>file:///opt/ros/humble/share/clearpath_platform_description/meshes/a200/top_chassis.dae</uri></mesh>
+        </geometry>
+      </visual>
+      <visual name="mocap_shell">
+        <pose>0 0 0.26 0 0 0</pose>
+        <geometry><box><size>0.20 0.20 0.06</size></box></geometry>
+        <material>
+          <ambient>0.10 0.10 0.12 1</ambient>
+          <diffuse>0.15 0.15 0.18 1</diffuse>
+        </material>
+      </visual>
+      <sensor name="imu_sensor" type="imu">
+        <always_on>1</always_on>
+        <update_rate>100</update_rate>
+      </sensor>
+    </link>
+
+    <!-- The A200 is a true four-wheel skid steer and its body mesh has all four
+         wheel wells, so a two-wheel-plus-caster stand-in would leave two visible
+         wheels floating. Both wheels on a side are instead handed to DiffDrive,
+         which accepts repeated left_joint/right_joint elements; the plugin block,
+         the topics and the odometry are otherwise identical to the Jackal's.
+         mu2 is deliberately far below mu: skid steer turns by scrubbing the tyres
+         sideways, and matched friction makes the robot refuse to yaw. -->
+    <link name="wheel_front_left">
+      <pose>0.256 0.2775 0.1651 0 0 0</pose>
+      <inertial>
+        <mass>2.637</mass>
+        <inertia><ixx>0.02467</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.04411</iyy><iyz>0</iyz><izz>0.02467</izz></inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.1651</radius><length>0.1143</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>0.3</mu2></ode></friction></surface>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>file:///opt/ros/humble/share/clearpath_platform_description/meshes/a200/wheel.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+
+    <link name="wheel_front_right">
+      <pose>0.256 -0.2775 0.1651 0 0 0</pose>
+      <inertial>
+        <mass>2.637</mass>
+        <inertia><ixx>0.02467</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.04411</iyy><iyz>0</iyz><izz>0.02467</izz></inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.1651</radius><length>0.1143</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>0.3</mu2></ode></friction></surface>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>file:///opt/ros/humble/share/clearpath_platform_description/meshes/a200/wheel.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+
+    <link name="wheel_rear_left">
+      <pose>-0.256 0.2775 0.1651 0 0 0</pose>
+      <inertial>
+        <mass>2.637</mass>
+        <inertia><ixx>0.02467</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.04411</iyy><iyz>0</iyz><izz>0.02467</izz></inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.1651</radius><length>0.1143</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>0.3</mu2></ode></friction></surface>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>file:///opt/ros/humble/share/clearpath_platform_description/meshes/a200/wheel.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+
+    <link name="wheel_rear_right">
+      <pose>-0.256 -0.2775 0.1651 0 0 0</pose>
+      <inertial>
+        <mass>2.637</mass>
+        <inertia><ixx>0.02467</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.04411</iyy><iyz>0</iyz><izz>0.02467</izz></inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.1651</radius><length>0.1143</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.0</mu><mu2>0.3</mu2></ode></friction></surface>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh><uri>file:///opt/ros/humble/share/clearpath_platform_description/meshes/a200/wheel.dae</uri></mesh>
+        </geometry>
+      </visual>
+    </link>
+
+    <joint name="wheel_front_left_joint" type="revolute">
+      <parent>base_link</parent><child>wheel_front_left</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+    <joint name="wheel_front_right_joint" type="revolute">
+      <parent>base_link</parent><child>wheel_front_right</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+    <joint name="wheel_rear_left_joint" type="revolute">
+      <parent>base_link</parent><child>wheel_rear_left</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+    <joint name="wheel_rear_right_joint" type="revolute">
+      <parent>base_link</parent><child>wheel_rear_right</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>wheel_front_left_joint</left_joint>
+      <left_joint>wheel_rear_left_joint</left_joint>
+      <right_joint>wheel_front_right_joint</right_joint>
+      <right_joint>wheel_rear_right_joint</right_joint>
+      <wheel_separation>0.555</wheel_separation>
+      <wheel_radius>0.1651</wheel_radius>
+      <max_linear_acceleration>3.0</max_linear_acceleration>
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_link</child_frame_id>
+    </plugin>
+
+  </model>
+</sdf>

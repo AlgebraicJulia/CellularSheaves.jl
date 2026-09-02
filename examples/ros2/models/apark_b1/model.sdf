@@ -1,0 +1,486 @@
+<?xml version="1.0" ?>
+<sdf version="1.9">
+  <model name="apark_b1">
+
+    <!-- base_link rides at 0.5663 m: with the thighs at 0.72 rad and the calves at
+         -1.44 the feet land exactly on z=0, so the standing pose neither sinks
+         nor floats. That is the gait node's neutral stance, and it is what the
+         twelve joint controllers below hold when the robot is not moving.
+
+         The legs are real kinematics now: hip, thigh and calf are separate links
+         on revolute joints, with the origins, axes and limits taken from
+         b1_description's xacro. They carry no collision geometry on purpose. The
+         body's weight rides on the hidden wheels further down, and a swinging
+         leg that could touch the ground would fight that drive; leaving the legs
+         out of the contact set keeps the gait purely a matter of what the camera
+         sees.
+
+         The leg masses are deliberately tiny, and subtracted from the trunk so
+         the model's total, and therefore how the wheels accelerate it, is what
+         it was before the legs existed. A leg heavy enough to matter also
+         matters on the first simulation step, where it swings up from the pose
+         written here into the standing pose and shoves the body several
+         centimetres sideways before anything has been commanded. -->
+    <link name="base_link">
+      <pose>0 0 0.5663 0 0 0</pose>
+      <inertial>
+        <mass>49.56</mass>
+        <inertia>
+          <ixx>1.4167</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>5.4167</iyy><iyz>0</iyz>
+          <izz>6.0833</izz>
+        </inertia>
+      </inertial>
+      <!-- One box over the standing envelope. It clears the drive wheels below,
+           so the only thing that touches the ground is the wheel/caster set. -->
+      <collision name="collision">
+        <geometry><box><size>1.1 0.5 0.3</size></box></geometry>
+      </collision>
+      <visual name="trunk">
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/trunkb.dae</uri></mesh></geometry>
+      </visual>
+      <visual name="mocap_shell">
+        <pose>0 0 0.2 0 0 0</pose>
+        <geometry><box><size>0.12 0.12 0.04</size></box></geometry>
+        <material>
+          <ambient>0.10 0.10 0.12 1</ambient>
+          <diffuse>0.15 0.15 0.18 1</diffuse>
+        </material>
+      </visual>
+      <sensor name="imu_sensor" type="imu">
+        <always_on>1</always_on>
+        <update_rate>100</update_rate>
+      </sensor>
+    </link>
+
+    <!-- One leg chain per corner, in the unitree link order trunk -> hip ->
+         thigh -> calf, with the foot as a visual on the calf rather than a link
+         of its own. Joint zero is the xacro's zero, which is the leg hanging
+         straight down and not the standing pose, so every angle here means on
+         this model what it means on the real machine. -->
+    <link name="FR_hip">
+      <pose relative_to="base_link">0.3455 -0.072 0 0 0 0</pose>
+      <inertial>
+        <mass>0.04</mass>
+        <inertia><ixx>1.296e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1.296e-04</iyy><iyz>0</iyz><izz>1.296e-04</izz></inertia>
+      </inertial>
+      <visual name="FR_hip">
+        <pose>0 0 0 3.141593 0 0</pose>
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/hipb.dae</uri></mesh></geometry>
+      </visual>
+    </link>
+    <link name="FR_thigh">
+      <pose relative_to="FR_hip">0 -0.12675 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 -0.175 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia><ixx>5.104e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>5.104e-04</iyy><iyz>0</iyz><izz>1.021e-05</izz></inertia>
+      </inertial>
+      <visual name="FR_thigh">
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/thigh_mirrorb.dae</uri></mesh></geometry>
+      </visual>
+    </link>
+    <link name="FR_calf">
+      <pose relative_to="FR_thigh">0 0 -0.35 0 0 0</pose>
+      <inertial>
+        <pose>0 0 -0.175 0 0 0</pose>
+        <mass>0.02</mass>
+        <inertia><ixx>2.042e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>2.042e-04</iyy><iyz>0</iyz><izz>4.083e-06</izz></inertia>
+      </inertial>
+      <visual name="FR_calf">
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/calfb.dae</uri></mesh></geometry>
+      </visual>
+      <visual name="FR_foot">
+        <pose>0 0 -0.35 0 0 0</pose>
+        <geometry><sphere><radius>0.03</radius></sphere></geometry>
+        <material>
+          <ambient>0.05 0.05 0.05 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse>
+        </material>
+      </visual>
+    </link>
+    <link name="FL_hip">
+      <pose relative_to="base_link">0.3455 0.072 0 0 0 0</pose>
+      <inertial>
+        <mass>0.04</mass>
+        <inertia><ixx>1.296e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1.296e-04</iyy><iyz>0</iyz><izz>1.296e-04</izz></inertia>
+      </inertial>
+      <visual name="FL_hip">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/hipb.dae</uri></mesh></geometry>
+      </visual>
+    </link>
+    <link name="FL_thigh">
+      <pose relative_to="FL_hip">0 0.12675 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 -0.175 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia><ixx>5.104e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>5.104e-04</iyy><iyz>0</iyz><izz>1.021e-05</izz></inertia>
+      </inertial>
+      <visual name="FL_thigh">
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/thighb.dae</uri></mesh></geometry>
+      </visual>
+    </link>
+    <link name="FL_calf">
+      <pose relative_to="FL_thigh">0 0 -0.35 0 0 0</pose>
+      <inertial>
+        <pose>0 0 -0.175 0 0 0</pose>
+        <mass>0.02</mass>
+        <inertia><ixx>2.042e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>2.042e-04</iyy><iyz>0</iyz><izz>4.083e-06</izz></inertia>
+      </inertial>
+      <visual name="FL_calf">
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/calfb.dae</uri></mesh></geometry>
+      </visual>
+      <visual name="FL_foot">
+        <pose>0 0 -0.35 0 0 0</pose>
+        <geometry><sphere><radius>0.03</radius></sphere></geometry>
+        <material>
+          <ambient>0.05 0.05 0.05 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse>
+        </material>
+      </visual>
+    </link>
+    <link name="RR_hip">
+      <pose relative_to="base_link">-0.3455 -0.072 0 0 0 0</pose>
+      <inertial>
+        <mass>0.04</mass>
+        <inertia><ixx>1.296e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1.296e-04</iyy><iyz>0</iyz><izz>1.296e-04</izz></inertia>
+      </inertial>
+      <visual name="RR_hip">
+        <pose>0 0 0 3.141593 3.141593 0</pose>
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/hipb.dae</uri></mesh></geometry>
+      </visual>
+    </link>
+    <link name="RR_thigh">
+      <pose relative_to="RR_hip">0 -0.12675 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 -0.175 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia><ixx>5.104e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>5.104e-04</iyy><iyz>0</iyz><izz>1.021e-05</izz></inertia>
+      </inertial>
+      <visual name="RR_thigh">
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/thigh_mirrorb.dae</uri></mesh></geometry>
+      </visual>
+    </link>
+    <link name="RR_calf">
+      <pose relative_to="RR_thigh">0 0 -0.35 0 0 0</pose>
+      <inertial>
+        <pose>0 0 -0.175 0 0 0</pose>
+        <mass>0.02</mass>
+        <inertia><ixx>2.042e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>2.042e-04</iyy><iyz>0</iyz><izz>4.083e-06</izz></inertia>
+      </inertial>
+      <visual name="RR_calf">
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/calfb.dae</uri></mesh></geometry>
+      </visual>
+      <visual name="RR_foot">
+        <pose>0 0 -0.35 0 0 0</pose>
+        <geometry><sphere><radius>0.03</radius></sphere></geometry>
+        <material>
+          <ambient>0.05 0.05 0.05 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse>
+        </material>
+      </visual>
+    </link>
+    <link name="RL_hip">
+      <pose relative_to="base_link">-0.3455 0.072 0 0 0 0</pose>
+      <inertial>
+        <mass>0.04</mass>
+        <inertia><ixx>1.296e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1.296e-04</iyy><iyz>0</iyz><izz>1.296e-04</izz></inertia>
+      </inertial>
+      <visual name="RL_hip">
+        <pose>0 0 0 0 3.141593 0</pose>
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/hipb.dae</uri></mesh></geometry>
+      </visual>
+    </link>
+    <link name="RL_thigh">
+      <pose relative_to="RL_hip">0 0.12675 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 -0.175 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia><ixx>5.104e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>5.104e-04</iyy><iyz>0</iyz><izz>1.021e-05</izz></inertia>
+      </inertial>
+      <visual name="RL_thigh">
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/thighb.dae</uri></mesh></geometry>
+      </visual>
+    </link>
+    <link name="RL_calf">
+      <pose relative_to="RL_thigh">0 0 -0.35 0 0 0</pose>
+      <inertial>
+        <pose>0 0 -0.175 0 0 0</pose>
+        <mass>0.02</mass>
+        <inertia><ixx>2.042e-04</ixx><ixy>0</ixy><ixz>0</ixz><iyy>2.042e-04</iyy><iyz>0</iyz><izz>4.083e-06</izz></inertia>
+      </inertial>
+      <visual name="RL_calf">
+        <geometry><mesh><uri>file:///opt/unitree_ros/robots/b1_description/meshes/calfb.dae</uri></mesh></geometry>
+      </visual>
+      <visual name="RL_foot">
+        <pose>0 0 -0.35 0 0 0</pose>
+        <geometry><sphere><radius>0.03</radius></sphere></geometry>
+        <material>
+          <ambient>0.05 0.05 0.05 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <joint name="FR_hip_joint" type="revolute">
+      <parent>base_link</parent><child>FR_hip</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-0.75</lower><upper>0.75</upper><effort>91.0035</effort><velocity>19.69</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="FR_thigh_joint" type="revolute">
+      <parent>FR_hip</parent><child>FR_thigh</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit><lower>-1</lower><upper>3.5</upper><effort>93.33</effort><velocity>23.32</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="FR_calf_joint" type="revolute">
+      <parent>FR_thigh</parent><child>FR_calf</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit><lower>-2.6</lower><upper>-0.6</upper><effort>140</effort><velocity>15.55</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="FL_hip_joint" type="revolute">
+      <parent>base_link</parent><child>FL_hip</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-0.75</lower><upper>0.75</upper><effort>91.0035</effort><velocity>19.69</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="FL_thigh_joint" type="revolute">
+      <parent>FL_hip</parent><child>FL_thigh</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit><lower>-1</lower><upper>3.5</upper><effort>93.33</effort><velocity>23.32</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="FL_calf_joint" type="revolute">
+      <parent>FL_thigh</parent><child>FL_calf</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit><lower>-2.6</lower><upper>-0.6</upper><effort>140</effort><velocity>15.55</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="RR_hip_joint" type="revolute">
+      <parent>base_link</parent><child>RR_hip</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-0.75</lower><upper>0.75</upper><effort>91.0035</effort><velocity>19.69</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="RR_thigh_joint" type="revolute">
+      <parent>RR_hip</parent><child>RR_thigh</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit><lower>-1</lower><upper>3.5</upper><effort>93.33</effort><velocity>23.32</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="RR_calf_joint" type="revolute">
+      <parent>RR_thigh</parent><child>RR_calf</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit><lower>-2.6</lower><upper>-0.6</upper><effort>140</effort><velocity>15.55</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="RL_hip_joint" type="revolute">
+      <parent>base_link</parent><child>RL_hip</child>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-0.75</lower><upper>0.75</upper><effort>91.0035</effort><velocity>19.69</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="RL_thigh_joint" type="revolute">
+      <parent>RL_hip</parent><child>RL_thigh</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit><lower>-1</lower><upper>3.5</upper><effort>93.33</effort><velocity>23.32</velocity></limit>
+      </axis>
+    </joint>
+    <joint name="RL_calf_joint" type="revolute">
+      <parent>RL_thigh</parent><child>RL_calf</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit><lower>-2.6</lower><upper>-0.6</upper><effort>140</effort><velocity>15.55</velocity></limit>
+      </axis>
+    </joint>
+
+    <!-- The quadruped is driven as a unicycle: the sheaf demo only ever commands
+         a body twist, and a real legged controller is not what it is about. These
+         four contact bodies carry no visual, so what the camera sees is the legged
+         machine while the same DiffDrive plugin the Jackal uses moves it and
+         publishes odometry. The legs above follow that motion rather than cause
+         it, which is why they are kept out of the contact set. -->
+    <link name="wheel_left">
+      <pose>0 0.2000 0.1600 0 0 0</pose>
+      <inertial>
+        <mass>2.0</mass>
+        <inertia><ixx>0.013867</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.025600</iyy><iyz>0</iyz><izz>0.013867</izz></inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.1600</radius><length>0.08</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.2</mu><mu2>1.2</mu2></ode></friction></surface>
+      </collision>
+    </link>
+    <link name="wheel_right">
+      <pose>0 -0.2000 0.1600 0 0 0</pose>
+      <inertial>
+        <mass>2.0</mass>
+        <inertia><ixx>0.013867</ixx><ixy>0</ixy><ixz>0</ixz><iyy>0.025600</iyy><iyz>0</iyz><izz>0.013867</izz></inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>0 0 0 1.5707963 0 0</pose>
+        <geometry><cylinder><radius>0.1600</radius><length>0.08</length></cylinder></geometry>
+        <surface><friction><ode><mu>1.2</mu><mu2>1.2</mu2></ode></friction></surface>
+      </collision>
+    </link>
+    <link name="caster_front">
+      <pose>0.4500 0 0.0900 0 0 0</pose>
+      <inertial>
+        <mass>0.417</mass>
+        <inertia><ixx>1.350e-03</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1.350e-03</iyy><iyz>0</iyz><izz>1.350e-03</izz></inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><sphere><radius>0.0900</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface>
+      </collision>
+    </link>
+    <link name="caster_rear">
+      <pose>-0.4500 0 0.0900 0 0 0</pose>
+      <inertial>
+        <mass>0.417</mass>
+        <inertia><ixx>1.350e-03</ixx><ixy>0</ixy><ixz>0</ixz><iyy>1.350e-03</iyy><iyz>0</iyz><izz>1.350e-03</izz></inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><sphere><radius>0.0900</radius></sphere></geometry>
+        <surface><friction><ode><mu>0.02</mu><mu2>0.02</mu2></ode></friction></surface>
+      </collision>
+    </link>
+
+    <joint name="wheel_left_joint" type="revolute">
+      <parent>base_link</parent><child>wheel_left</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+    <joint name="wheel_right_joint" type="revolute">
+      <parent>base_link</parent><child>wheel_right</child>
+      <axis><xyz>0 1 0</xyz><limit><lower>-1e16</lower><upper>1e16</upper></limit></axis>
+    </joint>
+    <joint name="caster_front_joint" type="ball">
+      <parent>base_link</parent><child>caster_front</child>
+    </joint>
+    <joint name="caster_rear_joint" type="ball">
+      <parent>base_link</parent><child>caster_rear</child>
+    </joint>
+
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+      <left_joint>wheel_left_joint</left_joint>
+      <right_joint>wheel_right_joint</right_joint>
+      <wheel_separation>0.4</wheel_separation>
+      <wheel_radius>0.16</wheel_radius>
+      <max_linear_acceleration>3.0</max_linear_acceleration>
+      <odom_publish_frequency>50</odom_publish_frequency>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_link</child_frame_id>
+    </plugin>
+
+    <!-- One position controller per joint. use_velocity_commands makes each
+         one a velocity constraint rather than a torque, which is what a
+         load-free decorative leg wants: it tracks the gait node's target
+         without drooping under gravity and without a tuned PID. The
+         initial_position values are the neutral stance, so the robot spawns
+         standing instead of snapping there on the first command. -->
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>FR_hip_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>0</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>FR_thigh_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>0.72</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>FR_calf_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>-1.44</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>FL_hip_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>0</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>FL_thigh_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>0.72</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>FL_calf_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>-1.44</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>RR_hip_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>0</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>RR_thigh_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>0.72</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>RR_calf_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>-1.44</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>RL_hip_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>0</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>RL_thigh_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>0.72</initial_position>
+    </plugin>
+    <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+      <joint_name>RL_calf_joint</joint_name>
+      <use_velocity_commands>true</use_velocity_commands>
+      <p_gain>120</p_gain>
+      <initial_position>-1.44</initial_position>
+    </plugin>
+
+    <!-- Published so the gait can be checked from outside: the twelve angles on
+         /world/<world>/model/<model>/joint_state. Rate-limited on purpose, since
+         the default is one message per physics step and nothing needs the leg
+         angles at a kilohertz. -->
+    <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+      <update_rate>100</update_rate>
+      <joint_name>FR_hip_joint</joint_name>
+      <joint_name>FR_thigh_joint</joint_name>
+      <joint_name>FR_calf_joint</joint_name>
+      <joint_name>FL_hip_joint</joint_name>
+      <joint_name>FL_thigh_joint</joint_name>
+      <joint_name>FL_calf_joint</joint_name>
+      <joint_name>RR_hip_joint</joint_name>
+      <joint_name>RR_thigh_joint</joint_name>
+      <joint_name>RR_calf_joint</joint_name>
+      <joint_name>RL_hip_joint</joint_name>
+      <joint_name>RL_thigh_joint</joint_name>
+      <joint_name>RL_calf_joint</joint_name>
+    </plugin>
+
+  </model>
+</sdf>
