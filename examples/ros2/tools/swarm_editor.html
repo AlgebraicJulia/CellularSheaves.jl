@@ -1,0 +1,2097 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swarm Scenario Editor</title>
+<style>
+  :root {
+    --bg:#eceae5; --panel:#fbfaf8; --ink:#16181d; --muted:#6b7280; --line:#dedbd4;
+    --accent:#2456a6; --quad:#1f4fa3; --ground:#c2661a; --target:#c22727;
+    --pin:#7a4fb3; --ok:#256b2b; --warn:#b3261e; --sky1:#f3f1ec; --sky2:#dfe3e8;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.45 ui-sans-serif,system-ui,sans-serif; display:flex; height:100vh;
+         overflow:hidden; }
+  #left { flex:1 1 auto; display:flex; flex-direction:column; min-width:0; }
+
+  #toolbar { padding:7px 12px; background:var(--panel); border-bottom:1px solid var(--line);
+             display:flex; gap:5px; align-items:center; flex-wrap:wrap; }
+  .title { font-weight:650; letter-spacing:-.01em; margin-right:10px; }
+  .sep { width:1px; height:22px; background:var(--line); margin:0 5px; }
+  button,select { font:inherit; font-size:13px; padding:5px 10px; border:1px solid var(--line);
+    background:#fff; border-radius:7px; cursor:pointer; color:var(--ink);
+    transition:background .12s, border-color .12s, color .12s; }
+  button:hover { border-color:var(--accent); }
+  button:active { transform:translateY(1px); }
+  button.mode.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.danger:hover { border-color:var(--warn); color:var(--warn); }
+  button.go { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:550; }
+  button.go:hover { filter:brightness(1.08); }
+  button:disabled { opacity:.5; cursor:default; }
+
+  #hint { color:var(--muted); font-size:12.5px; padding:5px 12px; background:var(--panel);
+          border-bottom:1px solid var(--line); }
+  #wrap { flex:1; position:relative; min-height:0;
+          background:radial-gradient(120% 100% at 50% 0%, var(--sky1) 0%, var(--sky2) 100%); }
+  canvas { position:absolute; inset:0; width:100%; height:100%; display:block; cursor:grab; }
+  canvas.dragging { cursor:grabbing; }
+
+  #hud { position:absolute; left:12px; top:10px; font:11.5px ui-monospace,monospace;
+         color:var(--muted); pointer-events:none; }
+  #legend { position:absolute; right:12px; top:10px; font:11.5px ui-sans-serif,system-ui;
+            color:var(--muted); pointer-events:none; text-align:right; line-height:1.7; }
+  #legend b { color:var(--ink); font-weight:550; }
+
+  /* transport: the scene's own controls, floating over it */
+  #transport { position:absolute; left:50%; transform:translateX(-50%); bottom:44px;
+    display:flex; gap:8px; align-items:center; padding:7px 12px;
+    background:#ffffffdd; backdrop-filter:blur(8px); border:1px solid var(--line);
+    border-radius:11px; box-shadow:0 6px 22px #0000001f; }
+  #transport button { padding:3px 9px; font-size:14px; }
+  #transport input[type=range] { width:260px; accent-color:var(--accent); }
+  #transport .tval { font:11.5px ui-monospace,monospace; color:var(--muted); min-width:46px; }
+  #transport .chk { font-size:12px; color:var(--muted); display:flex; gap:4px; align-items:center; }
+  #transport .resid { font:11.5px ui-monospace,monospace; color:var(--ink); min-width:150px; }
+
+  /* checks, pinned to the scene so they are read rather than scrolled past */
+  #strip { position:absolute; left:0; right:0; bottom:0; display:flex; gap:8px;
+    align-items:center; padding:6px 12px; font-size:12.5px;
+    background:#ffffffe8; border-top:1px solid var(--line); }
+  #strip .pill { border-radius:999px; padding:1px 9px; font-size:11.5px; font-weight:550; }
+  #strip .pill.ok { background:#e4f0e4; color:var(--ok); }
+  #strip .pill.warn { background:#fbe6e4; color:var(--warn); }
+  #strip .items { display:flex; gap:6px; overflow-x:auto; flex:1; scrollbar-width:thin; }
+  #strip .item { white-space:nowrap; border:1px solid var(--line); border-radius:7px;
+    padding:2px 8px; cursor:pointer; background:#fff; color:var(--warn); }
+  #strip .item:hover { border-color:var(--warn); }
+
+  #toast { position:absolute; right:12px; bottom:44px; background:#16181de8; color:#fff;
+    padding:7px 13px; border-radius:8px; font-size:12.5px; opacity:0;
+    transition:opacity .25s; pointer-events:none; max-width:380px; }
+
+  #side { width:390px; flex:0 0 390px; background:var(--panel);
+          border-left:1px solid var(--line); overflow-y:auto; padding:12px; }
+  body.nopanel #side { display:none; }
+  #tabs { display:flex; gap:4px; margin-bottom:12px; }
+  #tabs .tab { flex:1; border-radius:8px; font-size:13px; color:var(--muted); }
+  #tabs .tab.active { background:var(--ink); color:#fff; border-color:var(--ink); }
+
+  h3 { margin:14px 0 6px; font-size:11.5px; text-transform:uppercase; letter-spacing:.06em;
+       color:var(--muted); font-weight:600; }
+  section > h3:first-child { margin-top:0; }
+  .card { border:1px solid var(--line); border-radius:10px; padding:9px 11px; margin-bottom:8px;
+          background:#fff; }
+  .card.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .row { display:flex; gap:6px; align-items:center; margin:3px 0; flex-wrap:wrap; }
+  .row label { color:var(--muted); font-size:12px; min-width:70px; }
+  .grid3 { display:grid; grid-template-columns:64px 1fr 1fr 1fr; gap:4px; align-items:center;
+           margin:3px 0; }
+  .grid3 span { color:var(--muted); font-size:11.5px; }
+  input[type=text],input[type=number] { font:inherit; font-size:12.5px; padding:4px 6px;
+    border:1px solid var(--line); border-radius:6px; width:100%; min-width:0; background:#fff; }
+  input:focus { outline:2px solid #2456a633; border-color:var(--accent); }
+  .w70 { max-width:74px; }
+  textarea { width:100%; height:120px; font:11.5px/1.45 ui-monospace,monospace;
+             border:1px solid var(--line); border-radius:8px; padding:7px; background:#fff; }
+  .chip { display:inline-block; padding:1px 8px; border-radius:999px; font-size:11.5px; color:#fff; }
+  .chip.px4 { background:var(--quad); } .chip.diffdrive { background:var(--ground); }
+  .chip.selchip { background:var(--target); }
+  #warnings div { color:var(--warn); font-size:12.5px; margin:2px 0; }
+  #warnings .ok { color:var(--ok); }
+  .small { font-size:12px; color:var(--muted); }
+  .presets { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin:5px 0; }
+  .presets button { font-size:12px; padding:4px 6px; }
+  .pins { display:flex; flex-wrap:wrap; gap:4px; margin-top:3px; }
+  .pins button.pin { font-size:11.5px; padding:3px 7px; color:var(--muted); }
+  .pins button.pin.on { background:var(--pin); border-color:var(--pin); color:#fff; }
+</style>
+</head>
+<body>
+<div id="left">
+  <div id="toolbar">
+    <span class="title">Swarm Editor</span>
+    <button class="mode active" data-mode="move">Move</button>
+    <button class="mode" data-mode="offset">Offsets</button>
+    <button class="mode" data-mode="edge">Edges</button>
+    <button class="mode" data-mode="pin">Pinning</button>
+    <button class="mode" data-mode="draw">Draw</button>
+    <span class="sep"></span>
+    <select id="platformSel" title="Autonomy Park platforms"></select>
+    <button id="addAgentBtn">+ robot</button>
+    <button id="addTarget">+ target</button>
+    <button id="addZone" title="a region the safety filter keeps robots out of">+ keep-out</button>
+    <button id="delSel" class="danger">remove</button>
+    <span class="sep"></span>
+    <button id="playBtn">&#9654; Play</button>
+    <button id="viewIso">Iso</button>
+    <button id="viewTop">Top</button>
+    <button id="viewFront">Front</button>
+    <span style="flex:1"></span>
+    <button id="undoBtn" title="ctrl+z">&#8630;</button>
+    <button id="redoBtn" title="ctrl+shift+z">&#8631;</button>
+    <button id="panelBtn" title="hide the panel for a clean view (\\)">&#9776;</button>
+    <button id="shotBtn" title="save the scene as a PNG">&#128247;</button>
+    <button id="saveBtn" class="go">Save swarm.json</button>
+  </div>
+  <div id="hint"></div>
+  <div id="wrap">
+    <canvas id="cv"></canvas>
+    <div id="hud"></div>
+    <div id="legend"></div>
+    <div id="transport">
+      <button id="playBtn2" title="space">&#9654;</button>
+      <button id="rewindBtn" title="back to t = 0">&#9198;</button>
+      <input type="range" id="scrub" min="0" max="120" step="0.1" value="0">
+      <span class="tval" id="tval">0.0s</span>
+      <select id="speedSel" title="playback speed">
+        <option value="0.25">0.25x</option><option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option><option value="2">2x</option>
+        <option value="4">4x</option>
+      </select>
+      <label class="chk"><input type="checkbox" id="livePreview" checked> solve</label>
+      <label class="chk" title="enforce the safety filter in the preview, as server.jl does"><input type="checkbox" id="cbfPreview" checked> CBF</label>
+      <span class="resid" id="residOut"></span>
+    </div>
+    <div id="strip"></div>
+    <div id="toast"></div>
+  </div>
+</div>
+<div id="side">
+  <div id="tabs">
+    <button class="tab active" data-tab="build">Build</button>
+    <button class="tab" data-tab="gen">Describe</button>
+    <button class="tab" data-tab="file">File</button>
+  </div>
+
+  <section data-panel="build">
+    <h3>Examples</h3>
+    <div class="presets" id="examples"></div>
+    <div class="small">Each one loads a complete scenario. Press Play to watch it,
+      and read the Checks strip: two of these are meant to misbehave.</div>
+    <h3>Selected</h3>
+    <div id="inspector" class="small"></div>
+    <h3>Targets &amp; trajectories</h3>
+    <div id="targetCard"></div>
+    <h3>Gains &amp; safety</h3>
+    <div class="card" id="gainsCard"></div>
+  </section>
+
+  <section data-panel="gen" hidden>
+    <h3>Describe a scenario</h3>
+    <div class="card">
+      <textarea id="nlPrompt" style="height:76px"
+        placeholder="Six quadrotors in two triangles, each tracking its own target: one on a 3-D lissajous, the other a figure-eight. Add a Jackal per target, pinned by ground track."></textarea>
+      <div class="row">
+        <select id="nlModel" style="flex:1"></select>
+        <button id="nlGo" class="go">Generate</button>
+      </div>
+      <details>
+        <summary class="small">NaviGator connection</summary>
+        <div class="row"><label>base URL</label>
+          <input type="text" id="nlBase" style="flex:1" value="https://api.ai.it.ufl.edu/v1"></div>
+        <div class="row"><label>API key</label>
+          <input type="password" id="nlKey" style="flex:1" placeholder="sk-..."></div>
+        <div class="small">Stored in this browser only (localStorage), never written into
+          <code>swarm.json</code> or the repository. Get one from the NaviGator
+          Virtual Keys page.</div>
+      </details>
+      <div class="small" id="nlStatus"></div>
+    </div>
+    <div class="small">Try: <i>two counter-rotating rings of four quadrotors</i> &middot;
+      <i>a vertical stack of four quadrotors over a circling target</i> &middot;
+      <i>one quadrotor holding one target's ground track and another's altitude</i>.</div>
+  </section>
+
+  <section data-panel="file" hidden>
+    <h3>File</h3>
+    <div class="row">
+      <button id="openBtn">Open&hellip;</button>
+      <button id="copyBtn">Copy</button>
+      <button id="loadBtn">Load textarea</button>
+      <button id="resetBtn">Default</button>
+    </div>
+    <input type="file" id="fileInput" accept=".json,application/json" style="display:none">
+    <textarea id="io" spellcheck="false"></textarea>
+    <div class="small"><b>Save swarm.json</b> writes the file directly where the browser
+    supports it, otherwise it downloads; either way it has to end up at
+    <code>examples/ros2/config/swarm.json</code>. A running simulation reads the config
+    only at startup, so restart <code>make loop</code> or <code>make watch</code> to see
+    a change.</div>
+  </section>
+</div>
+<script>
+"use strict";
+/* ---------------------------------------------------------------------------
+   A dependency-free 3-D scenario editor for examples/ros2/config/swarm.json.
+   The trajectory maths below MIRRORS server.jl (target_position); keep the two
+   in step when adding a kind.
+   --------------------------------------------------------------------------- */
+
+const DEFAULT = {
+  _scenario: "Edited with tools/swarm_editor.html.",
+  rate_hz: 20.0, zmq_endpoint: "tcp://127.0.0.1:5599", watchdog_ms: 250,
+  safety: { z_max: 2.3, z_min: 0.3, arena_radius: 6.0 },
+  agents: [
+    { name:"uav0", kind:"px4", ns:"/uav0", instance:0, spawn:[0.6,1.4,0.0], z_ref:1.4,
+      v_max:1.2, formation:[0.0,1.2,0.0], gz_model:"x500_0", pose_topic:"/mocap/x500_0/pose" },
+    { name:"uav1", kind:"px4", ns:"/uav1", instance:1, spawn:[0.3,-1.2,0.0], z_ref:1.4,
+      v_max:1.2, formation:[-1.039,-0.6,0.0], gz_model:"x500_1", pose_topic:"/mocap/x500_1/pose" },
+    { name:"uav2", kind:"px4", ns:"/uav2", instance:2, spawn:[2.0,0.6,0.0], z_ref:1.4,
+      v_max:1.2, formation:[1.039,-0.6,0.0], gz_model:"x500_2", pose_topic:"/mocap/x500_2/pose" },
+    { name:"jackal0", kind:"diffdrive", gz_model:"jackal0", spawn:[-2.6,2.6,0.1], z_ref:0.0,
+      v_max:1.0, omega_max:2.5, offset:0.2, formation:[0.0,0.0,0.0],
+      pose_topic:"/mocap/jackal0/pose" }
+  ],
+  targets: [ { name:"target0", kind:"orbit3d", center:[0,0,1.4], radius:1.8, period:55.0,
+               z_amp:0.55, z_period:33.0, color:[0.95,0.12,0.1] } ],
+  edges: [[0,1],[1,2],[2,0]],
+  pinning: [ {agent:3,target:0,map:"xy"}, {agent:0,target:0,map:"identity"},
+             {agent:1,target:0,map:"identity"}, {agent:2,target:0,map:"identity"} ],
+  gains: { consensus:0.8, tracking:0.9 },
+  visualize: true
+};
+
+let cfg = clone(DEFAULT);
+let mode = "move", selected = null, edgeFirst = null, drag = null, camDrag = null;
+const cam = { az:-2.2, el:0.5, dist:18, center:[0,0,0.9] };
+const anim = { playing:false, t:0, last:0, speed:1 };
+const MAPS = ["identity","xy","z",null];
+function clone(o){ return JSON.parse(JSON.stringify(o)); }
+function esc(s){ return String(s).replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+/* ------------------------------------------------------------------ trajectories */
+// Mirrors server.jl target_position. All kinds return a 3-vector.
+function targetPos(t, time) {
+  const c = t.center || [0,0,0];
+  switch (t.kind) {
+    case "static": return c.slice();
+    case "circle": {
+      const w = 2*Math.PI/t.period;
+      return [c[0]+t.radius*Math.cos(w*time), c[1]+t.radius*Math.sin(w*time), c[2]];
+    }
+    case "orbit3d": {
+      const w = 2*Math.PI/t.period, wz = 2*Math.PI/t.z_period;
+      return [c[0]+t.radius*Math.cos(w*time), c[1]+t.radius*Math.sin(w*time),
+              c[2]+t.z_amp*Math.sin(wz*time)];
+    }
+    case "lissajous": {
+      const w = 2*Math.PI/t.period;
+      return [0,1,2].map(i => c[i] + t.amp[i]*Math.sin(t.freq[i]*w*time + t.phase[i]*Math.PI/180));
+    }
+    case "waypoints": {
+      const p = t.points || [];
+      if (!p.length) return [0,0,0];
+      if (p.length === 1) return p[0].slice();
+      const segs = p.map((q,i) => sub(p[(i+1)%p.length], q));
+      const lens = segs.map(norm), total = lens.reduce((a,b)=>a+b,0);
+      if (total < 1e-9 || !(t.speed > 0)) return p[0].slice();
+      let s = (t.speed*time) % total;
+      for (let i=0;i<p.length;i++) {
+        if (s <= lens[i] || i === p.length-1) {
+          const d = scale(segs[i], 1/Math.max(lens[i],1e-9));
+          return add(p[i], scale(d, s));
+        }
+        s -= lens[i];
+      }
+    }
+  }
+  return c.slice();
+}
+// The closed trace of a target, as a polyline for drawing.
+function targetPath(t) {
+  if (t.kind === "static") return [];
+  if (t.kind === "waypoints") {
+    const p = (t.points||[]).map(q=>q.slice());
+    return p.length > 2 ? p.concat([p[0]]) : p;
+  }
+  // Analytic kinds: sample long enough that the slowest axis closes.
+  let span = t.period || 1;
+  if (t.kind === "orbit3d") span = lcmSpan(t.period, t.z_period);
+  if (t.kind === "lissajous") {
+    const f = t.freq.filter(v=>Math.abs(v)>1e-9).map(Math.abs);
+    span = t.period * (f.length ? 1/gcdF(f) : 1);
+  }
+  span = Math.min(span, (t.period||1)*12);
+  const N = 420, out = [];
+  for (let i=0;i<=N;i++) out.push(targetPos(t, span*i/N));
+  return out;
+}
+function lcmSpan(a,b){ const n = Math.min(12, Math.max(1, Math.round(b/a))); return a*n; }
+function gcdF(arr){ // gcd of positive reals, quantised: enough for small integer ratios
+  const g = (x,y) => y < 1e-6 ? x : g(y, x % y);
+  return arr.reduce((a,b)=>g(a,b));
+}
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]];
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+const scale=(a,s)=>[a[0]*s,a[1]*s,a[2]*s];
+const norm=a=>Math.hypot(a[0],a[1],a[2]);
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+
+// Preset trajectory library. Every analytic preset emits ONE server kind
+// (lissajous), so the sim needs no new code per shape.
+const PRESETS = {
+  circle:    { label:"Circle",       make:c=>liss(c,[1.8,1.8,0],[1,1,0],[0,90,0],55) },
+  ellipse:   { label:"Ellipse",      make:c=>liss(c,[2.6,1.3,0],[1,1,0],[0,90,0],55) },
+  figure8:   { label:"Figure-8",     make:c=>liss(c,[2.2,1.6,0],[1,2,0],[0,0,0],55) },
+  bob:       { label:"Circle + bob", make:c=>liss(c,[1.8,1.8,0.55],[1,1,1.67],[0,90,0],55) },
+  helix:     { label:"Spiral bob",   make:c=>liss(c,[1.8,1.8,0.5],[1,1,3],[0,90,0],55) },
+  liss2d:    { label:"Lissajous 2-D",make:c=>liss(c,[2.2,2.2,0],[3,2,0],[0,0,0],60) },
+  liss3d:    { label:"Lissajous 3-D",make:c=>liss(c,[2.2,2.2,0.5],[3,2,1],[0,0,0],60) },
+  fig8_3d:   { label:"Figure-8 + climb", make:c=>liss(c,[2.2,1.6,0.45],[1,2,1],[0,0,90],55) },
+  static:    { label:"Static",       make:c=>({kind:"static", center:c.slice()}) },
+  drawn:     { label:"Drawn path",   make:c=>({kind:"waypoints", points:[], speed:0.5,
+                                               _control:[], _smooth:true, _tension:0.5,
+                                               center:c.slice()}) }
+};
+function liss(c, amp, freq, phase, period) {
+  return { kind:"lissajous", center:c.slice(), amp, freq, phase, period };
+}
+
+// The platforms the UF Autonomy Park actually documents. `kind` stays the
+// control-relevant discriminator the controller and the adapters dispatch on
+// (px4 or diffdrive); `platform` records which machine it is, and carries that
+// machine's real limits. The Unitree quadrupeds are driven as unicycles here
+// because they accept the same Twist a Jackal does; using their strafe would
+// need a holonomic adapter and a new kind.
+// `body` says what actually renders in Gazebo today: "own" means this tree has
+// a model for it, "x500" / "jackal" mean it flies or drives with that body while
+// using its own limits from this table. Kinematic runs (make loop) are exact for
+// every platform because only v_max and omega_max enter the control loop.
+const PLATFORMS = {
+  x500:     { label:"Quad: PX4 x500",        kind:"px4", v_max:1.2, z_ref:1.4, gz:"x500", body:"own" },
+  freefly:  { label:"Quad: Freefly",         kind:"px4", v_max:2.0, z_ref:1.6, gz:"x500", body:"own",
+              note:"Own body, x500 flight model: no Freefly mesh is published freely, so it wears an AscTec NEO 11 as a heavy-lift stand-in and its own limits are used." },
+  homebrew: { label:"Quad: Homebrew (PX4)",  kind:"px4", v_max:1.5, z_ref:1.4, gz:"x500", body:"own",
+              note:"Own body (a 3DR Iris), x500 flight model, its own limits." },
+  bebop:    { label:"Quad: Parrot Bebop",    kind:"px4", v_max:1.0, z_ref:1.2, gz:"x500", body:"own",
+              note:"Own body, but the Bebop is not a PX4 airframe: it flies as an x500 and needs its own airframe and adapter before it flies for real." },
+  jackal:   { label:"Ground: Clearpath Jackal", kind:"diffdrive", v_max:1.0, omega_max:2.5, gz:"jackal", body:"own" },
+  husky:    { label:"Ground: Clearpath Husky",  kind:"diffdrive", v_max:1.0, omega_max:2.0, gz:"husky", body:"own",
+              note:"Clearpath's own A200 meshes, driven on four wheels through the one DiffDrive plugin." },
+  b1:       { label:"Ground: Unitree B1",       kind:"diffdrive", v_max:1.2, omega_max:2.0, gz:"unitree_b1", body:"own",
+              note:"Unitree's own meshes in a standing pose, driven as a unicycle; gait and a holonomic adapter are future work." },
+  go1:      { label:"Ground: Unitree Go1",      kind:"diffdrive", v_max:1.5, omega_max:3.0, gz:"unitree_go1", body:"own",
+              note:"Unitree's own meshes in a standing pose, driven as a unicycle; gait and a holonomic adapter are future work." }
+};
+function addPlatform(key) {
+  const P = PLATFORMS[key];
+  if (P.kind === "px4") {
+    const i = cfg.agents.filter(a=>a.kind==="px4").length, name = freshName("uav");
+    cfg.agents.push({ name, kind:"px4", platform:key, ns:"/"+name, instance:i,
+      spawn:[+(Math.cos(i*1.7)*2).toFixed(2), +(Math.sin(i*1.7)*2).toFixed(2), 0],
+      z_ref:P.z_ref, v_max:P.v_max, formation:[0,0,0],
+      gz_model:`${P.gz}_${i}`, pose_topic:`/mocap/${P.gz}_${i}/pose`,
+      gz_aliases:[`${P.gz}_cam${i}_${i}`] });
+  } else {
+    const name = freshName(key);
+    cfg.agents.push({ name, kind:"diffdrive", platform:key, gz_model:name, spawn:[-2,-2,0.1],
+      z_ref:0, v_max:P.v_max, omega_max:P.omega_max, offset:0.2, formation:[0,0,0],
+      pose_topic:`/mocap/${name}/pose` });
+  }
+  selected = { type:"agent", i:cfg.agents.length-1 };
+  if (P.note) toast(P.note);
+  syncIO(); render();
+}
+function applyPreset(k, key) {
+  const t = cfg.targets[k], c = anchor(t);
+  const made = PRESETS[key].make([c[0], c[1], c[2]]);
+  const keep = { name:t.name, color:t.color };
+  for (const p of Object.keys(t)) delete t[p];
+  Object.assign(t, keep, made);
+  syncIO(); render();
+}
+
+/* ------------------------------------------------------------------ geometry */
+function anchor(t) {
+  if (t.kind === "waypoints") {
+    const p = t._control && t._control.length ? t._control : (t.points||[]);
+    return p.length ? p[0].slice() : (t.center || [0,0,1.4]).slice();
+  }
+  return (t.center || [0,0,1.4]).slice();
+}
+function selT() { return selected && selected.type === "target" ? selected.i : 0; }
+function pinnedTarget(i) {
+  const p = cfg.pinning.find(p => p.agent === i);
+  return p ? cfg.targets[p.target] : cfg.targets[0];
+}
+// Where an agent is drawn, in 3-D.
+function agentPos(a, i) {
+  // during playback with the solver on, show where the controller actually put
+  // it, not where we wish it were
+  if (anim.playing && document.getElementById("livePreview").checked && SIM.p && SIM.p[i])
+    return SIM.p[i];
+  if (mode === "offset" || anim.playing) {
+    const t = pinnedTarget(i);
+    const base = t ? (anim.playing ? targetPos(t, anim.t) : anchor(t)) : [0,0,0];
+    return add(base, a.formation);
+  }
+  return [a.spawn[0], a.spawn[1], a.kind === "px4" ? (a.z_ref||0) : (a.spawn[2]||0)];
+}
+
+/* ------------------------------------------------------------------ camera */
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+const wrap = document.getElementById("wrap");
+let W = 0, H = 0, focal = 600;
+
+function basis() {
+  const ce = Math.cos(cam.el), se = Math.sin(cam.el);
+  const ca = Math.cos(cam.az), sa = Math.sin(cam.az);
+  const back = [ce*ca, ce*sa, se];
+  const eye = add(cam.center, scale(back, cam.dist));
+  const f = scale(back, -1);
+  const rl = Math.hypot(f[1], -f[0]) || 1;
+  const r = [f[1]/rl, -f[0]/rl, 0];
+  const u = [r[1]*f[2]-r[2]*f[1], r[2]*f[0]-r[0]*f[2], r[0]*f[1]-r[1]*f[0]];
+  return { eye, f, r, u };
+}
+let B = basis();
+function project(p) {
+  const d = sub(p, B.eye), z = dot(d, B.f);
+  if (z < 0.05) return null;
+  return [W/2 + focal*dot(d,B.r)/z, H/2 - focal*dot(d,B.u)/z, z];
+}
+// screen -> world point on the horizontal plane z = z0
+function toPlane(px, py, z0) {
+  const dir = add(add(scale(B.r, (px - W/2)/focal), scale(B.u, -(py - H/2)/focal)), B.f);
+  if (Math.abs(dir[2]) < 1e-6) return null;
+  const t = (z0 - B.eye[2]) / dir[2];
+  if (t <= 0) return null;
+  return add(B.eye, scale(dir, t));
+}
+// altitude that puts (wx,wy,z) under screen-y py -- exact, from the projection
+function solveZ(wx, wy, py) {
+  const d0 = sub([wx,wy,0], B.eye);
+  const A = dot(d0,B.u), Bc = B.u[2], C = dot(d0,B.f), D = B.f[2];
+  const k = (H/2 - py)/focal, den = Bc - k*D;
+  if (Math.abs(den) < 1e-9) return null;
+  return (k*C - A)/den;
+}
+function resize() {
+  const r = wrap.getBoundingClientRect();
+  W = r.width; H = r.height;
+  cv.width = W*devicePixelRatio; cv.height = H*devicePixelRatio;
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  focal = (H/2)/Math.tan(40*Math.PI/180/2);
+  render();
+}
+window.addEventListener("resize", resize);
+function fitScrub() {
+  const T = cfg.targets.reduce((m,t)=>Math.max(m, t.period||0), 0) || 60;
+  const el = document.getElementById("scrub");
+  if (el) el.max = Math.max(60, Math.min(600, Math.round(T*2)));
+}
+function fitView() {
+  const R = cfg.safety.arena_radius || 6;
+  cam.dist = R*2.6; cam.center = [0,0,Math.min(1.0,(cfg.safety.z_max||2)*0.4)];
+  fitScrub(); simReset();
+}
+
+/* ------------------------------------------------------------------ drawing */
+const css = n => getComputedStyle(document.body).getPropertyValue(n).trim();
+function seg(a, b, col, w, dash) {
+  const p = project(a), q = project(b);
+  if (!p || !q) return;
+  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash||[]);
+  ctx.beginPath(); ctx.moveTo(p[0],p[1]); ctx.lineTo(q[0],q[1]); ctx.stroke();
+  ctx.setLineDash([]);
+}
+function poly(pts, col, w, dash) {
+  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.setLineDash(dash||[]);
+  ctx.beginPath();
+  let pen = false;
+  for (const p of pts) {
+    const s = project(p);
+    if (!s) { pen = false; continue; }
+    pen ? ctx.lineTo(s[0],s[1]) : ctx.moveTo(s[0],s[1]);
+    pen = true;
+  }
+  ctx.stroke(); ctx.setLineDash([]);
+}
+function ground() {
+  const R = Math.ceil((cfg.safety.arena_radius||6) + 2);
+  ctx.strokeStyle = "#e2dfd8"; ctx.lineWidth = 1;
+  for (let g=-R; g<=R; g++) {
+    poly([[g,-R,0],[g,R,0]], "#e2dfd8", 1);
+    poly([[-R,g,0],[R,g,0]], "#e2dfd8", 1);
+  }
+  poly([[-R,0,0],[R,0,0]], "#cdc9c1", 1.4);
+  poly([[0,-R,0],[0,R,0]], "#cdc9c1", 1.4);
+  // arena fence: floor ring, ceiling ring, a few struts
+  const zc = cfg.safety.z_max || 2.3, rad = cfg.safety.arena_radius || 6, ring = z => {
+    const out = [];
+    for (let i=0;i<=64;i++) { const a = i/64*2*Math.PI; out.push([rad*Math.cos(a), rad*Math.sin(a), z]); }
+    return out;
+  };
+  poly(ring(0), "#b3261e44", 1.5, [6,5]);
+  poly(ring(zc), "#b3261e33", 1.2, [4,6]);
+  for (let i=0;i<8;i++) {
+    const a = i/8*2*Math.PI;
+    seg([rad*Math.cos(a),rad*Math.sin(a),0], [rad*Math.cos(a),rad*Math.sin(a),zc], "#b3261e22", 1, [3,6]);
+  }
+}
+function nodeR(depth) { return Math.max(3.5, Math.min(15, focal*0.13/depth)); }
+// Draw a robot as itself. A quadrotor gets a body and four rotor discs, a
+// wheeled rover a chassis with wheels, a quadruped a body on legs: at a glance
+// you can tell what is flying and what is driving without reading a label.
+function marker(p, col, kind, sel, platform) {
+  const s = project(p); if (!s) return null;
+  const r = nodeR(s[2]);
+  // drop line and ground shadow: without these nothing reads as being aloft
+  if (p[2] > 0.02) {
+    seg(p, [p[0],p[1],0], col+"44", 1, [3,4]);
+    const g = project([p[0],p[1],0]);
+    if (g) { ctx.fillStyle = "#00000014"; ctx.beginPath();
+             ctx.ellipse(g[0],g[1],r*1.0,r*0.45,0,0,7); ctx.fill(); }
+  }
+  ctx.save();
+  ctx.translate(s[0], s[1]);
+  ctx.fillStyle = col; ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, r*0.16);
+  if (kind === "target") {
+    // a soft halo so the thing being tracked reads first
+    const g = ctx.createRadialGradient(0,0,0,0,0,r*2.6);
+    g.addColorStop(0, col+"55"); g.addColorStop(1, col+"00");
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0,0,r*2.6,0,7); ctx.fill();
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0,0,r*0.78,0,7); ctx.fill();
+  } else if (kind === "px4") {
+    const arm = r*1.15;
+    ctx.beginPath();
+    ctx.moveTo(-arm,-arm*0.62); ctx.lineTo(arm,arm*0.62);
+    ctx.moveTo(-arm,arm*0.62); ctx.lineTo(arm,-arm*0.62); ctx.stroke();
+    for (const [dx,dy] of [[-1,-.62],[1,.62],[-1,.62],[1,-.62]]) {
+      ctx.globalAlpha = .5; ctx.beginPath();
+      ctx.ellipse(dx*arm, dy*arm, r*0.46, r*0.2, 0, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    ctx.beginPath(); ctx.ellipse(0,0,r*0.62,r*0.44,0,0,7); ctx.fill();
+  } else if (platform === "b1" || platform === "go1") {
+    ctx.beginPath(); ctx.roundRect(-r*1.15,-r*0.42,r*2.3,r*0.84,r*0.28); ctx.fill();
+    ctx.lineWidth = Math.max(1, r*0.17);
+    for (const dx of [-0.82,-0.34,0.34,0.82]) {
+      ctx.beginPath(); ctx.moveTo(dx*r*1.15, r*0.35);
+      ctx.lineTo(dx*r*1.15 + (dx<0?-r*0.2:r*0.2), r*0.95); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(r*1.25, -r*0.3, r*0.2, 0, 7); ctx.fill();   // head
+  } else {
+    ctx.beginPath(); ctx.roundRect(-r*1.05,-r*0.6,r*2.1,r*1.2,r*0.24); ctx.fill();
+    ctx.fillStyle = "#1c1c1c";
+    for (const dx of [-0.62,0.62]) for (const dy of [-1,1])
+      ctx.fillRect(dx*r-r*0.22, dy*r*0.62-r*0.16, r*0.44, r*0.32);
+  }
+  ctx.restore();
+  if (sel) { ctx.strokeStyle = col; ctx.lineWidth = 2;
+             ctx.beginPath(); ctx.arc(s[0],s[1],r+8,0,7); ctx.stroke(); }
+  return s;
+}
+function label(s, txt, col) {
+  if (!s) return;
+  ctx.fillStyle = col || "#1c1c1c"; ctx.font = "12px system-ui,sans-serif";
+  ctx.fillText(txt, s[0]+11, s[1]-9);
+}
+function render() {
+  B = basis();
+  ctx.clearRect(0,0,W,H);
+  ground();
+
+  const tgtCol = css("--target");
+  cfg.targets.forEach(t => {
+    const path = targetPath(t);
+    if (path.length > 1) poly(path, tgtCol+"66", 1.6);
+    if (t.kind === "waypoints") {
+      const ctrl = t._control && t._control.length ? t._control : (t.points||[]);
+      for (const p of ctrl) { const s = project(p);
+        if (s) { ctx.fillStyle = tgtCol+"cc"; ctx.beginPath();
+                 ctx.arc(s[0],s[1],4,0,7); ctx.fill(); } }
+    }
+  });
+
+  // keep-out zones: a hatched footprint on the ground and a wall at the height
+  // the filter actually applies, so "the robots must go around this" is visible
+  (cfg.safety.keep_out || []).forEach((z,k) => {
+    const sel = selected && selected.type==="zone" && selected.i===k;
+    const col = sel ? "#b3261e" : "#b3261e";
+    const ring = (zz,alpha,w,dash) => {
+      const pts=[]; for (let q=0;q<=48;q++){ const a=q/48*2*Math.PI;
+        pts.push([z.center[0]+z.radius*Math.cos(a), z.center[1]+z.radius*Math.sin(a), zz]); }
+      poly(pts, col+alpha, w, dash);
+    };
+    if (z.kind === "sphere") {
+      ring(z.center[2], sel?"cc":"88", sel?2.2:1.6);
+      for (const t of [0.5,0.85]) {
+        const r2 = z.radius*Math.sqrt(1-t*t), pts=[];
+        for (let q=0;q<=48;q++){ const a=q/48*2*Math.PI;
+          pts.push([z.center[0]+r2*Math.cos(a), z.center[1]+r2*Math.sin(a), z.center[2]+z.radius*t]); }
+        poly(pts, col+"55", 1.1);
+        const pts2=pts.map(p=>[p[0],p[1],z.center[2]-z.radius*t]);
+        poly(pts2, col+"55", 1.1);
+      }
+    } else {
+      const zc = z.center[2], zt = zc + (z.height ?? 2.5);
+      ring(zc, sel?"cc":"88", sel?2.2:1.6);
+      ring(zt, sel?"88":"44", 1.2, [5,5]);
+      for (let q=0;q<8;q++) {
+        const a=q/8*2*Math.PI;
+        seg([z.center[0]+z.radius*Math.cos(a), z.center[1]+z.radius*Math.sin(a), zc],
+            [z.center[0]+z.radius*Math.cos(a), z.center[1]+z.radius*Math.sin(a), zt],
+            col+(sel?"66":"33"), 1, [4,5]);
+      }
+    }
+    const c = project([z.center[0], z.center[1], z.center[2]]);
+    if (c) { ctx.fillStyle = col+"dd"; ctx.font = "11.5px system-ui,sans-serif";
+             ctx.fillText(z.name + (z.applies!=="all" ? " ("+z.applies+")" : ""), c[0]+8, c[1]-6); }
+  });
+
+  const pos = cfg.agents.map(agentPos);
+  for (const [i,j] of cfg.edges)
+    if (cfg.agents[i] && cfg.agents[j]) seg(pos[i], pos[j], css("--accent"), 2.4);
+
+  for (const p of cfg.pinning) {
+    const a = cfg.agents[p.agent], t = cfg.targets[p.target];
+    if (!a || !t) continue;
+    const tp = anim.playing ? targetPos(t, anim.t) : anchor(t);
+    seg(pos[p.agent], tp, css("--pin"), 1.6, [7,5]);
+    const s1 = project(pos[p.agent]), s2 = project(tp);
+    if (s1 && s2) { ctx.fillStyle = css("--pin"); ctx.font = "11px ui-monospace,monospace";
+                    ctx.fillText(p.map, (s1[0]+s2[0])/2+4, (s1[1]+s2[1])/2-4); }
+  }
+  if (edgeFirst !== null && pos[edgeFirst]) {
+    const s = project(pos[edgeFirst]);
+    if (s) { ctx.strokeStyle = css("--accent"); ctx.lineWidth = 2;
+             ctx.beginPath(); ctx.arc(s[0],s[1],nodeR(s[2])+9,0,7); ctx.stroke(); }
+  }
+
+  // painter's algorithm over the movable things
+  const items = [];
+  cfg.agents.forEach((a,i) => items.push({ p:pos[i], col:a.kind==="px4"?css("--quad"):css("--ground"),
+    kind:a.kind, platform:a.platform, txt:a.name,
+    sel:selected&&selected.type==="agent"&&selected.i===i }));
+  cfg.targets.forEach((t,k) => {
+    const isSel = selected && selected.type==="target" && selected.i===k;
+    items.push({ p:anim.playing?targetPos(t,anim.t):anchor(t), col:tgtCol, kind:"target",
+                 txt: mode==="pin" && isSel ? t.name+"  <- pinning to this" : t.name,
+                 sel:isSel });
+  });
+  items.map(it => ({ it, s:project(it.p) })).filter(x => x.s)
+       .sort((a,b) => b.s[2]-a.s[2])
+       .forEach(({it}) => label(marker(it.p, it.col, it.kind, it.sel, it.platform), it.txt));
+
+  setHint();
+  renderStrip();
+  const nq = cfg.agents.filter(a=>a.kind==="px4").length;
+  document.getElementById("legend").innerHTML =
+    `<b>${nq}</b> quadrotor${nq===1?"":"s"} &nbsp; <b>${cfg.agents.length-nq}</b> ground &nbsp;` +
+    `<b>${cfg.targets.length}</b> target${cfg.targets.length===1?"":"s"}<br>` +
+    `<span style="color:${css("--accent")}">&#9472;&#9472;</span> consensus &nbsp;` +
+    `<span style="color:${css("--pin")}">&#9476;&#9476;</span> pinning`;
+  if (tvalEl) {
+    tvalEl.textContent = anim.t.toFixed(1)+"s";
+    if (scrubEl && !scrubDragging) scrubEl.value = Math.min(anim.t, +scrubEl.max);
+    residEl.textContent = (anim.playing && livePreviewEl && livePreviewEl.checked)
+      ? `cons ${SIM.cons.toFixed(3)}  track ${SIM.track.toFixed(3)}` : "";
+  }
+  document.getElementById("hud").textContent =
+    `drag empty space to orbit  ·  shift+drag to pan  ·  wheel to zoom` +
+    (anim.playing ? `   ·   t = ${anim.t.toFixed(1)} s` : "");
+  refreshSide();
+}
+
+// Cached element handles plus the checks strip. Warnings name agents, so make
+// them clickable: the point of a lint nobody reads is nothing.
+const tvalEl = document.getElementById("tval"), scrubEl = document.getElementById("scrub"),
+      residEl = document.getElementById("residOut"),
+      livePreviewEl = document.getElementById("livePreview"),
+      stripEl = document.getElementById("strip");
+let scrubDragging = false;
+if (scrubEl) {
+  scrubEl.addEventListener("pointerdown", () => scrubDragging = true);
+  addEventListener("pointerup", () => scrubDragging = false);
+}
+let LAST_WARNINGS = [];
+function renderStrip() {
+  if (!stripEl) return;
+  const w = LAST_WARNINGS;
+  const pill = w.length ? `<span class="pill warn">${w.length} issue${w.length>1?"s":""}</span>`
+                        : `<span class="pill ok">checks pass</span>`;
+  const items = w.slice(0,12).map((t,i) =>
+    `<span class="item" data-w="${i}" title="${esc(t)}">${esc(t.length>72?t.slice(0,72)+"\u2026":t)}</span>`).join("");
+  stripEl.innerHTML = pill + `<div class="items">${items}</div>`;
+  stripEl.querySelectorAll(".item").forEach(el => el.onclick = () => focusWarning(w[+el.dataset.w]));
+}
+// jump the camera to whatever a warning names, by matching agent and target names
+function focusWarning(text) {
+  const ai = cfg.agents.findIndex(a => new RegExp(`\\b${a.name.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\b`).test(text));
+  if (ai >= 0) { selected = { type:"agent", i:ai }; frameOn(agentPos(cfg.agents[ai], ai)); return; }
+  const ti = cfg.targets.findIndex(t => new RegExp(`\\b${t.name.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\b`).test(text));
+  if (ti >= 0) { selected = { type:"target", i:ti }; frameOn(anchor(cfg.targets[ti])); }
+}
+function frameOn(p) {
+  cam.center = [p[0], p[1], p[2]];
+  cam.dist = Math.max(4, Math.min(cam.dist, 9));
+  render();
+}
+
+/* ------------------------------------------------------------------ picking */
+function hit(mx, my) {
+  let best = null;
+  cfg.agents.forEach((a,i) => {
+    const s = project(agentPos(a,i)); if (!s) return;
+    if (Math.hypot(s[0]-mx, s[1]-my) < nodeR(s[2])+7 && (!best || s[2] < best.z))
+      best = { type:"agent", i, z:s[2] };
+  });
+  cfg.targets.forEach((t,k) => {
+    const s = project(anim.playing ? targetPos(t,anim.t) : anchor(t)); if (!s) return;
+    if (Math.hypot(s[0]-mx, s[1]-my) < nodeR(s[2])+7 && (!best || s[2] < best.z))
+      best = { type:"target", i:k, z:s[2] };
+  });
+  (cfg.safety.keep_out || []).forEach((z,k) => {
+    const s = project(z.center); if (!s) return;
+    if (Math.hypot(s[0]-mx, s[1]-my) < 14 && (!best || s[2] < best.z))
+      best = { type:"zone", i:k, z:s[2] };
+  });
+  return best;
+}
+function hitWaypoint(t, mx, my) {
+  const ctrl = t._control && t._control.length ? t._control : (t.points||[]);
+  for (let k=ctrl.length-1;k>=0;k--) {
+    const s = project(ctrl[k]);
+    if (s && Math.hypot(s[0]-mx, s[1]-my) < 9) return k;
+  }
+  return -1;
+}
+
+/* ------------------------------------------------------------------ paths */
+// Closed Catmull-Rom through the control points, sampled to a polyline the
+// server can walk at constant speed.
+function catmullRom(ctrl, tension, per) {
+  const n = ctrl.length;
+  if (n < 3) return ctrl.map(p=>p.slice());
+  const out = [];
+  for (let i=0;i<n;i++) {
+    const p0=ctrl[(i-1+n)%n], p1=ctrl[i], p2=ctrl[(i+1)%n], p3=ctrl[(i+2)%n];
+    for (let s=0;s<per;s++) {
+      const u=s/per, u2=u*u, u3=u2*u;
+      out.push([0,1,2].map(d => tension*(
+        (2*p1[d]) + (-p0[d]+p2[d])*u +
+        (2*p0[d]-5*p1[d]+4*p2[d]-p3[d])*u2 +
+        (-p0[d]+3*p1[d]-3*p2[d]+p3[d])*u3) + (1-tension)*(p1[d]+(p2[d]-p1[d])*u)
+      ).map(v => +v.toFixed(3)));
+    }
+  }
+  return out;
+}
+function rebuildPath(t) {
+  const ctrl = t._control || [];
+  t.points = (t._smooth && ctrl.length >= 3)
+    ? catmullRom(ctrl, Math.min(0.5, t._tension ?? 0.5), 14)
+    : ctrl.map(p => p.slice());
+}
+
+/* ------------------------------------------------------------------ input */
+cv.addEventListener("contextmenu", e => e.preventDefault());
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  cam.dist = Math.max(2.5, Math.min(90, cam.dist*Math.exp(e.deltaY*0.0012)));
+  render();
+}, { passive:false });
+
+cv.addEventListener("pointerdown", e => {
+  cv.setPointerCapture(e.pointerId);
+  cv.classList.add("dragging");
+  const m = hit(e.offsetX, e.offsetY);
+
+  if (e.button !== 0) { camDrag = { pan:e.shiftKey, x:e.offsetX, y:e.offsetY }; return; }
+
+  if (mode === "draw") {
+    const t = cfg.targets[selT()];
+    if (!t) return;
+    if (t.kind !== "waypoints") {
+      const c = anchor(t);
+      const keep = { name:t.name, color:t.color };
+      for (const p of Object.keys(t)) delete t[p];
+      Object.assign(t, keep, { kind:"waypoints", points:[], _control:[], _smooth:true,
+                               _tension:0.5, speed:0.5, center:c });
+    }
+    t._control = t._control || [];
+    const k = hitWaypoint(t, e.offsetX, e.offsetY);
+    if (k >= 0 && e.shiftKey) { t._control.splice(k,1); rebuildPath(t); }
+    else if (k >= 0) { drag = { type:"waypoint", t:selT(), k, alt:false }; }
+    else {
+      const z = t._control.length ? t._control[t._control.length-1][2] : (t.center?t.center[2]:1.4);
+      const p = toPlane(e.offsetX, e.offsetY, z);
+      if (p) { t._control.push([+p[0].toFixed(2), +p[1].toFixed(2), +z.toFixed(2)]); rebuildPath(t); }
+    }
+    syncIO(); render(); return;
+  }
+  if (mode === "edge") {
+    if (m && m.type === "agent") {
+      if (edgeFirst === null) edgeFirst = m.i;
+      else if (edgeFirst !== m.i) { toggleEdge(edgeFirst, m.i); edgeFirst = null; }
+      else edgeFirst = null;
+    } else edgeFirst = null;
+    render(); return;
+  }
+  if (mode === "pin") {
+    if (m && m.type === "agent") cyclePin(m.i, e.shiftKey);
+    else if (m && m.type === "target") selected = m;
+    render(); return;
+  }
+  if (m) { selected = m; drag = { type:m.type, i:m.i, alt:e.shiftKey }; }
+  else { camDrag = { pan:e.shiftKey, x:e.offsetX, y:e.offsetY }; }
+  render();
+});
+
+cv.addEventListener("pointermove", e => {
+  if (camDrag) {
+    const dx = e.offsetX - camDrag.x, dy = e.offsetY - camDrag.y;
+    camDrag.x = e.offsetX; camDrag.y = e.offsetY;
+    if (camDrag.pan) {
+      const s = cam.dist/focal;
+      cam.center = add(cam.center, add(scale(B.r, -dx*s), scale(B.u, dy*s)));
+    } else {
+      cam.az -= dx*0.008;
+      cam.el = Math.max(-1.45, Math.min(1.45, cam.el + dy*0.006));
+    }
+    render(); return;
+  }
+  if (!drag) return;
+
+  if (drag.type === "waypoint") {
+    const t = cfg.targets[drag.t], p = t._control[drag.k];
+    if (e.shiftKey) { const z = solveZ(p[0], p[1], e.offsetY); if (z != null) p[2] = +z.toFixed(2); }
+    else { const q = toPlane(e.offsetX, e.offsetY, p[2]);
+           if (q) { p[0] = +q[0].toFixed(2); p[1] = +q[1].toFixed(2); } }
+    rebuildPath(t); render(); return;
+  }
+  if (drag.type === "zone") {
+    const z = cfg.safety.keep_out[drag.i];
+    if (e.shiftKey) { const zz = solveZ(z.center[0], z.center[1], e.offsetY);
+                      if (zz != null) z.center[2] = +zz.toFixed(2); }
+    else { const q = toPlane(e.offsetX, e.offsetY, z.center[2]);
+           if (q) { z.center[0] = +q[0].toFixed(2); z.center[1] = +q[1].toFixed(2); } }
+    render(); return;
+  }
+  if (drag.type === "target") {
+    const t = cfg.targets[drag.i], a = anchor(t);
+    if (e.shiftKey) {
+      const z = solveZ(a[0], a[1], e.offsetY);
+      if (z != null) shiftTarget(t, [0,0,+ (z-a[2]).toFixed(2)]);
+    } else {
+      const q = toPlane(e.offsetX, e.offsetY, a[2]);
+      if (q) shiftTarget(t, [+(q[0]-a[0]).toFixed(2), +(q[1]-a[1]).toFixed(2), 0]);
+    }
+    render(); return;
+  }
+  // agent
+  const a = cfg.agents[drag.i], p = agentPos(a, drag.i);
+  if (mode === "offset") {
+    const base = sub(p, a.formation);
+    if (e.shiftKey) { const z = solveZ(p[0],p[1],e.offsetY);
+                      if (z != null) a.formation[2] = +(z-base[2]).toFixed(3); }
+    else { const q = toPlane(e.offsetX, e.offsetY, p[2]);
+           if (q) { a.formation[0] = +(q[0]-base[0]).toFixed(3);
+                    a.formation[1] = +(q[1]-base[1]).toFixed(3); } }
+  } else if (e.shiftKey) {
+    if (a.kind === "px4") { const z = solveZ(p[0],p[1],e.offsetY);
+                            if (z != null) a.z_ref = +Math.max(0,z).toFixed(2); }
+  } else {
+    const q = toPlane(e.offsetX, e.offsetY, p[2]);
+    if (q) { a.spawn[0] = +q[0].toFixed(2); a.spawn[1] = +q[1].toFixed(2); }
+  }
+  render();
+});
+cv.addEventListener("pointerup", () => {
+  drag = null; camDrag = null; cv.classList.remove("dragging"); syncIO();
+});
+function shiftTarget(t, d) {
+  if (t.kind === "waypoints") {
+    for (const p of (t._control||[])) { p[0]=+(p[0]+d[0]).toFixed(2);
+      p[1]=+(p[1]+d[1]).toFixed(2); p[2]=+(p[2]+d[2]).toFixed(2); }
+    rebuildPath(t);
+  } else if (t.center) {
+    t.center = [+(t.center[0]+d[0]).toFixed(2), +(t.center[1]+d[1]).toFixed(2),
+                +(t.center[2]+d[2]).toFixed(2)];
+  }
+}
+function toggleEdge(i,j) {
+  const k = cfg.edges.findIndex(e => (e[0]===i&&e[1]===j)||(e[0]===j&&e[1]===i));
+  if (k>=0) cfg.edges.splice(k,1); else cfg.edges.push([i,j]);
+  syncIO();
+}
+// Cycle agent `i`'s restriction map to target `tgt`.
+//
+// A plain click MOVES the pin: the agent tracks this target and no other, which
+// is what is meant nearly every time. Shift-click KEEPS the agent's other pins,
+// because multiple pinning edges are a real and useful construction -- pinning
+// through complementary maps (xy to one target, z to another) asks an agent to
+// follow one thing's ground track at another thing's altitude, and the sheaf
+// still has a global section. Pinning through overlapping maps (two identities)
+// asks it to be in two places at once, and the checks panel says so.
+function cyclePinTo(i, tgt, keepOthers) {
+  const k = cfg.pinning.findIndex(p => p.agent===i && p.target===tgt);
+  const cur = k>=0 ? MAPS.indexOf(cfg.pinning[k].map) : MAPS.length-1;
+  const next = MAPS[(cur+1)%MAPS.length];
+  cfg.pinning = cfg.pinning.filter(p => p.agent !== i || (keepOthers && p.target !== tgt));
+  if (next !== null) cfg.pinning.push({ agent:i, target:tgt, map:next });
+  syncIO(); render();
+}
+function cyclePin(i, keepOthers) { cyclePinTo(i, selT(), keepOthers); }
+// The CBF radii live in safety.min_separation, and server.jl falls back to these
+// same numbers when the block is absent, so the panel shows what will actually
+// be enforced rather than a blank.
+const SEP_DEFAULTS = { air_air:1.0, air_ground:0.8, ground_ground:0.8, alpha:2.0 };
+function sepOf(k) {
+  const m = cfg.safety && cfg.safety.min_separation;
+  return (m && m[k] !== undefined) ? m[k] : SEP_DEFAULTS[k];
+}
+function setSep(k, v) {
+  cfg.safety.min_separation = Object.assign({}, SEP_DEFAULTS, cfg.safety.min_separation || {});
+  cfg.safety.min_separation[k] = v;
+}
+function mapOf(i, k) {
+  const p = cfg.pinning.find(p => p.agent===i && p.target===k);
+  return p ? p.map + (p.offset ? "*" : "") : "—";
+}
+
+/* ------------------------------------------------------------------ add / remove */
+function freshName(pfx) { let n=0; while (cfg.agents.some(a=>a.name===pfx+n)) n++; return pfx+n; }
+const psel = document.getElementById("platformSel");
+psel.innerHTML = Object.entries(PLATFORMS)
+  .map(([k,p]) => `<option value="${k}">${p.label}${p.body==="own"?"":"  (borrowed body)"}</option>`).join("");
+document.getElementById("addAgentBtn").onclick = () => addPlatform(psel.value);
+document.getElementById("addTarget").onclick = () => {
+  let n=0; while (cfg.targets.some(t=>t.name==="target"+n)) n++;
+  // Offset from the targets that already exist: spawning a second one on top of
+  // the first makes it invisible and unclickable.
+  const m = cfg.targets.length, R = Math.min(3, (cfg.safety.arena_radius||6)*0.45);
+  const t = PRESETS.circle.make([+(R*Math.cos(m*2.2)).toFixed(2),
+                                 +(R*Math.sin(m*2.2)).toFixed(2), 1.4]);
+  t.amp = [1.2,1.2,0];
+  t.name = "target"+n; t.color = [0.95,0.12,0.1];
+  cfg.targets.push(t);
+  selected = { type:"target", i:cfg.targets.length-1 };
+  toast(`${t.name} added -- pin agents to it in the Targets panel`);
+  syncIO(); render();
+};
+document.getElementById("addZone").onclick = () => {
+  cfg.safety.keep_out = cfg.safety.keep_out || [];
+  let n=0; while (cfg.safety.keep_out.some(z=>z.name==="zone"+n)) n++;
+  const R = Math.min(2.5, (cfg.safety.arena_radius||6)*0.4);
+  const a = cfg.safety.keep_out.length*1.9;
+  cfg.safety.keep_out.push({ name:"zone"+n, kind:"cylinder",
+    center:[+(R*Math.cos(a)).toFixed(2), +(R*Math.sin(a)).toFixed(2), 0.0],
+    radius:0.9, height:+(cfg.safety.z_max||2.3).toFixed(2), applies:"all" });
+  selected = { type:"zone", i:cfg.safety.keep_out.length-1 };
+  toast("keep-out zone added: the filter will hold every robot outside it");
+  syncIO(); render();
+};
+document.getElementById("delSel").onclick = () => {
+  if (selected && selected.type === "zone") {
+    cfg.safety.keep_out.splice(selected.i, 1);
+    if (!cfg.safety.keep_out.length) delete cfg.safety.keep_out;
+    selected = null; syncIO(); render(); return;
+  }
+  if (selected && selected.type === "target") {
+    if (cfg.targets.length <= 1) return toast("keep at least one target");
+    const k = selected.i;
+    cfg.targets.splice(k,1);
+    cfg.pinning = cfg.pinning.filter(p=>p.target!==k)
+                             .map(p=>({...p, target:p.target>k?p.target-1:p.target}));
+    selected = null; syncIO(); render(); return;
+  }
+  if (!selected || selected.type !== "agent") return;
+  const i = selected.i;
+  cfg.agents.splice(i,1);
+  // the whole reason this tool exists: keep every index consistent
+  cfg.edges = cfg.edges.filter(e=>e[0]!==i&&e[1]!==i).map(e=>e.map(v=>v>i?v-1:v));
+  cfg.pinning = cfg.pinning.filter(p=>p.agent!==i)
+                           .map(p=>({...p, agent:p.agent>i?p.agent-1:p.agent}));
+  selected = null; edgeFirst = null; syncIO(); render();
+};
+
+/* ------------------------------------------------------------------ side panel */
+function num(lbl, val, setter, step) {
+  return `<div class="row"><label>${lbl}</label>
+    <input class="w70" type="number" step="${step||0.1}" value="${val}"
+      onchange="(${setter})(this.valueAsNumber); window._r()"></div>`;
+}
+function vec3(lbl, arr, path, step) {
+  return `<div class="grid3"><span>${lbl}</span>` + [0,1,2].map(d =>
+    `<input type="number" step="${step||0.1}" value="${arr[d]}"
+       onchange="${path}[${d}]=this.valueAsNumber; window._r()">`).join("") + `</div>`;
+}
+function refreshSide() {
+  const insp = document.getElementById("inspector");
+  if (selected && selected.type === "agent" && cfg.agents[selected.i]) {
+    const a = cfg.agents[selected.i], i = selected.i;
+    insp.innerHTML = `<div class="card sel">
+      <div class="row"><span class="chip ${a.kind}">${a.kind}</span>
+        <input class="w70" type="text" value="${esc(a.name)}"
+          onchange="cfg.agents[${i}].name=this.value; window._r()"></div>
+      ${vec3("spawn", a.spawn, `cfg.agents[${i}].spawn`)}
+      ${a.kind==="px4" ? num("altitude z_ref", a.z_ref, `v=>cfg.agents[${i}].z_ref=v`) : ""}
+      ${vec3("offset", a.formation, `cfg.agents[${i}].formation`)}
+      ${num("v_max", a.v_max, `v=>cfg.agents[${i}].v_max=v`)}
+      <div class="small">pins: ${cfg.pinning.filter(p=>p.agent===i)
+        .map(p=>`${esc((cfg.targets[p.target]||{}).name)}:${p.map}`).join(", ") || "none"}</div>
+      </div>`;
+  } else if (selected && selected.type === "zone" && (cfg.safety.keep_out||[])[selected.i]) {
+    const z = cfg.safety.keep_out[selected.i], k = selected.i;
+    insp.innerHTML = `<div class="card sel">
+      <div class="row"><span class="chip" style="background:var(--warn)">keep-out</span>
+        <input class="w70" type="text" value="${esc(z.name)}"
+          onchange="cfg.safety.keep_out[${k}].name=this.value; window._r()"></div>
+      <div class="row"><label>shape</label>
+        <select onchange="cfg.safety.keep_out[${k}].kind=this.value; window._r()">
+          <option value="cylinder"${z.kind==="cylinder"?" selected":""}>cylinder (a column)</option>
+          <option value="sphere"${z.kind==="sphere"?" selected":""}>sphere</option></select></div>
+      <div class="row"><label>applies to</label>
+        <select onchange="cfg.safety.keep_out[${k}].applies=this.value; window._r()">
+          <option value="all"${z.applies==="all"?" selected":""}>all robots</option>
+          <option value="air"${z.applies==="air"?" selected":""}>quadrotors only</option>
+          <option value="ground"${z.applies==="ground"?" selected":""}>ground only</option></select></div>
+      ${vec3("centre", z.center, `cfg.safety.keep_out[${k}].center`)}
+      ${num("radius", z.radius, `v=>cfg.safety.keep_out[${k}].radius=v`)}
+      ${z.kind==="cylinder" ? num("height", z.height ?? 2.5, `v=>cfg.safety.keep_out[${k}].height=v`) : ""}
+      <div class="small">The safety filter holds every applicable robot outside this.
+        A cylinder is measured horizontally and only bites between its base and
+        its top; a sphere is measured in all three axes.</div></div>`;
+  } else if (selected && selected.type === "target" && cfg.targets[selected.i]) {
+    insp.innerHTML = `<div class="small">Target <b>${esc(cfg.targets[selected.i].name)}</b>
+      selected: Pinning mode pins to <i>this</i> one, Draw sketches <i>its</i> route.</div>`;
+  } else insp.innerHTML = `<span class="small">Nothing selected. Click an agent or a target.
+    Drag empty space to orbit the camera.</span>`;
+
+  document.getElementById("targetCard").innerHTML = cfg.targets.map((t,k) => {
+    const sel = selected && selected.type==="target" && selected.i===k;
+    let body = "";
+    if (t.kind === "lissajous") {
+      body = num("period s", t.period, `v=>cfg.targets[${k}].period=v`, 1)
+           + vec3("amp", t.amp, `cfg.targets[${k}].amp`)
+           + vec3("freq", t.freq, `cfg.targets[${k}].freq`, 1)
+           + vec3("phase&deg;", t.phase, `cfg.targets[${k}].phase`, 15)
+           + vec3("centre", t.center, `cfg.targets[${k}].center`)
+           + `<div class="small">x,y,z each sweep A&middot;sin(n&omega;t+&phi;). Equal
+              frequencies give a circle or ellipse; n=(1,2) a figure eight.</div>`;
+    } else if (t.kind === "waypoints") {
+      body = `<div class="small">${(t._control||t.points||[]).length} control points,
+                ${(t.points||[]).length} sampled</div>`
+           + num("speed m/s", t.speed, `v=>cfg.targets[${k}].speed=v`, 0.05)
+           + `<div class="row"><label>smooth</label>
+                <input type="checkbox" ${t._smooth?"checked":""}
+                  onchange="cfg.targets[${k}]._smooth=this.checked; rebuildPath(cfg.targets[${k}]); window._r()">
+                <button onclick="cfg.targets[${k}]._control=[]; rebuildPath(cfg.targets[${k}]); window._r()">clear</button></div>`;
+    } else if (t.kind === "orbit3d" || t.kind === "circle") {
+      body = num("radius", t.radius, `v=>cfg.targets[${k}].radius=v`)
+           + num("period s", t.period, `v=>cfg.targets[${k}].period=v`, 1)
+           + (t.kind==="orbit3d" ? num("z_amp", t.z_amp, `v=>cfg.targets[${k}].z_amp=v`)
+                                 + num("z_period", t.z_period, `v=>cfg.targets[${k}].z_period=v`,1) : "")
+           + vec3("centre", t.center, `cfg.targets[${k}].center`);
+    } else {
+      body = vec3("centre", t.center, `cfg.targets[${k}].center`);
+    }
+    const presets = Object.entries(PRESETS).map(([key,p]) =>
+      `<button onclick="applyPreset(${k},'${key}')">${p.label}</button>`).join("");
+    // Who tracks this target: click to cycle that agent's restriction map.
+    const pins = cfg.agents.map((a,i) => {
+      const m = mapOf(i,k);
+      return `<button class="pin ${m!=="—"?"on":""}" onclick="cyclePinTo(${i},${k},event.shiftKey)"
+        title="click: ${esc(a.name)} tracks ${esc(t.name)} alone. shift-click: keep its other pins too."
+        >${esc(a.name)} ${m}</button>`;
+    }).join("");
+    return `<div class="card ${sel?"sel":""}">
+      <div class="row"><input class="w70" type="text" value="${esc(t.name)}"
+          onchange="cfg.targets[${k}].name=this.value; window._r()">
+        <span class="small">${t.kind}</span>
+        ${sel ? `<span class="chip selchip">selected</span>`
+              : `<button onclick="selectTarget(${k})">select</button>`}</div>
+      <div class="presets">${presets}</div>${body}
+      <div class="small" style="margin-top:6px">tracked by (click cycles
+        identity / xy / z / none; shift-click keeps pins to other targets):</div>
+      <div class="pins">${pins}</div></div>`;
+  }).join("");
+
+  document.getElementById("gainsCard").innerHTML =
+    num("consensus", cfg.gains.consensus, "v=>cfg.gains.consensus=v", 0.05) +
+    num("tracking", cfg.gains.tracking, "v=>cfg.gains.tracking=v", 0.05) +
+    num("arena r", cfg.safety.arena_radius, "v=>cfg.safety.arena_radius=v") +
+    num("z_max", cfg.safety.z_max, "v=>cfg.safety.z_max=v") +
+    `<div class="small" style="margin-top:7px">safety filter: the smallest gap the
+      controller will let a pair reach. Air-ground is measured horizontally, since
+      a quadrotor at altitude and a rover cannot meet.</div>` +
+    num("sep air-air", sepOf("air_air"), "v=>setSep('air_air',v)", 0.1) +
+    num("sep air-gnd", sepOf("air_ground"), "v=>setSep('air_ground',v)", 0.1) +
+    num("sep gnd-gnd", sepOf("ground_ground"), "v=>setSep('ground_ground',v)", 0.1) +
+    num("alpha", sepOf("alpha"), "v=>setSep('alpha',v)", 0.5);
+  checks();
+}
+window._r = () => { syncIO(); render(); };
+window.selectTarget = k => { selected = { type:"target", i:k }; render(); };
+window.applyPreset = applyPreset;
+window.rebuildPath = rebuildPath;
+window.cyclePinTo = cyclePinTo;
+window.cfg = cfg;
+
+function checks() {
+  const out = [];
+  cfg.targets.forEach((t,k) => {
+    const idx = cfg.agents.map((_,i)=>i).filter(i=>cfg.pinning.some(p=>p.agent===i&&p.target===k));
+    const grp = idx.map(i=>cfg.agents[i]);
+    // skip when any of them also tracks something else: see repairConfig
+    const solo = !idx.some(i => cfg.pinning.filter(p=>p.agent===i).length > 1);
+    if (grp.length && solo) {
+      const s = [0,1,2].map(d => grp.reduce((acc,a)=>acc+(a.formation[d]||0),0));
+      if (Math.hypot(...s) > 1e-6)
+        out.push(`offsets of the ${grp.length} agents pinned to ${t.name} sum to (${s.map(v=>v.toFixed(2))}), not zero: their centroid will not sit on it`);
+    }
+    if (t.kind === "waypoints" && (t.points||[]).length < 2)
+      out.push(`${t.name} is a drawn path with fewer than 2 points; it will sit still`);
+  });
+  const names = cfg.agents.map(a=>a.name);
+  if (new Set(names).size !== names.length) out.push("duplicate agent names");
+  // Where each single-pinned agent is actually asked to sit. Two of these on top
+  // of each other is a collision, and a flying one at ground level is a scenario
+  // that looks fine in JSON and never takes off.
+  const slots = cfg.agents.map((a,i) => {
+    const ps = cfg.pinning.filter(p=>p.agent===i);
+    if (ps.length !== 1) return null;
+    const t = cfg.targets[ps[0].target]; if (!t) return null;
+    const ctr = anchor(t), off = ps[0].offset || a.formation, map = ps[0].map;
+    // Only the coordinates the restriction map keeps are actually commanded: an
+    // xy pin leaves the agent at its own height, and a z pin says nothing about
+    // where it sits horizontally.
+    if (map === "z") return null;
+    const own = a.kind === "px4" ? (a.z_ref ?? 0) : (a.spawn[2] ?? 0.1);
+    return { p:[ctr[0]+off[0], ctr[1]+off[1], map === "xy" ? own : ctr[2]+off[2]], map };
+  });
+  for (let i=0;i<slots.length;i++) for (let j=i+1;j<slots.length;j++) {
+    if (!slots[i] || !slots[j]) continue;
+    // measure the pair the way the safety filter measures it, and against the
+    // same radius, so the panel and the controller cannot disagree
+    const ai = cfg.agents[i], aj = cfg.agents[j];
+    const air = k => cfg.agents[k].kind === "px4";
+    const planar = !air(i) || !air(j);
+    const key = air(i) && air(j) ? "air_air" : (planar && (air(i) || air(j)) ? "air_ground" : "ground_ground");
+    const dims = planar ? [0,1] : [0,1,2];
+    const d = Math.hypot(...dims.map(k=>slots[i].p[k]-slots[j].p[k]));
+    const dmin = sepOf(key);
+    if (d < dmin)
+      out.push(`${ai.name} and ${aj.name} are asked to sit ${d.toFixed(2)} m apart, inside the ${dmin} m ${key.replace("_","-")} separation the safety filter enforces: it will hold them apart and the formation will not close`);
+  }
+  slots.forEach((s,i) => {
+    const a = cfg.agents[i];
+    if (!s || a.kind !== "px4" || s.map === "xy") return;
+    // a quadrotor needs real clearance, whatever z_min the config claims
+    if (s.p[2] < Math.max(0.3, cfg.safety.z_min ?? 0))
+      out.push(`${a.name} is pinned through ${s.map} to a target at ${s.p[2].toFixed(2)} m, so it is commanded to the ground however high z_ref is: raise the target's centre z`);
+    else if (s.p[2] > cfg.safety.z_max)
+      out.push(`${a.name}'s pinned altitude ${s.p[2].toFixed(2)} m is above the ${cfg.safety.z_max} m ceiling`);
+  });
+  // a slot inside a keep-out zone is a scenario that cannot settle: the sheaf
+  // pulls the agent in and the filter pushes it out, forever
+  (cfg.safety.keep_out || []).forEach(z => {
+    slots.forEach((sl,i) => {
+      if (!sl) return;
+      const a = cfg.agents[i], isAir = a.kind === "px4";
+      if (z.applies === "air" && !isAir) return;
+      if (z.applies === "ground" && isAir) return;
+      const dims = z.kind === "sphere" ? [0,1,2] : [0,1];
+      if (z.kind === "cylinder") {
+        const zc = z.center[2], zt = zc + (z.height ?? 2.5);
+        if (sl.p[2] < zc || sl.p[2] > zt) return;
+      }
+      const d = Math.hypot(...dims.map(k => sl.p[k] - z.center[k]));
+      if (d < z.radius)
+        out.push(`${a.name}'s slot is ${d.toFixed(2)} m from the centre of ${z.name}, inside its ${z.radius} m radius: the formation pulls it in while the safety filter pushes it out`);
+    });
+  });
+  cfg.targets.forEach((t,k) => {
+    if (!cfg.pinning.some(p=>p.target===k))
+      out.push(`nothing is pinned to ${t.name}: it will be drawn and simulated but influences no robot`);
+  });
+  const nQuads = cfg.agents.filter(a=>a.kind==="px4").length;
+  if (nQuads > 4)
+    out.push(`${nQuads} PX4 instances: each is a full autopilot process, and Gazebo with more than about 4 needs a large machine (3 is the tested laptop configuration). make loop handles any number.`);
+  // Consensus says p_i - o_i must agree across an edge; pinning says it equals
+  // that agent's target. Both cannot hold when the two ends track different
+  // targets, so the controller settles at a least-squares compromise with a
+  // residual that never reaches zero. Legitimate to ask for, but it should be
+  // asked for knowingly.
+  // A pin's own offset is a CONSTANT, so it can absorb a constant difference
+  // between what two agents track and nothing more. Two agents joined by a
+  // consensus edge can hold formation only if their targets MOVE alike, so
+  // compare the motion itself with each trajectory's mean removed.
+  const pinsOf = i => cfg.pinning.filter(p=>p.agent===i).map(p=>p.target);
+  const SAMPLES = 24;
+  const motionOf = ks => {
+    const T = cfg.targets[0] ? (cfg.targets[0].period || 40) : 40;
+    const s = [];
+    for (let n=0;n<SAMPLES;n++) {
+      const time = T*n/SAMPLES;
+      const m = [0,1,2].map(d => ks.reduce((a,k)=>a+targetPos(cfg.targets[k], time)[d],0)/ks.length);
+      s.push(m);
+    }
+    const avg = [0,1,2].map(d => s.reduce((a,f)=>a+f[d],0)/s.length);
+    return s.map(f => f.map((v,d)=>v-avg[d]));
+  };
+  const clash = cfg.edges.filter(([i,j]) => {
+    const ki = pinsOf(i), kj = pinsOf(j);
+    if (!ki.length || !kj.length || !cfg.targets.length) return false;
+    const mi = motionOf(ki), mj = motionOf(kj);
+    const rms = Math.sqrt(mi.reduce((a,f,n)=>a+[0,1,2].reduce((b,d)=>b+(f[d]-mj[n][d])**2,0),0)/mi.length);
+    return rms > 0.05;
+  });
+  if (clash.length)
+    out.push(`${clash.length} consensus edge(s) join agents whose targets move differently (e.g. ${cfg.agents[clash[0][0]].name} and ${cfg.agents[clash[0][1]].name}): holding formation and tracking both cannot both be satisfied, so expect a steady nonzero residual rather than convergence to zero. A per-pin offset cannot fix this: it is a constant, and the disagreement is in the motion.`);
+  // Several pinning edges on one agent are fine when the maps are complementary
+  // (xy from one target, z from another): the constrained subspaces are disjoint
+  // and a global section still exists. Overlapping maps ask it to be in two
+  // places at once, and the two pinning terms fight for the same coordinates.
+  const SUB = { identity:["x","y","z"], xy:["x","y"], z:["z"] };
+  cfg.agents.forEach((a,i) => {
+    const ps = cfg.pinning.filter(p => p.agent === i);
+    if (ps.length < 2) return;
+    const seen = {};
+    for (const p of ps) for (const d of (SUB[p.map]||[])) {
+      if (seen[d]) out.push(`${a.name} is pinned to ${seen[d]} and ${(cfg.targets[p.target]||{}).name} through maps that both constrain ${d}: it cannot follow both`);
+      else seen[d] = (cfg.targets[p.target]||{}).name;
+    }
+  });
+  for (const p of cfg.pinning) {
+    const a = cfg.agents[p.agent];
+    if (a && a.kind === "diffdrive" && p.map === "identity")
+      out.push(`${a.name}: identity pinning on a ground robot asks it to match altitude; use xy`);
+  }
+  cfg.agents.forEach((a,i) => {
+    const d = cfg.edges.filter(e=>e.includes(i)).length + cfg.pinning.filter(p=>p.agent===i).length;
+    if (!d) out.push(`${a.name} is disconnected (no edges, no pinning)`);
+    if (Math.hypot(a.spawn[0],a.spawn[1]) > cfg.safety.arena_radius)
+      out.push(`${a.name} spawns outside the arena fence`);
+    if (a.kind === "px4" && a.z_ref > cfg.safety.z_max)
+      out.push(`${a.name} z_ref ${a.z_ref} m is above the ${cfg.safety.z_max} m ceiling`);
+  });
+  // the sheaf's own reachability: every quad's slot should clear the fence too
+  cfg.targets.forEach((t,k) => {
+    const path = targetPath(t);
+    for (const a of cfg.agents.filter((_,i)=>cfg.pinning.some(p=>p.agent===i&&p.target===k))) {
+      if (path.some(p => Math.hypot(p[0]+a.formation[0], p[1]+a.formation[1]) > cfg.safety.arena_radius)) {
+        out.push(`${a.name}'s slot leaves the arena somewhere on ${t.name}'s path`); break;
+      }
+      if (a.kind === "px4" && path.some(p => p[2]+a.formation[2] > cfg.safety.z_max)) {
+        out.push(`${a.name}'s slot rises above the ceiling on ${t.name}'s path`); break;
+      }
+    }
+  });
+  LAST_WARNINGS = out;
+  const wbox = document.getElementById("warnings");
+  if (wbox) wbox.innerHTML = out.length
+    ? out.map(w=>`<div>&#9888; ${esc(w)}</div>`).join("")
+    : `<div class="ok">no problems found</div>`;
+}
+
+/* ------------------------------------------------------------------ file i/o */
+const io = document.getElementById("io");
+function syncIO() {
+  io.value = JSON.stringify(cfg, null, 2);
+  snapshot();
+  // the solver's state belongs to a particular config; drop it when that changes
+  if (SIM.p && SIM.p.length !== cfg.agents.length) simReset();
+}
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg; el.style.opacity = 1;
+  clearTimeout(toast._t); toast._t = setTimeout(()=>el.style.opacity=0, 1800);
+}
+document.getElementById("saveBtn").onclick = async () => {
+  syncIO();
+  const text = io.value;
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName:"swarm.json",
+        types:[{ description:"JSON", accept:{"application/json":[".json"]} }] });
+      const w = await h.createWritable(); await w.write(text); await w.close();
+      return toast("saved -- restart the sim to pick it up");
+    } catch (err) { if (err.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type:"application/json"}));
+  a.download = "swarm.json"; a.click(); URL.revokeObjectURL(a.href);
+  toast("downloaded -- move it to config/swarm.json");
+};
+document.getElementById("openBtn").onclick = () => document.getElementById("fileInput").click();
+document.getElementById("fileInput").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(txt => { io.value = txt; loadFromText(); });
+};
+document.getElementById("copyBtn").onclick = () => {
+  syncIO(); io.select();
+  (navigator.clipboard ? navigator.clipboard.writeText(io.value) : Promise.reject())
+    .then(()=>toast("copied")).catch(()=>{ document.execCommand("copy"); toast("copied"); });
+};
+function loadFromText() {
+  try {
+    const c = JSON.parse(io.value);
+    if (!Array.isArray(c.agents) || !Array.isArray(c.edges)) throw new Error("missing agents/edges");
+    c.targets = c.targets || []; c.pinning = c.pinning || [];
+    c.safety = c.safety || { z_max:2.3, z_min:0.3, arena_radius:6.0 };
+    c.gains = c.gains || { consensus:0.8, tracking:0.9 };
+    for (const t of c.targets)
+      if (t.kind === "waypoints" && !t._control) t._control = (t.points||[]).map(p=>p.slice());
+    cfg = c; window.cfg = cfg; selected = null; edgeFirst = null;
+    fitView(); syncIO(); render(); toast("loaded");
+  } catch (err) { toast("not valid swarm.json: " + err.message); }
+}
+document.getElementById("loadBtn").onclick = loadFromText;
+document.getElementById("resetBtn").onclick = () => {
+  cfg = clone(DEFAULT); window.cfg = cfg; selected = null; edgeFirst = null;
+  fitView(); syncIO(); render();
+};
+
+/* ------------------------------------------------------------------ generate from text
+
+   A scenario is a small, highly constrained JSON document, which is exactly the
+   shape of problem a model is good at -- with one caveat measured rather than
+   assumed: over three prompts, gpt-oss-120b and nemotron-3-super-120b produced
+   a valid scenario every time, while gemma-4-31b-it got the formation offsets
+   wrong twice (they must sum to zero, which is arithmetic, not description).
+   So nothing here trusts the model: `repairConfig` fixes what it can and names
+   every repair, and the checks panel still runs afterwards. That makes the
+   smaller models usable and the larger ones safe.                             */
+
+const NL_MODELS = ["gpt-oss-120b","nemotron-3-super-120b-a12b","gemma-4-31b-it",
+                   "gemma-3-27b-it","llama-3.3-70b-instruct","mistral-small-3.1",
+                   "nemotron-3-nano-30b-a3b","gpt-oss-20b"];
+
+/* The model writes the whole scenario. No presets, no pattern library, no
+   expander: any formation, any wiring, any pinning it can describe, it can
+   produce. What keeps that safe is static typing, enforced at decode time.
+
+   The request carries a strict JSON Schema for the full swarm.json shape and
+   the gateway's guided decoding will not emit a token that leaves it. Asked
+   point blank for kind "hovercraft" and map "diagonal", the model returned
+   "px4" and "xy": it cannot spell an invalid enum, exceed a numeric bound, emit
+   a 2-vector where a 3-vector is required, add a field, or omit one. Edges and
+   pins refer to agents and targets BY NAME, so a dangling reference is a string
+   that matches nothing (dropped and reported) rather than an index that
+   silently points at the wrong robot. What the schema cannot express, the
+   checks panel lints: offsets that do not balance, a ground robot asked to
+   match altitude, an over-constrained wiring. Those are reported, not hidden,
+   because sometimes a nonzero residual is exactly what was asked for.        */
+const V3 = { type:"array", items:{type:"number"}, minItems:3, maxItems:3 };
+const SWARM_SCHEMA = {
+  type:"object", additionalProperties:false,
+  required:["safety","agents","targets","edges","pinning","ground_pinning","gains"],
+  properties:{
+    safety:{ type:"object", additionalProperties:false, required:["z_max","z_min","arena_radius","min_separation"],
+      properties:{ z_max:{type:"number",minimum:0.5,maximum:6},
+                   z_min:{type:"number",minimum:0,maximum:2},
+                   arena_radius:{type:"number",minimum:1,maximum:20},
+                   // the safety filter's radii, so a generated scenario states
+                   // its own clearances instead of inheriting the defaults
+                   min_separation:{ type:"object", additionalProperties:false,
+                     required:["air_air","air_ground","ground_ground","alpha"],
+                     properties:{
+                       air_air:{type:"number",minimum:0.2,maximum:4},
+                       air_ground:{type:"number",minimum:0.2,maximum:4},
+                       ground_ground:{type:"number",minimum:0.2,maximum:4},
+                       alpha:{type:"number",minimum:0.2,maximum:10} } } } },
+    agents:{ type:"array", minItems:1, maxItems:16, items:{
+      type:"object", additionalProperties:false,
+      required:["name","kind","platform","spawn","z_ref","v_max","formation"],
+      properties:{
+        name:{type:"string", minLength:1, maxLength:24},
+        kind:{type:"string", enum:["px4","diffdrive"]},
+        platform:{type:"string", enum:["x500","freefly","homebrew","bebop","jackal","husky","b1","go1"]},
+        spawn:V3,
+        z_ref:{type:"number", minimum:0, maximum:6},
+        v_max:{type:"number", minimum:0.1, maximum:5},
+        formation:V3 } } },
+    targets:{ type:"array", minItems:1, maxItems:12, items:{
+      type:"object", additionalProperties:false,
+      required:["name","kind","center","amp","freq","phase","period","speed","points"],
+      properties:{
+        name:{type:"string", minLength:1, maxLength:24},
+        kind:{type:"string", enum:["lissajous","static","waypoints"]},
+        center:V3, amp:V3, freq:V3, phase:V3,
+        period:{type:"number", minimum:5, maximum:600},
+        speed:{type:"number", minimum:0, maximum:5},
+        points:{ type:"array", maxItems:64, items:V3 } } } },
+    edges:{ type:"array", maxItems:64, items:{
+      type:"object", additionalProperties:false, required:["a","b"],
+      properties:{ a:{type:"string"}, b:{type:"string"} } } },
+    // Air pins only. A ground robot cannot be named here without being reported,
+    // and it has its own array below with no map field to get wrong.
+    pinning:{ type:"array", maxItems:64, items:{
+      type:"object", additionalProperties:false,
+      required:["agent","target","map","offset_mode","offset"],
+      properties:{
+        agent:{type:"string"}, target:{type:"string"},
+        map:{type:"string", enum:["identity","xy","z"]},
+        // formation: the agent's own formation offset applies (the usual case).
+        // custom: this pin uses `offset` instead, which is how an agent can hold
+        // one formation while tracking several targets with zero residual.
+        offset_mode:{type:"string", enum:["formation","custom"]},
+        offset:V3 } } },
+    // Ground pins. There is no map here BY CONSTRUCTION: a wheeled or legged
+    // robot can only ever agree about the ground plane, so the map is xy and a
+    // model that would have written "identity" has nowhere to write it.
+    ground_pinning:{ type:"array", maxItems:32, items:{
+      type:"object", additionalProperties:false,
+      required:["agent","target","offset_mode","offset"],
+      properties:{
+        agent:{type:"string"}, target:{type:"string"},
+        offset_mode:{type:"string", enum:["formation","custom"]},
+        offset:V3 } } },
+    gains:{ type:"object", additionalProperties:false, required:["consensus","tracking"],
+      properties:{ consensus:{type:"number",minimum:0.05,maximum:3},
+                   tracking:{type:"number",minimum:0.05,maximum:3} } }
+  }
+};
+const NL_SYS = `You write scenario files for a cellular-sheaf formation controller used at the
+UF Autonomy Park. Produce the complete scenario that matches the description as
+literally as you can. You have full freedom over geometry and wiring.
+
+How the controller reads it:
+- agents: kind px4 is a quadrotor (platforms x500, freefly, homebrew, bebop),
+  kind diffdrive is a ground robot (platforms jackal, husky, b1, go1). spawn is
+  where it starts [x,y,z] (z=0 for quads on the pad, 0.1 for ground robots).
+  z_ref is a quadrotor's flight altitude. formation is the agent's offset from
+  the thing it tracks, so a group of agents pinned to one target with offsets
+  that sum to [0,0,0] holds a rigid shape centred on that target. For a regular
+  N-gon of circumradius r the offsets are [r*cos(a_i), r*sin(a_i), 0] with
+  a_i = 90deg + i*360/N deg.
+- targets: kind lissajous moves as p_i(t) = center_i + amp_i*sin(freq_i*w*t +
+  phase_i deg), w = 2*pi/period. A circle of radius r is amp=[r,r,0],
+  freq=[1,1,0], phase=[0,90,0]. A figure eight is freq=[1,2,0], phase=[0,0,0].
+  Nonzero amp[2] and freq[2] make it 3-D. kind static sits at center (fill the
+  other fields with zeros). kind waypoints tours points at constant speed.
+- Several targets can SHARE one orbit and ride it together rather than each
+  having its own little circle. Give them all the SAME center, amp, freq and
+  period, and separate them by phase alone: for N targets on one shared circle
+  of radius R, target k takes center [cx,cy,h], amp [R,R,0], freq [1,1,0] and
+  phase [k*360/N, k*360/N + 90, 0]. That puts every target on the same circle of
+  radius R about [cx,cy], evenly spaced around it, all sweeping it together.
+  This is what "a shared circle the targets lie on and move along" means, and it
+  is different from giving each target its own center and a small radius.
+- edges: consensus edges between agents, by name. Two agents joined by an edge
+  hold their relative formation offsets. A ring means each agent has 2 edges.
+- pinning: which QUADROTOR tracks which target, by name, through a map.
+  identity tracks the target in full 3-D, xy only its ground track, z only its
+  altitude. Put ground robots in ground_pinning instead, which needs no map
+  because a ground robot can only ever follow a ground track. An agent may be
+  pinned to several targets; with
+  offset_mode formation it settles between them and the residual stays
+  nonzero, which is a legitimate thing to ask for. With offset_mode custom the
+  pin uses its own offset; choosing offset = formation - (target_center -
+  centroid_of_its_targets) lets an agent hold formation and track several
+  rigidly moving targets exactly.
+- A quadrotor pinned through identity is commanded to its target's altitude, so
+  a target that quadrotors track must have a center z at flight height (about
+  1.2 to 1.6 m), not 0. z_ref only sets the climb before the sheaf takes over.
+- Two robots pinned to the same target with the same formation offset are being
+  asked to occupy the same point. Give every member of a group a distinct
+  offset, and make the offsets of the agents pinned to one target sum to
+  [0,0,0] so the group is centred on it.
+- safety.min_separation is the smallest gap a control-barrier filter will let a
+  pair of robots reach, in metres: air_air between two quadrotors, air_ground and
+  ground_ground measured horizontally. Formation offsets must be wider than these
+  or the filter holds the formation open. Use 1.0 / 0.8 / 0.8 with alpha 2.0
+  unless the description calls for tighter or looser flying.
+- The park arena is 6 m in radius with a 2.3 m ceiling unless told otherwise.
+  Keep every spawn, formation and orbit inside it, and z_ref under the ceiling.
+- Every name must be unique. Every edge and pin must use names that exist.`;
+
+// Turn the model's typed scenario into the file the controller reads: resolve
+// names to indices, add the plumbing fields that follow from kind and platform
+// (namespaces, model names, mocap topics), and report anything dropped.
+function resolveGenerated(g) {
+  const notes = [];
+  const c = { _scenario:"Generated from a natural-language description.",
+    rate_hz:20.0, zmq_endpoint:"tcp://127.0.0.1:5599", watchdog_ms:250,
+    safety:g.safety, agents:[], targets:[], edges:[], pinning:[], gains:g.gains, visualize:true };
+  const seen = new Set();
+  let air = 0;
+  for (const a of g.agents) {
+    if (seen.has(a.name)) { notes.push(`duplicate agent ${a.name} dropped`); continue; }
+    seen.add(a.name);
+    const P = PLATFORMS[a.platform] || (a.kind==="px4" ? PLATFORMS.x500 : PLATFORMS.jackal);
+    const platform = P.kind === a.kind ? a.platform : (a.kind==="px4" ? "x500" : "jackal");
+    if (platform !== a.platform) notes.push(`${a.name}: platform ${a.platform} is not a ${a.kind}; using ${platform}`);
+    const gz = PLATFORMS[platform].gz;
+    if (a.kind === "px4") {
+      c.agents.push({ name:a.name, kind:"px4", platform, ns:"/"+a.name, instance:air,
+        spawn:[a.spawn[0], a.spawn[1], 0.0], z_ref:a.z_ref, v_max:a.v_max, formation:a.formation,
+        gz_model:`${gz}_${air}`, pose_topic:`/mocap/${gz}_${air}/pose`,
+        // With CAMERAS=N the first N instances are spawned by PX4 as
+        // <model>_cam<i>_<i>, not <model>_<i>. Without the alias the mocap node
+        // watches a model name that does not exist, the agent reports the world
+        // origin instead of its spawn, and the bridge refuses to fly it.
+        gz_aliases:[`${gz}_cam${air}_${air}`] });
+      air++;
+    } else {
+      c.agents.push({ name:a.name, kind:"diffdrive", platform, gz_model:a.name,
+        spawn:[a.spawn[0], a.spawn[1], 0.1], z_ref:0.0, v_max:a.v_max,
+        omega_max:PLATFORMS[platform].omega_max, offset:0.2,
+        formation:[a.formation[0], a.formation[1], 0], pose_topic:`/mocap/${a.name}/pose` });
+    }
+  }
+  const tseen = new Set();
+  for (const t of g.targets) {
+    if (tseen.has(t.name)) { notes.push(`duplicate target ${t.name} dropped`); continue; }
+    tseen.add(t.name);
+    const out = { name:t.name, kind:t.kind, color:[0.95,0.12,0.1] };
+    if (t.kind === "lissajous") Object.assign(out, { center:t.center, amp:t.amp, freq:t.freq, phase:t.phase, period:t.period });
+    else if (t.kind === "waypoints") Object.assign(out, { points:t.points, speed:t.speed||0.5,
+      _control:t.points.map(p=>p.slice()), _smooth:false, center:t.center });
+    else Object.assign(out, { center:t.center });
+    c.targets.push(out);
+  }
+  const ai = Object.fromEntries(c.agents.map((a,i)=>[a.name,i]));
+  const ti = Object.fromEntries(c.targets.map((t,k)=>[t.name,k]));
+  for (const e of g.edges) {
+    if (!(e.a in ai) || !(e.b in ai)) { notes.push(`edge ${e.a}-${e.b} names an unknown agent, dropped`); continue; }
+    if (e.a === e.b) continue;
+    c.edges.push([ai[e.a], ai[e.b]]);
+  }
+  // Air pins carry their own map; ground pins have none, because xy is the only
+  // map a ground robot can hold. An agent named in the wrong array is reported
+  // rather than silently reinterpreted.
+  const addPin = (p, wantGround) => {
+    if (!(p.agent in ai) || !(p.target in ti)) {
+      notes.push(`pin ${p.agent}->${p.target} names something unknown, dropped`); return; }
+    const a = c.agents[ai[p.agent]], isGround = a.kind === "diffdrive";
+    let map = isGround ? "xy" : (p.map || "identity");
+    if (isGround !== wantGround)
+      notes.push(`${p.agent} is ${isGround ? "a ground robot listed under air pinning" : "a quadrotor listed under ground pinning"}; pinned through ${map}`);
+    const pin = { agent:ai[p.agent], target:ti[p.target], map };
+    if (p.offset_mode === "custom") pin.offset = p.offset;
+    c.pinning.push(pin);
+  };
+  for (const p of (g.pinning || [])) addPin(p, false);
+  for (const p of (g.ground_pinning || [])) addPin(p, true);
+  return { cfg:c, notes };
+}
+// Fix what a model reliably gets wrong, and say what was changed.
+function repairConfig(c) {
+  const fixes = [];
+  c.rate_hz = c.rate_hz || 20.0;
+  c.zmq_endpoint = c.zmq_endpoint || "tcp://127.0.0.1:5599";
+  c.watchdog_ms = c.watchdog_ms || 250;
+  c.safety = Object.assign({ z_max:2.3, z_min:0.3, arena_radius:6.0 }, c.safety||{});
+  c.safety.min_separation = Object.assign({ air_air:1.0, air_ground:0.8,
+    ground_ground:0.8, alpha:2.0 }, c.safety.min_separation || {});
+  c.gains = Object.assign({ consensus:0.8, tracking:0.9 }, c.gains||{});
+  c.visualize = true;
+  c.agents = (c.agents||[]).filter(a => a && a.name);
+  c.targets = c.targets || [];
+  let air = 0;
+  for (const a of c.agents) {
+    a.kind = a.kind === "diffdrive" ? "diffdrive" : "px4";
+    a.spawn = (a.spawn||[0,0,0]).map(Number);
+    a.formation = (a.formation||[0,0,0]).map(Number);
+    while (a.formation.length < 3) a.formation.push(0);
+    a.v_max = a.v_max || (a.kind==="px4" ? 1.2 : 1.0);
+    if (a.kind === "px4") {
+      a.instance = air; a.ns = "/"+a.name;
+      const gz = (PLATFORMS[a.platform]||PLATFORMS.x500).gz;
+      a.gz_model = `${gz}_${air}`; a.pose_topic = `/mocap/${gz}_${air}/pose`;
+      a.z_ref = a.z_ref || 1.4; a.spawn[2] = 0;
+      air++;
+    } else {
+      a.omega_max = a.omega_max || 2.5; a.offset = a.offset ?? 0.2;
+      a.z_ref = 0; a.spawn[2] = 0.1; a.formation[2] = 0;
+      a.gz_model = a.gz_model || a.name; a.pose_topic = `/mocap/${a.name}/pose`;
+    }
+  }
+  const n = c.agents.length;
+  c.edges = (c.edges||[]).filter(e => Array.isArray(e) && e.length===2 &&
+    e[0]>=0 && e[0]<n && e[1]>=0 && e[1]<n && e[0]!==e[1]);
+  c.pinning = (c.pinning||[]).filter(p => p && p.agent>=0 && p.agent<n &&
+    p.target>=0 && p.target<c.targets.length);
+  for (const p of c.pinning)
+    if (!["identity","xy","z"].includes(p.map)) p.map = "identity";
+  // Geometry is deliberately NOT rewritten here. Offsets that do not balance,
+  // a ground robot pinned through identity, an over-constrained wiring: all
+  // legitimate things to ask for, and all reported by the checks panel instead.
+  for (const a of c.agents) {
+    const r = Math.hypot(a.spawn[0], a.spawn[1]), R = c.safety.arena_radius*0.92;
+    if (r > R) { a.spawn[0] *= R/r; a.spawn[1] *= R/r;
+      a.spawn = a.spawn.map(v=>+v.toFixed(2));
+      fixes.push(`${a.name} spawn pulled inside the arena`); }
+    if (a.kind === "px4" && a.z_ref > c.safety.z_max) {
+      a.z_ref = +(c.safety.z_max-0.3).toFixed(2);
+      fixes.push(`${a.name} z_ref lowered under the ceiling`);
+    }
+  }
+  for (const t of c.targets) {
+    if (t.kind === "waypoints" && !t._control) t._control = (t.points||[]).map(p=>p.slice());
+    if (!t.color) t.color = [0.95,0.12,0.1];
+  }
+  return fixes;
+}
+
+const nlModel = document.getElementById("nlModel");
+nlModel.innerHTML = NL_MODELS.map(m =>
+  `<option value="${m}">${m}${m==="gpt-oss-120b"?"  (recommended)":""}</option>`).join("");
+try {
+  const k = localStorage.getItem("navigator_key"); if (k) document.getElementById("nlKey").value = k;
+  const b = localStorage.getItem("navigator_base"); if (b) document.getElementById("nlBase").value = b;
+  const m = localStorage.getItem("navigator_model"); if (m && NL_MODELS.includes(m)) nlModel.value = m;
+} catch (_) {}
+document.getElementById("nlGo").onclick = async () => {
+  const status = document.getElementById("nlStatus");
+  const key = document.getElementById("nlKey").value.trim();
+  const base = document.getElementById("nlBase").value.trim().replace(/\/$/,"");
+  const prompt = document.getElementById("nlPrompt").value.trim();
+  if (!key) return status.textContent = "Set an API key under 'NaviGator connection' first.";
+  if (!prompt) return status.textContent = "Describe the scenario first.";
+  try { localStorage.setItem("navigator_key", key);
+        localStorage.setItem("navigator_base", base);
+        localStorage.setItem("navigator_model", nlModel.value); } catch (_) {}
+  status.textContent = `asking ${nlModel.value}...`;
+  document.getElementById("nlGo").disabled = true;
+  try {
+    const res = await fetch(base + "/chat/completions", {
+      method:"POST",
+      headers:{ "Authorization":"Bearer "+key, "Content-Type":"application/json" },
+      body: JSON.stringify({ model:nlModel.value, temperature:0.2,
+        response_format:{ type:"json_schema",
+          json_schema:{ name:"swarm_scenario", strict:true, schema:SWARM_SCHEMA } },
+        messages:[{role:"system",content:NL_SYS},{role:"user",content:prompt}] })
+    });
+    if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0,200)}`);
+    const data = await res.json();
+    let txt = data.choices[0].message.content.trim();
+    const fence = txt.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fence) txt = fence[1].trim();
+    const gen = JSON.parse(txt);
+    if (!Array.isArray(gen.agents) || !Array.isArray(gen.targets))
+      throw new Error("reply did not match the scenario schema");
+    const { cfg:c, notes } = resolveGenerated(gen);
+    if (!c.agents.length) throw new Error("the description produced no robots");
+    const fixes = notes.concat(repairConfig(c));
+    cfg = c; window.cfg = cfg; selected = null; edgeFirst = null;
+    fitView(); syncIO(); render();
+    const quads = cfg.agents.filter(a=>a.kind==="px4").length;
+    status.innerHTML = `<b>${quads} quadrotor(s), ${cfg.agents.length-quads} ground, ` +
+      `${cfg.targets.length} target(s), ${cfg.edges.length} edges, ${cfg.pinning.length} pins.</b> ` +
+      (fixes.length ? "Adjusted: " + fixes.map(esc).join("; ") + ". " : "") +
+      "See Checks below, press Play to watch it, then Save swarm.json.";
+  } catch (err) {
+    status.textContent = "failed: " + err.message +
+      (String(err).includes("Failed to fetch") ? " (network or CORS: check the base URL)" : "");
+  } finally { document.getElementById("nlGo").disabled = false; }
+};
+
+/* ------------------------------------------------------------------ examples
+
+   Built in rather than shipped as files, so the page stays one self-contained
+   document and a first-time visitor has something to look at before they know
+   what a restriction map is. Two of them are deliberately unhappy: a scenario
+   that cannot settle teaches more about a sheaf than three that can.          */
+function exQuad(i, off, z, plat) {
+  const P = PLATFORMS[plat || "x500"], gz = P.gz;
+  return { name:`uav${i}`, kind:"px4", platform:plat||"x500", ns:`/uav${i}`, instance:i,
+    spawn:[+off[0].toFixed(2), +off[1].toFixed(2), 0], z_ref:z, v_max:P.v_max,
+    formation:[+off[0].toFixed(3), +off[1].toFixed(3), +(off[2]||0).toFixed(3)],
+    gz_model:`${gz}_${i}`, pose_topic:`/mocap/${gz}_${i}/pose`,
+    gz_aliases:[`${gz}_cam${i}_${i}`] };
+}
+function exGround(name, plat, spawn, off) {
+  const P = PLATFORMS[plat];
+  return { name, kind:"diffdrive", platform:plat, gz_model:name, spawn,
+    z_ref:0.0, v_max:P.v_max, omega_max:P.omega_max, offset:0.2, formation:off,
+    pose_topic:`/mocap/${name}/pose` };
+}
+function exBase(agents, targets, edges, pinning, extra) {
+  return Object.assign({ _scenario:"Built-in example.", rate_hz:20.0,
+    zmq_endpoint:"tcp://127.0.0.1:5599", watchdog_ms:250,
+    safety:{ z_max:2.3, z_min:0.3, arena_radius:6.0,
+      min_separation:{ air_air:1.0, air_ground:0.8, ground_ground:0.8, alpha:2.0 } },
+    agents, targets, edges, pinning,
+    gains:{ consensus:0.8, tracking:0.9 }, visualize:true }, extra||{});
+}
+function ring(n, r, phase) {
+  return [...Array(n)].map((_,i) => {
+    const a = (phase||Math.PI/2) + i*2*Math.PI/n;
+    return [r*Math.cos(a), r*Math.sin(a), 0];
+  });
+}
+const EXAMPLES = {
+  "Triangle + rover": () => {
+    const o = ring(3, 1.2);
+    const ag = o.map((p,i) => exQuad(i, p, 1.4));
+    ag.push(exGround("jackal0","jackal",[-2.6,2.6,0.1],[0,0,0]));
+    return exBase(ag,
+      [{ name:"target0", kind:"lissajous", center:[0,0,1.4], amp:[1.8,1.8,0.55],
+         freq:[1,1,1.67], phase:[0,90,0], period:55, color:[0.95,0.12,0.1] }],
+      [[0,1],[1,2],[2,0],[0,3]],
+      [0,1,2].map(i=>({agent:i,target:0,map:"identity"})).concat([{agent:3,target:0,map:"xy"}]));
+  },
+  "Hexagon, mixed fleet": () => {
+    const o = ring(6, 1.5).map((p,i) => [p[0], p[1], (i-2.5)*0.16]);
+    const ag = o.map((p,i) => exQuad(i, p, +(1.45+p[2]).toFixed(2)));
+    // rover slots sit well inside the hexagon's radius: at 1.5 m the quadrotor
+    // ring would otherwise sit 0.78 m from a rover in ground projection, inside
+    // the 0.8 m air-ground radius the filter enforces
+    ag.push(exGround("husky0","husky",[-3.2,-1.4,0.1],[0.62,0,0]));
+    ag.push(exGround("jackal0","jackal",[-2.6,2.6,0.1],[-0.31,0.54,0]));
+    ag.push(exGround("go10","go1",[2.2,-2.8,0.1],[-0.31,-0.54,0]));
+    const e = [[0,1],[1,2],[2,3],[3,4],[4,5],[5,0],[0,3],[0,6],[2,7],[4,8]];
+    return exBase(ag,
+      [{ name:"target0", kind:"lissajous", center:[0,0,1.45], amp:[2.4,1.7,0],
+         freq:[1,2,0], phase:[0,0,0], period:50, color:[0.95,0.12,0.1] }], e,
+      [0,1,2,3,4,5].map(i=>({agent:i,target:0,map:"identity"}))
+        .concat([6,7,8].map(i=>({agent:i,target:0,map:"xy"}))));
+  },
+  "Keep-out column": () => {
+    const c = EXAMPLES["Triangle + rover"]();
+    c.safety.keep_out = [{ name:"pillar", kind:"cylinder", center:[1.9,0,0],
+                           radius:1.0, height:2.3, applies:"all" }];
+    c._scenario = "The formation has to go around a column the filter keeps it out of.";
+    return c;
+  },
+  "Two that would collide": () => {
+    const ag = [exQuad(0,[-3,-3,0],1.4), exQuad(1,[3,3,0],1.4)];
+    ag[0].formation = [0,0,0]; ag[1].formation = [0,0,0];
+    // perpendicular sweeps through the origin on the same period, so the two
+    // targets are at the same point every half cycle and the agents chasing them
+    // must be pulled through each other unless something stops them
+    const T = (name, amp, freq, col) => ({ name, kind:"lissajous", center:[0,0,1.4],
+      amp, freq, phase:[0,0,0], period:22, color:col });
+    return exBase(ag, [T("t0",[3.2,0,0],[1,0,0],[0.95,0.12,0.1]),
+                       T("t1",[0,3.2,0],[0,1,0],[0.2,0.5,0.9])], [],
+      [{agent:0,target:0,map:"identity"},{agent:1,target:1,map:"identity"}],
+      { _scenario:"Two quadrotors on crossing orbits. Toggle CBF in the transport." });
+  },
+  "Counter-rotating rings": () => {
+    const inner = ring(4, 1.1), outer = ring(4, 2.2, 0);
+    const ag = inner.map((p,i)=>exQuad(i,p,1.2))
+      .concat(outer.map((p,i)=>exQuad(4+i,p,1.9)));
+    const e = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4]];
+    const T = (name,per,col) => ({ name, kind:"lissajous", center:[0,0,1.5],
+      amp:[1.4,1.4,0], freq:[1,1,0], phase:[0,per>0?90:-90,0],
+      period:Math.abs(per), color:col });
+    return exBase(ag, [T("inner",34,[0.95,0.12,0.1]), T("outer",-48,[0.2,0.5,0.9])], e,
+      [0,1,2,3].map(i=>({agent:i,target:0,map:"identity"}))
+        .concat([4,5,6,7].map(i=>({agent:i,target:1,map:"identity"}))));
+  },
+  "Cannot settle (on purpose)": () => {
+    const o = ring(5, 1.7);
+    const ag = o.map((p,i)=>exQuad(i,p,1.5));
+    const T = k => ({ name:`target${k}`, kind:"lissajous", center:[0,0,1.5],
+      amp:[3.2,3.2,0], freq:[1,1,0], phase:[k*72,k*72+90,0], period:45,
+      color:[0.95,0.12,0.1] });
+    return exBase(ag, [0,1,2,3,4].map(T), [[0,1],[1,2],[2,3],[3,4],[4,0]],
+      [0,1,2,3,4].map(i=>({agent:i,target:i,map:"identity"})),
+      { _scenario:"Five targets share one circle and each agent chases its own, so the pentagon cannot stay rigid. The residual settles nonzero, which is the sheaf telling the truth." });
+  }
+};
+const exBox = document.getElementById("examples");
+if (exBox) {
+  exBox.innerHTML = Object.keys(EXAMPLES).map((k,i) =>
+    `<button data-ex="${i}">${esc(k)}</button>`).join("");
+  exBox.querySelectorAll("button").forEach(b => b.onclick = () => {
+    const name = Object.keys(EXAMPLES)[+b.dataset.ex];
+    cfg = EXAMPLES[name](); window.cfg = cfg;
+    selected = null; edgeFirst = null; anim.t = 0;
+    fitView(); syncIO(); render();
+    toast(name);
+  });
+}
+
+/* ------------------------------------------------------------------ history */
+// Undo over whole configs. A scenario is a few kB of JSON, so snapshotting it
+// is far simpler than tracking individual edits, and it makes Generate as
+// undoable as a drag.
+const HIST = { past:[], future:[], last:null };
+function snapshot(label) {
+  const now = JSON.stringify(cfg);
+  if (now === HIST.last) return;
+  if (HIST.last !== null) HIST.past.push(HIST.last);
+  if (HIST.past.length > 60) HIST.past.shift();
+  HIST.last = now; HIST.future.length = 0;
+  syncButtons();
+}
+function restore(json) {
+  cfg = JSON.parse(json); window.cfg = cfg; HIST.last = json;
+  selected = null; edgeFirst = null; syncIO(); render(); syncButtons();
+}
+function undo() {
+  if (!HIST.past.length) return;
+  HIST.future.push(HIST.last); restore(HIST.past.pop());
+  toast("undo");
+}
+function redo() {
+  if (!HIST.future.length) return;
+  HIST.past.push(HIST.last); restore(HIST.future.pop());
+  toast("redo");
+}
+function syncButtons() {
+  const u = document.getElementById("undoBtn"), r = document.getElementById("redoBtn");
+  if (u) u.disabled = !HIST.past.length;
+  if (r) r.disabled = !HIST.future.length;
+}
+
+/* ------------------------------------------------------------------ preview solver
+
+   Play runs the SAME gradient flow the controller runs, in the browser:
+
+     u_i = ff_i - k_c (d_c' d_c z)_i - k_t (d_p' d_p z)_i,   z_i = p_i - o_i
+
+   built edge by edge from the config's own restriction maps rather than from an
+   idealisation. That matters for showing what a scenario really does: an
+   over-constrained formation visibly fails to close, and the residual readout
+   settles at a nonzero number instead of pretending otherwise. The feedforward
+   is the least-squares combination of the pinned targets' velocities, matching
+   server.jl's FF_SOLVE.                                                       */
+const SIM = { p:null, t:0, cons:0, track:0 };
+const MAPD = { identity:[1,1,1], xy:[1,1,0], z:[0,0,1] };
+
+function simReset() {
+  SIM.p = cfg.agents.map(a => [a.spawn[0], a.spawn[1],
+                               a.kind === "px4" ? (a.z_ref ?? 1.4) : (a.spawn[2] ?? 0.1)]);
+  SIM.t = 0; SIM.cons = SIM.track = 0;
+}
+function simStep(dt) {
+  if (!SIM.p || SIM.p.length !== cfg.agents.length) simReset();
+  const n = cfg.agents.length, kc = cfg.gains.consensus, kt = cfg.gains.tracking;
+  const z = cfg.agents.map((a,i) => [0,1,2].map(d => SIM.p[i][d] - a.formation[d]));
+  const grad = cfg.agents.map(() => [0,0,0]);
+  let cons = 0, track = 0;
+
+  for (const [i,j] of cfg.edges) {
+    if (!cfg.agents[i] || !cfg.agents[j]) continue;
+    // an edge touching a ground robot can only compare the ground plane
+    const planar = cfg.agents[i].kind === "diffdrive" || cfg.agents[j].kind === "diffdrive";
+    const m = planar ? MAPD.xy : MAPD.identity;
+    for (const d of [0,1,2]) {
+      if (!m[d]) continue;
+      const r = z[i][d] - z[j][d];
+      cons += r*r; grad[i][d] += kc*r; grad[j][d] -= kc*r;
+    }
+  }
+  const tp = cfg.targets.map(t => targetPos(t, SIM.t));
+  const tv = cfg.targets.map(t => targetVel(t, SIM.t));
+  const ffAcc = cfg.agents.map(() => [0,0,0]), ffCnt = cfg.agents.map(() => [0,0,0]);
+  for (const pin of cfg.pinning) {
+    const a = cfg.agents[pin.agent], T = tp[pin.target];
+    if (!a || !T) continue;
+    const m = MAPD[pin.map] || MAPD.identity;
+    const off = pin.offset || a.formation;
+    for (const d of [0,1,2]) {
+      if (!m[d]) continue;
+      // a pin with its own offset compares p - o_ik rather than p - o_i
+      const zi = SIM.p[pin.agent][d] - off[d];
+      const r = zi - T[d];
+      track += r*r; grad[pin.agent][d] += kt*r;
+      ffAcc[pin.agent][d] += tv[pin.target][d]; ffCnt[pin.agent][d] += 1;
+    }
+  }
+  SIM.cons = Math.sqrt(cons); SIM.track = Math.sqrt(track);
+
+  const U = cfg.agents.map((a,i) => {
+    const u = [0,1,2].map(d =>
+      (ffCnt[i][d] ? ffAcc[i][d]/ffCnt[i][d] : 0) - grad[i][d]);
+    if (a.kind === "diffdrive") u[2] = 0;
+    return u;
+  });
+  if (cbfOn()) cbfFilter(U, SIM.p);
+
+  for (let i=0;i<n;i++) {
+    const a = cfg.agents[i];
+    const u = U[i];
+    const nrm = Math.hypot(...u), vm = a.v_max || 1;
+    const s = nrm > vm ? vm/nrm : 1;
+    for (const d of [0,1,2]) SIM.p[i][d] += u[d]*s*dt;
+    if (a.kind === "diffdrive") SIM.p[i][2] = a.spawn[2] ?? 0.1;
+    else SIM.p[i][2] = Math.max(0, Math.min(cfg.safety.z_max ?? 2.3, SIM.p[i][2]));
+  }
+  SIM.t += dt;
+}
+// The same safety filter server.jl runs, so Play shows what the controller will
+// actually do rather than an unfiltered idealisation. Pairwise barriers plus the
+// scenario's keep-out zones, projected the way each pair is measured, solved by
+// the same Hildreth dual sweep. Kept deliberately small: this is a preview, and
+// the authority is server.jl.
+function cbfOn() { const el = document.getElementById("cbfPreview"); return !el || el.checked; }
+function pairMetric(i, j) {
+  const air = k => cfg.agents[k].kind === "px4";
+  const both = air(i) && air(j);
+  return { dims: both ? [0,1,2] : [0,1],
+           d: sepOf(both ? "air_air" : (air(i)||air(j) ? "air_ground" : "ground_ground")) };
+}
+function cbfFilter(U, P) {
+  const alpha = sepOf("alpha"), n = cfg.agents.length;
+  const rows = [];
+  for (let i=0;i<n;i++) for (let j=i+1;j<n;j++) {
+    const { dims, d } = pairMetric(i, j);
+    const g = dims.map(k => P[i][k] - P[j][k]);
+    const h = g.reduce((a,v)=>a+v*v, 0) - d*d;
+    rows.push({ i, j, dims, g, h });
+  }
+  for (const z of (cfg.safety.keep_out || [])) {
+    const dims = z.kind === "sphere" ? [0,1,2] : [0,1];
+    for (let i=0;i<n;i++) {
+      const a = cfg.agents[i], isAir = a.kind === "px4";
+      if (z.applies === "air" && !isAir) continue;
+      if (z.applies === "ground" && isAir) continue;
+      if (z.kind === "cylinder") {
+        const zc = z.center[2], zt = zc + (z.height ?? 2.5);
+        if (P[i][2] < zc || P[i][2] > zt) continue;
+      }
+      const g = dims.map(k => P[i][k] - z.center[k]);
+      rows.push({ i, j:-1, dims, g, h: g.reduce((a,v)=>a+v*v,0) - z.radius*z.radius });
+    }
+  }
+  if (!rows.length) return;
+  // dual ascent on the inequality rows, clamped at zero: a few sweeps is plenty
+  // for a preview at 50 Hz, and an unconverged multiplier only means the nudge
+  // is smaller than the controller's would be.
+  const lam = rows.map(()=>0);
+  for (let sweep=0; sweep<12; sweep++) {
+    for (let r=0;r<rows.length;r++) {
+      const R = rows[r];
+      let lhs = 0, norm2 = 0;
+      R.dims.forEach((k,q) => {
+        const gi = 2*R.g[q];
+        lhs += gi*U[R.i][k]; norm2 += gi*gi;
+        if (R.j >= 0) { lhs -= gi*U[R.j][k]; norm2 += gi*gi; }
+      });
+      if (norm2 < 1e-12) continue;
+      const viol = -alpha*R.h - lhs;             // want lhs >= -alpha h
+      const step = viol / norm2;
+      const old = lam[r], next = Math.max(0, old + step);
+      const dl = next - old;
+      lam[r] = next;
+      if (dl === 0) continue;
+      R.dims.forEach((k,q) => {
+        const gi = 2*R.g[q];
+        U[R.i][k] += dl*gi;
+        if (R.j >= 0) U[R.j][k] -= dl*gi;
+      });
+    }
+  }
+}
+
+// analytic target velocity, mirroring server.jl target_velocity
+function targetVel(t, time) {
+  // circle and orbit3d are still in older configs, and without their velocity
+  // the feedforward silently vanishes and every agent trails the target
+  if (t.kind === "circle" || t.kind === "orbit3d") {
+    const w = 2*Math.PI/t.period, r = t.radius;
+    const vz = t.kind === "orbit3d"
+      ? t.z_amp*(2*Math.PI/t.z_period)*Math.cos((2*Math.PI/t.z_period)*time) : 0;
+    return [-r*w*Math.sin(w*time), r*w*Math.cos(w*time), vz];
+  }
+  if (t.kind === "lissajous") {
+    const w = 2*Math.PI/t.period;
+    return [0,1,2].map(i => t.amp[i]*t.freq[i]*w*Math.cos(t.freq[i]*w*time + t.phase[i]*Math.PI/180));
+  }
+  if (t.kind === "waypoints") {
+    const e = 0.05, a = targetPos(t, time), b = targetPos(t, time+e);
+    return [0,1,2].map(d => (b[d]-a[d])/e);
+  }
+  return [0,0,0];
+}
+
+/* ------------------------------------------------------------------ views, play */
+document.getElementById("viewIso").onclick = () => { cam.az=-2.2; cam.el=0.5; fitView(); render(); };
+document.getElementById("viewTop").onclick = () => { cam.az=-Math.PI/2; cam.el=1.44; fitView(); render(); };
+document.getElementById("viewFront").onclick = () => { cam.az=-Math.PI/2; cam.el=0.06; fitView(); render(); };
+const playBtn = document.getElementById("playBtn");
+const scrub = document.getElementById("scrub"), tval = document.getElementById("tval");
+const speedSel = document.getElementById("speedSel"), residOut = document.getElementById("residOut");
+const livePreview = document.getElementById("livePreview");
+const playBtn2 = document.getElementById("playBtn2");
+
+function setPlaying(on) {
+  anim.playing = on;
+  const glyph = on ? "&#10073;&#10073;" : "&#9654;";
+  playBtn.innerHTML = on ? "&#10073;&#10073; Pause" : "&#9654; Play";
+  playBtn2.innerHTML = glyph;
+  anim.last = performance.now();
+  if (on) requestAnimationFrame(tick); else render();
+}
+playBtn.onclick = () => setPlaying(!anim.playing);
+playBtn2.onclick = () => setPlaying(!anim.playing);
+document.getElementById("rewindBtn").onclick = () => { anim.t = 0; simReset(); render(); };
+speedSel.onchange = () => { anim.speed = +speedSel.value; };
+livePreview.onchange = () => { simReset(); render(); };
+scrub.oninput = () => {
+  anim.t = +scrub.value;
+  // scrubbing cannot rewind a dynamical system, so re-run it from t=0 to here
+  if (livePreview.checked) { simReset(); const dt=0.05;
+    for (let u=0; u<anim.t; u+=dt) simStep(dt); }
+  render();
+};
+function tick(now) {
+  if (!anim.playing) return;
+  const dt = Math.min(0.1, (now - anim.last)/1000) * anim.speed;
+  anim.last = now; anim.t += dt;
+  if (livePreview.checked) { let left = dt; while (left > 1e-4) { const h = Math.min(0.02, left); simStep(h); left -= h; } }
+  if (anim.t > +scrub.max) { anim.t = 0; simReset(); }
+  render();
+  requestAnimationFrame(tick);
+}
+
+/* ------------------------------------------------------------------ chrome */
+document.querySelectorAll("#tabs .tab").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#tabs .tab").forEach(x => x.classList.toggle("active", x===b));
+  document.querySelectorAll("#side section").forEach(sec =>
+    sec.hidden = sec.dataset.panel !== b.dataset.tab);
+});
+document.getElementById("panelBtn").onclick = () => {
+  document.body.classList.toggle("nopanel"); resize();
+};
+// Save the scene as it stands. The canvas is the whole picture, so this is a
+// screenshot of the 3-D view alone, without the panel or the browser chrome.
+document.getElementById("shotBtn").onclick = () => {
+  cv.toBlob(b => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b);
+    a.download = "swarm-scene.png";
+    a.click(); URL.revokeObjectURL(a.href);
+    toast("saved swarm-scene.png");
+  }, "image/png");
+};
+document.getElementById("undoBtn").onclick = undo;
+document.getElementById("redoBtn").onclick = redo;
+addEventListener("keydown", e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
+  if (typing) return;
+  if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==="z") {
+    e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (e.key === " ") { e.preventDefault(); setPlaying(!anim.playing); }
+  if (e.key === "\\") { document.body.classList.toggle("nopanel"); resize(); }
+});
+
+/* ------------------------------------------------------------------ modes */
+const HINTS = {
+  move: "Drag an agent or target to move it; hold <b>shift</b> while dragging a quadrotor to change its altitude. Drag empty space to orbit, shift+drag to pan, wheel to zoom.",
+  offset: "Showing the formation slots about each target. Drag an agent to set its offset, shift+drag for the offset's altitude.",
+  edge: "Click two agents to add or remove a consensus edge between them.",
+  pin: "Click an agent to cycle its restriction map to the <b>selected</b> target: identity (all of R&sup3;) &rarr; xy (ground track) &rarr; z (altitude only) &rarr; none.",
+  draw: "Click to drop control points for the <b>selected</b> target's path. Drag a point to move it, shift+drag for altitude, shift+click to delete. Smoothing is on by default."
+};
+function setHint() {
+  let h = HINTS[mode];
+  if (mode === "pin" || mode === "draw") {
+    const t = cfg.targets[selT()];
+    h += ` &nbsp;<b>Selected target: ${esc(t ? t.name : "none")}</b>` +
+         (cfg.targets.length > 1 ? " (click another target, or use its Targets card, to switch)" : "");
+  }
+  document.getElementById("hint").innerHTML = h;
+}
+document.querySelectorAll("button.mode").forEach(b => b.onclick = () => {
+  mode = b.dataset.mode; edgeFirst = null;
+  document.querySelectorAll("button.mode").forEach(x=>x.classList.toggle("active", x===b));
+  setHint(); render();
+});
+document.getElementById("hint").innerHTML = HINTS.move;
+
+fitView(); syncIO(); resize();
+</script>
+</body>
+</html>
