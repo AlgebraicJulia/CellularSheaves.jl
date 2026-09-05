@@ -43,6 +43,10 @@ include("AgentControllers.jl")
 import .AgentControllers
 export AgentControllers
 
+include("SafetyFilters/SafetyFilters.jl")
+import .SafetyFilters
+export SafetyFilters
+
 include("DistributedLayeredControl.jl")
 import .DistributedLayeredControl
 export DistributedLayeredControl
