@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <!-- Arrowhead for restriction morphisms -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#6B7C96" />
+    </marker>
+  </defs>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=STIX+Two+Text:ital,wght@0,400..700;1,400..700&amp;display=swap');
+
+    .math {
+      font-family: "STIX Two Math", "STIX Two Text", "XITS Math", "XITS", "Cambria Math", serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .base-edge { stroke: #D3D8E2; stroke-width: 6; stroke-linecap: round; }
+    .stalk-proj { stroke: #9AA8BE; stroke-width: 2; stroke-dasharray: 4 4; }
+    .restriction { stroke: #6B7C96; stroke-width: 2.2; stroke-linecap: round; }
+
+    .stalk-label {
+      font-size: 19px;
+      font-weight: 600;
+      fill: #FFFFFF;
+      text-anchor: middle;
+      dominant-baseline: central;
+    }
+  </style>
+
+  <!-- ========================================== -->
+  <!-- 1. BASE CELL COMPLEX                       -->
+  <!-- ========================================== -->
+  <g id="base-complex">
+    <!-- 2-cell interior -->
+    <polygon points="120,380 380,380 250,155" fill="#F4F6FB" />
+
+    <!-- 1-cells (Edges) -->
+    <line x1="120" y1="380" x2="380" y2="380" class="base-edge" />
+    <line x1="120" y1="380" x2="250" y2="155" class="base-edge" />
+    <line x1="380" y1="380" x2="250" y2="155" class="base-edge" />
+
+    <!-- 0-cells (Vertices) -->
+    <circle cx="120" cy="380" r="6.5" fill="#4063D8" />
+    <circle cx="380" cy="380" r="6.5" fill="#4063D8" />
+    <circle cx="250" cy="155" r="6.5" fill="#4063D8" />
+  </g>
+
+  <!-- ========================================== -->
+  <!-- 2. PROJECTION FIBERS                       -->
+  <!-- ========================================== -->
+  <g id="projections">
+    <line x1="120" y1="380" x2="120" y2="330" class="stalk-proj" />
+    <line x1="380" y1="380" x2="380" y2="330" class="stalk-proj" />
+    <line x1="250" y1="155" x2="250" y2="105" class="stalk-proj" />
+    <line x1="250" y1="380" x2="250" y2="330" class="stalk-proj" />
+    <line x1="185" y1="267" x2="185" y2="217" class="stalk-proj" />
+    <line x1="315" y1="267" x2="315" y2="217" class="stalk-proj" />
+  </g>
+
+  <!-- ========================================== -->
+  <!-- 3. RESTRICTION MORPHISMS                   -->
+  <!-- ========================================== -->
+  <g id="restriction-maps">
+    <!-- Bottom edge restrictions: v1 -> e1 <- v2 -->
+    <path d="M 148 330 L 221 330" class="restriction" marker-end="url(#arrow)" />
+    <path d="M 352 330 L 279 330" class="restriction" marker-end="url(#arrow)" />
+
+    <!-- Left edge restrictions: v1 -> e2 <- v3 -->
+    <path d="M 136 308 L 171 239" class="restriction" marker-end="url(#arrow)" />
+    <path d="M 234 130 L 199 199" class="restriction" marker-end="url(#arrow)" />
+
+    <!-- Right edge restrictions: v2 -> e3 <- v3 -->
+    <path d="M 364 308 L 329 239" class="restriction" marker-end="url(#arrow)" />
+    <path d="M 266 130 L 301 199" class="restriction" marker-end="url(#arrow)" />
+  </g>
+
+  <!-- ========================================== -->
+  <!-- 4. STALK SPACES (Julia Triad)              -->
+  <!-- ========================================== -->
+  <g id="stalk-nodes">
+    <!-- Top Stalk (Red: #CB3C33) -->
+    <circle cx="250" cy="105" r="24" fill="#CB3C33" />
+    <circle cx="250" cy="105" r="27.5" fill="none" stroke="#CB3C33" stroke-width="2" opacity="0.3" />
+
+    <!-- Bottom-Left Stalk (Purple: #9558B2) -->
+    <circle cx="120" cy="330" r="24" fill="#9558B2" />
+    <circle cx="120" cy="330" r="27.5" fill="none" stroke="#9558B2" stroke-width="2" opacity="0.3" />
+
+    <!-- Bottom-Right Stalk (Green: #389826) -->
+    <circle cx="380" cy="330" r="24" fill="#389826" />
+    <circle cx="380" cy="330" r="27.5" fill="none" stroke="#389826" stroke-width="2" opacity="0.3" />
+
+    <!-- Edge Stalks / Vector Spaces over 1-cells (Julia Blue: #4063D8) -->
+    <rect x="236" y="316" width="28" height="28" rx="6" fill="#4063D8" />
+    <rect x="171" y="203" width="28" height="28" rx="6" fill="#4063D8" />
+    <rect x="301" y="203" width="28" height="28" rx="6" fill="#4063D8" />
+  </g>
+
+  <!-- ========================================== -->
+  <!-- 5. MINIMAL SHEAF EMBLEM                    -->
+  <!-- ========================================== -->
+  <g id="labels" class="math">
+    <!-- Pure script ℱ emblem on primary vertex stalks -->
+    <text x="250" y="105" class="stalk-label">ℱ</text>
+    <text x="120" y="330" class="stalk-label">ℱ</text>
+    <text x="380" y="330" class="stalk-label">ℱ</text>
+  </g>
+</svg>
