@@ -214,3 +214,79 @@ end
     NS_PfF = nullspace_ldlt(PfF)
     @test size(NS_F, 2) == size(NS_PfF, 2)
 end
+
+# ---------------------------------------------------------------------------
+# Orthonormality of the fiber-section bases
+# ---------------------------------------------------------------------------
+
+# Rebuild the fiber sub-sheaf that `fiber_section_basis` works on, so its
+# coboundary can be applied to the returned basis.
+function fiber_subsheaf(F, verts::Vector{Int}, fedges::Vector{Tuple{Int,Int}})
+    v_idx = Dict(v => i for (i, v) in enumerate(verts))
+    Fib = EuclideanSheaf{Float64}([get_vertex_stalk(F, v) for v in verts])
+    for (a, b) in fedges
+        add_sheaf_edge!(Fib, v_idx[a], v_idx[b],
+                        get_restriction_map(F, a, b),
+                        get_restriction_map(F, b, a))
+    end
+    return Fib
+end
+
+@testset "fiber_section_basis — orthonormal columns" begin
+    F   = make_6cycle_sheaf()
+    hom = GraphHomomorphism([1, 1, 2, 2, 3, 3])
+    g   = underlying_graph(F)
+
+    for tv in 1:hom.n_target
+        fverts = fiber_vertices(hom, tv)
+        fedges = fiber_edges(hom, g, tv)
+        B = fiber_section_basis(F, fverts, fedges)
+
+        # Each fiber: 2 vertices (ℝ³ each) joined by 1 edge (ℝ²) → dim 4
+        @test size(B) == (6, 4)
+        @test Matrix(B' * B) ≈ Matrix(I, 4, 4)
+
+        # Orthonormalising must not change the span: the columns are still
+        # sections of the fiber sub-sheaf, and there are still as many of them
+        # as the section space has dimensions.
+        d_fib = coboundary_map(fiber_subsheaf(F, fverts, fedges))
+        @test norm(d_fib * B) < 1e-10
+        @test size(B, 2) == size(nullspace_ldlt(Matrix(d_fib' * d_fib)), 2)
+    end
+end
+
+@testset "fiber_section_basis — edgeless and trivial fibers" begin
+    # A fiber with no internal edges: every assignment is a section, so the
+    # basis is the identity, which is already orthonormal.
+    F = make_6cycle_sheaf()
+    B = fiber_section_basis(F, [1], Tuple{Int,Int}[])
+    @test size(B) == (3, 3)
+    @test Matrix(B' * B) ≈ Matrix(I, 3, 3)
+
+    # A fiber whose only section is zero: the basis has no columns, and the QR
+    # must leave that empty matrix alone.
+    G = EuclideanSheaf{Float64}(repeat([1], 3))
+    add_sheaf_edge!(G, 1, 2, ones(1, 1), ones(1, 1))    # x₁ = x₂
+    add_sheaf_edge!(G, 2, 3, ones(1, 1), ones(1, 1))    # x₂ = x₃
+    add_sheaf_edge!(G, 1, 3, ones(1, 1), -ones(1, 1))   # x₁ = −x₃
+    B0 = fiber_section_basis(G, [1, 2, 3], [(1, 2), (2, 3), (1, 3)])
+    @test size(B0) == (3, 0)
+end
+
+@testset "pushforward_transfer_map — partial isometry" begin
+    F   = make_6cycle_sheaf()
+    hom = GraphHomomorphism([1, 1, 2, 2, 3, 3])
+    T   = Matrix(pushforward_transfer_map(hom, F))
+
+    # Orthonormal fiber bases make T a partial isometry: T Tᵀ = I.
+    @test T * T' ≈ Matrix(I, size(T, 1), size(T, 1))
+
+    # TᵀT is then the orthogonal projector of C⁰(F) onto the direct sum of the
+    # fibers' section spaces, which contains every global section of F, so T
+    # carries global sections over without changing their norm.
+    NS_F = nullspace_ldlt(F)
+    for j in axes(NS_F, 2)
+        s = NS_F[:, j]
+        @test norm(T * s) ≈ norm(s)
+    end
+end
