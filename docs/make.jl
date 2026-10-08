@@ -80,7 +80,7 @@ end
 
 @info "Building Documenter.jl docs"
 makedocs(
-  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.Layered, CellularSheaves.ControlSheaves.NestedSystems, CellularSheaves.ControlSheaves.NestedDSL, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLTerm, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLParser, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLValidator, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLLowering, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.ControlSheaves.CoordinationBenchmarks, CellularSheaves.AsynchSheaves, CellularSheaves.SheafInterface, CellularSheaves.NetworkSheaves.EuclideanSheaves, CellularSheaves.NetworkSheaves.GraphHomomorphisms, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.Pushforwards, CellularSheaves.NetworkSheaves.Pushouts, CellularSheaves.NetworkSheaves.CellularSheafParser, CellularSheaves.BlockSparseArrays, CellularSheaves.NetworkSheaves.PotentialSheaves, CellularSheaves.NetworkSheaves.TrajectorySheaves, CellularSheaves.NetworkSheaves.DistributedSolve, CellularSheaves.NetworkSheaves.Formations, CellularSheaves.ControlSheaves.TrackingDSL, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLTerm, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLParser, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLValidator, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLResolver, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLLowering, CellularSheaves.IPM],
+  modules=[CellularSheaves, CellularSheaves.ControlSheaves, CellularSheaves.ControlSheaves.Tikhonov, CellularSheaves.ControlSheaves.AgentControllers, CellularSheaves.ControlSheaves.DistributedLayeredControl, CellularSheaves.ControlSheaves.Layered, CellularSheaves.ControlSheaves.NestedSystems, CellularSheaves.ControlSheaves.NestedDSL, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLTerm, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLParser, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLValidator, CellularSheaves.ControlSheaves.NestedDSL.NestedDSLLowering, CellularSheaves.ControlSheaves.MultiAgentTracking, CellularSheaves.ControlSheaves.MultiAgentTracking.QuadraticCosts, CellularSheaves.ControlSheaves.CoordinationBenchmarks, CellularSheaves.AsynchSheaves, CellularSheaves.SheafInterface, CellularSheaves.NetworkSheaves.EuclideanSheaves, CellularSheaves.NetworkSheaves.GraphHomomorphisms, CellularSheaves.NetworkSheaves.SheafMorphisms, CellularSheaves.NetworkSheaves.Pushforwards, CellularSheaves.NetworkSheaves.Pushouts, CellularSheaves.NetworkSheaves.CellularSheafParser, CellularSheaves.BlockSparseArrays, CellularSheaves.NetworkSheaves.PotentialSheaves, CellularSheaves.NetworkSheaves.TrajectorySheaves, CellularSheaves.NetworkSheaves.DistributedSolve, CellularSheaves.NetworkSheaves.SchwarzMethods, CellularSheaves.NetworkSheaves.Formations, CellularSheaves.ControlSheaves.TrackingDSL, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLTerm, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLParser, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLValidator, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLResolver, CellularSheaves.ControlSheaves.TrackingDSL.TrackingDSLLowering, CellularSheaves.IPM],
   draft=false,
   format=Documenter.HTML(
     assets=["assets/benchtables.css"],
@@ -99,6 +99,7 @@ makedocs(
       "generated/nearest_global_section_iterative.md",
       "generated/pushforward.md",
       "generated/trajectory_sheaf.md",
+      "generated/schwarz_domain_decomposition.md",
       "Control Examples"=>Any[
         "generated/control/simple_integrator.md",
         "generated/control/controlled_double_integrator.md",
@@ -163,6 +164,7 @@ makedocs(
       "api/sheaf_interface.md",
       "api/euclidean_sheaves.md",
       "api/distributed_solve.md",
+      "api/schwarz_methods.md",
       "api/graph_homomorphisms.md",
       "api/sheaf_morphisms.md",
       "api/pushforwards.md",

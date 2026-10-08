@@ -4,6 +4,7 @@
 
 - [Sheaf Interface](sheaf_interface.md)
 - [Euclidean Sheaves](euclidean_sheaves.md)
+- [Schwarz Methods](schwarz_methods.md)
 - [Potential Sheaves](potential_sheaves.md)
 - [Block Sparse Arrays](block_sparse_arrays.md)
 - [Cellular Sheaf DSL](dsl.md)
