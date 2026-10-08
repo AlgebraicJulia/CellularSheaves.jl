@@ -67,4 +67,8 @@ include("CoordinationProfiling.jl")
 import .CoordinationProfiling
 export CoordinationProfiling
 
+include("PredictiveConsensus.jl")
+import .PredictiveConsensus
+export PredictiveConsensus
+
 end # module ControlSheaves

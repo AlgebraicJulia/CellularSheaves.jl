@@ -231,5 +231,33 @@ Remaining differences:
    updates on independent clocks. The parallel Schwarz iterate is already a
    cochain of per-subdomain copies, so asynchronous Schwarz, known to converge
    for M-matrices, is a natural next step.
-3. **Conventions.** The IPM settings use `itmax`. The Schwarz algorithms use
+3. **Conventions.** The IPM settings (Mumblebee) use `max_iter`. The Schwarz algorithms use
    `maxiter` and `tol`, and could be aligned.
+
+## Agents as subdomains: predicted trajectories
+
+[`PredictiveConsensus`](@ref CellularSheaves.ControlSheaves.PredictiveConsensus)
+applies the same idea to optimal control. Each planar double integrator
+(state ``(q_i, v_i) \in \mathbb R^4``) is a subdomain whose unknowns are its
+whole trajectory over the horizon. Agents interact only through the pinned
+coordination sheaf, via the team cost
+``\sum_t \tfrac w2 \|q(t) - q^\star\|^2_{\mathcal H}``. The data an agent needs
+from a neighbour is that neighbour's *predicted* position trajectory, which
+plays the role of the ghost layer. Each agent's local problem is a conic QP
+(dynamics as equalities, the thrust limit ``\|u_i(t)\| \le \bar u`` as one
+second-order cone per step) solved by the Mumblebee IPM. The neighbours enter
+only its linear term, so one symbolic factorization per agent serves every
+sweep and every receding-horizon step.
+
+| Schwarz on a PDE | Predictive consensus |
+|---|---|
+| subdomain ``\Omega_i`` | agent ``i``'s trajectory space |
+| ghost values on ``\Gamma_i`` | neighbours' predicted trajectories ``\hat q_j(\cdot)`` |
+| multicolor sweep | colored block Gauss–Seidel (monotone in the team cost) |
+| parallel sweep | block Jacobi, damped by ``1/\chi`` |
+| direct solve | joint Riccati recursion / centralized QP |
+
+Since the agents do not overlap, this is the zero-overlap (block) case. With a
+convex cost and per-agent constraints, colored sweeps converge to the team
+optimum. With obstacles (planned in `docs/issues/015`) they converge to a Nash
+point instead.
