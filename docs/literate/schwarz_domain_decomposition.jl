@@ -75,9 +75,13 @@ overlap_disagreement(dd, localize(dd, u_exact))
 # neighbours, so the iterate stays a global section. The **parallel** (Lions)
 # method solves every subdomain at once from the previous cochain. Its copies
 # disagree on overlaps until convergence.
+#
+# A `SchwarzProblem` bundles the decomposition with the right-hand side, and an
+# algorithm struct bundles the solver options. `solve` runs one on the other.
 
-mult = schwarz_solve(dd, f; method=:multiplicative, tol=1e-10)
-par = schwarz_solve(dd, f; method=:parallel, tol=1e-10)
+prob = SchwarzProblem(dd, f)
+mult = solve(prob, SchwarzIteration(sweep=MultiplicativeSweep(), tol=1e-10))
+par = solve(prob, SchwarzIteration(sweep=ParallelSweep(), tol=1e-10))
 (mult.iterations, par.iterations)
 
 #-
@@ -101,7 +105,7 @@ plot(p1, p2; layout=(1, 2), size=(900, 350))
 
 for δ in 1:4
     dδ = SchwarzDecomposition(A, overlapping_subdomains(A, parts; overlap=δ); owner=parts)
-    println("overlap = $δ: ", schwarz_solve(dδ, f; method=:parallel, tol=1e-8).iterations, " sweeps")
+    println("overlap = $δ: ", solve(SchwarzProblem(dδ, f), SchwarzIteration(sweep=ParallelSweep())).iterations, " sweeps")
 end
 
 # ## Multicolor sweeps
@@ -116,7 +120,7 @@ dd.colors
 
 #-
 
-multicolor = schwarz_solve(dd, f; method=:multicolor, tol=1e-10)
+multicolor = solve(prob, SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10))
 multicolor.iterations
 
 # ## Coarse spaces from the pushforward
@@ -149,7 +153,7 @@ hom = box_aggregation(4)
 small = SchwarzDecomposition(poisson2d(16), overlapping_subdomains(poisson2d(16), box_partition(16, 4); overlap=1);
     owner=box_partition(16, 4))
 exact_small = ExactPushforwardCoarseSpace(small, hom)
-vertex_stalks(pushforward_sheaf(hom, overlap_sheaf(small))) == length.(exact_small.decomposition.subdomains)
+vertex_stalks(pushforward_sheaf(hom, overlap_sheaf(small))) == length.(exact_small.decomposition.cover.subdomains)
 
 # ## Scalability
 #
@@ -171,7 +175,7 @@ function scaling_row(p)
         "exact (2×2)" => ExactPushforwardCoarseSpace(ddp, box_aggregation(p)),
     )
     return map(coarse_spaces) do (name, c)
-        its = schwarz_solve(ddp, fp; method=:multicolor, coarse=c, tol=1e-8, maxiter=5000).iterations
+        its = solve(SchwarzProblem(ddp, fp), SchwarzIteration(sweep=MulticolorSweep(), coarse=c, maxiter=5000)).iterations
         dim = c === nothing ? 0 : coarse_dimension(c)
         (; p, name, its, dim)
     end
@@ -225,9 +229,9 @@ strips = [cld(jx * 4, m) for jy in 1:m for jx in 1:m]
 strip_domains = overlapping_subdomains(A, strips; overlap=1)
 pstar = optimized_robin_parameter(3h) / h
 for scale in (nothing, 0.125, 0.5, 1, 2, 8)
-    robin = scale === nothing ? nothing : scale * pstar
-    dds = SchwarzDecomposition(A, strip_domains; owner=strips, robin)
-    r = schwarz_solve(dds, f; method=:parallel, tol=1e-8, maxiter=3000)
+    transmission = scale === nothing ? DirichletTransmission() : RobinTransmission(scale * pstar)
+    dds = SchwarzDecomposition(A, strip_domains; owner=strips, transmission)
+    r = solve(SchwarzProblem(dds, f), SchwarzIteration(sweep=ParallelSweep(), maxiter=3000))
     println(rpad(scale === nothing ? "Dirichlet" : "p = $(scale) p*", 14), r.iterations, " sweeps")
 end
 
@@ -243,11 +247,12 @@ end
 # solver below.
 
 for scale in (1, 2, 4)
-    ddr = SchwarzDecomposition(A, subdomains; owner=parts, robin=scale * optimized_robin_parameter(5h) / h)
-    r = schwarz_solve(ddr, f; method=:multicolor, tol=1e-8, maxiter=3000)
+    robin = RobinTransmission(scale * optimized_robin_parameter(5h) / h)
+    ddr = SchwarzDecomposition(A, subdomains; owner=parts, transmission=robin)
+    r = solve(SchwarzProblem(ddr, f), SchwarzIteration(sweep=MulticolorSweep(), maxiter=3000))
     println("p = $(scale) p*: ", r.converged ? "$(r.iterations) sweeps" : "diverged")
 end
-println("Dirichlet: ", schwarz_solve(dd, f; method=:multicolor, tol=1e-8).iterations, " sweeps")
+println("Dirichlet: ", solve(prob, SchwarzIteration(sweep=MulticolorSweep())).iterations, " sweeps")
 
 # ## Krylov acceleration
 #
@@ -263,8 +268,9 @@ for p in (4, 8, 16)
     pp = box_partition(mp, p)
     ddp = SchwarzDecomposition(Ap, overlapping_subdomains(Ap, pp; overlap=1); owner=pp)
     fp = ones(mp^2)
-    one_level = schwarz_cg(ddp, fp).iterations
-    two_level = schwarz_cg(ddp, fp; coarse=TruncatedPushforwardCoarseSpace(ddp)).iterations
+    probp = SchwarzProblem(ddp, fp)
+    one_level = solve(probp, SchwarzCG()).iterations
+    two_level = solve(probp, SchwarzCG(coarse=TruncatedPushforwardCoarseSpace(ddp))).iterations
     println("$(p)×$(p) boxes: one-level CG $one_level, two-level CG $two_level")
 end
 
