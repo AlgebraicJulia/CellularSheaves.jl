@@ -643,6 +643,7 @@ function _predict(ws::SweepWorkspace, i, solver)
     p, d, y = ws.primal[i], ws.dual[i], ws.multiplier[i]
     Δp, Δd, Δy = similar(p), similar(d), similar(y)
     frule!(Δp, Δy, Δd, solver, ws.f[i] - ws.f_solved[i], ws.g[i] - ws.g_solved[i], 0.0)
+    all(isfinite, Δp) && all(isfinite, Δd) && all(isfinite, Δy) || return p, d, y
     α = _step_to_boundary(l, p, Δp, d, Δd; τ = ws.algorithm.settings.step_frac)
     return p .+ α .* Δp, d .+ α .* Δd, y .+ α .* Δy
 end
@@ -651,21 +652,32 @@ end
 #
 # Warm start (barrier solvers only): from the tangent prediction of the last
 # central point, or, right after a receding-horizon time shift, from the
-# shifted central point. A warm solve that fails is retried cold, and both
+# shifted central point; with unchanged data the last solution is kept as is.
+# A warm solve that fails (or throws) is retried cold, and both
 # attempts count towards `local_iterations`.
 function _replan!(ws::SweepWorkspace, i, states, controls)
     l = ws.layouts[i]
     _linear_term!(ws.f[i], ws.lq, l, ws.states)
     _rhs!(ws.g[i], ws.lq, l, ws.x0)
     solver = ws.exact ? ws.exact_solvers[i] : ws.solvers[i]
+    warm = ws.algorithm.warm_start && !ws.exact && !isempty(ws.primal[i])
+    if warm && !ws.shifted[i] && ws.f[i] == ws.f_solved[i] && ws.g[i] == ws.g_solved[i]
+        _extract!(states, controls, l, ws.primal[i])      # same data: the last solution stands
+        return nothing
+    end
     result = nothing
-    if ws.algorithm.warm_start && !ws.exact && !isempty(ws.primal[i])
-        p0, d0, y0 = ws.shifted[i] ? (ws.primal[i], ws.dual[i], ws.multiplier[i]) : _predict(ws, i, solver)
-        _reset_hessian!(solver)
-        reinit!(solver; f = ws.f[i], g = ws.g[i], p0, d0, y0)
-        result = solve!(solver)
-        ws.local_iterations[i] += result.niter
-        result.status in (OPTIMAL, NEAR_OPTIMAL) || (result = nothing)
+    if warm
+        try
+            p0, d0, y0 = ws.shifted[i] ? (ws.primal[i], ws.dual[i], ws.multiplier[i]) : _predict(ws, i, solver)
+            _reset_hessian!(solver)
+            reinit!(solver; f = ws.f[i], g = ws.g[i], p0, d0, y0)
+            result = solve!(solver)
+            ws.local_iterations[i] += result.niter
+            result.status in (OPTIMAL, NEAR_OPTIMAL) || (result = nothing)
+        catch err
+            err isa InterruptException && rethrow()
+            result = nothing                               # fall back to a cold solve below
+        end
     end
     if result === nothing
         _reset_hessian!(solver)

@@ -261,3 +261,16 @@ Since the agents do not overlap, this is the zero-overlap (block) case. With a
 convex cost and per-agent constraints, colored sweeps converge to the team
 optimum. With obstacles (planned in `docs/issues/015`) they converge to a Nash
 point instead.
+
+**Interior warm starts.** With a thrust limit, each agent's QP is solved to
+the point on the central path at barrier ``\mu' > 0`` (default ``10^{-6}``),
+not to the cone boundary. Because the barrier is a sum of per-agent terms, the
+sweeps are block coordinate descent on one barrier-regularized team problem,
+whose optimum is within ``\nu\mu'`` of the true one. Optional exact sweeps at
+``\mu' = 0`` remove that gap. The central point is interior and smooth in the
+neighbours' predictions, so when they change by ``\Delta f`` an agent
+differentiates its last solution through the KKT system (Mumblebee's
+`frule!`), steps along that tangent as far as the cones allow, and lets the
+IPM re-center. On the ``3 \times 3`` grid this takes 1974 interior-point
+iterations against 8210 for cold starts at the same ``\mu'``, for the same
+plan.
