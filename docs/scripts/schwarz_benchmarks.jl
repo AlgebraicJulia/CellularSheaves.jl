@@ -16,15 +16,16 @@
 # solution, neighbour-exchange rounds and the largest local problem.
 #
 # Run with:  julia -t 8 --project=docs docs/scripts/schwarz_benchmarks.jl
-# Results are written to docs/figures/schwarz/benchmarks.csv and timing.svg.
+# Results are written to docs/figures/schwarz/benchmarks.csv; the figure
+# (timing.svg, timing.png) is drawn by schwarz_benchmark_figure.jl.
 
-get!(ENV, "GKSwstype", "100")
+
 
 using CellularSheaves
 using CliqueTrees.Multifrontal
 using LinearAlgebra
 using SparseArrays
-using Plots
+
 using Printf
 
 const OUT = joinpath(@__DIR__, "..", "figures", "schwarz")
@@ -152,7 +153,7 @@ rows = reduce(vcat, [measure(c) for c in cases])
 open(joinpath(OUT, "benchmarks.csv"), "w") do io
     println(io, "case,dofs,subdomains,method,setup_s,solve_s,iterations,rel_error,rounds,max_local_dofs")
     for r in rows
-        println(io, join((r.case, r.dofs, r.subdomains, r.method, r.setup_s, r.solve_s, r.iterations,
+        println(io, join((repr(r.case), r.dofs, r.subdomains, repr(r.method), r.setup_s, r.solve_s, r.iterations,
             r.rel_error, r.rounds, r.max_local_dofs), ","))
     end
 end
@@ -170,14 +171,5 @@ for c in cases
     end
 end
 
-squares = filter(c -> startswith(c.name, "square"), cases)
-plt = plot(; xscale=:log10, yscale=:log10, xlabel="dofs", ylabel="setup + solve time (s)",
-    legend=:outerright, size=(950, 450), title="Poisson on the unit square, 32×32 boxes, overlap 2")
-for method in unique(r.method for r in rows)
-    selected = [r for r in rows if r.method == method && startswith(r.case, "square") && r.iterations >= 0]
-    length(selected) >= 3 || continue
-    plot!(plt, [r.dofs for r in selected], [r.setup_s + r.solve_s for r in selected];
-        label=method, marker=:circle, lw=2)
-end
-savefig(plt, joinpath(OUT, "timing.svg"))
 println("\nwrote ", joinpath(OUT, "benchmarks.csv"))
+include(joinpath(@__DIR__, "schwarz_benchmark_figure.jl"))
