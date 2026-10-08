@@ -16,7 +16,7 @@ export OverlapCover, ghost_layer_cover, Ownership, LocalProblem, RobinFace, Schw
     AbstractCoarseSpace, TruncatedPushforwardCoarseSpace, ExactPushforwardCoarseSpace,
     coarse_dimension, coarse_correct!,
     SchwarzProblem, SchwarzIteration, SchwarzCG, SchwarzResult, SchwarzPreconditioner, solve,
-    SheafADMM, LocalObjective, local_objectives
+    SheafADMM, LocalObjective, local_objectives, SchwarzGMRES, SchwarzSweepPreconditioner
 
 using ArgCheck: @argcheck
 using BlockArrays: BlockVector, mortar, blocks
@@ -25,7 +25,7 @@ using LinearAlgebra
 using LinearAlgebra: ldlt!, RowMaximum
 using SparseArrays
 using CliqueTrees.Multifrontal: ChordalLDLt
-using Krylov: cg
+using Krylov: cg, gmres
 import CommonSolve: solve
 
 using ..SheafInterface: add_sheaf_edge!
@@ -1212,6 +1212,98 @@ end
 
 Base.:*(P::SchwarzPreconditioner{T}, r::AbstractVector) where {T} =
     mul!(similar(r, promote_type(T, eltype(r))), P, r)
+
+# ===== GMRES acceleration =====
+
+"""
+    SchwarzSweepPreconditioner(dd, sweep, coarse=nothing)
+
+One step of a stationary Schwarz iteration as a linear map: `P * r` starts from
+the zero cochain, applies one `sweep` of [`schwarz_step!`](@ref) to
+``A e = r``, then the `coarse` correction ([`coarse_correct!`](@ref)) if any,
+and returns the glued result ``e = M^{-1} r``. The map is linear in ``r`` for
+every sweep, transmission condition and coarse space:
+
+- with [`ParallelSweep`](@ref) and Dirichlet transmission ``M^{-1}`` is
+  restricted additive Schwarz (RAS);
+- with [`ParallelSweep`](@ref) and [`RobinTransmission`](@ref) it is optimized
+  RAS (ORAS, St-Cyr–Gander–Thomas 2007);
+- with a coarse space it is the corresponding hybrid two-level method,
+  ``M^{-1} = M_1^{-1} + \\Phi A_0^{-1}\\Phi^\\mathsf{T}(I - A M_1^{-1})`` for a
+  [`TruncatedPushforwardCoarseSpace`](@ref).
+
+It is not symmetric in general, so it preconditions GMRES ([`SchwarzGMRES`](@ref)).
+"""
+struct SchwarzSweepPreconditioner{T,D<:SchwarzDecomposition{T},S<:SchwarzSweep,C<:Union{Nothing,AbstractCoarseSpace}}
+    decomposition::D
+    sweep::S
+    coarse::C
+end
+
+SchwarzSweepPreconditioner(dd::SchwarzDecomposition{T}, sweep::SchwarzSweep, coarse=nothing) where {T} =
+    SchwarzSweepPreconditioner{T,typeof(dd),typeof(sweep),typeof(coarse)}(dd, sweep, coarse)
+
+Base.size(P::SchwarzSweepPreconditioner) = size(P.decomposition.A)
+Base.size(P::SchwarzSweepPreconditioner, d::Integer) = size(P.decomposition.A, d)
+Base.eltype(::SchwarzSweepPreconditioner{T}) where {T} = T
+
+function LinearAlgebra.mul!(y::AbstractVector, P::SchwarzSweepPreconditioner{T}, r::AbstractVector) where {T}
+    dd = P.decomposition
+    @argcheck length(y) == length(r) == size(dd.A, 1)
+    n = size(dd.A, 1)
+    prob = SchwarzProblem(dd, Vector{T}(r), zeros(T, n))
+    x = localize(dd, prob.u0)
+    schwarz_step!(x, prob, P.sweep)
+    P.coarse === nothing || coarse_correct!(x, prob, P.coarse)
+    y .= glue(dd, x)
+    return y
+end
+
+Base.:*(P::SchwarzSweepPreconditioner{T}, r::AbstractVector) where {T} =
+    mul!(similar(r, promote_type(T, eltype(r))), P, r)
+
+"""
+    SchwarzGMRES(; sweep=ParallelSweep(), coarse=nothing, tol=1e-8, maxiter=1000, memory=100)
+
+GMRES (Krylov.jl, restarted every `memory` iterations) right-preconditioned
+with one step of the stationary Schwarz iteration
+([`SchwarzSweepPreconditioner`](@ref)). It accelerates any
+[`SchwarzIteration`](@ref) with the same sweep and coarse space, including
+combinations whose stationary iteration diverges. The standard example is
+optimized (Robin) RAS with a coarse level, the two-level ORAS method
+(Dolean–Jolivet–Nataf 2015, ch. 5).
+
+Right preconditioning makes GMRES minimize the true residual. Iteration stops
+when ``\\|f - A u\\| \\le \\mathrm{tol}\\,\\|f\\|``, the same criterion as
+[`SchwarzIteration`](@ref) and [`SchwarzCG`](@ref). The relative residual of
+the final iterate is checked and recorded.
+"""
+Base.@kwdef struct SchwarzGMRES{S<:SchwarzSweep,C<:Union{Nothing,AbstractCoarseSpace}}
+    sweep::S = ParallelSweep()
+    coarse::C = nothing
+    tol::Float64 = 1e-8
+    maxiter::Int = 1000
+    memory::Int = 100
+end
+
+function solve(prob::SchwarzProblem{T}, alg::SchwarzGMRES) where {T}
+    @argcheck alg.maxiter >= 1 && alg.memory >= 1
+    dd = prob.decomposition
+    r0 = prob.rhs - dd.A * prob.u0
+    initial = _relative_residual(prob, prob.u0)
+    if initial <= alg.tol || iszero(norm(r0))
+        return SchwarzResult(copy(prob.u0), localize(dd, prob.u0), T[initial], T[0], 0, true)
+    end
+    # GMRES solves A e = f − A u0 for the correction e from e = 0.
+    P = SchwarzSweepPreconditioner(dd, alg.sweep, alg.coarse)
+    e, stats = gmres(dd.A, r0; N=P, memory=alg.memory, restart=true, atol=zero(T),
+        rtol=T(alg.tol) * _rhs_scale(prob) / norm(r0), itmax=alg.maxiter, history=true)
+    u = prob.u0 + e
+    residuals = T.(stats.residuals) ./ _rhs_scale(prob)
+    residuals[end] = _relative_residual(prob, u)
+    return SchwarzResult(u, localize(dd, u), residuals, zeros(T, length(residuals)),
+        stats.niter, last(residuals) <= alg.tol)
+end
 
 # ===== Sheaf ADMM =====
 
