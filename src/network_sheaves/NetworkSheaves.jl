@@ -13,6 +13,7 @@ include("GraphHomomorphisms.jl")
 include("Morphisms.jl")
 include("Pushforwards.jl")
 include("SchwarzMethods.jl")
+include("SchwarzModelProblems.jl")
 include("Pushouts.jl")
 include("TrajectorySheaf.jl")
 include("asynch/AsynchSheaves.jl")
@@ -29,6 +30,7 @@ include("Formations.jl")
 @reexport using .SheafMorphisms
 @reexport using .Pushforwards
 @reexport using .SchwarzMethods
+@reexport using .SchwarzModelProblems
 @reexport using .Pushouts
 @reexport using .TrajectorySheaves
 @reexport using .AsynchSheaves

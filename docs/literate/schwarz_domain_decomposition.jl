@@ -17,7 +17,6 @@
 
 using CellularSheaves
 using LinearAlgebra
-using SparseArrays
 using Graphs
 using Plots
 
@@ -25,19 +24,14 @@ using Plots
 #
 # We solve the Poisson problem ``-\Delta u = f`` on the unit square with
 # ``u = 0`` on the boundary, using the 5-point finite-difference Laplacian on an
-# ``m \times m`` interior grid.
-
-function poisson2d(m)
-    h = 1 / (m + 1)
-    T = spdiagm(-1 => fill(-1.0, m - 1), 0 => fill(2.0, m), 1 => fill(-1.0, m - 1))
-    Id = sparse(1.0I, m, m)
-    return (kron(Id, T) + kron(T, Id)) / h^2
-end
+# ``m \times m`` interior grid. The model problems in `SchwarzModelProblems`
+# provide the grid ([`unit_square`](@ref)), the matrix
+# ([`poisson_matrix`](@ref)) and box partitions ([`box_partition`](@ref)).
 
 m = 40
-A = poisson2d(m)
-xs = range(0, 1; length=m + 2)[2:end-1]
-f = [8π^2 * sin(2π * x) * sin(2π * y) + 10 for y in xs for x in xs]
+dom = unit_square(m)
+A = poisson_matrix(dom)
+f = [8π^2 * sin(2π * x) * sin(2π * y) + 10 for (x, y) in dom.points]
 u_exact = A \ f;
 
 # ## The decomposition
@@ -45,15 +39,7 @@ u_exact = A \ f;
 # We cut the grid into a ``3 \times 3`` array of boxes and grow each box by two
 # layers of grid neighbours to get overlapping subdomains.
 
-function box_partition(m, p)
-    parts = Vector{Int}(undef, m * m)
-    for jy in 1:m, jx in 1:m
-        parts[(jy - 1) * m + jx] = (cld(jy * p, m) - 1) * p + cld(jx * p, m)
-    end
-    return parts
-end
-
-parts = box_partition(m, 3)
+parts = box_partition(dom, 3, 3)
 subdomains = overlapping_subdomains(A, parts; overlap=2)
 dd = SchwarzDecomposition(A, subdomains; owner=parts)
 
@@ -150,8 +136,10 @@ end
 # The exact coarse space has the same stalks as `pushforward_sheaf`:
 
 hom = box_aggregation(4)
-small = SchwarzDecomposition(poisson2d(16), overlapping_subdomains(poisson2d(16), box_partition(16, 4); overlap=1);
-    owner=box_partition(16, 4))
+small_dom = unit_square(16)
+A16 = poisson_matrix(small_dom)
+parts16 = box_partition(small_dom, 4, 4)
+small = SchwarzDecomposition(A16, overlapping_subdomains(A16, parts16; overlap=1); owner=parts16)
 exact_small = ExactPushforwardCoarseSpace(small, hom)
 vertex_stalks(pushforward_sheaf(hom, overlap_sheaf(small))) == length.(exact_small.decomposition.cover.subdomains)
 
@@ -164,8 +152,9 @@ vertex_stalks(pushforward_sheaf(hom, overlap_sheaf(small))) == length.(exact_sma
 
 function scaling_row(p)
     mp = 8p
-    Ap = poisson2d(mp)
-    pp = box_partition(mp, p)
+    domp = unit_square(mp)
+    Ap = poisson_matrix(domp)
+    pp = box_partition(domp, p, p)
     ddp = SchwarzDecomposition(Ap, overlapping_subdomains(Ap, pp; overlap=1); owner=pp)
     fp = ones(mp^2)
     coarse_spaces = (
@@ -209,14 +198,15 @@ for name in unique(r.name for r in rows)
 end
 plt
 
+
 # ## Robin transmission conditions
 #
 # Classical Schwarz passes *Dirichlet* data across each edge of the overlap
 # graph. Optimized Schwarz methods pass *Robin* data
 # ``(\partial_n + p)\,u`` instead, which damps low frequencies along the
-# interface far better. Here this is done algebraically: the interface rows of
-# each local matrix get a Neumann correction plus the Robin parameter ``p``. The
-# exact solution stays the fixed point.
+# interface far better. Here this is done algebraically: on each interface
+# face, the Dirichlet coupling is replaced by a Neumann condition plus the Robin
+# parameter ``p``. The exact solution stays the fixed point.
 #
 # Gander's optimized parameter for overlap width ``L`` is a continuous
 # quantity. For our ``h^{-2}``-scaled matrix we divide it by ``h``. With overlap
@@ -224,8 +214,8 @@ plt
 #
 # First on four vertical strips, where subdomain boundaries never meet:
 
-h = 1 / (m + 1)
-strips = [cld(jx * 4, m) for jy in 1:m for jx in 1:m]
+h = dom.h
+strips = box_partition(dom, 4, 1)
 strip_domains = overlapping_subdomains(A, strips; overlap=1)
 pstar = optimized_robin_parameter(3h) / h
 for scale in (nothing, 0.125, 0.5, 1, 2, 8)
@@ -238,21 +228,72 @@ end
 # The optimized parameter cuts the sweep count by an order of magnitude, and
 # the formula's ``p^*`` is close to the best value.
 #
+# ## Cross points
+#
 # On boxes, four subdomains meet at each *cross point*. Discrete optimized
-# Schwarz methods are known to be delicate there (Gander–Kwok 2013). On these
-# ``3 \times 3`` boxes ``p^*`` converges in about half the Dirichlet sweep
-# count, and ``2p^*`` does best. On a ``4 \times 4`` box grid with overlap 1,
-# however, the stationary iteration diverged for ``p \le p^*`` and converged
-# for ``p \ge 2p^*``. When in doubt, err towards larger ``p``, or use the CG
-# solver below.
+# Schwarz methods are delicate there (Gander–Kwok), and a naive algebraic
+# version diverges for small ``p``. `RobinTransmission` treats corners
+# consistently:
+#
+# 1. an interface dof at a subdomain corner gets one Robin term per face, each
+#    with the parameter of the neighbour across that face;
+# 2. each face's Robin data is read from the neighbour across it;
+# 3. the alternating sweeps do not push values onto the neighbours, so every
+#    subdomain keeps its own copy on the overlaps.
+#
+# With these, every sweep converges for every ``p`` on a ``4 \times 4`` box
+# grid with nine cross points:
 
-for scale in (1, 2, 4)
-    robin = RobinTransmission(scale * optimized_robin_parameter(5h) / h)
-    ddr = SchwarzDecomposition(A, subdomains; owner=parts, transmission=robin)
-    r = solve(SchwarzProblem(ddr, f), SchwarzIteration(sweep=MulticolorSweep(), maxiter=3000))
-    println("p = $(scale) p*: ", r.converged ? "$(r.iterations) sweeps" : "diverged")
+boxes = box_partition(dom, 4, 4)
+box_domains = overlapping_subdomains(A, boxes; overlap=1)
+dirichlet = SchwarzDecomposition(A, box_domains; owner=boxes)
+println(rpad("Dirichlet", 14), [solve(SchwarzProblem(dirichlet, f), SchwarzIteration(; sweep, maxiter=3000)).iterations
+                                for sweep in (ParallelSweep(), MulticolorSweep())])
+for scale in (0.125, 0.5, 1, 2, 4)
+    ddr = SchwarzDecomposition(A, box_domains; owner=boxes, transmission=RobinTransmission(scale * pstar))
+    its = map((ParallelSweep(), MulticolorSweep())) do sweep
+        r = solve(SchwarzProblem(ddr, f), SchwarzIteration(; sweep, maxiter=3000))
+        r.converged ? r.iterations : "diverged"
+    end
+    println(rpad("p = $(scale) p*", 14), its)
 end
-println("Dirichlet: ", solve(prob, SchwarzIteration(sweep=MulticolorSweep())).iterations, " sweeps")
+
+# (Columns: parallel and multicolor sweeps.)
+#
+# ## The notched rectangle
+#
+# The [`notched_rectangle`](@ref) is ``[0, 2] \times [0, 1]`` with a slot cut
+# from the middle of the top edge. The bottom of the slot has two re-entrant
+# corners, where the solution behaves like ``r^{2/3}``. It is the standard test
+# of how a method copes with corner singularities. The algebraic decomposition
+# needs no special handling: subdomains next to the slot simply have an
+# irregular shape.
+
+notched = notched_rectangle(31)
+An = poisson_matrix(notched)
+fn = ones(length(notched.points))
+parts_n = box_partition(notched, 4, 2)
+ddn = SchwarzDecomposition(An, overlapping_subdomains(An, parts_n; overlap=2); owner=parts_n)
+pn = optimized_robin_parameter(5notched.h) / notched.h
+ddn_robin = SchwarzDecomposition(An, overlapping_subdomains(An, parts_n; overlap=2); owner=parts_n,
+    transmission=RobinTransmission(pn))
+probn = SchwarzProblem(ddn, fn)
+for (name, prob_, alg) in (
+        ("Dirichlet, multicolor", probn, SchwarzIteration(sweep=MulticolorSweep())),
+        ("Dirichlet, two-level", probn, SchwarzIteration(sweep=MulticolorSweep(), coarse=TruncatedPushforwardCoarseSpace(ddn))),
+        ("Robin p*, multicolor", SchwarzProblem(ddn_robin, fn), SchwarzIteration(sweep=MulticolorSweep())),
+        ("two-level CG", probn, SchwarzCG(coarse=TruncatedPushforwardCoarseSpace(ddn))))
+    r = solve(prob_, alg)
+    println(rpad(name, 24), r.iterations, " iterations, error ", round(norm(r.u - An \ fn) / norm(An \ fn); sigdigits=2))
+end
+
+#-
+
+xn = notched.h .* (1:size(notched.inside, 1))
+yn = notched.h .* (1:size(notched.inside, 2))
+un = solve(probn, SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10)).u
+plot(heatmap(xn, yn, grid_values(notched, Float64.(parts_n))'; aspect_ratio=1, title="owner partition", colorbar=false),
+     heatmap(xn, yn, grid_values(notched, un)'; aspect_ratio=1, title="u"); layout=(2, 1), size=(700, 650))
 
 # ## Krylov acceleration
 #
@@ -263,17 +304,17 @@ println("Dirichlet: ", solve(prob, SchwarzIteration(sweep=MulticolorSweep())).it
 # while one-level CG grows.
 
 for p in (4, 8, 16)
-    mp = 8p
-    Ap = poisson2d(mp)
-    pp = box_partition(mp, p)
+    domp = unit_square(8p)
+    Ap = poisson_matrix(domp)
+    pp = box_partition(domp, p, p)
     ddp = SchwarzDecomposition(Ap, overlapping_subdomains(Ap, pp; overlap=1); owner=pp)
-    fp = ones(mp^2)
-    probp = SchwarzProblem(ddp, fp)
+    probp = SchwarzProblem(ddp, ones(size(Ap, 1)))
     one_level = solve(probp, SchwarzCG()).iterations
     two_level = solve(probp, SchwarzCG(coarse=TruncatedPushforwardCoarseSpace(ddp))).iterations
     println("$(p)×$(p) boxes: one-level CG $one_level, two-level CG $two_level")
 end
 
-# ## The solution
+# ## The solution on the unit square
 
-heatmap(xs, xs, reshape(par.u, m, m)'; aspect_ratio=1, title="u (parallel Schwarz)")
+xs = dom.h .* (1:m)
+heatmap(xs, xs, grid_values(dom, par.u)'; aspect_ratio=1, title="u (parallel Schwarz)")

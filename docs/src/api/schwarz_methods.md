@@ -53,3 +53,13 @@ example for a worked Poisson problem.
 ```@autodocs
 Modules = [CellularSheaves.NetworkSheaves.SchwarzMethods]
 ```
+
+## Model problems
+
+`SchwarzModelProblems` provides standard finite-difference test cases for the
+Schwarz methods: Poisson problems on a [`GridDomain`](@ref), including the
+[`notched_rectangle`](@ref) with its two re-entrant corners.
+
+```@autodocs
+Modules = [CellularSheaves.NetworkSheaves.SchwarzModelProblems]
+```

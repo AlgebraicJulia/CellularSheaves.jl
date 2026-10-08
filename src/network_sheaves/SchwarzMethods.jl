@@ -9,7 +9,7 @@
 # that cochain is a global section that glues to the solution of A u = f.
 module SchwarzMethods
 
-export OverlapCover, Ownership, LocalProblem, SchwarzDecomposition,
+export OverlapCover, Ownership, LocalProblem, RobinFace, SchwarzDecomposition,
     overlap_sheaf, overlapping_subdomains, localize, glue, overlap_disagreement,
     TransmissionCondition, DirichletTransmission, RobinTransmission, optimized_robin_parameter,
     SchwarzSweep, MultiplicativeSweep, MulticolorSweep, ParallelSweep, schwarz_step!,
@@ -271,13 +271,30 @@ The algebraic form follows St-Cyr–Gander–Thomas (2007). The *interface* dofs
 \\tilde A_i = A_{\\Omega_i\\Omega_i} - N_i + P_i .
 ```
 
-``N_i = \\mathrm{diag}\\big(\\sum_{k \\in \\Gamma_i} |A_{mk}|\\big)`` removes the
-Dirichlet coupling and leaves an algebraic Neumann condition. ``P_i`` is
-diagonal with the Robin parameter on the interface dofs. An interface dof
-``m`` uses the parameter of the edge to the owner ``j`` of a boundary dof next
-to ``m``. The modification only touches interface rows, so the Robin data comes
-from the neighbours' copies of those dofs, and the exact solution is still the
+The modification is made face by face. A *face* is a coupling ``A_{mk} \\neq 0``
+between an interface dof ``m \\in \\Omega_i`` and a boundary dof
+``k \\in \\Gamma_i`` owned by the neighbour ``j`` (a [`RobinFace`](@ref)).
+``N_i = \\mathrm{diag}\\big(\\sum_{k} |A_{mk}|\\big)`` removes the Dirichlet
+coupling of every face and leaves an algebraic Neumann condition. ``P_i`` adds
+``p_{ij}`` once per face. The face's Robin data, the discrete
+``(\\partial_n + p_{ij})\\, u_j``, is read entirely from neighbour ``j``. The
+modification only touches interface rows, so the exact solution is still the
 fixed point.
+
+# Cross points
+
+At a subdomain corner an interface dof has several faces, often towards
+different neighbours. Discrete optimized Schwarz methods are known to be
+fragile there and can diverge (Gander–Kwok 2012/2013). Three choices make
+the corners consistent, and together they removed the divergence on box
+decompositions in our tests:
+
+1. a Robin term ``p_{ij}`` for *each* face whose Dirichlet coupling is removed,
+   so that a corner dof is not under-penalized;
+2. each face's Robin data taken from the neighbour across that face, never a
+   mix of copies from different subdomains;
+3. no pushes in the alternating sweeps: each subdomain keeps its own copy on
+   the overlaps, as optimized Schwarz requires (see [`MultiplicativeSweep`](@ref)).
 
 A large `p` approaches Dirichlet transmission. `p` is in the units of `A`: for a
 stencil scaled by ``h^{-2}``, a continuous Robin parameter ``p`` corresponds to
@@ -326,6 +343,32 @@ end
 # ===== Local problems =====
 
 """
+    RobinFace
+
+One face of a subdomain's interface under [`RobinTransmission`](@ref): the
+coupling between an interface dof ``m \\in \\Omega_i`` and a boundary dof
+``k \\in \\Gamma_i`` across it.
+
+- `dof`: the local index of ``m`` in ``\\Omega_i``;
+- `weight`: ``p_{ij} - |A_{mk}|``, the Robin term added for this face minus
+  the Dirichlet coupling it replaces;
+- `source`: the neighbour ``j`` across the face (the owner of ``k``);
+- `source_dof`: the local index of ``m`` in ``\\Omega_j``.
+
+The face's Robin data is read entirely from the neighbour ``j``: its values
+at ``k`` (through the coupling block) and at ``m`` (through `weight`). Together
+they form the discrete ``(\\partial_n + p_{ij})\\, u_j`` on that face. An
+interface dof at a subdomain corner has one face per outside neighbour, each
+with its own neighbour, parameter and data.
+"""
+struct RobinFace{T}
+    dof::Int
+    weight::T
+    source::Int
+    source_dof::Int
+end
+
+"""
     LocalProblem
 
 Everything one subdomain needs for its local solve:
@@ -334,8 +377,7 @@ Everything one subdomain needs for its local solve:
 - `boundary`: its discrete boundary
   ``\\Gamma_i = \\{k \\notin \\Omega_i : A_{km} \\neq 0 \\text{ for some } m \\in \\Omega_i\\}``;
 - `coupling`: the block ``A_{\\Omega_i \\Gamma_i}``;
-- `interface`, `shift`: local indices of the interface dofs and the diagonal
-  shift ``\\tilde A_i - A_{\\Omega_i\\Omega_i}`` on them (empty for
+- `faces`: the [`RobinFace`](@ref)s of the interface (empty for
   [`DirichletTransmission`](@ref));
 - `factor`: a sparse `ChordalLDLt` factorization of the local matrix
   ``\\tilde A_i``, computed once and reused by every local solve.
@@ -344,8 +386,7 @@ struct LocalProblem{T,F}
     dofs::Vector{Int}
     boundary::Vector{Int}
     coupling::SparseMatrixCSC{T,Int}
-    interface::Vector{Int}
-    shift::Vector{T}
+    faces::Vector{RobinFace{T}}
     factor::F
 end
 
@@ -361,40 +402,36 @@ function LocalProblem(asm::_Assembly, i::Int)
     S = asm.A
     dofs = asm.cover.subdomains[i]
     boundary = _boundary(S, dofs)
-    interface, shift = _interface_shift(asm, i, boundary)
+    faces = _robin_faces(asm, i, boundary)
     Ai = S[dofs, dofs]
-    if !isempty(interface)
-        Ai = Ai + sparse(interface, interface, shift, length(dofs), length(dofs))
+    if !isempty(faces)
+        local_dofs = [face.dof for face in faces]
+        Ai = Ai + sparse(local_dofs, local_dofs, [face.weight for face in faces], length(dofs), length(dofs))
     end
     factor = ldlt!(ChordalLDLt(Ai), RowMaximum(); check=false)
     @argcheck all(>(0), factor.D.diag) "the local matrix of subdomain $i is not positive definite; increase the Robin parameter"
-    return LocalProblem(dofs, boundary, S[dofs, boundary], interface, shift, factor)
+    return LocalProblem(dofs, boundary, S[dofs, boundary], faces, factor)
 end
 
-_interface_shift(::_Assembly{T,DirichletTransmission}, i, boundary) where {T} = (Int[], T[])
+_robin_faces(::_Assembly{T,DirichletTransmission}, i, boundary) where {T} = RobinFace{T}[]
 
-function _interface_shift(asm::_Assembly{T,<:RobinTransmission}, i, boundary) where {T}
+function _robin_faces(asm::_Assembly{T,<:RobinTransmission}, i, boundary) where {T}
     S = asm.A
     on_boundary = falses(size(S, 1))
     on_boundary[boundary] .= true
-    interface, shift = Int[], T[]
-    for (ℓ, m) in enumerate(asm.cover.subdomains[i])
-        neumann = zero(T)
-        across = 0
-        for idx in nzrange(S, m)
-            k = rowvals(S)[idx]
-            if on_boundary[k] && !iszero(nonzeros(S)[idx])
-                neumann += abs(nonzeros(S)[idx])
-                across == 0 && (across = asm.ownership.owner[k])
-            end
-        end
-        across == 0 && continue
-        p = T(_robin_parameter(asm.transmission, i, across))
-        @argcheck p > 0 "Robin parameters must be positive (got $p on edge $(i)–$(across))"
-        push!(interface, ℓ)
-        push!(shift, p - neumann)
+    faces = RobinFace{T}[]
+    for (ℓ, m) in enumerate(asm.cover.subdomains[i]), idx in nzrange(S, m)
+        k = rowvals(S)[idx]
+        (on_boundary[k] && !iszero(nonzeros(S)[idx])) || continue
+        j = asm.ownership.owner[k]
+        p = T(_robin_parameter(asm.transmission, i, j))
+        @argcheck p > 0 "Robin parameters must be positive (got $p on edge $(i)–$(j))"
+        source = findfirst(q -> first(q) == j, asm.cover.members[m])
+        src, src_dof = source === nothing ?
+            (asm.ownership.owner[m], asm.ownership.local_index[m]) : asm.cover.members[m][source]
+        push!(faces, RobinFace(ℓ, p - abs(nonzeros(S)[idx]), src, src_dof))
     end
-    return interface, shift
+    return faces
 end
 
 # ===== Decomposition =====
@@ -415,7 +452,8 @@ cover `1:size(A, 1)`. The decomposition bundles
   if given and from the sparsity of `A` otherwise;
 - `locals`: one [`LocalProblem`](@ref) per subdomain, built with the given
   [`TransmissionCondition`](@ref);
-- `colors`: a coloring of the subdomains for [`MulticolorSweep`](@ref).
+- `colors`: a coloring of the subdomains for [`MulticolorSweep`](@ref);
+- `transmission`: the [`TransmissionCondition`](@ref) the local problems were built with.
 
 Every boundary dof ``k \\in \\Gamma_i`` must be owned by a subdomain that
 overlaps ``\\Omega_i``, so that all communication runs along edges of the
@@ -434,6 +472,7 @@ struct SchwarzDecomposition{T,F}
     ownership::Ownership
     locals::Vector{LocalProblem{T,F}}
     colors::Vector{Vector{Int}}
+    transmission::TransmissionCondition
 end
 
 function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}};
@@ -459,7 +498,7 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
         @argcheck has_edge(cover.graph, i, j) "subdomain $i needs boundary dof $k from its owner, subdomain $j, but the two do not overlap; increase the overlap or choose a different owner"
     end
     colors = _greedy_coloring(_conflict_graph(cover, locals))
-    return SchwarzDecomposition(S, cover, ownership, locals, colors)
+    return SchwarzDecomposition(S, cover, ownership, locals, colors, transmission)
 end
 
 # Subdomains conflict when they overlap or when one's Dirichlet boundary lies
@@ -605,14 +644,21 @@ abstract type SchwarzSweep end
     MultiplicativeSweep(order=nothing)
 
 Schwarz's *alternating* method (Schwarz 1870). It visits the subdomains in
-`order` (default `1:N`). After each local solve it pushes the new values
-through the restriction maps onto every overlapping neighbour,
-``x_j|_{\\Omega_i\\cap\\Omega_j} \\leftarrow x_i|_{\\Omega_i\\cap\\Omega_j}``.
-Starting from a global section the iterate stays a section, and its glued
-vector is exactly the classical multiplicative Schwarz iterate
-``u \\leftarrow u + R_i^\\mathsf{T} \\tilde A_i^{-1} R_i (f - A u)``. With
-Dirichlet transmission it converges for every SPD `A`, since it is block
-Gauss–Seidel over overlapping blocks (Toselli–Widlund 2005, ch. 2).
+`order` (default `1:N`), each solve reading the newest data of its neighbours.
+
+- With [`DirichletTransmission`](@ref), each local solve is followed by a push
+  of the new values through the restriction maps onto every overlapping
+  neighbour, ``x_j|_{\\Omega_i\\cap\\Omega_j} \\leftarrow x_i|_{\\Omega_i\\cap\\Omega_j}``.
+  Starting from a global section the iterate stays a section, and its glued
+  vector is exactly the classical multiplicative Schwarz iterate
+  ``u \\leftarrow u + R_i^\\mathsf{T} A_i^{-1} R_i (f - A u)``. It converges for
+  every SPD `A`, since it is block Gauss–Seidel over overlapping blocks
+  (Toselli–Widlund 2005, ch. 2).
+- With [`RobinTransmission`](@ref) nothing is pushed: each subdomain keeps its
+  own copy on the overlaps, which is the alternating optimized Schwarz method.
+  Pushing would overwrite the neighbours' Robin solutions with values that do
+  not satisfy their transmission conditions; with cross points that made the
+  iteration diverge for small `p`.
 """
 struct MultiplicativeSweep <: SchwarzSweep
     order::Union{Nothing,Vector{Int}}
@@ -625,8 +671,8 @@ MultiplicativeSweep() = MultiplicativeSweep(nothing)
 
 The alternating method with the subdomains visited one color class of
 `dd.colors` at a time. The subdomains in a class do not conflict, so they are
-solved and pushed concurrently (`Threads.@threads`; start Julia with several
-threads to benefit). The result equals `MultiplicativeSweep(reduce(vcat,
+solved (and, for Dirichlet transmission, pushed) concurrently
+(`Threads.@threads`; start Julia with several threads to benefit). The result equals `MultiplicativeSweep(reduce(vcat,
 dd.colors))`. It keeps that method's convergence guarantee while the number of
 sequential steps per sweep drops from the number of subdomains to the number
 of colors (Smith–Bjørstad–Gropp 1996, §1.4).
@@ -639,39 +685,51 @@ struct MulticolorSweep <: SchwarzSweep end
 Lions' *parallel* Schwarz method (Lions 1988). All subdomains solve
 simultaneously from the previous cochain and no values are pushed. Copies on
 overlaps disagree during the iteration (the cochain is not a section) and agree
-in the limit. The glued iterate coincides with restricted additive Schwarz
-(RAS) for the owner partition (Efstathiou–Gander 2003), or with optimized RAS
-under [`RobinTransmission`](@ref) (St-Cyr–Gander–Thomas 2007). With Dirichlet
-transmission it converges when `A` is an M-matrix, such as standard
-discretizations of ``-\\Delta`` (Frommer–Szyld 2001), but not for every SPD
-matrix.
+in the limit. With Dirichlet transmission the glued iterate coincides with
+restricted additive Schwarz (RAS) for the owner partition
+(Efstathiou–Gander 2003), and it converges when `A` is an M-matrix, such as
+standard discretizations of ``-\\Delta`` (Frommer–Szyld 2001), but not for
+every SPD matrix. With [`RobinTransmission`](@ref) it is the discrete parallel
+optimized Schwarz method. A step from a global section equals one step of
+optimized RAS (St-Cyr–Gander–Thomas 2007). Later steps differ, because each
+face reads the neighbour across it rather than the owner of each dof.
 """
 struct ParallelSweep <: SchwarzSweep end
 
-# Subproblem on Ω_i: Ã_i x_i = f|Ω_i − A_{Ω_i Γ_i} g_i + (Ã_i − A_i) s_i, where
-# g_i and the interface values s_i are read from their owners' copies. The
-# last term is the Robin data and vanishes for Dirichlet transmission.
+# Subproblem on Ω_i: Ã_i x_i = f|Ω_i − A_{Ω_i Γ_i} g_i + Σ_faces w x_j(m), where
+# g_i is read from the owners' copies and each Robin face reads the interface
+# value from the neighbour across it. The face sum vanishes for Dirichlet
+# transmission.
 function _local_solve(prob::SchwarzProblem, xs, i::Int)
     dd = prob.decomposition
     lp = dd.locals[i]
     g = [_owned_value(dd, xs, k) for k in lp.boundary]
     b = prob.rhs[lp.dofs] - lp.coupling * g
-    for (ℓ, w) in zip(lp.interface, lp.shift)
-        b[ℓ] += w * _owned_value(dd, xs, lp.dofs[ℓ])
+    for face in lp.faces
+        b[face.dof] += face.weight * xs[face.source][face.source_dof]
     end
     return _ldlt_solve(lp.factor, b)
 end
 
-# Local solve on Ω_i, then push the result along the restriction maps onto
-# every overlapping neighbour.
-function _solve_and_push!(xs, prob::SchwarzProblem, i::Int)
-    cover = prob.decomposition.cover
+# Local solve on Ω_i, then publish the result to the neighbours.
+function _solve_and_publish!(xs, prob::SchwarzProblem, i::Int)
     xs[i] .= _local_solve(prob, xs, i)
+    _publish!(xs, prob.decomposition.transmission, prob.decomposition.cover, i)
+    return nothing
+end
+
+# Dirichlet transmission: push the new values along the restriction maps onto
+# every overlapping neighbour, so a section stays a section.
+function _publish!(xs, ::DirichletTransmission, cover::OverlapCover, i::Int)
     for j in neighbors(cover.graph, i)
         xs[j][cover.overlaps[j => i]] .= view(xs[i], cover.overlaps[i => j])
     end
     return nothing
 end
+
+# Robin transmission: each subdomain keeps its own copy on the overlaps, as
+# optimized Schwarz requires; neighbours read the new values on their next solve.
+_publish!(xs, ::RobinTransmission, cover::OverlapCover, i::Int) = nothing
 
 """
     schwarz_step!(x::BlockVector, prob::SchwarzProblem, sweep::SchwarzSweep) -> x
@@ -681,24 +739,26 @@ subdomain ``i`` the local solve is
 
 ```math
 \\tilde A_i\\, x_i = f|_{\\Omega_i} - A_{\\Omega_i \\Gamma_i}\\, g_i
-    + (\\tilde A_i - A_{\\Omega_i\\Omega_i})\\, s_i,
+    + \\sum_{\\text{faces } (m, k)} (p_{ij} - |A_{mk}|)\\, x_j(m),
 ```
 
 where ``\\tilde A_i`` is the local matrix of the
-[`TransmissionCondition`](@ref). The boundary data ``g_i`` on ``\\Gamma_i``
-and the interface values ``s_i`` (only used by Robin transmission) are read
-from the copies of their owners, which are neighbours in the overlap graph.
+[`TransmissionCondition`](@ref). The boundary data ``g_i`` on ``\\Gamma_i`` is
+read from the copies of the owners, which are neighbours in the overlap graph.
+The face sum is the Robin data (see [`RobinFace`](@ref)) and is empty for
+Dirichlet transmission.
 
 With Robin transmission ``\\tilde A_i`` no longer dominates
 ``A_{\\Omega_i\\Omega_i}``, so convergence of the stationary iteration is not
-guaranteed for every parameter. Use [`SchwarzCG`](@ref) when a guarantee is
-needed.
+proven for every parameter, although with the corner treatment of
+[`RobinTransmission`](@ref) it converged for every `p` we tried. Use
+[`SchwarzCG`](@ref) when a guarantee is needed.
 """
 function schwarz_step!(x::BlockVector, prob::SchwarzProblem, sweep::MultiplicativeSweep)
     xs = _cochain_blocks(prob.decomposition, x)
     order = something(sweep.order, eachindex(xs))
     for i in order
-        _solve_and_push!(xs, prob, i)
+        _solve_and_publish!(xs, prob, i)
     end
     return x
 end
@@ -707,7 +767,7 @@ function schwarz_step!(x::BlockVector, prob::SchwarzProblem, ::MulticolorSweep)
     xs = _cochain_blocks(prob.decomposition, x)
     for class in prob.decomposition.colors
         Threads.@threads for i in class
-            _solve_and_push!(xs, prob, i)
+            _solve_and_publish!(xs, prob, i)
         end
     end
     return x

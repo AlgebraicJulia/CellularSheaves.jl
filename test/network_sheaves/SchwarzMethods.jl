@@ -4,6 +4,7 @@ using LinearAlgebra
 using SparseArrays
 using Graphs
 using BlockArrays
+using Random
 
 # 5-point finite-difference Laplacian for -Δu = f on an m×m interior grid of
 # the unit square with homogeneous Dirichlet boundary conditions.
@@ -15,7 +16,7 @@ function poisson2d(m)
 end
 
 # Label each grid dof by which of the p×p boxes it falls in.
-function box_partition(m, p)
+function index_boxes(m, p)
     parts = Vector{Int}(undef, m * m)
     for jy in 1:m, jx in 1:m
         bx = cld(jx * p, m)
@@ -37,15 +38,15 @@ end
 
 ReferenceSystem(A, f, doms, parts) = ReferenceSystem(A, f, doms, parts, [Matrix(A[d, d]) for d in doms])
 
-# Robin local matrix built independently of the package: drop the coupling to
-# outside dofs from the diagonal (algebraic Neumann) and add p.
+# Robin local matrix built independently of the package: replace the coupling
+# to each outside dof by a Robin term p (algebraic Neumann plus Robin per face).
 function robin_local_matrix(A, d, p)
     inside = falses(size(A, 1))
     inside[d] .= true
     Ai = Matrix(A[d, d])
     for (ℓ, k) in enumerate(d)
         outside = [r for r in findall(!iszero, A[:, k]) if !inside[r]]
-        isempty(outside) || (Ai[ℓ, ℓ] += p - sum(abs, A[outside, k]))
+        isempty(outside) || (Ai[ℓ, ℓ] += sum(r -> p - abs(A[r, k]), outside))   # one Robin term per face
     end
     return Ai
 end
@@ -109,7 +110,7 @@ end
 
     @testset "overlapping_subdomains" begin
         A = poisson2d(6)
-        parts = box_partition(6, 2)
+        parts = index_boxes(6, 2)
         @test overlapping_subdomains(A, parts; overlap=0) == [findall(==(i), parts) for i in 1:4]
         doms = overlapping_subdomains(A, parts; overlap=1)
         @test all(issubset(findall(==(i), parts), d) for (i, d) in enumerate(doms))
@@ -122,7 +123,7 @@ end
     n = m * m
     f = [sin(3x) * cos(2y) + 1 for y in range(0, 1; length=m) for x in range(0, 1; length=m)]
     u_exact = A \ f
-    parts = box_partition(m, 3)
+    parts = index_boxes(m, 3)
     doms = overlapping_subdomains(A, parts; overlap=2)
     dd = SchwarzDecomposition(A, doms; owner=parts)
     prob = SchwarzProblem(dd, f)
@@ -266,7 +267,7 @@ end
 
     @testset "coarse spaces and the pushforward sheaf" begin
         A8 = poisson2d(8)
-        parts8 = box_partition(8, 4)
+        parts8 = index_boxes(8, 4)
         dd8 = SchwarzDecomposition(A8, overlapping_subdomains(A8, parts8; overlap=1); owner=parts8)
         hom = box_aggregation(4)
         pf = pushforward_sheaf(hom, overlap_sheaf(dd8))
@@ -295,7 +296,7 @@ end
         @test r1.u ≈ u_exact rtol = 1e-10
 
         A16 = poisson2d(16)
-        parts16 = box_partition(16, 4)
+        parts16 = index_boxes(16, 4)
         dd16 = SchwarzDecomposition(A16, overlapping_subdomains(A16, parts16; overlap=1); owner=parts16)
         f16 = ones(16 * 16)
         exact = ExactPushforwardCoarseSpace(dd16, box_aggregation(4))
@@ -311,7 +312,7 @@ end
         its = map((2, 4, 6)) do p
             mp = 6p
             Ap = poisson2d(mp)
-            pp = box_partition(mp, p)
+            pp = index_boxes(mp, p)
             ddp = SchwarzDecomposition(Ap, overlapping_subdomains(Ap, pp; overlap=1); owner=pp)
             fp = ones(mp * mp)
             one_level = stationary(ddp, fp; sweep=MulticolorSweep()).iterations
@@ -329,8 +330,17 @@ end
         p = optimized_robin_parameter(5h) / h           # overlap 2 ⇒ L = 5h
         ddr = SchwarzDecomposition(A, doms; owner=parts, transmission=RobinTransmission(p))
         probr = SchwarzProblem(ddr, f)
-        @test all(lp -> isempty(lp.interface), dd.locals)
-        @test all(lp -> !isempty(lp.interface), ddr.locals)
+        @test all(lp -> isempty(lp.faces), dd.locals)
+        @test all(lp -> !isempty(lp.faces), ddr.locals)
+        @test ddr.transmission isa RobinTransmission
+        # A corner dof of box 1 has two faces, towards boxes 2 and 4.
+        corner = ddr.locals[1]
+        @test any(length(unique(face.source for face in corner.faces if face.dof == ℓ)) == 2
+                  for ℓ in unique(face.dof for face in corner.faces))
+        for (i, lp) in enumerate(ddr.locals), face in lp.faces
+            @test has_edge(ddr.cover.graph, i, face.source)
+            @test ddr.cover.subdomains[face.source][face.source_dof] == lp.dofs[face.dof]
+        end
 
         for sweep in (ParallelSweep(), MultiplicativeSweep(), MulticolorSweep())
             x = localize(ddr, u_exact)
@@ -338,22 +348,26 @@ end
             @test glue(ddr, x) ≈ u_exact                 # exact solution is still the fixed point
         end
 
+        # From a global section, one parallel step is one step of optimized RAS.
         robin_sys = with_robin(sys, p)
         u0 = randn(n)
         x = localize(ddr, u0)
-        for _ in 1:3
-            schwarz_step!(x, probr, ParallelSweep())
-        end
-        @test glue(ddr, x) ≈ reference_ras(robin_sys, u0, 3)              # optimized RAS
+        schwarz_step!(x, probr, ParallelSweep())
+        @test glue(ddr, x) ≈ reference_ras(robin_sys, u0, 1)
 
+        # No pushes under Robin transmission: copies stay distinct, and the
+        # colored sweep is the alternating sweep in color order.
         x = localize(ddr, zeros(n))
+        y = localize(ddr, zeros(n))
         for _ in 1:2
-            schwarz_step!(x, probr, MultiplicativeSweep())
+            schwarz_step!(x, probr, MulticolorSweep())
+            schwarz_step!(y, probr, MultiplicativeSweep(reduce(vcat, ddr.colors)))
         end
-        @test glue(ddr, x) ≈ reference_multiplicative(robin_sys, zeros(n), 2)   # optimized multiplicative
+        @test Vector(x) ≈ Vector(y)
+        @test overlap_disagreement(ddr, x) > 1e-6
 
         per_edge = SchwarzDecomposition(A, doms; owner=parts, transmission=RobinTransmission((i, j) -> p))
-        @test [lp.shift for lp in per_edge.locals] == [lp.shift for lp in ddr.locals]
+        @test [lp.faces for lp in per_edge.locals] == [lp.faces for lp in ddr.locals]
         @test_throws ArgumentError RobinTransmission(0.0)
         @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts,
             transmission=RobinTransmission((i, j) -> i == 1 ? -1.0 : p))
@@ -379,9 +393,68 @@ end
         @test optimized.u ≈ As \ fs rtol = 1e-6
     end
 
+    @testset "Robin transmission at cross points" begin
+        # 4×4 boxes meet at nine cross points. Small Robin parameters used to
+        # make the stationary iteration diverge there.
+        mc = 32
+        hc = 1 / (mc + 1)
+        Ac = poisson2d(mc)
+        pc = index_boxes(mc, 4)
+        dc = overlapping_subdomains(Ac, pc; overlap=1)
+        fc = ones(mc * mc)
+        pstar = optimized_robin_parameter(3hc) / hc
+        dirichlet = stationary(SchwarzDecomposition(Ac, dc; owner=pc), fc; sweep=MulticolorSweep())
+        for scale in (0.125, 0.5, 1.0, 4.0)
+            ddc = SchwarzDecomposition(Ac, dc; owner=pc, transmission=RobinTransmission(scale * pstar))
+            for sweep in (ParallelSweep(), MultiplicativeSweep(), MulticolorSweep())
+                r = stationary(ddc, fc; sweep, maxiter=2000)
+                @test r.converged
+                @test r.u ≈ Ac \ fc rtol = 1e-6
+            end
+        end
+        optimized = stationary(SchwarzDecomposition(Ac, dc; owner=pc, transmission=RobinTransmission(pstar)), fc;
+            sweep=MulticolorSweep())
+        @test 2 * optimized.iterations < dirichlet.iterations
+    end
+
+    @testset "notched rectangle" begin
+        dom = notched_rectangle(15)
+        @test dom.h ≈ 1 / 16
+        @test size(dom.inside) == (31, 15)
+        @test length(dom.points) == 31 * 15 - 5 * 8     # the slot removes 5 × 8 grid points
+        @test !any(abs(x - 1) <= 0.125 && y >= 0.5 for (x, y) in dom.points)
+        An = poisson_matrix(dom)
+        @test issymmetric(An)
+        @test all(>(0), diag(An)) && all(<=(0), An - Diagonal(diag(An)))
+        @test isposdef(Matrix(An))
+        V = grid_values(dom, collect(1.0:length(dom.points)))
+        @test count(isnan, V) == 40 && V[1, 1] == 1.0
+
+        wide = notched_rectangle(15; notch_width=0.5)
+        @test sort(unique(box_partition(wide, 8, 2))) == 1:14   # the two boxes inside the slot are dropped
+        parts_n = box_partition(dom, 4, 2)
+        @test box_partition(unit_square(4), 2, 2) == [1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]
+
+        fn = ones(length(dom.points))
+        un = An \ fn
+        hn = dom.h
+        ddn = SchwarzDecomposition(An, overlapping_subdomains(An, parts_n; overlap=2); owner=parts_n)
+        robin = RobinTransmission(optimized_robin_parameter(5hn) / hn)
+        ddr = SchwarzDecomposition(An, overlapping_subdomains(An, parts_n; overlap=2); owner=parts_n,
+            transmission=robin)
+        for d in (ddn, ddr), sweep in (MultiplicativeSweep(), MulticolorSweep(), ParallelSweep())
+            r = stationary(d, fn; sweep, tol=1e-10, maxiter=3000)
+            @test r.converged
+            @test r.u ≈ un rtol = 1e-8
+        end
+        c = TruncatedPushforwardCoarseSpace(ddn)
+        @test stationary(ddn, fn; sweep=MulticolorSweep(), coarse=c, tol=1e-10).u ≈ un rtol = 1e-8
+        @test krylov(ddn, fn; coarse=c, tol=1e-10).u ≈ un rtol = 1e-8
+    end
+
     @testset "Schwarz-preconditioned CG" begin
         A8 = poisson2d(8)
-        parts8 = box_partition(8, 2)
+        parts8 = index_boxes(8, 2)
         doms8 = overlapping_subdomains(A8, parts8; overlap=1)
         for transmission in (DirichletTransmission(), RobinTransmission(50.0))
             d8 = SchwarzDecomposition(A8, doms8; owner=parts8, transmission)
@@ -412,10 +485,61 @@ end
         @test krylov(ddr, f; tol=1e-10).u ≈ u_exact rtol = 1e-8
 
         A128 = poisson2d(128)
-        parts128 = box_partition(128, 16)
+        parts128 = index_boxes(128, 16)
         d128 = SchwarzDecomposition(A128, overlapping_subdomains(A128, parts128; overlap=1); owner=parts128)
         f128 = ones(128^2)
         @test krylov(d128, f128; coarse=TruncatedPushforwardCoarseSpace(d128)).iterations <
               krylov(d128, f128).iterations
+    end
+
+    @testset "coordination problems and the pushforward tower" begin
+        # A coordination sheaf on a 6×6 grid of agents with 2-dimensional stalks
+        # and random (invertible, symmetric) restriction maps, pinned at the four
+        # corner agents (targets).
+        rng = Random.MersenneTwister(7)
+        g = Graphs.grid([6, 6])
+        s = sheaf_from_graph(g, 2, d -> randn(rng, d, d); symmetric_edges=true)
+        pins = Dict(v => randn(rng, 2) for v in (1, 6, 31, 36))
+        x_p, _ = harmonic_extension(s, pins)
+        boundary = sort(collect(keys(pins)))
+        interior = setdiff(1:36, boundary)
+        H, B = restricted_laplacian_blocks(s, interior, boundary)
+        p = reduce(vcat, [pins[v] for v in boundary])
+        q_star = reduce(vcat, [x_p[Block(v)] for v in interior])
+        @test H * q_star ≈ -B * p
+
+        # Teams of agents (quadrants of the grid) are the subdomains; each team
+        # solves a pinned harmonic extension with its neighbours as targets.
+        team(v) = 1 + (mod1(v, 6) > 3) + 2 * (cld(v, 6) > 3)
+        dof_team = reduce(vcat, [fill(team(v), 2) for v in interior])
+        doms_c = overlapping_subdomains(H, dof_team; overlap=2)
+        ddc = SchwarzDecomposition(H, doms_c; owner=dof_team)
+        probc = SchwarzProblem(ddc, -B * p)
+        for alg in (SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000),
+                    SchwarzIteration(sweep=MultiplicativeSweep(), coarse=TruncatedPushforwardCoarseSpace(ddc), tol=1e-10),
+                    SchwarzCG(coarse=TruncatedPushforwardCoarseSpace(ddc), tol=1e-10))
+            r = solve(probc, alg)
+            @test r.converged
+            @test r.u ≈ q_star rtol = 1e-7
+        end
+
+        # The pushforward of a sheaf along a graph homomorphism has Laplacian
+        # Bᵀ L B, where B lifts fiber sections: the hierarchical solve of the
+        # nested tower is a Galerkin coarse problem with prolongation B.
+        hom = GraphHomomorphism([team(v) for v in 1:36])
+        pf = pushforward_sheaf(hom, s)
+        bases = all_fiber_bases(hom, s)
+        offsets = [0; cumsum(vertex_stalks(s))]
+        Blift = zeros(72, sum(size.(bases, 2)))
+        col = 0
+        for h in 1:4
+            k = size(bases[h], 2)
+            fiber_rows = reduce(vcat, [collect(offsets[v]+1:offsets[v+1]) for v in fiber_vertices(hom, h)])
+            Blift[fiber_rows, col+1:col+k] = bases[h]
+            col += k
+        end
+        @test size(Blift, 2) == 8                       # each team: a 2-dimensional space of sections
+        L = Matrix(sheaf_laplacian_matrix(s))
+        @test Matrix(sheaf_laplacian_matrix(pf)) ≈ Blift' * L * Blift atol = 1e-8 * norm(L)
     end
 end
