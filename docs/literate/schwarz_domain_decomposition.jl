@@ -104,6 +104,99 @@ for δ in 1:4
     println("overlap = $δ: ", schwarz_solve(dδ, f; method=:parallel, tol=1e-8).iterations, " sweeps")
 end
 
+# ## Multicolor sweeps
+#
+# Two subdomains *conflict* when they overlap or are coupled by ``A``.
+# Subdomains of one color are independent, so a multiplicative sweep can solve
+# a whole color class concurrently. The result is identical to a sequential
+# sweep in color order. For the ``3 \times 3`` boxes four colors suffice, so a
+# sweep takes four parallel steps instead of nine sequential ones.
+
+dd.colors
+
+#-
+
+multicolor = schwarz_solve(dd, f; method=:multicolor, tol=1e-10)
+multicolor.iterations
+
+# ## Coarse spaces from the pushforward
+#
+# One-level methods only exchange information between neighbouring
+# subdomains, so the iteration count grows with the number of subdomains. A
+# coarse level fixes this. Both coarse spaces here start from a graph
+# homomorphism ``\varphi : G \to H`` that groups subdomains into aggregates,
+# and from the pushforward ``\varphi_* F`` of the overlap sheaf. Its stalk at an
+# aggregate is the space of functions on the union of the subdomains in the
+# fiber.
+#
+# - The **truncated pushforward** keeps one mode per aggregate: the constant
+#   function, weighted by a partition of unity (with ``\varphi`` the identity
+#   this is the Nicolaides coarse space). The coarse problem has one unknown per
+#   aggregate.
+# - The **exact pushforward** keeps the whole stalk. The coarse step is a
+#   Schwarz sweep over the aggregates themselves.
+#
+# We group the boxes ``2 \times 2`` into aggregates.
+
+function box_aggregation(p)
+    q = cld(p, 2)
+    return GraphHomomorphism([(cld(by, 2) - 1) * q + cld(bx, 2) for by in 1:p for bx in 1:p])
+end
+
+# The exact coarse space has the same stalks as `pushforward_sheaf`:
+
+hom = box_aggregation(4)
+small = SchwarzDecomposition(poisson2d(16), overlapping_subdomains(poisson2d(16), box_partition(16, 4); overlap=1);
+    owner=box_partition(16, 4))
+exact_small = ExactPushforwardCoarseSpace(small, hom)
+vertex_stalks(pushforward_sheaf(hom, overlap_sheaf(small))) == length.(exact_small.decomposition.subdomains)
+
+# ## Scalability
+#
+# We keep each box at ``8 \times 8`` grid points and add more boxes, so the grid
+# grows with the number of subdomains. We compare sweeps to a relative residual
+# of ``10^{-8}`` for the one-level method and for each coarse space, with their
+# coarse dimensions (the number of unknowns the coarse level solves for).
+
+function scaling_row(p)
+    mp = 8p
+    Ap = poisson2d(mp)
+    pp = box_partition(mp, p)
+    ddp = SchwarzDecomposition(Ap, overlapping_subdomains(Ap, pp; overlap=1); owner=pp)
+    fp = ones(mp^2)
+    coarse_spaces = (
+        "one-level" => nothing,
+        "truncated (φ = id)" => TruncatedPushforwardCoarseSpace(ddp),
+        "truncated (2×2)" => TruncatedPushforwardCoarseSpace(ddp, box_aggregation(p)),
+        "exact (2×2)" => ExactPushforwardCoarseSpace(ddp, box_aggregation(p)),
+    )
+    return map(coarse_spaces) do (name, c)
+        its = schwarz_solve(ddp, fp; method=:multicolor, coarse=c, tol=1e-8, maxiter=5000).iterations
+        dim = c === nothing ? 0 : coarse_dimension(c)
+        (; p, name, its, dim)
+    end
+end
+
+rows = reduce(vcat, [collect(scaling_row(p)) for p in (2, 4, 6, 8)])
+println(rpad("boxes", 8), rpad("method", 22), rpad("sweeps", 8), "coarse dim")
+for r in rows
+    println(rpad("$(r.p)×$(r.p)", 8), rpad(r.name, 22), rpad(r.its, 8), r.dim)
+end
+
+# The truncated coarse space keeps the sweep count nearly flat as boxes are
+# added, with a coarse problem of one unknown per aggregate. The exact
+# pushforward needs the fewest sweeps, because each coarse step solves exactly
+# on large aggregates. But its coarse level is as large as the whole problem
+# (plus overlaps), and its sweep count still grows with the number of
+# aggregates. Higher accuracy per sweep, worse scalability.
+
+ps = (2, 4, 6, 8)
+plt = plot(; xlabel="boxes per side", ylabel="sweeps", yscale=:log10, legend=:topleft)
+for name in unique(r.name for r in rows)
+    plot!(plt, collect(ps), [r.its for r in rows if r.name == name]; label=name, marker=:circle, lw=2)
+end
+plt
+
 # ## The solution
 
 heatmap(xs, xs, reshape(par.u, m, m)'; aspect_ratio=1, title="u (parallel Schwarz)")

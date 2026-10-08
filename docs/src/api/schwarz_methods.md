@@ -14,7 +14,17 @@ The coboundary of the iterate measures how much the copies disagree on overlaps
 section, which glues into the solution ([`glue`](@ref)). Two variants are
 provided. The *multiplicative* (alternating) method keeps the iterate a
 section at every step. The *parallel* (Lions/RAS) method lets the copies
-disagree until they converge.
+disagree until they converge. The *multicolor* method is the multiplicative
+method with each color class of non-conflicting subdomains solved
+concurrently.
+
+A coarse level comes from a graph homomorphism ``\varphi`` that groups
+subdomains into aggregates, together with the pushforward of the overlap sheaf
+along it. [`TruncatedPushforwardCoarseSpace`](@ref) keeps a few modes of each
+pushforward stalk; it is a small Galerkin problem that makes the iteration
+scalable. [`ExactPushforwardCoarseSpace`](@ref) keeps the full stalks; it
+solves on the aggregates themselves, which is more accurate per sweep but
+costlier.
 
 See the [Schwarz domain decomposition](../generated/schwarz_domain_decomposition.md)
 example for a worked Poisson problem.

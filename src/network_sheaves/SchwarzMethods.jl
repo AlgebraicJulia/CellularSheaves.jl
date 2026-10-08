@@ -10,11 +10,13 @@
 module SchwarzMethods
 
 export SchwarzDecomposition, SchwarzResult, overlap_sheaf, overlapping_subdomains,
+    AbstractCoarseSpace, TruncatedPushforwardCoarseSpace, ExactPushforwardCoarseSpace,
+    coarse_dimension, coarse_correct!,
     localize, glue, overlap_disagreement, schwarz_step!, schwarz_solve
 
 using ArgCheck: @argcheck
 using BlockArrays: BlockVector, mortar, blocks
-using Graphs: SimpleGraph, add_edge!, has_edge, neighbors, ne
+using Graphs: SimpleGraph, add_edge!, has_edge, neighbors, ne, nv, vertices, degree
 using LinearAlgebra
 using LinearAlgebra: ldlt!, RowMaximum
 using SparseArrays
@@ -22,6 +24,7 @@ using CliqueTrees.Multifrontal: ChordalLDLt
 
 using ..SheafInterface: add_sheaf_edge!
 using ..EuclideanSheaves: EuclideanSheaf
+using ..GraphHomomorphisms: GraphHomomorphism, fiber_vertices
 
 # ===== Cover combinatorics =====
 
@@ -85,6 +88,32 @@ function _default_owner(S::SparseMatrixCSC, members)
         end
     end
     return owner
+end
+
+# Subdomains conflict when they overlap or when one's Dirichlet boundary lies
+# in the other: either way a concurrent update could change data the other
+# reads or writes.
+function _conflict_graph(graph::SimpleGraph{Int}, boundary, members)
+    conflicts = copy(graph)
+    for (i, Γ) in enumerate(boundary), k in Γ, (j, _) in members[k]
+        i == j || add_edge!(conflicts, i, j)
+    end
+    return conflicts
+end
+
+# Greedy coloring, largest degree first (ties by vertex id). Returns the color
+# classes, each in increasing vertex order.
+function _greedy_coloring(g::SimpleGraph{Int})
+    color = zeros(Int, nv(g))
+    for v in sort(collect(vertices(g)); by=v -> (-degree(g, v), v))
+        used = Set(color[u] for u in neighbors(g, v))
+        c = 1
+        while c in used
+            c += 1
+        end
+        color[v] = c
+    end
+    return [findall(==(c), color) for c in 1:maximum(color; init=0)]
 end
 
 # Solve M v = b for a ChordalLDLt factor with X = P' L D L' P.
@@ -225,6 +254,13 @@ Every boundary dof ``k \\in \\Gamma_i`` must be owned by a subdomain that
 overlaps ``\\Omega_i``, so that all communication runs along edges of the
 overlap graph; a decomposition built with `overlap >= 1` by
 [`overlapping_subdomains`](@ref) always satisfies this.
+
+`colors` partitions the subdomains into color classes for the `:multicolor`
+sweep of [`schwarz_step!`](@ref). Two subdomains get different colors when they
+*conflict*: they overlap (an edge of the overlap graph), or one's boundary
+``\\Gamma_i`` meets the other subdomain (they are coupled by `A`). Subdomains
+of one color neither read nor write each other's data, so they can be solved
+concurrently. The coloring is greedy, largest conflict degree first.
 """
 struct SchwarzDecomposition{T,F}
     A::SparseMatrixCSC{T,Int}
@@ -236,6 +272,7 @@ struct SchwarzDecomposition{T,F}
     boundary::Vector{Vector{Int}}
     coupling::Vector{SparseMatrixCSC{T,Int}}
     factors::Vector{F}
+    colors::Vector{Vector{Int}}
 end
 
 function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}};
@@ -272,8 +309,9 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
 
     coupling = [S[d, Γ] for (d, Γ) in zip(doms, boundary)]
     factors = [ldlt!(ChordalLDLt(S[d, d]), RowMaximum()) for d in doms]
+    colors = _greedy_coloring(_conflict_graph(graph, boundary, members))
     return SchwarzDecomposition{eltype(S),eltype(factors)}(
-        S, doms, own, owner_local, graph, overlaps, boundary, coupling, factors)
+        S, doms, own, owner_local, graph, overlaps, boundary, coupling, factors, colors)
 end
 
 overlap_sheaf(dd::SchwarzDecomposition{T}) where {T} =
@@ -354,7 +392,17 @@ function _local_solve(dd::SchwarzDecomposition, i::Int, xs, f::AbstractVector)
     return _ldlt_solve(dd.factors[i], f[dd.subdomains[i]] - dd.coupling[i] * g)
 end
 
-const SCHWARZ_METHODS = (:multiplicative, :parallel)
+# Local solve on Ω_i, then push the result along the restriction maps onto
+# every overlapping neighbour.
+function _solve_and_push!(xs, dd::SchwarzDecomposition, i::Int, f::AbstractVector)
+    xs[i] .= _local_solve(dd, i, xs, f)
+    for j in neighbors(dd.graph, i)
+        xs[j][dd.overlaps[j => i]] .= view(xs[i], dd.overlaps[i => j])
+    end
+    return nothing
+end
+
+const SCHWARZ_METHODS = (:multiplicative, :multicolor, :parallel)
 
 """
     schwarz_step!(x::BlockVector, dd::SchwarzDecomposition, f;
@@ -372,21 +420,29 @@ whose boundary data ``g_i`` on ``\\Gamma_i`` is read from neighbouring
 subdomains' copies (each boundary dof from its owner, a neighbour in the
 overlap graph).
 
-- `method = :multiplicative` — Schwarz's *alternating* method (Schwarz 1870):
-  visit subdomains in `order`; after each local solve, push the new values
-  through the restriction maps onto every overlapping neighbour,
+- `method = :multiplicative` is Schwarz's *alternating* method (Schwarz 1870).
+  It visits subdomains in `order`. After each local solve it pushes the new
+  values through the restriction maps onto every overlapping neighbour,
   ``x_j|_{\\Omega_i\\cap\\Omega_j} \\leftarrow x_i|_{\\Omega_i\\cap\\Omega_j}``.
   Starting from a global section the iterate stays a section, and its glued
   vector is exactly the classical multiplicative Schwarz iterate
-  ``u \\leftarrow u + R_i^\\mathsf{T} A_i^{-1} R_i (f - A u)``. Converges for
-  every SPD `A` (it is block Gauss–Seidel over overlapping blocks; see
-  Toselli–Widlund 2005, ch. 2).
-- `method = :parallel` — Lions' *parallel* Schwarz method (Lions 1988): all
+  ``u \\leftarrow u + R_i^\\mathsf{T} A_i^{-1} R_i (f - A u)``. It converges for
+  every SPD `A`, since it is block Gauss–Seidel over overlapping blocks
+  (Toselli–Widlund 2005, ch. 2).
+- `method = :multicolor` is the same alternating method, with the subdomains
+  visited one color class of `dd.colors` at a time. The subdomains in a class
+  do not conflict, so they are solved and pushed concurrently
+  (`Threads.@threads`; start Julia with several threads to benefit). The result
+  equals `:multiplicative` with `order = reduce(vcat, dd.colors)`, so it keeps
+  that method's convergence guarantee while the number of sequential steps per
+  sweep drops from the number of subdomains to the number of colors
+  (Smith–Bjørstad–Gropp 1996, §1.4).
+- `method = :parallel` is Lions' *parallel* Schwarz method (Lions 1988). All
   subdomains solve simultaneously from the previous cochain and no values are
   pushed. Copies on overlaps disagree during the iteration (the cochain is not
   a section) and agree in the limit. The glued iterate coincides with
   restricted additive Schwarz (RAS) for the owner partition
-  (Efstathiou–Gander 2003); it converges e.g. when `A` is an M-matrix, such as
+  (Efstathiou–Gander 2003). It converges when `A` is an M-matrix, such as
   standard discretizations of ``-\\Delta`` (Frommer–Szyld 2001), but not for
   every SPD matrix.
 """
@@ -398,13 +454,209 @@ function schwarz_step!(x::BlockVector, dd::SchwarzDecomposition, f::AbstractVect
     if method === :parallel
         updates = [_local_solve(dd, i, xs, f) for i in eachindex(xs)]
         foreach(copyto!, xs, updates)
-    else
-        for i in order
-            xs[i] .= _local_solve(dd, i, xs, f)
-            for j in neighbors(dd.graph, i)
-                xs[j][dd.overlaps[j => i]] .= view(xs[i], dd.overlaps[i => j])
+    elseif method === :multicolor
+        for class in dd.colors
+            Threads.@threads for i in class
+                _solve_and_push!(xs, dd, i, f)
             end
         end
+    else
+        for i in order
+            _solve_and_push!(xs, dd, i, f)
+        end
+    end
+    return x
+end
+
+# ===== Coarse spaces =====
+
+"""
+    AbstractCoarseSpace
+
+A second level for [`schwarz_solve`](@ref). After every fine sweep the glued
+iterate ``u`` receives a correction ``e`` computed from the residual
+``f - A u``, and ``e`` is added to every subdomain's copy (the cochain
+`localize(dd, e)`, which leaves the overlap disagreement unchanged).
+
+Both implementations start from a graph homomorphism ``\\varphi : G \\to H``
+that groups the subdomains (vertices of the overlap graph ``G``) into
+aggregates, and from the pushforward ``\\varphi_* F`` of the overlap sheaf
+``F``. The stalk ``(\\varphi_* F)(h)`` is the space of global sections of ``F``
+over the fiber ``\\varphi^{-1}(h)``, i.e. functions on the aggregate
+``\\widehat\\Omega_h = \\bigcup_{i \\in \\varphi^{-1}(h)} \\Omega_i``.
+
+- [`TruncatedPushforwardCoarseSpace`](@ref) keeps a few modes of each stalk
+  and solves a small Galerkin problem. It is cheap and scalable but inexact.
+- [`ExactPushforwardCoarseSpace`](@ref) keeps the whole stalk, i.e. it solves
+  on the aggregates themselves. It is more accurate per sweep but its cost
+  grows with the aggregate size.
+"""
+abstract type AbstractCoarseSpace end
+
+function _check_hom(dd::SchwarzDecomposition, hom::GraphHomomorphism)
+    @argcheck length(hom.vertex_map) == length(dd.subdomains) "the graph homomorphism must have one source vertex per subdomain"
+    for h in 1:hom.n_target
+        @argcheck !isempty(fiber_vertices(hom, h)) "aggregate $h has an empty fiber; every target vertex must receive a subdomain"
+    end
+end
+
+_identity_hom(dd::SchwarzDecomposition) = GraphHomomorphism(collect(eachindex(dd.subdomains)))
+
+"""
+    TruncatedPushforwardCoarseSpace(dd, hom=identity; modes=ones(n, 1))
+
+A low-dimensional coarse space built from the pushforward of the overlap sheaf
+along ``\\varphi`` = `hom` by keeping only a few modes of every stalk.
+
+Let ``\\mu_k`` be the number of subdomains containing dof ``k`` and
+``D_h = \\mathrm{diag}\\big(\\#\\{i \\in \\varphi^{-1}(h) : k \\in \\Omega_i\\} / \\mu_k\\big)``,
+so ``\\sum_h D_h = I`` is a partition of unity subordinate to the aggregates.
+For every aggregate ``h`` and every column ``z`` of `modes` (a near-nullspace of
+``A``, e.g. constants for the Laplacian, rigid body modes for elasticity), the
+coarse basis contains ``D_h z``. This vector lives in the stalk
+``(\\varphi_* F)(h)``, so the coarse space is a sub-cochain space
+``V_0 \\subset C^0(\\varphi_* F)`` with `size(modes, 2)` dimensions per vertex of
+``H``. Basis vectors that vanish are dropped.
+
+With ``\\Phi`` the matrix of basis vectors, the restriction is
+``R_0 = \\Phi^\\mathsf{T}``, the prolongation is ``\\Phi``, and the coarse matrix
+``A_0 = \\Phi^\\mathsf{T} A \\Phi`` is sparse on the graph ``H`` and factored
+once with `ChordalLDLt`. The correction is the ``A``-orthogonal projection
+``e = \\Phi A_0^{-1} \\Phi^\\mathsf{T}(f - A u)``, so adding it after
+multiplicative sweeps still converges for every SPD `A`.
+
+With the identity homomorphism and constant modes this is the Nicolaides coarse
+space (Nicolaides 1987), which makes the iteration count roughly independent of
+the number of subdomains (Toselli–Widlund 2005, §3.10).
+"""
+struct TruncatedPushforwardCoarseSpace{T,F} <: AbstractCoarseSpace
+    hom::GraphHomomorphism
+    basis::SparseMatrixCSC{T,Int}
+    stalks::Vector{Int}
+    matrix::SparseMatrixCSC{T,Int}
+    factor::F
+end
+
+function TruncatedPushforwardCoarseSpace(dd::SchwarzDecomposition{T}, hom::GraphHomomorphism=_identity_hom(dd);
+                                         modes::AbstractVecOrMat=ones(T, size(dd.A, 1), 1)) where {T}
+    _check_hom(dd, hom)
+    n = size(dd.A, 1)
+    Z = reshape(modes, size(modes, 1), :)
+    @argcheck size(Z, 1) == n "modes must have one row per dof"
+    multiplicity = zeros(Int, n)
+    for d in dd.subdomains
+        multiplicity[d] .+= 1
+    end
+
+    I, J, V = Int[], Int[], T[]
+    stalks = zeros(Int, hom.n_target)
+    col = 0
+    for h in 1:hom.n_target
+        weight = zeros(T, n)
+        for i in fiber_vertices(hom, h)
+            weight[dd.subdomains[i]] .+= 1
+        end
+        support = findall(!iszero, weight)
+        weight[support] ./= multiplicity[support]
+        for c in axes(Z, 2)
+            vals = weight[support] .* Z[support, c]
+            nz = findall(!iszero, vals)
+            isempty(nz) && continue
+            col += 1
+            stalks[h] += 1
+            append!(I, support[nz])
+            append!(J, fill(col, length(nz)))
+            append!(V, vals[nz])
+        end
+    end
+    Φ = sparse(I, J, V, n, col)
+    A0 = Φ' * dd.A * Φ
+    A0 = (A0 + A0') / 2
+    factor = ldlt!(ChordalLDLt(A0), RowMaximum())
+    return TruncatedPushforwardCoarseSpace{T,typeof(factor)}(hom, Φ, stalks, A0, factor)
+end
+
+"""
+    ExactPushforwardCoarseSpace(dd, hom; method=:multicolor)
+
+The coarse level given by the full pushforward ``\\varphi_* F`` of the overlap
+sheaf along ``\\varphi`` = `hom`. Its stalk at an aggregate ``h`` is all
+functions on ``\\widehat\\Omega_h = \\bigcup_{i \\in \\varphi^{-1}(h)} \\Omega_i``,
+so its vertex stalks have the same dimensions as those of
+`pushforward_sheaf(hom, overlap_sheaf(dd))`. Since no modes are discarded,
+``H^0(\\varphi_* F) \\cong H^0(F)``.
+
+Concretely this is a second [`SchwarzDecomposition`](@ref) whose subdomains
+are the aggregates ``\\widehat\\Omega_h``. A dof is owned by the aggregate
+containing its fine owner. The correction is one sweep of `method` on that
+decomposition, started from the current glued iterate. Each local solve is
+exact on a larger region, so a sweep reduces the error far more than a
+truncated coarse solve. The cost is in the factorizations: with ``\\varphi``
+to a single vertex the coarse level is a direct solve of the whole problem
+(one iteration, no scalability). With a fixed aggregation ratio, the iteration
+count still grows with the number of aggregates, as for any one-level method.
+"""
+struct ExactPushforwardCoarseSpace{D<:SchwarzDecomposition} <: AbstractCoarseSpace
+    hom::GraphHomomorphism
+    decomposition::D
+    method::Symbol
+end
+
+function ExactPushforwardCoarseSpace(dd::SchwarzDecomposition, hom::GraphHomomorphism; method::Symbol=:multicolor)
+    _check_hom(dd, hom)
+    @argcheck method in SCHWARZ_METHODS "method must be one of $SCHWARZ_METHODS"
+    aggregates = [reduce(vcat, (dd.subdomains[i] for i in fiber_vertices(hom, h)))
+                  for h in 1:hom.n_target]
+    owner = hom.vertex_map[dd.owner]
+    return ExactPushforwardCoarseSpace(hom, SchwarzDecomposition(dd.A, aggregates; owner), method)
+end
+
+"""
+    coarse_dimension(coarse::AbstractCoarseSpace) -> Int
+
+Number of unknowns the coarse level solves for in each correction: the
+dimension of the truncated coarse space, or the total size of the aggregates
+(the sum of the vertex stalk dimensions of the pushforward sheaf) for the
+exact pushforward.
+"""
+coarse_dimension(c::TruncatedPushforwardCoarseSpace) = size(c.basis, 2)
+coarse_dimension(c::ExactPushforwardCoarseSpace) = sum(length, c.decomposition.subdomains)
+
+function Base.show(io::IO, c::TruncatedPushforwardCoarseSpace)
+    print(io, "TruncatedPushforwardCoarseSpace(", c.hom.n_target, " aggregates, dimension ",
+        coarse_dimension(c), ")")
+end
+
+function Base.show(io::IO, c::ExactPushforwardCoarseSpace)
+    print(io, "ExactPushforwardCoarseSpace(", c.hom.n_target, " aggregates, dimension ",
+        coarse_dimension(c), ")")
+end
+
+_coarse_correction(c::TruncatedPushforwardCoarseSpace, A, f, u) =
+    c.basis * _ldlt_solve(c.factor, c.basis' * (f - A * u))
+
+function _coarse_correction(c::ExactPushforwardCoarseSpace, A, f, u)
+    dd = c.decomposition
+    x = localize(dd, u)
+    schwarz_step!(x, dd, f; method=c.method)
+    return glue(dd, x) - u
+end
+
+"""
+    coarse_correct!(x::BlockVector, dd::SchwarzDecomposition, coarse, f) -> x
+
+Apply one coarse-level correction to the 0-cochain `x`, in place. The glued
+iterate ``u`` = `glue(dd, x)` gives the residual ``f - A u``. The coarse level
+turns it into a global correction ``e``, which is added to every subdomain's
+copy: ``x \\leftarrow x + \\mathrm{localize}(e)``. The glued iterate becomes
+``u + e``, and the disagreement ``\\|\\delta x\\|`` is unchanged.
+"""
+function coarse_correct!(x::BlockVector, dd::SchwarzDecomposition, coarse::AbstractCoarseSpace, f::AbstractVector)
+    @argcheck length(f) == size(dd.A, 1)
+    xs = _cochain_blocks(dd, x)
+    e = _coarse_correction(coarse, dd.A, f, glue(dd, x))
+    for (xi, d) in zip(xs, dd.subdomains)
+        xi .+= view(e, d)
     end
     return x
 end
@@ -432,21 +684,26 @@ struct SchwarzResult{T}
 end
 
 """
-    schwarz_solve(dd::SchwarzDecomposition, f; method=:multiplicative,
+    schwarz_solve(dd::SchwarzDecomposition, f; method=:multiplicative, coarse=nothing,
                   u0=zeros(n), tol=1e-8, maxiter=1000, order=1:N) -> SchwarzResult
 
 Solve ``A u = f`` by overlapping Schwarz iteration on the overlap sheaf of `dd`.
 
-The iterate is a 0-cochain ``x = (x_1, \\dots, x_N)`` — each subdomain holds
-its own copy of the solution on ``\\Omega_i`` — initialized to the global
-section `localize(dd, u0)`. Each iteration is one [`schwarz_step!`](@ref)
-sweep with the given `method` (`:multiplicative` or `:parallel`). Iteration
-stops once the glued iterate satisfies ``\\|f - A u\\| \\le \\mathrm{tol}\\,\\|f\\|``.
-At the fixed point every local solve is consistent with its neighbours, so
-``x`` is a global section and its gluing solves ``A u = f``.
+The iterate is a 0-cochain ``x = (x_1, \\dots, x_N)``: each subdomain holds its
+own copy of the solution on ``\\Omega_i``. It starts from the global section
+`localize(dd, u0)`. Each iteration is one [`schwarz_step!`](@ref) sweep with
+the given `method` (`:multiplicative`, `:multicolor` or `:parallel`). When a
+`coarse` space is given (an [`AbstractCoarseSpace`](@ref)), the sweep is
+followed by [`coarse_correct!`](@ref), giving a two-level method. Iteration
+stops once the glued iterate satisfies
+``\\|f - A u\\| \\le \\mathrm{tol}\\,\\|f\\|``. At the fixed point every local
+solve is consistent with its neighbours, so ``x`` is a global section and its
+gluing solves ``A u = f``.
 """
 function schwarz_solve(dd::SchwarzDecomposition{T}, f::AbstractVector;
-                       method::Symbol=:multiplicative, u0::AbstractVector=zeros(T, size(dd.A, 1)),
+                       method::Symbol=:multiplicative,
+                       coarse::Union{Nothing,AbstractCoarseSpace}=nothing,
+                       u0::AbstractVector=zeros(T, size(dd.A, 1)),
                        tol::Real=1e-8, maxiter::Integer=1000,
                        order=eachindex(dd.subdomains)) where {T}
     @argcheck method in SCHWARZ_METHODS "method must be one of $SCHWARZ_METHODS"
@@ -463,6 +720,7 @@ function schwarz_solve(dd::SchwarzDecomposition{T}, f::AbstractVector;
     iterations = 0
     while last(residuals) > tol && iterations < maxiter
         schwarz_step!(x, dd, f; method, order)
+        coarse === nothing || coarse_correct!(x, dd, coarse, f)
         iterations += 1
         u = glue(dd, x)
         push!(residuals, relres(u))

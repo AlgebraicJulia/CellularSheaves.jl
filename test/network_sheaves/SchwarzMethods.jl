@@ -156,4 +156,125 @@ end
         @test_throws ArgumentError schwarz_solve(dd, f; method=:additive)
         @test_throws ArgumentError SchwarzDecomposition(sparse([1.0 2.0; 0.0 1.0]), [[1, 2]])
     end
+
+    @testset "multicolor Schwarz" begin
+        @test sort(reduce(vcat, dd.colors)) == 1:length(doms)
+        @test length(dd.colors) < length(doms)
+        for class in dd.colors, i in class, j in class
+            i < j || continue
+            @test isempty(intersect(doms[i], doms[j]))
+            @test iszero(A[doms[i], doms[j]])
+        end
+
+        x = localize(dd, zeros(n))
+        y = localize(dd, zeros(n))
+        for _ in 1:3
+            schwarz_step!(x, dd, f; method=:multicolor)
+            schwarz_step!(y, dd, f; method=:multiplicative, order=reduce(vcat, dd.colors))
+        end
+        @test Vector(x) ≈ Vector(y)
+
+        r = schwarz_solve(dd, f; method=:multicolor, tol=1e-10)
+        @test r.converged
+        @test r.u ≈ u_exact rtol = 1e-8
+    end
+
+    # p×p boxes grouped into (p/2)×(p/2) blocks of 2×2 boxes.
+    function box_aggregation(p)
+        q = p ÷ 2
+        return GraphHomomorphism([(cld(by, 2) - 1) * q + cld(bx, 2) for by in 1:p for bx in 1:p])
+    end
+
+    @testset "truncated pushforward coarse space" begin
+        c = TruncatedPushforwardCoarseSpace(dd)
+        @test coarse_dimension(c) == length(doms)
+        @test vec(sum(c.basis; dims=2)) ≈ ones(n)                 # partition of unity
+        @test c.matrix ≈ c.basis' * A * c.basis
+        for (h, d) in enumerate(doms)
+            @test issubset(findall(!iszero, c.basis[:, h]), d)    # supported on Ω_h
+        end
+        @test occursin("dimension 9", sprint(show, c))
+
+        r = schwarz_solve(dd, f; method=:multicolor, coarse=c, tol=1e-10)
+        @test r.converged
+        @test r.u ≈ u_exact rtol = 1e-8
+        @test r.iterations < schwarz_solve(dd, f; method=:multicolor, tol=1e-10).iterations
+
+        rp = schwarz_solve(dd, f; method=:parallel, coarse=c, tol=1e-10)
+        @test rp.converged
+        @test rp.u ≈ u_exact rtol = 1e-8
+
+        x = localize(dd, randn(n))
+        schwarz_step!(x, dd, f; method=:parallel)
+        before = overlap_disagreement(dd, x)
+        u_before = glue(dd, x)
+        coarse_correct!(x, dd, c, f)
+        @test overlap_disagreement(dd, x) ≈ before
+        @test c.basis' * (f - A * glue(dd, x)) ≈ zeros(coarse_dimension(c)) atol = 1e-8 * norm(f)
+        @test glue(dd, x) != u_before
+
+        two_modes = TruncatedPushforwardCoarseSpace(dd; modes=[ones(n) repeat(1:m, m)])
+        @test coarse_dimension(two_modes) == 2 * length(doms)
+        @test_throws ArgumentError TruncatedPushforwardCoarseSpace(dd, GraphHomomorphism([1, 1, 1, 1, 1, 1, 1, 1, 3]))
+    end
+
+    @testset "coarse spaces and the pushforward sheaf" begin
+        A8 = poisson2d(8)
+        parts8 = box_partition(8, 4)
+        dd8 = SchwarzDecomposition(A8, overlapping_subdomains(A8, parts8; overlap=1); owner=parts8)
+        hom = box_aggregation(4)
+        pf = pushforward_sheaf(hom, overlap_sheaf(dd8))
+        exact = ExactPushforwardCoarseSpace(dd8, hom)
+        @test vertex_stalks(pf) == length.(exact.decomposition.subdomains)
+        @test coarse_dimension(exact) == sum(vertex_stalks(pf))
+        @test ne(underlying_graph(pf)) == ne(exact.decomposition.graph)
+
+        tc = TruncatedPushforwardCoarseSpace(dd8, hom)
+        @test coarse_dimension(tc) == hom.n_target
+        bases = all_fiber_bases(hom, overlap_sheaf(dd8))
+        for h in 1:hom.n_target
+            fiber = fiber_vertices(hom, h)
+            local_section = reduce(vcat, [Vector(tc.basis[d, h]) for d in dd8.subdomains[fiber]])
+            B = bases[h]
+            @test norm(B * (B \ local_section) - local_section) < 1e-8   # lies in (φ_*F)(h)
+        end
+    end
+
+    @testset "exact pushforward coarse space" begin
+        point = GraphHomomorphism(ones(Int, length(doms)))
+        c1 = ExactPushforwardCoarseSpace(dd, point)
+        @test coarse_dimension(c1) == n
+        r1 = schwarz_solve(dd, f; method=:multicolor, coarse=c1, tol=1e-10)
+        @test r1.iterations == 1                 # pushforward to a point = direct solve
+        @test r1.u ≈ u_exact rtol = 1e-10
+
+        A16 = poisson2d(16)
+        parts16 = box_partition(16, 4)
+        dd16 = SchwarzDecomposition(A16, overlapping_subdomains(A16, parts16; overlap=1); owner=parts16)
+        f16 = ones(16 * 16)
+        exact = ExactPushforwardCoarseSpace(dd16, box_aggregation(4))
+        tc = TruncatedPushforwardCoarseSpace(dd16, box_aggregation(4))
+        its = Dict(name => schwarz_solve(dd16, f16; method=:multicolor, coarse=c, tol=1e-8).iterations
+                   for (name, c) in (:none => nothing, :exact => exact, :truncated => tc))
+        @test its[:exact] < its[:truncated] < its[:none]
+        @test coarse_dimension(exact) > coarse_dimension(tc)
+        @test schwarz_solve(dd16, f16; coarse=exact, tol=1e-10).u ≈ A16 \ f16 rtol = 1e-8
+    end
+
+    @testset "two-level scalability" begin
+        its = map((2, 4, 6)) do p
+            mp = 6p
+            Ap = poisson2d(mp)
+            pp = box_partition(mp, p)
+            ddp = SchwarzDecomposition(Ap, overlapping_subdomains(Ap, pp; overlap=1); owner=pp)
+            fp = ones(mp * mp)
+            one_level = schwarz_solve(ddp, fp; method=:multicolor, tol=1e-8).iterations
+            two_level = schwarz_solve(ddp, fp; method=:multicolor, tol=1e-8,
+                coarse=TruncatedPushforwardCoarseSpace(ddp)).iterations
+            (one_level, two_level)
+        end
+        one, two = first.(its), last.(its)
+        @test all(two .< one)
+        @test two[end] - two[1] < one[end] - one[1]
+    end
 end
