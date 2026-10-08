@@ -1,17 +1,22 @@
 # Schwarz Methods
 
-`SchwarzMethods` implements overlapping Schwarz domain decomposition for a
-sparse SPD system ``A u = f`` as message passing on a cellular sheaf. The
-subdomains ``\Omega_i`` of the decomposition are the vertices, the nonempty
-overlaps ``\Omega_i \cap \Omega_j`` are the edges, and the restriction maps
-read off the values a subdomain holds on an overlap ([`overlap_sheaf`](@ref)).
+`SchwarzMethods` implements Schwarz domain decomposition for a sparse SPD system
+``A u = f`` as message passing on a cellular sheaf. The vertices are the
+subdomains, each with a ghost layer: the vertex stalk is the closed subdomain
+``\overline\Omega_i = \Omega_i \cup \Gamma_i``, its own unknowns plus the
+boundary values it receives ([`ghost_layer_cover`](@ref)). The edges are the
+nonempty overlaps ``\overline\Omega_i \cap \overline\Omega_j``, and the
+restriction maps select a subdomain's values on an overlap. They are stored as
+index lists ([`SelectionRestriction`](@ref), see [`overlap_sheaf`](@ref)).
 
 A Schwarz iterate is a 0-cochain of this sheaf: every subdomain keeps its own
-copy of the solution. Each sweep solves a local problem on every subdomain,
-using data from overlapping neighbours ([`schwarz_step!`](@ref)). The
-coboundary of the iterate measures how much the copies disagree on overlaps
-([`overlap_disagreement`](@ref)). At convergence the iterate is a global
-section, which glues into the solution ([`glue`](@ref)).
+copy of the solution. Each sweep receives each subdomain's ghost values
+through the restriction maps, then solves a local problem on every subdomain
+([`schwarz_step!`](@ref)). The coboundary of the iterate measures how much the
+copies disagree on overlaps ([`overlap_disagreement`](@ref)). At convergence
+the iterate is a global section, which glues into the solution ([`glue`](@ref)).
+[`SheafADMM`](@ref) solves the same problem as a homological program with the
+sheaf ADMM of Hanks, Riess et al.
 
 The data is bundled into a few structs:
 
@@ -38,7 +43,8 @@ The data is bundled into a few structs:
   and initial guess. [`solve`](@ref) runs it with a stationary
   [`SchwarzIteration`](@ref) or with conjugate gradients preconditioned by the
   additive two-level operator ([`SchwarzCG`](@ref),
-  [`SchwarzPreconditioner`](@ref)).
+  [`SchwarzPreconditioner`](@ref)), or with [`SheafADMM`](@ref) on the
+  [`local_objectives`](@ref) of the problem.
 
 ```julia
 dd = SchwarzDecomposition(A, overlapping_subdomains(A, parts; overlap=2); owner=parts)

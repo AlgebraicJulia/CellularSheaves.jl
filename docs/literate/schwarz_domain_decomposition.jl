@@ -43,11 +43,17 @@ parts = box_partition(dom, 3, 3)
 subdomains = overlapping_subdomains(A, parts; overlap=2)
 dd = SchwarzDecomposition(A, subdomains; owner=parts)
 
-# The overlap graph is the underlying graph of the sheaf. Diagonal boxes share
-# a corner of overlap, so each interior subdomain has eight neighbours.
+# Each vertex stalk is a *closed* subdomain ``\overline\Omega_i``: the
+# subdomain's own unknowns plus a ghost layer ``\Gamma_i`` of boundary values it
+# receives from its neighbours. The edges are the nonempty overlaps
+# ``\overline\Omega_i \cap \overline\Omega_j``, and every ghost value lies in
+# the edge stalk shared with the subdomain that computes it. So every message a
+# Schwarz method sends is a restriction map applied to a vertex stalk. The
+# restriction maps are coordinate selections, stored as index lists
+# (`SelectionRestriction`) rather than matrices.
 
 s = overlap_sheaf(dd)
-(nv(underlying_graph(s)), ne(underlying_graph(s)))
+(nv(underlying_graph(s)), ne(underlying_graph(s)), typeof(get_restriction_map(s, 1, 2)))
 
 # Global sections of this sheaf are exactly the functions on the whole grid:
 # a cochain is a section precisely when all overlapping copies agree.
@@ -294,6 +300,51 @@ yn = notched.h .* (1:size(notched.inside, 2))
 un = solve(probn, SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10)).u
 plot(heatmap(xn, yn, grid_values(notched, Float64.(parts_n))'; aspect_ratio=1, title="owner partition", colorbar=false),
      heatmap(xn, yn, grid_values(notched, un)'; aspect_ratio=1, title="u"); layout=(2, 1), size=(700, 650))
+
+# ## Sheaf ADMM and Robin conditions
+#
+# Hanks, Riess et al. (arXiv:2504.02049) solve *homological programs*
+# ``\min \sum_i f_i(x_i)`` subject to ``x \in H^0`` by ADMM with copies ``z`` and
+# multipliers ``y`` on the vertex stalks:
+#
+# ```math
+# x_i \leftarrow \operatorname{argmin} f_i(x_i) + \tfrac{\rho}{2}\lVert x_i - z_i + y_i\rVert^2,
+# \qquad z \leftarrow \Pi_{H^0}(x + y), \qquad y \leftarrow y + x - z .
+# ```
+#
+# The PDE is such a program: `local_objectives` splits the energy
+# ``\tfrac12 u^\mathsf{T} A u - f^\mathsf{T} u`` exactly into convex pieces on
+# the closed subdomains, and `SheafADMM` runs the iteration. Its local solve
+# ``(K_i + \rho I)\, x_i = b_i + \rho (z_i - y_i)`` has the same shape as a Robin
+# local solve, a "Neumann" local operator plus a penalty, so we compare the
+# penalty ``\rho`` with the Robin parameter ``p``.
+
+strip_problem = SchwarzProblem(SchwarzDecomposition(A, strip_domains; owner=strips), f)
+box_problem = SchwarzProblem(dirichlet, f)
+for (name, problem, robin_domains, robin_parts) in (("strips", strip_problem, strip_domains, strips),
+                                                    ("4×4 boxes", box_problem, box_domains, boxes))
+    robin = SchwarzDecomposition(A, robin_domains; owner=robin_parts, transmission=RobinTransmission(pstar))
+    r = solve(SchwarzProblem(robin, f), SchwarzIteration(sweep=ParallelSweep(), maxiter=3000))
+    admm = [solve(problem, SheafADMM(rho=scale * pstar, maxiter=3000)).iterations for scale in (0.3, 1, 3)]
+    println(rpad(name, 11), "Robin p*: ", r.iterations, "   ADMM ρ = (0.3, 1, 3) p*: ", admm)
+end
+
+# Both parameters are best at the same scale: ADMM's best ``\rho`` is close to
+# the optimized Robin parameter ``p^*``. But optimized Schwarz needs far fewer
+# iterations. The local solves differ in what they know:
+#
+# - A Robin subdomain keeps the full operator on its interior and reads its
+#   neighbours' current values *and fluxes* on the interface.
+# - An ADMM subdomain holds only its share of the energy on the dofs it shares
+#   with others. It sees its neighbours only through the averages ``z``, and
+#   must learn the interface flux through the multiplier ``y``.
+#
+# ADMM has the stronger guarantees: it converges for every ``\rho > 0`` (Boyd et
+# al. 2011) and works without overlap. It needs an exact projection, though.
+# Replacing ``\Pi_{H^0}`` by a single sheaf-diffusion step (`projection_steps = 1`)
+# converged on strips but diverged on a box grid in our tests (32 × 32 grid,
+# `penalty = :shared`), where dofs have
+# different numbers of copies.
 
 # ## Krylov acceleration
 #

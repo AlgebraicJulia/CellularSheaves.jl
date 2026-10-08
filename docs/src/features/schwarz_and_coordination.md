@@ -109,14 +109,81 @@ fixes the communication pattern to the clique tree. Schwarz sits between them.
 Each team solves exactly inside its subdomain, and the overlap width and a
 coarse space control the iteration count.
 
-**Robin transmission and augmented Lagrangians.** Optimized Schwarz exchanges
-``(\partial_n + p)\,u`` instead of values. For the non-overlapping case,
-Lions' Robin method is Douglas–Rachford splitting (Lions–Mercier 1979). ADMM
-is Douglas–Rachford applied to the dual (Gabay 1983). So the Robin parameter
-``p`` plays the role of the ADMM penalty: Robin data is a flux (a multiplier on
-the edge) plus ``p`` times a value. The package has no ADMM solver for
-coordination problems. `RobinTransmission` is the closest existing piece, and
-the cross-point treatment below should carry over.
+## Sheaf ADMM and Robin transmission
+
+Hanks, Riess, Cohen, Gross, Hale and Fairbanks (arXiv:2504.02049, Algorithm 1;
+code in AlgebraicOptimization.jl) solve homological programs
+
+```math
+\min_{x \in C^0} \sum_i f_i(x_i) \quad\text{subject to}\quad x \in H^0
+```
+
+by ADMM in consensus form. All of ``x``, the copies ``z`` and the scaled
+multipliers ``y`` live on vertex stalks:
+
+```math
+x_i \leftarrow \operatorname{argmin}_{x_i} f_i(x_i) + \tfrac{\rho}{2}\lVert x_i - z_i + y_i\rVert^2,
+\qquad z \leftarrow \Pi_{H^0}(x + y),
+\qquad y_i \leftarrow y_i + x_i - z_i .
+```
+
+In the paper the projection is computed by sheaf diffusion run to convergence
+(their Theorem 2). The AlgebraicOptimization.jl code computes it with CG.
+
+[`SheafADMM`](@ref) runs this iteration on the ghost-layer overlap sheaf.
+[`local_objectives`](@ref) splits the PDE energy exactly into convex quadratics
+``f_i(x_i) = \tfrac12 x_i^\mathsf{T} K_i x_i - b_i^\mathsf{T} x_i`` on the
+closed subdomains: each matrix edge term is shared equally by the stalks that
+contain it. For this sheaf ``\Pi_{H^0}`` averages the copies of each dof, which
+is a single exchange with the neighbours.
+
+**The two local solves have the same shape.**
+
+| | Robin (optimized Schwarz) | Sheaf ADMM |
+|---|---|---|
+| local operator | ``A_{\Omega_i\Omega_i} - N_i``: full operator, Dirichlet coupling removed on interface rows | ``K_i``: the subdomain's share of the energy on its closed stalk |
+| penalty | ``p_{ij}`` on each interface face | ``\rho`` on the whole stalk (`penalty = :stalk`) or on shared dofs (`:shared`) |
+| data | neighbour's current values on ``\Gamma_i`` and at the interface | ``z_i - y_i``: average of copies minus multiplier |
+| needs overlap | yes (one layer at least) | no |
+| convergence | not proven for every ``p``; fast at ``p^*`` | proven for every ``\rho > 0`` with an exact projection |
+
+Both are "Neumann-type local operator plus penalty", and in our runs the best
+``\rho`` was the optimized Robin parameter ``p^*`` (in the units of `A`). That
+matches the classical picture in which the multiplier plays the role of the
+interface flux, and ADMM on a consensus splitting is a Douglas–Rachford method
+(Gabay 1983), like Lions' Robin method (Lions–Mercier 1979).
+
+**Optimized Schwarz converges much faster.** Iterations to a relative residual of
+``10^{-8}`` for Poisson problems with overlap 1 (unit square on a ``32 \times 32``
+grid; notched rectangle on a ``31 \times 15`` grid with ``4 \times 2`` boxes):
+
+| decomposition | Dirichlet (parallel) | Robin, ``p^*`` | ADMM, best ``\rho \approx p^*`` |
+|---|---|---|---|
+| 4 strips | 95 | 19 | 248 |
+| ``4\times 4`` boxes | 189 | 21 | 400 |
+| notched rectangle | 51 | 25 | 254 |
+
+The difference is in what a local solve knows. A Robin subdomain has the true
+operator on its whole interior and reads its neighbours' values *and fluxes*
+directly. An ADMM subdomain holds only part of the stiffness on shared dofs
+and sees its neighbours only through averages. The flux has to be learned
+iteratively in ``y``. Penalizing only shared dofs (`penalty = :shared`) changes
+little.
+
+Replacing the exact projection by a single diffusion step
+(`projection_steps = 1`), as a communication-light variant of Algorithm 1,
+converged on strips but diverged on box grids, where dofs carry different
+numbers of copies. The convergence proof assumes the exact projection.
+
+**What each side can borrow.**
+
+- ADMM could take Robin-type local problems: keep the full operator on the
+  interior and penalize only the interface faces. That would be optimized
+  Schwarz with ADMM's multiplier update, i.e. an augmented-Lagrangian
+  formulation of optimized Schwarz.
+- Schwarz could use ADMM's guarantee. ADMM converges with zero overlap and for
+  every ``\rho``, which makes it a safe fallback where the Robin iteration is
+  delicate.
 
 ## Corners
 
@@ -133,29 +200,36 @@ Two kinds of corners matter.
   does not push values in the alternating sweeps. On box decompositions this
   removed the divergence for small ``p`` that we saw before.
 
-## Where the implementation does not yet fit the sheaf picture
+## How the implementation fits the sheaf picture
 
-1. **Boundary data is not carried by edge stalks.** The Dirichlet data of
-   ``\Omega_i`` lives on ``\Gamma_i``, which lies outside ``\Omega_i`` and hence
-   outside every overlap ``\Omega_i \cap \Omega_j``. A local solve therefore
-   reads entries of a neighbour's *vertex* stalk rather than the image of a
-   restriction map. A faithful repair is to use the closed subdomains
-   ``\overline\Omega_i = \Omega_i \cup \Gamma_i`` (a ghost layer) as the cover.
-   Then ``\Gamma_i \cap \Omega_j \subset \overline\Omega_i \cap \overline\Omega_j``,
-   every message is a restriction map applied to a vertex stalk, and the Robin
-   faces lie in the edge stalks too.
-2. **Dense restriction maps.** `EuclideanSheaf` stores every restriction map as
-   a dense matrix, so [`overlap_sheaf`](@ref) is only practical for small
-   problems. The solvers use the index form in [`OverlapCover`](@ref). A
-   selection-map type for `EuclideanSheaf` would remove this split.
-3. **Trivial cohomology.** With projections as restriction maps, ``H^0`` is just
+Two earlier mismatches are now resolved:
+
+- **Messages are restriction maps.** A Schwarz decomposition uses a
+  ghost-layer cover ([`ghost_layer_cover`](@ref)). Each vertex stalk is the
+  closed subdomain ``\overline\Omega_i = \Omega_i \cup \Gamma_i``. The boundary
+  data of ``\Omega_i`` lies in ``\Gamma_i \cap \Omega_j \subset \overline\Omega_i \cap \overline\Omega_j``,
+  the edge stalk shared with its owner ``j``. So receiving the ghost layer is
+  the owner's restriction map followed by the adjoint restriction of ``i``. The
+  Robin faces ``(m, k)`` lie in the same edge stalk. As a side effect,
+  non-overlapping subdomains work too, as block Gauss–Seidel and block Jacobi.
+- **Restriction maps need not be dense.** [`AbstractRestrictionMap`](@ref) is a
+  LinearMaps-style interface (`mul!` with the map and its adjoint), with
+  dense, sparse, selection and matrix-free implementations
+  ([Restriction Maps](../api/restriction_maps.md)). `EuclideanSheaf{T,M}` stores
+  maps of type `M`, and [`overlap_sheaf`](@ref) stores index lists. The
+  coboundary is assembled sparsely or applied matrix-free with
+  [`coboundary_operator`](@ref).
+
+Remaining differences:
+
+1. **Trivial cohomology.** With selections as restriction maps, ``H^0`` is just
    ``\mathbb R^n``. The rich structure of coordination sheaves (non-identity
    maps, nontrivial sections on fibers) enters only when Schwarz is applied to a
    coordination problem, as in the test above, and not through the overlap
    sheaf itself.
-4. **No asynchrony yet.** Asynchronous diffusion keeps per-agent copies and
+2. **No asynchrony yet.** Asynchronous diffusion keeps per-agent copies and
    updates on independent clocks. The parallel Schwarz iterate is already a
    cochain of per-subdomain copies, so asynchronous Schwarz, known to converge
    for M-matrices, is a natural next step.
-5. **Conventions.** The IPM settings use `itmax`. The Schwarz algorithms use
+3. **Conventions.** The IPM settings use `itmax`. The Schwarz algorithms use
    `maxiter` and `tol`, and could be aligned.
