@@ -52,7 +52,7 @@ Cooperative Control*, 2008; arXiv:2512.24886 for the sheaf form).
 module PredictiveConsensus
 
 using ..CoordinationBenchmarks: CoordinationScenario
-using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzSweep, MulticolorSweep, ParallelSweep
+using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzSweep, MulticolorSweep, ParallelSweep, _greedy_coloring
 using ArgCheck
 using CommonSolve
 using CommonSolve: init, solve, solve!
@@ -60,7 +60,7 @@ using Graphs
 using LinearAlgebra
 using Mumblebee.IPM: IPMProblem, IPMSettings, AbstractCone, CofreeCone, SecondOrderCone,
     OPTIMAL, NEAR_OPTIMAL
-using Mumblebee.IPM: reinit!
+using Mumblebee.IPM: reinit!, frule!
 using SparseArrays
 
 export PlanarDoubleIntegrator, ConsensusLQ, ConsensusProblem, ConsensusPlan,
@@ -180,6 +180,8 @@ An open-loop plan for the whole fleet.
 - `residuals`: per sweep, the largest change in any agent's plan.
 - `costs`: per sweep, the team cost after the sweep.
 - `converged`: whether the residual fell below the tolerance.
+- `local_iterations`: interior-point iterations summed over every local (or
+  the one centralized) solve, the measure of warm-start savings.
 """
 struct ConsensusPlan
     states::Array{Float64, 3}
@@ -189,6 +191,7 @@ struct ConsensusPlan
     residuals::Vector{Float64}
     costs::Vector{Float64}
     converged::Bool
+    local_iterations::Int
 end
 
 """
@@ -271,7 +274,8 @@ end
 
 # The trajectory QP for `agents`, with the predicted positions of every other
 # agent entering the linear term. Returns the problem and its layout.
-function _trajectory_qp(lq::ConsensusLQ, agents::Vector{Int}, x0::AbstractMatrix, states::AbstractArray)
+function _trajectory_qp(lq::ConsensusLQ, agents::Vector{Int}, x0::AbstractMatrix, states::AbstractArray;
+        barrier::Real = 0.0)
     T = lq.horizon
     l = TrajectoryLayout(agents, T, _bounded(lq))
     local_index = Dict(i => a for (a, i) in enumerate(agents))
@@ -322,7 +326,7 @@ function _trajectory_qp(lq::ConsensusLQ, agents::Vector{Int}, x0::AbstractMatrix
     _linear_term!(f, lq, l, states)
     g = zeros(m)
     _rhs!(g, lq, l, x0)
-    return IPMProblem(Q, B, f, g, 0.0, cones, sizes), l
+    return IPMProblem(Q, B, f, g, l.bounded ? Float64(barrier) : 0.0, cones, sizes), l
 end
 
 # f = w (B p − Σ_{j outside} H_ij q̂_j(t)) on the positions, using H q⋆ = B p.
@@ -442,7 +446,7 @@ function CommonSolve.solve(prob::ConsensusProblem, ::JointRiccati)
     for i in 1:N, t in 1:(T + 1)
         states[1:2, t, i] .+= view(lq.formation, _pos(i))
     end
-    return ConsensusPlan(states, controls, team_cost(lq, states, controls), 0, Float64[], Float64[], true)
+    return ConsensusPlan(states, controls, team_cost(lq, states, controls), 0, Float64[], Float64[], true, 0)
 end
 
 """
@@ -461,8 +465,9 @@ function CommonSolve.solve(prob::ConsensusProblem, alg::CentralizedQP)
     states, controls = coasting_plan(prob)
     qp, l = _trajectory_qp(lq, collect(1:nagents(lq)), prob.x0, states)
     result = _check(solve(qp, alg.settings))
+    niter = result.niter
     _extract!(states, controls, l, result.p)
-    return ConsensusPlan(states, controls, team_cost(lq, states, controls), 0, Float64[], Float64[], true)
+    return ConsensusPlan(states, controls, team_cost(lq, states, controls), 0, Float64[], Float64[], true, niter)
 end
 
 # ===========================================================================
@@ -472,7 +477,8 @@ end
 """
     PredictedTrajectorySweeps(; sweep = MulticolorSweep(), damping = nothing,
                               tol = 1e-8, maxiter = 500,
-                              settings = IPMSettings{Float64}(), warm_start = false)
+                              settings = IPMSettings{Float64}(step_frac = 0.95),
+                              barrier = 1e-6, warm_start = true, polish = 0)
 
 Distributed solver: every agent repeatedly re-plans its own trajectory against
 its neighbours' latest predicted trajectories.
@@ -485,19 +491,45 @@ its neighbours' latest predicted trajectories.
   to their new plan (damped block Jacobi). One exchange per sweep.
 
 Each local problem is solved by the Mumblebee IPM, reusing its symbolic
-factorization across sweeps (`reinit!` with the new linear term). With
-`warm_start` the previous local solution is passed as the starting point;
-this is off by default because with a control bound that solution lies on the
-cone boundary, where the interior-point iteration fails. Stops when no agent's plan
-changes by more than `tol` (relative to the plan's scale) in a sweep.
+factorization across sweeps (`reinit!` with the new linear term).
+
+**Interior warm starts.** With a control bound the local problems are solved
+to the point of the central path with barrier parameter ``\\mu' = ``
+`barrier` rather than to the boundary of the cones: agent ``i`` minimizes its
+share of the team cost minus ``\\mu'`` times the logarithmic barrier of its
+second-order cones. That point is strictly interior and depends smoothly on
+the neighbours' predictions. With `warm_start`, an agent whose neighbours
+changed their predictions by ``\\Delta f`` (the change in its linear term)
+starts from the tangent prediction
+``(p, d, y) + \\alpha\\,(\\Delta p, \\Delta d, \\Delta y)``, where the tangent is
+the derivative of its last central point through the KKT system (Mumblebee's
+`frule!`) and ``\\alpha \\le 1`` keeps the slacks strictly inside the cones.
+The IPM then only has to re-center; an interior-point method cannot restart
+from the boundary, which is why ``\\mu' > 0`` is needed. A warm solve that
+fails is retried cold. The default local `settings` use a fraction to the
+boundary `step_frac = 0.95` (Mumblebee's default is 0.99): when the IPM aims at
+an interior central point rather than the boundary, 0.99 failed on about 1–2%
+of local problems in our tests and 0.95 on none, at about one extra iteration.
+The
+barrier terms are separable by agent, so the sweeps are block coordinate
+descent on one barrier-regularized team problem and converge to its optimum,
+whose cost exceeds the true optimum by at most ``\\nu\\mu'`` (``\\nu`` the
+total barrier degree of the cones). `polish` extra sweeps with exact
+(``\\mu' = 0``), cold-started local solves remove that gap. Unbounded problems
+have no cones and ignore `barrier`.
+
+Stops when no agent's plan changes by more than `tol` (relative to the plan's
+scale) in a sweep.
 """
 Base.@kwdef struct PredictedTrajectorySweeps{W <: SchwarzSweep, S <: IPMSettings}
     sweep::W = MulticolorSweep()
     damping::Union{Nothing, Float64} = nothing
     tol::Float64 = 1e-8
     maxiter::Int = 500
-    settings::S = IPMSettings{Float64}()
-    warm_start::Bool = false
+    settings::S = IPMSettings{Float64}(step_frac = 0.95)
+    barrier::Float64 = 1e-6
+    warm_start::Bool = true
+    polish::Int = 0
 end
 
 """
@@ -513,10 +545,18 @@ mutable struct SweepWorkspace{A <: PredictedTrajectorySweeps, V}
     algorithm::A
     x0::Matrix{Float64}
     solvers::Vector{V}
+    exact_solvers::Vector{V}            # μ′ = 0, built on first polish
+    exact::Bool                         # sweeping with exact_solvers
     layouts::Vector{TrajectoryLayout}
     f::Vector{Vector{Float64}}
     g::Vector{Vector{Float64}}
-    primal::Vector{Vector{Float64}}
+    primal::Vector{Vector{Float64}}     # last local solution (p, d, y), user frame
+    dual::Vector{Vector{Float64}}
+    multiplier::Vector{Vector{Float64}}
+    f_solved::Vector{Vector{Float64}}   # data of the barrier solver's current central point
+    g_solved::Vector{Vector{Float64}}
+    shifted::Vector{Bool}               # (p, d, y) were time-shifted by RecedingHorizon
+    local_iterations::Vector{Int}
     states::Array{Float64, 3}
     controls::Array{Float64, 3}
     next_states::Array{Float64, 3}
@@ -532,17 +572,29 @@ function CommonSolve.init(prob::ConsensusProblem, alg::PredictedTrajectorySweeps
     s0, c0 = coasting_plan(prob)
     states = states === nothing ? s0 : copy(states)
     controls = controls === nothing ? c0 : copy(controls)
-    built = [_trajectory_qp(lq, [i], prob.x0, states) for i in 1:N]
+    @argcheck alg.barrier >= 0 && alg.polish >= 0
+    @argcheck !(alg.warm_start && _bounded(lq) && alg.barrier == 0) "warm starts need an interior point: set barrier > 0"
+    built = [_trajectory_qp(lq, [i], prob.x0, states; alg.barrier) for i in 1:N]
     solvers = [init(qp, alg.settings) for (qp, _) in built]
     layouts = [l for (_, l) in built]
     f = [zeros(length(qp.f)) for (qp, _) in built]
     g = [zeros(length(qp.g)) for (qp, _) in built]
-    coloring = Graphs.greedy_color(lq.scenario.agent_graph)
-    colors = [findall(==(k), coloring.colors) for k in 1:coloring.num_colors]
+    colors = _greedy_coloring(lq.scenario.agent_graph)       # deterministic: degree, then id
     damping = something(alg.damping, 1 / length(colors))
     @argcheck 0 < damping <= 1
-    return SweepWorkspace(lq, alg, copy(prob.x0), solvers, layouts, f, g,
-        [Float64[] for _ in 1:N], states, controls, copy(states), copy(controls), colors, damping)
+    blank() = [Float64[] for _ in 1:N]
+    return SweepWorkspace(lq, alg, copy(prob.x0), solvers, similar(solvers, 0), false, layouts, f, g,
+        blank(), blank(), blank(), deepcopy(f), deepcopy(g), fill(false, N), zeros(Int, N), states, controls, copy(states), copy(controls), colors, damping)
+end
+
+# Switch to exact (μ′ = 0) local solvers, building them on first use.
+function _go_exact!(ws::SweepWorkspace, x0)
+    if isempty(ws.exact_solvers)
+        ws.exact_solvers = [init(first(_trajectory_qp(ws.lq, [i], x0, ws.states)), ws.algorithm.settings)
+                            for i in 1:nagents(ws.lq)]
+    end
+    ws.exact = true
+    return ws
 end
 
 CommonSolve.solve(prob::ConsensusProblem, alg::PredictedTrajectorySweeps) = solve!(init(prob, alg))
@@ -553,16 +605,80 @@ CommonSolve.solve(prob::ConsensusProblem, alg::PredictedTrajectorySweeps) = solv
 # fails. A fresh solver has H = Q; restore that until upstream does.
 _reset_hessian!(solver) = copyto!(solver.H, solver.Q)
 
+# Margin of the second-order-cone slack blocks of v + α Δv: the smallest
+# s₁ − ‖s₂‖ over all steps (positive ⟺ strictly interior).
+function _cone_margin(v, Δv, α, l::TrajectoryLayout)
+    margin = Inf
+    for t in 0:(l.horizon - 1)
+        r = _s(l, 1, t)
+        s1 = v[r[1]] + α * Δv[r[1]]
+        s2 = hypot(v[r[2]] + α * Δv[r[2]], v[r[3]] + α * Δv[r[3]])
+        margin = min(margin, s1 - s2)
+    end
+    return margin
+end
+
+# Largest step α ≤ 1 (by halving) along the tangent that keeps the primal and
+# dual slacks at least a fraction 1 − τ of their current distance from the
+# cone boundary; τ is the IPM's own fraction to the boundary (`step_frac`).
+function _step_to_boundary(l::TrajectoryLayout, p, Δp, d, Δd; τ)
+    l.bounded || return 1.0
+    zero_p = zero(Δp)
+    floor_p = (1 - τ) * _cone_margin(p, zero_p, 0.0, l)
+    floor_d = (1 - τ) * _cone_margin(d, zero_p, 0.0, l)
+    α = 1.0
+    for _ in 1:50
+        _cone_margin(p, Δp, α, l) > floor_p && _cone_margin(d, Δd, α, l) > floor_d && return α
+        α /= 2
+    end
+    return 0.0
+end
+
+# Tangent predictor for an interior warm start. The barrier solver still holds
+# its converged central point for the data (f, g) it last solved; `frule!`
+# differentiates that point through the KKT system, giving the first-order
+# change (Δp, Δy, Δd) for the new data. Step along it as far as the cones allow.
+function _predict(ws::SweepWorkspace, i, solver)
+    l = ws.layouts[i]
+    p, d, y = ws.primal[i], ws.dual[i], ws.multiplier[i]
+    Δp, Δd, Δy = similar(p), similar(d), similar(y)
+    frule!(Δp, Δy, Δd, solver, ws.f[i] - ws.f_solved[i], ws.g[i] - ws.g_solved[i], 0.0)
+    α = _step_to_boundary(l, p, Δp, d, Δd; τ = ws.algorithm.settings.step_frac)
+    return p .+ α .* Δp, d .+ α .* Δd, y .+ α .* Δy
+end
+
 # Re-plan agent i against the current predictions, writing into (states, controls).
+#
+# Warm start (barrier solvers only): from the tangent prediction of the last
+# central point, or, right after a receding-horizon time shift, from the
+# shifted central point. A warm solve that fails is retried cold, and both
+# attempts count towards `local_iterations`.
 function _replan!(ws::SweepWorkspace, i, states, controls)
     l = ws.layouts[i]
     _linear_term!(ws.f[i], ws.lq, l, ws.states)
     _rhs!(ws.g[i], ws.lq, l, ws.x0)
-    p0 = ws.algorithm.warm_start && !isempty(ws.primal[i]) ? ws.primal[i] : nothing
-    _reset_hessian!(ws.solvers[i])
-    reinit!(ws.solvers[i]; f = ws.f[i], g = ws.g[i], p0)
-    result = _check(solve!(ws.solvers[i]))
-    ws.primal[i] = result.p
+    solver = ws.exact ? ws.exact_solvers[i] : ws.solvers[i]
+    result = nothing
+    if ws.algorithm.warm_start && !ws.exact && !isempty(ws.primal[i])
+        p0, d0, y0 = ws.shifted[i] ? (ws.primal[i], ws.dual[i], ws.multiplier[i]) : _predict(ws, i, solver)
+        _reset_hessian!(solver)
+        reinit!(solver; f = ws.f[i], g = ws.g[i], p0, d0, y0)
+        result = solve!(solver)
+        ws.local_iterations[i] += result.niter
+        result.status in (OPTIMAL, NEAR_OPTIMAL) || (result = nothing)
+    end
+    if result === nothing
+        _reset_hessian!(solver)
+        reinit!(solver; f = ws.f[i], g = ws.g[i])
+        result = _check(solve!(solver))
+        ws.local_iterations[i] += result.niter
+    end
+    ws.shifted[i] = false
+    if !ws.exact
+        ws.primal[i], ws.dual[i], ws.multiplier[i] = result.p, result.d, result.y
+        copyto!(ws.f_solved[i], ws.f[i])
+        copyto!(ws.g_solved[i], ws.g[i])
+    end
     _extract!(states, controls, l, result.p)
     return nothing
 end
@@ -590,23 +706,40 @@ function _sweep!(ws::SweepWorkspace, ::ParallelSweep)
     return θ * change
 end
 
-function CommonSolve.solve!(ws::SweepWorkspace; maxiter::Integer = ws.algorithm.maxiter)
-    residuals = Float64[]
-    costs = Float64[]
-    converged = false
+function _sweeps!(ws::SweepWorkspace, maxiter, residuals, costs)
     for _ in 1:maxiter
         change = _sweep!(ws, ws.algorithm.sweep)
         scale = max(1.0, maximum(abs, ws.states))
         push!(residuals, change / scale)
         push!(costs, team_cost(ws.lq, ws.states, ws.controls))
-        if residuals[end] <= ws.algorithm.tol
-            converged = true
-            break
-        end
+        residuals[end] <= ws.algorithm.tol && return true
+    end
+    return false
+end
+
+"""
+    solve!(workspace::SweepWorkspace; maxiter, polish) -> ConsensusPlan
+
+Run sweeps from the workspace's current plan: up to `maxiter` with the
+barrier (warm-started) local solvers, then up to `polish` exact ones (see
+[`PredictedTrajectorySweeps`](@ref)). `local_iterations` in the result counts
+this call's interior-point iterations.
+"""
+function CommonSolve.solve!(ws::SweepWorkspace; maxiter::Integer = ws.algorithm.maxiter,
+        polish::Integer = ws.algorithm.polish)
+    residuals = Float64[]
+    costs = Float64[]
+    fill!(ws.local_iterations, 0)
+    ws.exact = false
+    converged = _sweeps!(ws, maxiter, residuals, costs)
+    if polish > 0 && _bounded(ws.lq)
+        _go_exact!(ws, ws.x0)
+        converged = _sweeps!(ws, polish, residuals, costs)
+        ws.exact = false
     end
     cost = isempty(costs) ? team_cost(ws.lq, ws.states, ws.controls) : costs[end]
     return ConsensusPlan(copy(ws.states), copy(ws.controls), cost, length(residuals),
-        residuals, costs, converged)
+        residuals, costs, converged, sum(ws.local_iterations))
 end
 
 # ===========================================================================
@@ -669,16 +802,19 @@ end
 Distributed model-predictive control: at every step the fleet re-plans over
 the horizon with [`PredictedTrajectorySweeps`](@ref), starting from the
 previous plan shifted by one step, running at most `sweeps` sweeps, and
-applies the first input. The local IPM solvers are set up once.
+applies the first input. The local IPM solvers are set up once, and their
+last interior points (primal, dual, multipliers) are shifted one step in time
+with the plan to warm-start the next step.
 """
 mutable struct RecedingHorizon{W <: SweepWorkspace} <: ConsensusController
     workspace::W
     sweeps::Int
+    local_iterations::Int       # interior-point iterations over all steps so far
 end
 
 function RecedingHorizon(prob::ConsensusProblem, alg::PredictedTrajectorySweeps; sweeps::Integer = 1)
     @argcheck sweeps >= 1
-    return RecedingHorizon(init(prob, alg), Int(sweeps))
+    return RecedingHorizon(init(prob, alg), Int(sweeps), 0)
 end
 
 function _clip!(u, bound)
@@ -707,6 +843,30 @@ function _control!(u, ctrl::SecondOrderDiffusion, x, step)
     return _clip!(u, lq.control_bound)
 end
 
+# Shift a single agent's local primal or dual vector one step forward in time:
+# stalk t takes stalk t+1, the last step keeps its input and takes x(T), and
+# x(T) and the last slack stay. Every block is copied from an interior block,
+# so an interior point stays interior.
+function _shift_columns!(v, l::TrajectoryLayout)
+    T = l.horizon
+    for t in 0:(T - 2)
+        v[_x(l, 1, t)] .= v[_x(l, 1, t + 1)]
+        v[_u(l, 1, t)] .= v[_u(l, 1, t + 1)]
+        l.bounded && (v[_s(l, 1, t)] .= v[_s(l, 1, t + 1)])
+    end
+    v[_x(l, 1, T - 1)] .= v[_x(l, 1, T)]
+    return v
+end
+
+# The same shift for the equality multipliers (rows), keeping the x(0) rows.
+function _shift_rows!(y, l::TrajectoryLayout)
+    for t in 0:(l.horizon - 2)
+        y[_rowdyn(l, 1, t)] .= y[_rowdyn(l, 1, t + 1)]
+        l.bounded && (y[_rowsoc(l, 1, t)] .= y[_rowsoc(l, 1, t + 1)])
+    end
+    return y
+end
+
 function _control!(u, ctrl::RecedingHorizon, x, step)
     ws = ctrl.workspace
     if step > 1
@@ -716,11 +876,17 @@ function _control!(u, ctrl::RecedingHorizon, x, step)
         ws.controls[:, end, :] .= 0
         for i in axes(ws.states, 3)
             ws.states[:, end, i] .= A * view(ws.states, :, size(ws.states, 2) - 1, i)
+            isempty(ws.primal[i]) && continue
+            l = ws.layouts[i]
+            _shift_columns!(ws.primal[i], l)
+            _shift_columns!(ws.dual[i], l)
+            _shift_rows!(ws.multiplier[i], l)
+            ws.shifted[i] = true
         end
     end
     ws.x0 .= x
     ws.states[:, 1, :] .= x
-    solve!(ws; maxiter = ctrl.sweeps)
+    ctrl.local_iterations += solve!(ws; maxiter = ctrl.sweeps).local_iterations
     u .= view(ws.controls, :, 1, :)
     return u
 end

@@ -73,6 +73,28 @@ using Random
         @test plan.converged
         @test plan.cost ≈ ref.cost rtol = 1e-5
         @test maximum(norm(plan.controls[:, t, i]) for t in 1:25, i in 1:9) <= 1.0 + 1e-6
+        # Barrier-regularized optimum: above the exact one by at most ν μ′
+        # (ν ≤ 2 per agent and step).
+        @test ref.cost - 1e-6 <= plan.cost <= ref.cost + 2 * 9 * 25 * 1e-6 + 1e-6 * ref.cost
+
+        @testset "interior warm starts" begin
+            cold = solve(bprob, PredictedTrajectorySweeps(tol = 1e-8, barrier = 0.0, warm_start = false))
+            @test cold.converged
+            @test cold.cost ≈ ref.cost rtol = 1e-7
+            # Same barrier, cold: same fixed point (to the sweep tolerance), more IPM iterations.
+            barrier_cold = solve(bprob, PredictedTrajectorySweeps(tol = 1e-8, warm_start = false))
+            @test barrier_cold.cost ≈ plan.cost rtol = 1e-6
+            @test plan.local_iterations < barrier_cold.local_iterations
+            # Exact polish removes the barrier gap.
+            polished = solve(bprob, PredictedTrajectorySweeps(tol = 1e-8, polish = 50))
+            @test polished.converged
+            @test polished.cost ≈ ref.cost rtol = 1e-7
+            @test_throws ArgumentError solve(bprob, PredictedTrajectorySweeps(barrier = 0.0))
+            @test ref.local_iterations > 0
+        end
+        rhc = rollout(bounded, RecedingHorizon(bprob, PredictedTrajectorySweeps(); sweeps = 3), x0, 40)
+        @test maximum(norm(rhc.controls[:, k, i]) for k in 1:40, i in 1:9) <= 1.0 + 1e-6
+        @test norm(rhc.states[1:2, end, :] - formation(bounded)) < norm(x0[1:2, :] - formation(bounded))
     end
 
     @testset "closed loop" begin
