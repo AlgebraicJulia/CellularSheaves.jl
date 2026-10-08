@@ -1,0 +1,85 @@
+case,agents,bounded,mode,method,seconds,sweeps,rounds,ipm_iterations,cost,gap
+"grid 3×3",9,false,"open loop","joint Riccati",0.001649944,0,0,0,2154.6622210402666,-8.881784197001252e-16
+"grid 3×3",9,false,"open loop","centralized QP (IPM)",0.00947589,0,0,2,2154.6622210402684,0.0
+"grid 3×3",9,false,"open loop","sweeps, multicolor",0.279872703,99,198,1788,2154.662216672038,-2.0273387413283217e-9
+"grid 3×3",9,false,"open loop","sweeps, damped parallel",1.273266968,363,363,4482,2154.6622181530684,-1.339978017433907e-9
+"grid 3×3",9,false,"closed loop","centralized LQR",0.005997469,0,0,0,2154.8864021520712,3.725908470642025e-12
+"grid 3×3",9,false,"closed loop","diffusion (kp = 1, kv = 2)",0.000407642,0,120,0,2731.6697972717857,0.26766301673900883
+"grid 3×3",9,false,"closed loop","receding horizon, 1 sweep/step",0.272523427,1,240,2202,2183.995936370378,0.013508616601493495
+"grid 3×3",9,false,"closed loop","receding horizon, 3 sweeps/step",0.790264015,3,720,4401,2158.078955288827,0.001481541273641307
+"grid 3×3",9,false,"closed loop","receding horizon, 10 sweeps/step",2.081173407,10,2400,10164,2155.023688032279,6.370910693953569e-5
+"grid 3×3",9,true,"open loop","centralized QP (IPM)",0.041615279,0,0,16,5321.81211426676,0.0
+"grid 3×3",9,true,"open loop","sweeps, multicolor",0.380193994,56,112,1440,5321.812240084096,2.3641822277653546e-8
+"grid 3×3",9,true,"open loop","sweeps, damped parallel",1.827119249,209,209,4756,5321.812453624589,6.376734495994185e-8
+"grid 3×3",9,true,"open loop","sweeps, multicolor, cold, μ′ = 0",1.565186637,56,112,6081,5321.812101966991,-2.311199454041457e-9
+"grid 3×3",9,true,"open loop","sweeps, multicolor, cold, μ′ = 1e-6",1.419563473,56,112,5756,5321.812359176803,4.602004688436523e-8
+"grid 3×3",9,true,"open loop","sweeps, multicolor + 20 exact polish",0.671113914,66,132,2530,5321.812101964873,-2.3115972469511803e-9
+"grid 3×3",9,true,"closed loop","centralized LQR (clipped)",0.006141858,0,0,0,5598.623309799732,0.049222816129809166
+"grid 3×3",9,true,"closed loop","diffusion (kp = 1, kv = 4)",0.000426738,0,120,0,6132.687478859258,0.1493103341583628
+"grid 3×3",9,true,"closed loop","receding horizon, 1 sweep/step",1.413170256,1,240,6051,5338.764635347587,0.0005234064504333613
+"grid 3×3",9,true,"closed loop","receding horizon, 3 sweeps/step",2.280071647,3,720,9070,5336.04891826284,1.4461274128629853e-5
+"grid 3×3",9,true,"closed loop","receding horizon, 10 sweeps/step",4.359062816,10,2400,16795,5335.991916948833,3.778812406318721e-6
+"grid 3×3",9,true,"closed loop","receding horizon, 3 sweeps/step, cold",6.782695157,3,720,27605,5336.0489309108325,1.4463644454787428e-5
+"grid 5×5",25,false,"open loop","joint Riccati",0.014957843,0,0,0,13242.572068080197,8.881784197001252e-16
+"grid 5×5",25,false,"open loop","centralized QP (IPM)",0.023506227,0,0,2,13242.572068080186,0.0
+"grid 5×5",25,false,"open loop","sweeps, multicolor",2.344432876,249,498,10523,13242.572035608815,-2.452044123302244e-9
+"grid 5×5",25,false,"open loop","sweeps, damped parallel",8.895706134,880,880,44624,13242.572055985902,-9.132881118034675e-10
+"grid 5×5",25,false,"closed loop","centralized LQR",0.062475441,0,0,0,13246.651875497706,3.6041702955458277e-10
+"grid 5×5",25,false,"closed loop","diffusion (kp = 1, kv = 2)",0.001254955,0,120,0,16185.738137913737,0.22187389657956258
+"grid 5×5",25,false,"closed loop","receding horizon, 1 sweep/step",1.071307119,1,240,6024,13368.669821999372,0.009211229559497713
+"grid 5×5",25,false,"closed loop","receding horizon, 3 sweeps/step",2.982388974,3,720,12156,13260.459253672152,0.0010423300229758237
+"grid 5×5",25,false,"closed loop","receding horizon, 10 sweeps/step",8.777834923,10,2400,32402,13248.601596660665,0.00014718631970578322
+"grid 5×5",25,true,"open loop","centralized QP (IPM)",0.250190392,0,0,17,40321.15904918116,0.0
+"grid 5×5",25,true,"open loop","sweeps, multicolor",1.176585157,45,90,3286,40321.159443218945,9.772481712744252e-9
+"grid 5×5",25,true,"open loop","sweeps, damped parallel",4.402205058,182,182,11428,40321.15943039768,9.45450318035057e-9
+"grid 5×5",25,true,"open loop","sweeps, multicolor, cold, μ′ = 0",4.965157993,45,90,14263,40321.15880010081,-6.177410361019042e-9
+"grid 5×5",25,true,"open loop","sweeps, multicolor, cold, μ′ = 1e-6",4.844505805,45,90,13991,40321.159624905034,1.4278455529037615e-8
+"grid 5×5",25,true,"open loop","sweeps, multicolor + 20 exact polish",2.600753806,58,116,7407,40321.1588001587,-6.1759747316258995e-9
+"grid 5×5",25,true,"closed loop","centralized LQR (clipped)",0.062733864,0,0,0,46453.163370353104,0.14377261465283886
+"grid 5×5",25,true,"closed loop","diffusion (kp = 1, kv = 4)",0.001305299,0,120,0,43332.38446897757,0.066932606679178
+"grid 5×5",25,true,"closed loop","receding horizon, 1 sweep/step",5.974799585,1,240,18662,40629.89579289823,0.000391766080974687
+"grid 5×5",25,true,"closed loop","receding horizon, 3 sweeps/step",9.10285125,3,720,28303,40616.63032828808,6.51430042908352e-5
+"grid 5×5",25,true,"closed loop","receding horizon, 10 sweeps/step",18.00414207,10,2400,54572,40615.67300627644,4.157176347785452e-5
+"grid 5×5",25,true,"closed loop","receding horizon, 3 sweeps/step, cold",25.696670228,3,720,77924,40616.630485426496,6.514687336234282e-5
+"ring 32",32,false,"open loop","joint Riccati",0.018500688,0,0,0,18139.303168656526,-1.9984014443252818e-15
+"ring 32",32,false,"open loop","centralized QP (IPM)",0.024909121,0,0,2,18139.303168656563,0.0
+"ring 32",32,false,"open loop","sweeps, multicolor",2.697896572,231,462,11278,18139.3031319067,-2.0259798283461805e-9
+"ring 32",32,false,"open loop","sweeps, damped parallel",9.502231477,777,777,43185,18139.303153462777,-8.376168647572513e-10
+"ring 32",32,false,"closed loop","centralized LQR",0.102471303,0,0,0,18154.23902657127,1.3714262392383603e-8
+"ring 32",32,false,"closed loop","diffusion (kp = 2, kv = 4)",0.001305849,0,120,0,21819.11604420186,0.2018744664262495
+"ring 32",32,false,"closed loop","receding horizon, 1 sweep/step",1.416474778,1,240,7698,18564.94165257553,0.022622974171906618
+"ring 32",32,false,"closed loop","receding horizon, 3 sweeps/step",4.155345675,3,720,15588,18214.050732222462,0.0032946550585744028
+"ring 32",32,false,"closed loop","receding horizon, 10 sweeps/step",12.743563356,10,2400,42659,18162.446811196103,0.00045212766546587346
+"ring 32",32,true,"open loop","centralized QP (IPM)",0.180410517,0,0,18,53556.48762249758,0.0
+"ring 32",32,true,"open loop","sweeps, multicolor",1.863213914,55,110,4977,53556.48824568705,1.1636115404556335e-8
+"ring 32",32,true,"open loop","sweeps, damped parallel",5.268281254,206,206,14393,53556.487981386934,6.701136756603887e-9
+"ring 32",32,true,"open loop","sweeps, multicolor, cold, μ′ = 0",8.00315988,55,110,21111,53556.48726477712,-6.6793114372742934e-9
+"ring 32",32,true,"open loop","sweeps, multicolor, cold, μ′ = 1e-6",7.985290571,55,110,20916,53556.4884605652,1.5648293105741118e-8
+"ring 32",32,true,"open loop","sweeps, multicolor + 20 exact polish",3.434973341,66,132,9190,53556.487264852774,-6.677898900520063e-9
+"ring 32",32,true,"closed loop","centralized LQR (clipped)",0.106752192,0,0,0,61552.76914664276,0.13632360879691618
+"ring 32",32,true,"closed loop","diffusion (kp = 0.5, kv = 2)",0.001340325,0,120,0,59832.748929144036,0.10457037319356877
+"ring 32",32,true,"closed loop","receding horizon, 1 sweep/step",8.712169093,1,240,24941,54204.20616016452,0.000662033728333844
+"ring 32",32,true,"closed loop","receding horizon, 3 sweeps/step",13.976617757,3,720,39458,54175.48875620368,0.00013188269603325864
+"ring 32",32,true,"closed loop","receding horizon, 10 sweeps/step",26.5975806,10,2400,73848,54173.01122435703,8.614506362580876e-5
+"ring 32",32,true,"closed loop","receding horizon, 3 sweeps/step, cold",37.008885965,3,720,100024,54175.48789635825,0.00013186682245569514
+"grid 8×8",64,false,"open loop","joint Riccati",0.078945897,0,0,0,83121.96002874622,1.9984014443252818e-15
+"grid 8×8",64,false,"open loop","centralized QP (IPM)",0.082925745,0,0,2,83121.96002874605,0.0
+"grid 8×8",64,false,"open loop","sweeps, multicolor",9.186029728,420,840,38188,83121.95994785996,-9.731013772551478e-10
+"grid 8×8",64,false,"open loop","sweeps, damped parallel",37.683894716,1452,1452,197270,83121.96025921754,2.7726907436687043e-9
+"grid 8×8",64,false,"closed loop","centralized LQR",0.512895791,0,0,0,83183.03654267563,2.4667637799069553e-7
+"grid 8×8",64,false,"closed loop","diffusion (kp = 1, kv = 2)",0.003246868,0,120,0,99786.3308154965,0.19959981719630404
+"grid 8×8",64,false,"closed loop","receding horizon, 1 sweep/step",2.725391132,1,240,15540,84098.17720607686,0.011001779286639257
+"grid 8×8",64,false,"closed loop","receding horizon, 3 sweeps/step",8.40563746,3,720,31314,83301.9329133783,0.0014295813697633442
+"grid 8×8",64,false,"closed loop","receding horizon, 10 sweeps/step",25.551307167,10,2400,86281,83208.71127048889,0.0003089001616762843
+"grid 8×8",64,true,"open loop","centralized QP (IPM)",1.963993011,0,0,22,315996.1451503606,0.0
+"grid 8×8",64,true,"open loop","sweeps, multicolor",2.562120235,29,58,6516,315996.14657759643,4.516624185768592e-9
+"grid 8×8",64,true,"open loop","sweeps, damped parallel",7.354466548,112,112,19057,315996.14528674074,4.3158809859278335e-10
+"grid 8×8",64,true,"open loop","sweeps, multicolor, cold, μ′ = 0",9.42172766,29,58,23949,315996.14243857504,-8.581704569188275e-9
+"grid 8×8",64,true,"open loop","sweeps, multicolor, cold, μ′ = 1e-6",9.162425367,29,58,23509,315996.1440038629,-3.6282014059807466e-9
+"grid 8×8",64,true,"open loop","sweeps, multicolor + 20 exact polish",4.818188004,36,72,12298,315996.1424384564,-8.582079935592901e-9
+"grid 8×8",64,true,"closed loop","centralized LQR (clipped)",0.622181173,0,0,0,412426.18491237,0.28448334273182985
+"grid 8×8",64,true,"closed loop","diffusion (kp = 2, kv = 8)",0.003401187,0,120,0,352376.8244832221,0.09746223196184078
+"grid 8×8",64,true,"closed loop","receding horizon, 1 sweep/step",19.336207936,1,240,53980,321253.06558979984,0.0005286440270766413
+"grid 8×8",64,true,"closed loop","receding horizon, 3 sweeps/step",31.055267749,3,720,85216,321151.4444583282,0.000212149450786292
+"grid 8×8",64,true,"closed loop","receding horizon, 10 sweeps/step",58.327915497,10,2400,161722,321139.89612056257,0.00017618265711782932
+"grid 8×8",64,true,"closed loop","receding horizon, 3 sweeps/step, cold",78.419084068,3,720,207435,321151.44399809104,0.000212148017397773
