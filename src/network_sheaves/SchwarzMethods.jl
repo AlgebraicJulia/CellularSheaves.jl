@@ -590,11 +590,14 @@ Concretely this is a second [`SchwarzDecomposition`](@ref) whose subdomains
 are the aggregates ``\\widehat\\Omega_h``. A dof is owned by the aggregate
 containing its fine owner. The correction is one sweep of `method` on that
 decomposition, started from the current glued iterate. Each local solve is
-exact on a larger region, so a sweep reduces the error far more than a
-truncated coarse solve. The cost is in the factorizations: with ``\\varphi``
-to a single vertex the coarse level is a direct solve of the whole problem
-(one iteration, no scalability). With a fixed aggregation ratio, the iteration
-count still grows with the number of aggregates, as for any one-level method.
+exact on a larger region, so while there are few aggregates a sweep reduces
+the error more than a truncated coarse solve. With ``\\varphi`` to a single
+vertex the coarse level is a direct solve of the whole problem (one iteration,
+no scalability). The level carries no global information beyond its
+aggregates, so with a fixed aggregation ratio it is a one-level method on
+larger subdomains: the iteration count grows with the number of aggregates and
+eventually exceeds that of [`TruncatedPushforwardCoarseSpace`](@ref), while its
+factorizations cost as much as the whole problem plus overlaps.
 """
 struct ExactPushforwardCoarseSpace{D<:SchwarzDecomposition} <: AbstractCoarseSpace
     hom::GraphHomomorphism

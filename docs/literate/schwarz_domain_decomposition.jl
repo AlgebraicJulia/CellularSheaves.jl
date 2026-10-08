@@ -183,12 +183,20 @@ for r in rows
     println(rpad("$(r.p)×$(r.p)", 8), rpad(r.name, 22), rpad(r.its, 8), r.dim)
 end
 
-# The truncated coarse space keeps the sweep count nearly flat as boxes are
-# added, with a coarse problem of one unknown per aggregate. The exact
-# pushforward needs the fewest sweeps, because each coarse step solves exactly
-# on large aggregates. But its coarse level is as large as the whole problem
-# (plus overlaps), and its sweep count still grows with the number of
-# aggregates. Higher accuracy per sweep, worse scalability.
+# With the truncated coarse space and ``\varphi`` the identity, the sweep count
+# levels off as boxes are added (23, 47, 56, 61 sweeps), while the one-level
+# count grows roughly with the number of boxes. Its coarse problem has one
+# unknown per subdomain. Coarser aggregates (``2 \times 2``) make the coarse
+# problem four times smaller but less effective.
+#
+# The exact pushforward is the most accurate per sweep while there are few
+# aggregates. With one aggregate it is a direct solve and converges in one
+# sweep; on ``4 \times 4`` boxes it beats every truncated variant. But it
+# carries no global information beyond its aggregates, so it is still a
+# one-level method on larger subdomains. Its sweep count grows with the number
+# of aggregates, overtaking the truncated space by ``6 \times 6`` boxes, and its
+# coarse level costs as much as the whole problem plus overlaps. Higher accuracy
+# per sweep, worse scalability.
 
 ps = (2, 4, 6, 8)
 plt = plot(; xlabel="boxes per side", ylabel="sweeps", yscale=:log10, legend=:topleft)

@@ -23,7 +23,8 @@ subdomains into aggregates, together with the pushforward of the overlap sheaf
 along it. [`TruncatedPushforwardCoarseSpace`](@ref) keeps a few modes of each
 pushforward stalk; it is a small Galerkin problem that makes the iteration
 scalable. [`ExactPushforwardCoarseSpace`](@ref) keeps the full stalks; it
-solves on the aggregates themselves, which is more accurate per sweep but
+solves on the aggregates themselves, which is more accurate per sweep while
+there are few aggregates, but scales worse and is
 costlier.
 
 See the [Schwarz domain decomposition](../generated/schwarz_domain_decomposition.md)
