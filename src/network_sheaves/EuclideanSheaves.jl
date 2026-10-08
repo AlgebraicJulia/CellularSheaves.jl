@@ -7,7 +7,8 @@ export EuclideanSheaf, UnorderedPair, sheaf_laplacian_matrix,
     nearest_global_section, edge_stalk_dimensions, nullspace_ldlt, harmonic_extension,
     ldlt_pseudoinverse_and_null, ldiv_diag_pinv!, ldiv_diag_pinv, ldlt_pinv_solve, ldlt_pinv_solve!, HarmonicExtensionLDLDiagnostics,
     HarmonicExtensionSVDDiagnostics, harmonic_extension_ldl_diagnostics,
-    harmonic_extension_svd_diagnostics, zero_sheaf, constant_sheaf, cycle_sheaf
+    harmonic_extension_svd_diagnostics, zero_sheaf, constant_sheaf, cycle_sheaf,
+    DenseEuclideanSheaf, coboundary_operator
 
 using ArgCheck: @argcheck
 using Graphs
@@ -23,7 +24,8 @@ import Base: hash, ==, isequal
 
 using ..SheafInterface
 import ..SheafInterface: vertex_stalks, edge_stalks, edge_stalk_dimensions, coboundary_map, add_vertex_stalk!, add_sheaf_edge!, underlying_graph,
-    get_vertex_stalk, get_edge_stalk, get_restriction_map, sheaf_laplacian
+    get_vertex_stalk, get_edge_stalk, get_restriction_map, sheaf_laplacian, coboundary_operator
+using ..RestrictionMaps: restriction_map
 using ..BlockSparseArrays
 
 struct UnorderedPair{T}
@@ -45,20 +47,47 @@ function Base.:(isequal)(up1::UnorderedPair{T}, up2::UnorderedPair{T}) where T
            (up1.first == up2.second && up1.second == up2.first)
 end
 
-"""     EuclideanSheaf{T}
+"""     EuclideanSheaf{T,M}
 
 A Euclidean sheaf is a network sheaf where each vertex stalk is a Euclidean space R^n for some n,
 each edge stalk is a Euclidean space R^m for some m, and each restriction map is a linear map
-R^n -> R^m represented by a matrix of type T.
+R^n -> R^m with entries of type T.
+
+`M` is how the restriction maps are stored. `EuclideanSheaf{T}(vertex_stalks)` stores dense
+matrices (`M = Matrix{T}`, see [`DenseEuclideanSheaf`](@ref)).
+`EuclideanSheaf{T,M}(vertex_stalks)` with `M <: AbstractRestrictionMap{T}` stores
+restriction maps that are sparse, coordinate selections, or known only through
+matrix-vector products; use `M = AbstractRestrictionMap{T}` to mix kinds. For such sheaves
+[`coboundary_map`](@ref) assembles a sparse matrix and [`coboundary_operator`](@ref) gives a
+matrix-free operator.
 """
-@auto_hash_equals struct EuclideanSheaf{T} <: AbstractNetworkSheaf
+@auto_hash_equals struct EuclideanSheaf{T,M} <: AbstractNetworkSheaf
     vertex_stalks::Vector{Int}
     edge_stalks::Dict{UnorderedPair{Int},Int}
     underlying_graph::Graph
-    restriction_maps::Dict{Pair{Int},Matrix{T}}
+    restriction_maps::Dict{Pair{Int},M}
 end
 
-EuclideanSheaf{T}(vertex_stalks::Vector{Int}) where T = EuclideanSheaf{T}(vertex_stalks, Dict{UnorderedPair{Int},Int}(), Graph(length(vertex_stalks)), Dict{Pair{Int},Matrix{T}}())
+"""     DenseEuclideanSheaf{T}
+
+A [`EuclideanSheaf`](@ref) whose restriction maps are stored as dense `Matrix{T}`s: the type
+built by `EuclideanSheaf{T}(vertex_stalks)`. Use it to annotate fields concretely.
+"""
+const DenseEuclideanSheaf{T} = EuclideanSheaf{T,Matrix{T}}
+
+EuclideanSheaf{T}(vertex_stalks::Vector{Int}) where T = EuclideanSheaf{T,Matrix{T}}(vertex_stalks)
+EuclideanSheaf{T,M}(vertex_stalks::Vector{Int}) where {T,M} =
+    EuclideanSheaf{T,M}(vertex_stalks, Dict{UnorderedPair{Int},Int}(), Graph(length(vertex_stalks)), Dict{Pair{Int},M}())
+EuclideanSheaf{T}(vertex_stalks::Vector{Int}, edge_stalks, graph, maps::Dict{Pair{Int},M}) where {T,M} =
+    EuclideanSheaf{T,M}(vertex_stalks, edge_stalks, graph, maps)
+
+# Restriction maps as matrices, for code that needs explicit entries.
+_as_matrix(rm::AbstractMatrix) = rm
+_as_matrix(rm::AbstractRestrictionMap) = sparse(rm)
+
+_store_map(::Type{Matrix{T}}, rm::AbstractMatrix) where {T} = Matrix{T}(rm)
+_store_map(::Type{Matrix{T}}, rm::AbstractRestrictionMap) where {T} = Matrix{T}(Matrix(rm))
+_store_map(::Type{M}, rm) where {T,M<:AbstractRestrictionMap{T}} = convert(M, restriction_map(T, rm))
 
 
 function sheaf_from_graph(g::Graph, stalk_dim::Int, rm_generator::Function; symmetric_edges=false)
@@ -190,7 +219,9 @@ is the restriction map from vertex `v2` to the edge.
 Both `rm1` and `rm2` may be any `AbstractMatrix` (e.g. `Matrix`, `Diagonal`,
 `SparseMatrixCSC`); they are converted to `Matrix{T}` when stored.
 """
-function add_sheaf_edge!(s::EuclideanSheaf{T}, v1::Int, v2::Int, rm1::AbstractMatrix, rm2::AbstractMatrix) where T
+function add_sheaf_edge!(s::EuclideanSheaf{T,M}, v1::Int, v2::Int,
+                         rm1::Union{AbstractMatrix,AbstractRestrictionMap},
+                         rm2::Union{AbstractMatrix,AbstractRestrictionMap}) where {T,M}
     @assert v1 <= length(s.vertex_stalks) && v2 <= length(s.vertex_stalks)
     @assert size(rm1, 1) == size(rm2, 1)
     @assert size(rm1, 2) == s.vertex_stalks[v1]
@@ -200,8 +231,8 @@ function add_sheaf_edge!(s::EuclideanSheaf{T}, v1::Int, v2::Int, rm1::AbstractMa
     add_edge!(s.underlying_graph, v1, v2)
     edge_key = UnorderedPair(v1, v2)
     s.edge_stalks[edge_key] = stalk_size
-    s.restriction_maps[v1=>v2] = Matrix{T}(rm1)
-    s.restriction_maps[v2=>v1] = Matrix{T}(rm2)
+    s.restriction_maps[v1=>v2] = _store_map(M, rm1)
+    s.restriction_maps[v2=>v1] = _store_map(M, rm2)
     return ne(s.underlying_graph)
 end
 
@@ -277,6 +308,61 @@ function coboundary_map(s::EuclideanSheaf{T}) where T
     return blocksparse(I, J, V, R, C)
 end
 
+
+# Sheaves with general restriction maps: assemble the coboundary as a sparse
+# matrix from each map's sparse form.
+function coboundary_map(s::EuclideanSheaf{T,<:AbstractRestrictionMap}) where T
+    edge_list = collect(edges(s.underlying_graph))
+    row_offsets = [0; cumsum([get_edge_stalk(s, src(e), dst(e)) for e in edge_list])]
+    col_offsets = [0; cumsum(s.vertex_stalks)]
+    I, J, V = Int[], Int[], T[]
+    for (k, e) in enumerate(edge_list), (v, w, sign) in ((src(e), dst(e), one(T)), (dst(e), src(e), -one(T)))
+        rows, cols, vals = findnz(sparse(s.restriction_maps[v => w]))
+        append!(I, row_offsets[k] .+ rows)
+        append!(J, col_offsets[v] .+ cols)
+        append!(V, sign .* vals)
+    end
+    return sparse(I, J, V, row_offsets[end], col_offsets[end])
+end
+
+"""
+    coboundary_operator(s::EuclideanSheaf) -> LinearOperator
+
+The coboundary ``\\delta : C^0 \\to C^1``, ``(\\delta x)_e = F_{u \\trianglelefteq e} x_u - F_{v \\trianglelefteq e} x_v``
+for ``e = (u, v)`` in the edge order of the underlying graph, as a matrix-free
+`LinearOperator`. Its adjoint applies ``\\delta^\\mathsf{T}``. Only products with the
+restriction maps and their adjoints are used, so this works for maps given as
+[`FunctionRestriction`](@ref)s.
+"""
+function coboundary_operator(s::EuclideanSheaf{T}) where T
+    edge_list = collect(edges(s.underlying_graph))
+    row_offsets = [0; cumsum([get_edge_stalk(s, src(e), dst(e)) for e in edge_list])]
+    col_offsets = [0; cumsum(s.vertex_stalks)]
+    vblock(x, v) = view(x, col_offsets[v]+1:col_offsets[v+1])
+    eblock(y, k) = view(y, row_offsets[k]+1:row_offsets[k+1])
+    function prod!(y, x, α, β)
+        δx = zeros(T, row_offsets[end])
+        for (k, e) in enumerate(edge_list)
+            u, v = src(e), dst(e)
+            eblock(δx, k) .= s.restriction_maps[u => v] * vblock(x, u) .- s.restriction_maps[v => u] * vblock(x, v)
+        end
+        iszero(β) ? (y .= α .* δx) : (y .= α .* δx .+ β .* y)
+        return y
+    end
+    function tprod!(x, y, α, β)
+        δty = zeros(T, col_offsets[end])
+        for (k, e) in enumerate(edge_list)
+            u, v = src(e), dst(e)
+            ye = Vector(eblock(y, k))
+            vblock(δty, u) .+= s.restriction_maps[u => v]' * ye
+            vblock(δty, v) .-= s.restriction_maps[v => u]' * ye
+        end
+        iszero(β) ? (x .= α .* δty) : (x .= α .* δty .+ β .* x)
+        return x
+    end
+    return LinearOperator(T, row_offsets[end], col_offsets[end], false, false, prod!, tprod!, tprod!)
+end
+
 function sheaf_laplacian(s::EuclideanSheaf)
     B = coboundary_map(s)
     return x -> B' * (B * x)
@@ -343,8 +429,8 @@ function restricted_laplacian_blocks(s::EuclideanSheaf{T},
         # Skip edges entirely in the boundary subgraph
         (u_pos_I == 0 && v_pos_I == 0) && continue
 
-        ρ_u = s.restriction_maps[u => v]   # d_e × d_u
-        ρ_v = s.restriction_maps[v => u]   # d_e × d_v
+        ρ_u = _as_matrix(s.restriction_maps[u => v])   # d_e × d_u
+        ρ_v = _as_matrix(s.restriction_maps[v => u])   # d_e × d_v
         du  = s.vertex_stalks[u]
         dv  = s.vertex_stalks[v]
 

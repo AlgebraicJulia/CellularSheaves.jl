@@ -96,8 +96,9 @@ end
         @test ne(underlying_graph(s)) == 3
         @test !has_edge(underlying_graph(s), 1, 4)
         @test edge_stalks(s)[UnorderedPair(1, 2)] == 1
-        @test get_restriction_map(s, 1, 2) == [0.0 0.0 1.0]
-        @test get_restriction_map(s, 3, 1) == [1.0 0.0 0.0]
+        @test get_restriction_map(s, 1, 2) isa SelectionRestriction{Float64}
+        @test Matrix(get_restriction_map(s, 1, 2)) == [0.0 0.0 1.0]
+        @test Matrix(get_restriction_map(s, 3, 1)) == [1.0 0.0 0.0]
         # H⁰ ≅ functions on the union of the cover: one dimension per dof.
         @test size(nullspace_ldlt(s), 2) == 7
 
@@ -134,7 +135,8 @@ end
         @test dd.cover.subdomains == doms
         @test dd.cover.graph == underlying_graph(overlap_sheaf(dd))
         @test has_edge(dd.cover.graph, 1, 5)          # diagonal boxes overlap
-        @test !has_edge(dd.cover.graph, 1, 3)
+        @test isempty(intersect(doms[1], doms[3]))      # interiors of boxes 1 and 3 are disjoint
+        @test has_edge(dd.cover.graph, 1, 3) == !isempty(intersect(dd.cover.stalks[1], dd.cover.stalks[3]))
         @test dd.ownership.owner == parts
         @test all(lp.coupling == A[lp.dofs, lp.boundary] for lp in dd.locals)
         @test occursin("9 subdomains", sprint(show, dd))
@@ -149,7 +151,7 @@ end
     @testset "localize / glue / disagreement" begin
         x = localize(dd, u_exact)
         @test x isa BlockVector
-        @test blocklengths(axes(x, 1)) == length.(doms)
+        @test blocklengths(axes(x, 1)) == length.(dd.cover.stalks)
         @test glue(dd, x) ≈ u_exact
         @test overlap_disagreement(dd, x) ≈ 0 atol = 1e-10
         y = copy(x)
@@ -205,7 +207,8 @@ end
         @test_throws ArgumentError SchwarzDecomposition(A, [doms[1]])            # not a cover
         @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=fill(1, n))
         nonoverlap = overlapping_subdomains(A, parts; overlap=0)
-        @test_throws ArgumentError SchwarzDecomposition(A, nonoverlap; owner=parts)
+        @test_throws ArgumentError SchwarzDecomposition(A, nonoverlap; owner=parts,
+            transmission=RobinTransmission(1.0))                             # Robin needs overlap
         @test_throws ArgumentError SchwarzProblem(dd, f[1:end-1])
         @test_throws ArgumentError SchwarzDecomposition(sparse([1.0 2.0; 0.0 1.0]), [[1, 2]])
     end
@@ -272,8 +275,8 @@ end
         hom = box_aggregation(4)
         pf = pushforward_sheaf(hom, overlap_sheaf(dd8))
         exact = ExactPushforwardCoarseSpace(dd8, hom)
-        @test vertex_stalks(pf) == length.(exact.decomposition.cover.subdomains)
-        @test coarse_dimension(exact) == sum(vertex_stalks(pf))
+        @test vertex_stalks(pf) == length.(exact.decomposition.cover.stalks)
+        @test coarse_dimension(exact) == sum(length, exact.decomposition.cover.subdomains)
         @test ne(underlying_graph(pf)) == ne(exact.decomposition.cover.graph)
 
         tc = TruncatedPushforwardCoarseSpace(dd8, hom)
@@ -281,7 +284,7 @@ end
         bases = all_fiber_bases(hom, overlap_sheaf(dd8))
         for h in 1:hom.n_target
             fiber = fiber_vertices(hom, h)
-            local_section = reduce(vcat, [Vector(tc.basis[d, h]) for d in dd8.cover.subdomains[fiber]])
+            local_section = reduce(vcat, [Vector(tc.basis[d, h]) for d in dd8.cover.stalks[fiber]])
             B = bases[h]
             @test norm(B * (B \ local_section) - local_section) < 1e-8   # lies in (φ_*F)(h)
         end
@@ -339,7 +342,8 @@ end
                   for ℓ in unique(face.dof for face in corner.faces))
         for (i, lp) in enumerate(ddr.locals), face in lp.faces
             @test has_edge(ddr.cover.graph, i, face.source)
-            @test ddr.cover.subdomains[face.source][face.source_dof] == lp.dofs[face.dof]
+            @test ddr.cover.stalks[face.source][face.source_dof] == lp.dofs[face.dof]
+            @test ddr.cover.interior[face.source][face.source_dof]
         end
 
         for sweep in (ParallelSweep(), MultiplicativeSweep(), MulticolorSweep())
@@ -541,5 +545,77 @@ end
         @test size(Blift, 2) == 8                       # each team: a 2-dimensional space of sections
         L = Matrix(sheaf_laplacian_matrix(s))
         @test Matrix(sheaf_laplacian_matrix(pf)) ≈ Blift' * L * Blift atol = 1e-8 * norm(L)
+    end
+
+    @testset "ghost-layer covers" begin
+        cover = dd.cover
+        for (i, lp) in enumerate(dd.locals)
+            @test cover.stalks[i] == sort(union(doms[i], lp.boundary))
+            @test cover.stalks[i][lp.interior] == doms[i]
+            @test cover.stalks[i][lp.ghosts] == lp.boundary
+            # Every ghost value comes from its owner through a shared edge stalk.
+            for k in lp.boundary
+                j = dd.ownership.owner[k]
+                @test has_edge(cover.graph, i, j)
+                @test k in cover.stalks[i][cover.overlaps[i => j]]
+            end
+        end
+        s = overlap_sheaf(dd)
+        @test s isa EuclideanSheaf{Float64,SelectionRestriction{Float64}}
+        @test coboundary_map(s) isa SparseMatrixCSC
+        @test ghost_layer_cover(A, doms).stalks == cover.stalks
+        @test OverlapCover(doms).stalks == doms                  # no ghosts without a matrix
+
+        # Ghost layers carry the interface, so non-overlapping subdomains work:
+        # the sweeps become block Gauss–Seidel and block Jacobi.
+        blocks0 = overlapping_subdomains(A, parts; overlap=0)
+        dd0 = SchwarzDecomposition(A, blocks0; owner=parts)
+        @test all(lp -> !isempty(lp.ghosts), dd0.locals)
+        for sweep in (MultiplicativeSweep(), MulticolorSweep(), ParallelSweep())
+            r = stationary(dd0, f; sweep, tol=1e-10, maxiter=5000)
+            @test r.converged
+            @test r.u ≈ u_exact rtol = 1e-8
+        end
+    end
+
+    @testset "sheaf ADMM" begin
+        objectives = local_objectives(prob)
+        K = spzeros(n, n)
+        b = zeros(n)
+        for (obj, s) in zip(objectives, dd.cover.stalks)
+            K[s, s] += obj.matrix
+            b[s] += obj.rhs
+            @test isposdef(Matrix(obj.matrix) + 1e-12I)      # every local objective is convex
+        end
+        @test K ≈ A                                          # the energy splits exactly
+        @test b ≈ f
+
+        h = 1 / (m + 1)
+        ρ = optimized_robin_parameter(5h) / h
+        for penalty in (:stalk, :shared)
+            r = solve(prob, SheafADMM(rho=ρ, penalty=penalty, tol=1e-9, maxiter=5000))
+            @test r.converged
+            @test r.u ≈ u_exact rtol = 1e-7
+        end
+        @test_throws ArgumentError solve(prob, SheafADMM(rho=0.0))
+        @test_throws ArgumentError solve(prob, SheafADMM(rho=1.0, penalty=:edges))
+
+        # On strips, sheaf diffusion can replace the exact projection; ADMM
+        # converges but optimized Schwarz needs far fewer iterations.
+        ms = 24
+        As = poisson2d(ms)
+        strips = [cld(jx * 4, ms) for jy in 1:ms for jx in 1:ms]
+        sdoms = overlapping_subdomains(As, strips; overlap=1)
+        fs = ones(ms * ms)
+        hs = 1 / (ms + 1)
+        ps = optimized_robin_parameter(3hs) / hs
+        dds = SchwarzDecomposition(As, sdoms; owner=strips)
+        admm = solve(SchwarzProblem(dds, fs), SheafADMM(rho=ps, maxiter=5000))
+        diffused = solve(SchwarzProblem(dds, fs), SheafADMM(rho=ps, penalty=:shared, projection_steps=1, maxiter=5000))
+        robin = stationary(SchwarzDecomposition(As, sdoms; owner=strips, transmission=RobinTransmission(ps)), fs;
+            sweep=ParallelSweep())
+        @test admm.converged && diffused.converged && robin.converged
+        @test admm.u ≈ As \ fs rtol = 1e-6
+        @test 5 * robin.iterations < admm.iterations
     end
 end
