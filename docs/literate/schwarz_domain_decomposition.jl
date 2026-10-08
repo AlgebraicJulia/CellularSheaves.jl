@@ -205,6 +205,69 @@ for name in unique(r.name for r in rows)
 end
 plt
 
+# ## Robin transmission conditions
+#
+# Classical Schwarz passes *Dirichlet* data across each edge of the overlap
+# graph. Optimized Schwarz methods pass *Robin* data
+# ``(\partial_n + p)\,u`` instead, which damps low frequencies along the
+# interface far better. Here this is done algebraically: the interface rows of
+# each local matrix get a Neumann correction plus the Robin parameter ``p``. The
+# exact solution stays the fixed point.
+#
+# Gander's optimized parameter for overlap width ``L`` is a continuous
+# quantity. For our ``h^{-2}``-scaled matrix we divide it by ``h``. With overlap
+# ``\delta`` grid layers on each side, the overlap width is ``L = (2\delta+1)h``.
+#
+# First on four vertical strips, where subdomain boundaries never meet:
+
+h = 1 / (m + 1)
+strips = [cld(jx * 4, m) for jy in 1:m for jx in 1:m]
+strip_domains = overlapping_subdomains(A, strips; overlap=1)
+pstar = optimized_robin_parameter(3h) / h
+for scale in (nothing, 0.125, 0.5, 1, 2, 8)
+    robin = scale === nothing ? nothing : scale * pstar
+    dds = SchwarzDecomposition(A, strip_domains; owner=strips, robin)
+    r = schwarz_solve(dds, f; method=:parallel, tol=1e-8, maxiter=3000)
+    println(rpad(scale === nothing ? "Dirichlet" : "p = $(scale) p*", 14), r.iterations, " sweeps")
+end
+
+# The optimized parameter cuts the sweep count by an order of magnitude, and
+# the formula's ``p^*`` is close to the best value.
+#
+# On boxes, four subdomains meet at each *cross point*. Discrete optimized
+# Schwarz methods are known to be delicate there (Gander–Kwok 2013). On these
+# ``3 \times 3`` boxes ``p^*`` converges in about half the Dirichlet sweep
+# count, and ``2p^*`` does best. On a ``4 \times 4`` box grid with overlap 1,
+# however, the stationary iteration diverged for ``p \le p^*`` and converged
+# for ``p \ge 2p^*``. When in doubt, err towards larger ``p``, or use the CG
+# solver below.
+
+for scale in (1, 2, 4)
+    ddr = SchwarzDecomposition(A, subdomains; owner=parts, robin=scale * optimized_robin_parameter(5h) / h)
+    r = schwarz_solve(ddr, f; method=:multicolor, tol=1e-8, maxiter=3000)
+    println("p = $(scale) p*: ", r.converged ? "$(r.iterations) sweeps" : "diverged")
+end
+println("Dirichlet: ", schwarz_solve(dd, f; method=:multicolor, tol=1e-8).iterations, " sweeps")
+
+# ## Krylov acceleration
+#
+# The additive Schwarz operator ``\sum_i R_i^\mathsf{T} A_i^{-1} R_i`` is
+# symmetric positive definite, so it can precondition conjugate gradients.
+# Adding the truncated pushforward coarse space gives the classical two-level
+# preconditioner. Its iteration count stays bounded as subdomains are added,
+# while one-level CG grows.
+
+for p in (4, 8, 16)
+    mp = 8p
+    Ap = poisson2d(mp)
+    pp = box_partition(mp, p)
+    ddp = SchwarzDecomposition(Ap, overlapping_subdomains(Ap, pp; overlap=1); owner=pp)
+    fp = ones(mp^2)
+    one_level = schwarz_cg(ddp, fp).iterations
+    two_level = schwarz_cg(ddp, fp; coarse=TruncatedPushforwardCoarseSpace(ddp)).iterations
+    println("$(p)×$(p) boxes: one-level CG $one_level, two-level CG $two_level")
+end
+
 # ## The solution
 
 heatmap(xs, xs, reshape(par.u, m, m)'; aspect_ratio=1, title="u (parallel Schwarz)")

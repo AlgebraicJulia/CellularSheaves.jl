@@ -11,7 +11,8 @@ module SchwarzMethods
 
 export SchwarzDecomposition, SchwarzResult, overlap_sheaf, overlapping_subdomains,
     AbstractCoarseSpace, TruncatedPushforwardCoarseSpace, ExactPushforwardCoarseSpace,
-    coarse_dimension, coarse_correct!,
+    coarse_dimension, coarse_correct!, optimized_robin_parameter,
+    SchwarzPreconditioner, schwarz_preconditioner, schwarz_cg,
     localize, glue, overlap_disagreement, schwarz_step!, schwarz_solve
 
 using ArgCheck: @argcheck
@@ -21,6 +22,7 @@ using LinearAlgebra
 using LinearAlgebra: ldlt!, RowMaximum
 using SparseArrays
 using CliqueTrees.Multifrontal: ChordalLDLt
+using Krylov: cg
 
 using ..SheafInterface: add_sheaf_edge!
 using ..EuclideanSheaves: EuclideanSheaf
@@ -227,7 +229,7 @@ end
 # ===== Decomposition =====
 
 """
-    SchwarzDecomposition(A, subdomains; owner=nothing)
+    SchwarzDecomposition(A, subdomains; owner=nothing, robin=nothing)
 
 An overlapping domain decomposition of the sparse symmetric positive-definite
 system ``A u = f`` (typically a finite-difference or finite-element
@@ -241,9 +243,8 @@ must cover `1:size(A, 1)`. The decomposition stores
 - for each subdomain its *discrete boundary*
   ``\\Gamma_i = \\{k \\notin \\Omega_i : A_{km} \\neq 0 \\text{ for some } m \\in \\Omega_i\\}``
   and the coupling block ``A_{\\Omega_i \\Gamma_i}``;
-- a sparse `ChordalLDLt` factorization of the local stiffness matrix
-  ``A_i = A_{\\Omega_i \\Omega_i}`` (SPD, as a principal submatrix of an SPD
-  matrix), computed once and reused by every local solve.
+- a sparse `ChordalLDLt` factorization of the local matrix ``\\tilde A_i``
+  (below), computed once and reused by every local solve.
 
 `owner[k]` names the subdomain whose copy supplies dof `k` when another
 subdomain needs it as Dirichlet data, and when a cochain is glued back to a
@@ -254,6 +255,39 @@ Every boundary dof ``k \\in \\Gamma_i`` must be owned by a subdomain that
 overlaps ``\\Omega_i``, so that all communication runs along edges of the
 overlap graph; a decomposition built with `overlap >= 1` by
 [`overlapping_subdomains`](@ref) always satisfies this.
+
+# Transmission conditions
+
+With `robin = nothing` (the default) the local matrix is
+``\\tilde A_i = A_{\\Omega_i\\Omega_i}``: each subdomain takes *Dirichlet* data
+from its neighbours, as in classical Schwarz.
+
+With `robin = p` the subdomains exchange *Robin* data instead, which gives
+optimized Schwarz methods (Gander 2006). In the algebraic form of
+St-Cyr–Gander–Thomas (2007), the interface rows of the local matrix are
+modified,
+
+```math
+\\tilde A_i = A_{\\Omega_i\\Omega_i} - N_i + P_i ,
+```
+
+where the *interface* dofs of ``\\Omega_i`` are those coupled to ``\\Gamma_i``.
+``N_i = \\mathrm{diag}\\big(\\sum_{k \\in \\Gamma_i} |A_{mk}|\\big)`` removes the
+Dirichlet coupling and leaves an algebraic Neumann condition. ``P_i`` is
+diagonal with the Robin parameter on interface dofs. The modification acts only
+on interface rows, so the Robin data comes from the neighbours' copies of those
+dofs, and the exact solution is still the fixed point.
+
+`p` is a positive number, or a function `(i, j) -> p_ij` giving a parameter per
+edge of the overlap graph: interface dof ``m`` of ``\\Omega_i`` uses the edge to
+the owner ``j`` of a boundary dof next to ``m``. A large `p` approaches the
+Dirichlet method. `p` is in the units of `A`: for a stencil scaled by
+``h^{-2}``, a continuous Robin parameter ``p`` corresponds to ``p/h`` (see
+[`optimized_robin_parameter`](@ref)). Every ``\\tilde A_i`` must be positive
+definite, which holds for diagonally dominant `A` (e.g. M-matrices) and
+`p > 0`; this is checked.
+
+# Coloring
 
 `colors` partitions the subdomains into color classes for the `:multicolor`
 sweep of [`schwarz_step!`](@ref). Two subdomains get different colors when they
@@ -271,12 +305,52 @@ struct SchwarzDecomposition{T,F}
     overlaps::Dict{Pair{Int,Int},Vector{Int}}
     boundary::Vector{Vector{Int}}
     coupling::Vector{SparseMatrixCSC{T,Int}}
+    interface::Vector{Vector{Int}}
+    robin_shift::Vector{Vector{T}}
     factors::Vector{F}
     colors::Vector{Vector{Int}}
 end
 
+# Interface dofs of Ω_i (local indices) and the diagonal shift P_i − N_i on
+# them. Returns empty data for Dirichlet transmission.
+function _robin_shift(S::SparseMatrixCSC{T}, dom, Γ, owner, i, robin) where {T}
+    robin === nothing && return Int[], T[]
+    param = robin isa Function ? robin : (_, _) -> robin
+    on_boundary = falses(size(S, 1))
+    on_boundary[Γ] .= true
+    interface, shift = Int[], T[]
+    for (ℓ, m) in enumerate(dom)
+        neumann = zero(T)
+        across = 0
+        for idx in nzrange(S, m)
+            k = rowvals(S)[idx]
+            if on_boundary[k] && !iszero(nonzeros(S)[idx])
+                neumann += abs(nonzeros(S)[idx])
+                across == 0 && (across = owner[k])
+            end
+        end
+        across == 0 && continue
+        p = T(param(i, across))
+        @argcheck p > 0 "Robin parameters must be positive (got $p on edge $(i)–$(across))"
+        push!(interface, ℓ)
+        push!(shift, p - neumann)
+    end
+    return interface, shift
+end
+
+function _local_factor(S::SparseMatrixCSC, dom, interface, shift, i)
+    Ai = S[dom, dom]
+    if !isempty(interface)
+        Ai = Ai + sparse(interface, interface, shift, length(dom), length(dom))
+    end
+    M = ldlt!(ChordalLDLt(Ai), RowMaximum(); check=false)
+    @argcheck all(>(0), M.D.diag) "the local matrix of subdomain $i is not positive definite; increase the Robin parameter"
+    return M
+end
+
 function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}};
-                              owner::Union{Nothing,AbstractVector{<:Integer}}=nothing)
+                              owner::Union{Nothing,AbstractVector{<:Integer}}=nothing,
+                              robin::Union{Nothing,Real,Function}=nothing)
     n = size(A, 1)
     @argcheck size(A, 2) == n "A must be square"
     S = dropzeros(sparse(float.(A)))
@@ -308,10 +382,38 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
     end
 
     coupling = [S[d, Γ] for (d, Γ) in zip(doms, boundary)]
-    factors = [ldlt!(ChordalLDLt(S[d, d]), RowMaximum()) for d in doms]
+    robin_data = [_robin_shift(S, d, Γ, own, i, robin) for (i, (d, Γ)) in enumerate(zip(doms, boundary))]
+    interface, shift = first.(robin_data), last.(robin_data)
+    factors = [_local_factor(S, d, interface[i], shift[i], i) for (i, d) in enumerate(doms)]
     colors = _greedy_coloring(_conflict_graph(graph, boundary, members))
     return SchwarzDecomposition{eltype(S),eltype(factors)}(
-        S, doms, own, owner_local, graph, overlaps, boundary, coupling, factors, colors)
+        S, doms, own, owner_local, graph, overlaps, boundary, coupling, interface, shift, factors, colors)
+end
+
+"""
+    optimized_robin_parameter(L; kmin=π, η=0) -> Real
+
+The optimized Robin parameter of zeroth order for overlapping Schwarz on
+``(\\eta - \\Delta) u = f``, to leading order in the overlap width ``L``:
+
+```math
+p^* = \\frac{(k_{\\min}^2 + \\eta)^{1/3}}{(2L)^{1/3}}
+```
+
+(Gander 2006, overlapping OO0). ``k_{\\min}`` is the lowest frequency along the
+interface, ``\\pi / \\ell`` for an interface of length ``\\ell`` with Dirichlet
+ends. With Robin transmission the contraction factor is ``1 - O(L^{1/3})``
+instead of ``1 - O(L)`` for Dirichlet transmission.
+
+This is a parameter of the continuous problem. For a finite-difference matrix
+scaled by ``h^{-2}``, pass `robin = p / h` to [`SchwarzDecomposition`](@ref).
+The formula is asymptotic and for model problems, so treat it as a starting
+point.
+"""
+function optimized_robin_parameter(L::Real; kmin::Real=π, η::Real=0)
+    @argcheck L > 0 "the overlap width must be positive"
+    @argcheck kmin > 0 && η >= 0
+    return cbrt(kmin^2 + η) / cbrt(2L)
 end
 
 overlap_sheaf(dd::SchwarzDecomposition{T}) where {T} =
@@ -385,11 +487,19 @@ end
 
 # ===== Schwarz iteration =====
 
-# Dirichlet subproblem on Ω_i: A_i x_i = f|Ω_i − A_{Ω_i Γ_i} g_i, where g_i
-# reads each boundary dof from its owner's copy.
+# Subproblem on Ω_i: Ã_i x_i = f|Ω_i − A_{Ω_i Γ_i} g_i + (Ã_i − A_i) s_i, where
+# g_i and the interface values s_i are read from their owners' copies. The
+# last term is the Robin data and vanishes for Dirichlet transmission.
+_owned_value(dd::SchwarzDecomposition, xs, k::Int) = xs[dd.owner[k]][dd.owner_local[k]]
+
 function _local_solve(dd::SchwarzDecomposition, i::Int, xs, f::AbstractVector)
-    g = [xs[dd.owner[k]][dd.owner_local[k]] for k in dd.boundary[i]]
-    return _ldlt_solve(dd.factors[i], f[dd.subdomains[i]] - dd.coupling[i] * g)
+    dom = dd.subdomains[i]
+    g = [_owned_value(dd, xs, k) for k in dd.boundary[i]]
+    b = f[dom] - dd.coupling[i] * g
+    for (ℓ, w) in zip(dd.interface[i], dd.robin_shift[i])
+        b[ℓ] += w * _owned_value(dd, xs, dom[ℓ])
+    end
+    return _ldlt_solve(dd.factors[i], b)
 end
 
 # Local solve on Ω_i, then push the result along the restriction maps onto
@@ -445,6 +555,15 @@ overlap graph).
   (Efstathiou–Gander 2003). It converges when `A` is an M-matrix, such as
   standard discretizations of ``-\\Delta`` (Frommer–Szyld 2001), but not for
   every SPD matrix.
+
+With Robin transmission (`robin = p` in [`SchwarzDecomposition`](@ref)) each
+local solve uses the modified matrix ``\\tilde A_i``. The glued `:parallel`
+iterate is then optimized restricted additive Schwarz (ORAS), and the
+multiplicative sweeps are optimized multiplicative Schwarz (St-Cyr–Gander–Thomas
+2007). A good `p` contracts much faster than Dirichlet transmission. As
+``\\tilde A_i`` no longer dominates ``A_{\\Omega_i\\Omega_i}``, convergence of the
+stationary iteration is not guaranteed for every `p`. Use
+[`schwarz_cg`](@ref) when a guarantee is needed.
 """
 function schwarz_step!(x::BlockVector, dd::SchwarzDecomposition, f::AbstractVector;
                        method::Symbol=:multiplicative, order=eachindex(dd.subdomains))
@@ -577,7 +696,7 @@ function TruncatedPushforwardCoarseSpace(dd::SchwarzDecomposition{T}, hom::Graph
 end
 
 """
-    ExactPushforwardCoarseSpace(dd, hom; method=:multicolor)
+    ExactPushforwardCoarseSpace(dd, hom; method=:multicolor, robin=nothing)
 
 The coarse level given by the full pushforward ``\\varphi_* F`` of the overlap
 sheaf along ``\\varphi`` = `hom`. Its stalk at an aggregate ``h`` is all
@@ -597,7 +716,9 @@ no scalability). The level carries no global information beyond its
 aggregates, so with a fixed aggregation ratio it is a one-level method on
 larger subdomains: the iteration count grows with the number of aggregates and
 eventually exceeds that of [`TruncatedPushforwardCoarseSpace`](@ref), while its
-factorizations cost as much as the whole problem plus overlaps.
+factorizations cost as much as the whole problem plus overlaps. `robin` sets
+the transmission conditions between aggregates, as in
+[`SchwarzDecomposition`](@ref).
 """
 struct ExactPushforwardCoarseSpace{D<:SchwarzDecomposition} <: AbstractCoarseSpace
     hom::GraphHomomorphism
@@ -605,13 +726,15 @@ struct ExactPushforwardCoarseSpace{D<:SchwarzDecomposition} <: AbstractCoarseSpa
     method::Symbol
 end
 
-function ExactPushforwardCoarseSpace(dd::SchwarzDecomposition, hom::GraphHomomorphism; method::Symbol=:multicolor)
+function ExactPushforwardCoarseSpace(dd::SchwarzDecomposition, hom::GraphHomomorphism;
+                                     method::Symbol=:multicolor,
+                                     robin::Union{Nothing,Real,Function}=nothing)
     _check_hom(dd, hom)
     @argcheck method in SCHWARZ_METHODS "method must be one of $SCHWARZ_METHODS"
     aggregates = [reduce(vcat, (dd.subdomains[i] for i in fiber_vertices(hom, h)))
                   for h in 1:hom.n_target]
     owner = hom.vertex_map[dd.owner]
-    return ExactPushforwardCoarseSpace(hom, SchwarzDecomposition(dd.A, aggregates; owner), method)
+    return ExactPushforwardCoarseSpace(hom, SchwarzDecomposition(dd.A, aggregates; owner, robin), method)
 end
 
 """
@@ -730,6 +853,116 @@ function schwarz_solve(dd::SchwarzDecomposition{T}, f::AbstractVector;
         push!(disagreements, T(overlap_disagreement(dd, x)))
     end
     return SchwarzResult{T}(u, x, residuals, disagreements, iterations, last(residuals) <= tol)
+end
+
+# ===== Krylov acceleration =====
+
+"""
+    SchwarzPreconditioner
+
+The two-level additive Schwarz preconditioner built by
+[`schwarz_preconditioner`](@ref). Apply it with `P * r` or `mul!(z, P, r)`.
+"""
+struct SchwarzPreconditioner{T,D<:SchwarzDecomposition{T},C}
+    decomposition::D
+    coarse::C
+end
+
+"""
+    schwarz_preconditioner(dd::SchwarzDecomposition; coarse=nothing) -> SchwarzPreconditioner
+
+The additive Schwarz preconditioner on the overlap sheaf of `dd`,
+
+```math
+M^{-1} r = \\sum_i R_i^\\mathsf{T} \\tilde A_i^{-1} R_i\\, r + (\\text{coarse term}),
+```
+
+where ``R_i`` restricts to ``\\Omega_i`` and ``\\tilde A_i`` is the local matrix
+of `dd` (Dirichlet, or Robin when `dd` was built with `robin`). All local
+solves are independent and run concurrently (`Threads.@threads`). The coarse
+term is
+
+- ``\\Phi A_0^{-1} \\Phi^\\mathsf{T} r`` for a
+  [`TruncatedPushforwardCoarseSpace`](@ref), the two-level additive Schwarz
+  method (Toselli–Widlund 2005, ch. 3);
+- ``\\sum_h \\widehat R_h^\\mathsf{T} \\widehat A_h^{-1} \\widehat R_h r`` over the
+  aggregates of an [`ExactPushforwardCoarseSpace`](@ref).
+
+The full restrictions ``R_i^\\mathsf{T}`` (not the owner-restricted ones of
+RAS) keep ``M^{-1}`` symmetric. It is positive definite because each
+``\\tilde A_i`` is, so it can precondition conjugate gradients
+([`schwarz_cg`](@ref)).
+"""
+function schwarz_preconditioner(dd::SchwarzDecomposition{T};
+                                coarse::Union{Nothing,AbstractCoarseSpace}=nothing) where {T}
+    return SchwarzPreconditioner{T,typeof(dd),typeof(coarse)}(dd, coarse)
+end
+
+Base.size(P::SchwarzPreconditioner) = size(P.decomposition.A)
+Base.size(P::SchwarzPreconditioner, d::Integer) = size(P.decomposition.A, d)
+Base.eltype(::SchwarzPreconditioner{T}) where {T} = T
+
+function _additive!(y::AbstractVector, dd::SchwarzDecomposition{T}, r::AbstractVector) where {T}
+    corrections = Vector{Vector{T}}(undef, length(dd.subdomains))
+    Threads.@threads for i in eachindex(dd.subdomains)
+        corrections[i] = _ldlt_solve(dd.factors[i], r[dd.subdomains[i]])
+    end
+    fill!(y, zero(eltype(y)))
+    for (d, z) in zip(dd.subdomains, corrections)
+        view(y, d) .+= z
+    end
+    return y
+end
+
+_add_coarse!(y, ::Nothing, r) = y
+_add_coarse!(y, c::TruncatedPushforwardCoarseSpace, r) =
+    (y .+= c.basis * _ldlt_solve(c.factor, c.basis' * r); y)
+_add_coarse!(y, c::ExactPushforwardCoarseSpace, r) =
+    (y .+= _additive!(similar(y), c.decomposition, r); y)
+
+function LinearAlgebra.mul!(y::AbstractVector, P::SchwarzPreconditioner, r::AbstractVector)
+    @argcheck length(y) == length(r) == size(P, 1)
+    _additive!(y, P.decomposition, r)
+    return _add_coarse!(y, P.coarse, r)
+end
+
+Base.:*(P::SchwarzPreconditioner{T}, r::AbstractVector) where {T} =
+    mul!(similar(r, promote_type(T, eltype(r))), P, r)
+
+"""
+    schwarz_cg(dd::SchwarzDecomposition, f; coarse=nothing, tol=1e-8, maxiter=1000)
+        -> (; u, residuals, iterations, converged)
+
+Solve ``A u = f`` by conjugate gradients (Krylov.jl) preconditioned with
+[`schwarz_preconditioner`](@ref)`(dd; coarse)`, from a zero initial guess.
+Unlike the stationary [`schwarz_solve`](@ref), this converges for every SPD
+`A`, with every coarse space and with Robin transmission. The two-level
+version needs a number of iterations bounded independently of the number of
+subdomains (Toselli–Widlund 2005, Thm. 3.13).
+
+`residuals` holds the relative residual ``\\|f - A u_k\\| / \\|f\\|`` of each
+iterate (entry 1 is the initial guess), and iteration stops once it drops below
+`tol`, the same criterion as [`schwarz_solve`](@ref).
+"""
+function schwarz_cg(dd::SchwarzDecomposition{T}, f::AbstractVector;
+                    coarse::Union{Nothing,AbstractCoarseSpace}=nothing,
+                    tol::Real=1e-8, maxiter::Integer=1000) where {T}
+    @argcheck length(f) == size(dd.A, 1)
+    @argcheck maxiter >= 1
+    b = Vector{T}(f)
+    scale = norm(b)
+    scale = iszero(scale) ? one(T) : scale
+    residuals = T[norm(b) / scale]
+    if last(residuals) <= tol
+        return (; u=zeros(T, length(b)), residuals, iterations=0, converged=true)
+    end
+    function monitor(workspace)
+        push!(residuals, T(norm(b - dd.A * workspace.x) / scale))
+        return last(residuals) <= tol
+    end
+    u, stats = cg(dd.A, b; M=schwarz_preconditioner(dd; coarse), atol=zero(T), rtol=zero(T),
+        itmax=maxiter, callback=monitor)
+    return (; u, residuals, iterations=stats.niter, converged=last(residuals) <= tol)
 end
 
 end

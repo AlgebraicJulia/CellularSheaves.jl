@@ -277,4 +277,117 @@ end
         @test all(two .< one)
         @test two[end] - two[1] < one[end] - one[1]
     end
+
+    # Robin local matrix built independently of the package: drop the coupling
+    # to outside dofs from the diagonal (algebraic Neumann) and add p.
+    function robin_local_matrix(A, d, p)
+        inside = falses(size(A, 1))
+        inside[d] .= true
+        Ai = Matrix(A[d, d])
+        for (ℓ, k) in enumerate(d)
+            outside = [r for r in findall(!iszero, A[:, k]) if !inside[r]]
+            isempty(outside) || (Ai[ℓ, ℓ] += p - sum(abs, A[outside, k]))
+        end
+        return Ai
+    end
+
+    @testset "Robin transmission" begin
+        h = 1 / (m + 1)
+        p = optimized_robin_parameter(5h) / h           # overlap 2 ⇒ L = 5h
+        ddr = SchwarzDecomposition(A, doms; owner=parts, robin=p)
+        @test all(isempty, dd.interface)
+        @test all(!isempty, ddr.interface)
+
+        for meth in (:parallel, :multiplicative, :multicolor)
+            x = localize(ddr, u_exact)
+            schwarz_step!(x, ddr, f; method=meth)
+            @test glue(ddr, x) ≈ u_exact                 # exact solution is still the fixed point
+        end
+
+        locals = [robin_local_matrix(A, d, p) for d in doms]
+        u0 = randn(n)
+        x = localize(ddr, u0)
+        u = copy(u0)
+        for _ in 1:3
+            schwarz_step!(x, ddr, f; method=:parallel)
+            r = f - A * u
+            du = zeros(n)
+            for (i, d) in enumerate(doms)
+                c = locals[i] \ r[d]
+                owned = parts[d] .== i
+                du[d[owned]] = c[owned]
+            end
+            u += du
+        end
+        @test glue(ddr, x) ≈ u                           # optimized RAS
+
+        x = localize(ddr, zeros(n))
+        u = zeros(n)
+        for _ in 1:2
+            schwarz_step!(x, ddr, f; method=:multiplicative)
+            for (i, d) in enumerate(doms)
+                u[d] += locals[i] \ (f - A * u)[d]
+            end
+        end
+        @test glue(ddr, x) ≈ u                           # optimized multiplicative Schwarz
+
+        per_edge = SchwarzDecomposition(A, doms; owner=parts, robin=(i, j) -> p)
+        @test per_edge.robin_shift == ddr.robin_shift
+        @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, robin=0.0)
+        @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, robin=(i, j) -> i == 1 ? -1.0 : p)
+
+        @test optimized_robin_parameter(0.1) ≈ cbrt(π^2) / cbrt(0.2)
+        @test optimized_robin_parameter(0.1; kmin=2.0, η=1.0) ≈ cbrt(5.0) / cbrt(0.2)
+        @test_throws ArgumentError optimized_robin_parameter(0.0)
+
+        # Strips have no cross points; there the optimized parameter is far
+        # better than Dirichlet transmission.
+        ms = 24
+        As = poisson2d(ms)
+        strips = [cld(jx * 4, ms) for jy in 1:ms for jx in 1:ms]
+        sdoms = overlapping_subdomains(As, strips; overlap=1)
+        fs = ones(ms * ms)
+        hs = 1 / (ms + 1)
+        dirichlet = schwarz_solve(SchwarzDecomposition(As, sdoms; owner=strips), fs; method=:parallel)
+        optimized = schwarz_solve(SchwarzDecomposition(As, sdoms; owner=strips,
+            robin=optimized_robin_parameter(3hs) / hs), fs; method=:parallel)
+        @test dirichlet.converged && optimized.converged
+        @test 3 * optimized.iterations < dirichlet.iterations
+        @test optimized.u ≈ As \ fs rtol = 1e-6
+    end
+
+    @testset "Schwarz-preconditioned CG" begin
+        A8 = poisson2d(8)
+        parts8 = box_partition(8, 2)
+        doms8 = overlapping_subdomains(A8, parts8; overlap=1)
+        for robin in (nothing, 50.0)
+            d8 = SchwarzDecomposition(A8, doms8; owner=parts8, robin)
+            for coarse in (nothing, TruncatedPushforwardCoarseSpace(d8),
+                           ExactPushforwardCoarseSpace(d8, GraphHomomorphism([1, 1, 2, 2])))
+                P = schwarz_preconditioner(d8; coarse)
+                Pm = reduce(hcat, [P * e for e in eachcol(Matrix(1.0I, 64, 64))])
+                @test Pm ≈ Pm'
+                @test eigmin(Symmetric(Pm)) > 0
+                @test size(P) == (64, 64) && eltype(P) == Float64
+            end
+        end
+
+        for coarse in (nothing, TruncatedPushforwardCoarseSpace(dd), ExactPushforwardCoarseSpace(dd, GraphHomomorphism(fill(1, 9))))
+            r = schwarz_cg(dd, f; coarse, tol=1e-10)
+            @test r.converged
+            @test r.u ≈ u_exact rtol = 1e-8
+            @test r.residuals[1] ≈ 1
+            @test length(r.residuals) == r.iterations + 1
+        end
+        ddr = SchwarzDecomposition(A, doms; owner=parts, robin=optimized_robin_parameter(5 / (m + 1)) * (m + 1))
+        @test schwarz_cg(ddr, f; tol=1e-10).u ≈ u_exact rtol = 1e-8
+        A128 = poisson2d(128)
+        parts128 = box_partition(128, 16)
+        d128 = SchwarzDecomposition(A128, overlapping_subdomains(A128, parts128; overlap=1); owner=parts128)
+        f128 = ones(128^2)
+        @test schwarz_cg(d128, f128; coarse=TruncatedPushforwardCoarseSpace(d128)).iterations <
+              schwarz_cg(d128, f128).iterations
+        z = schwarz_cg(dd, zeros(n))
+        @test z.converged && z.iterations == 0 && iszero(z.u)
+    end
 end

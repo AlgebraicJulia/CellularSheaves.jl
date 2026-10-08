@@ -27,6 +27,12 @@ solves on the aggregates themselves, which is more accurate per sweep while
 there are few aggregates, but scales worse and is
 costlier.
 
+Neighbouring subdomains exchange either Dirichlet data (classical Schwarz) or
+Robin data (optimized Schwarz, `robin = p` in [`SchwarzDecomposition`](@ref),
+with [`optimized_robin_parameter`](@ref) as a starting value). Besides the
+stationary iteration [`schwarz_solve`](@ref), the additive two-level operator
+preconditions conjugate gradients ([`schwarz_cg`](@ref)).
+
 See the [Schwarz domain decomposition](../generated/schwarz_domain_decomposition.md)
 example for a worked Poisson problem.
 
