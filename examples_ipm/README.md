@@ -1,6 +1,6 @@
 # IPM Benchmark Suite
 
-Benchmarks comparing the CellularSheaves IPM solver against commercial (Mosek) and open-source (Clarabel, OSQP) solvers.
+Benchmarks comparing the IPM solver (Mumblebee.jl, via `CellularSheaves.IPM`) against commercial (Mosek) and open-source (Clarabel, OSQP) solvers.
 
 ## Quick Start
 
