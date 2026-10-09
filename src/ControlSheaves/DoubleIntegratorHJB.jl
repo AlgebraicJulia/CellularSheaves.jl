@@ -70,7 +70,7 @@ using CommonSolve: solve
 using LinearAlgebra
 using SparseArrays
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, SchwarzProblem,
-    SchwarzIteration, MulticolorSweep, refactor, _stable_lu, _threaded_mul!
+    SchwarzIteration, MulticolorSweep, refactor!, _stable_lu, _threaded_mul!
 using Krylov: gmres
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
@@ -447,7 +447,8 @@ struct DirectPolicyEvaluation end
 Solve each policy evaluation by Schwarz domain decomposition: the grid is cut
 into `blocks[1] × blocks[2] × …` boxes ([`grid_partition`](@ref)), extended by
 `overlap` points ([`grid_subdomains`](@ref)); each box owns its points. Every
-policy iteration builds a `SchwarzDecomposition` of the new
+policy iteration refactors one `SchwarzDecomposition` (built at the first
+step, then updated in place with `refactor!`) for the new
 ``A_u`` on the same subdomains and solves it with `algorithm`
 (a `SchwarzIteration` or `SchwarzGMRES`), warm-started from the previous
 value function.
@@ -596,11 +597,13 @@ function _evaluate(e::KrylovPolicyEvaluation, blocks, A, At, b, V0)
     return V0 + dV, stats.niter, stats.solved, setup
 end
 
-# The cover, ownership and coloring are built once, from the full stencil, at
-# the first Newton step; later steps only refactor the local problems.
+# The cover, ownership and coloring are built once, from the full stencil (its
+# explicit zeros kept), at the first Newton step; later steps gather the new
+# values into the local problems and refactor their LUs numerically in place.
 function _evaluate(e::SchwarzPolicyEvaluation, (subdomains, parts, structure, cached), A, At, b, V0)
     setup = @elapsed dd = cached[] === nothing ?
-        SchwarzDecomposition(A, subdomains; owner = parts, structure) : refactor(cached[], A)
+        SchwarzDecomposition(A, subdomains; owner = parts, structure, dropzeros = false) :
+        refactor!(cached[], A; At)
     cached[] = dd
     result = solve(SchwarzProblem(dd, b; u0 = V0), e.algorithm)
     return result.u, result.iterations, result.converged, setup

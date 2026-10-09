@@ -674,5 +674,47 @@ end
         @test solve(SchwarzProblem(refactor(ddw, sparse(transpose(A))), f),
             SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000)).u ≈ sparse(transpose(A)) \ f rtol = 1e-8
         @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, structure=sparse(1.0I, m * m, m * m))
+
+        # refactor!: in place, on a fixed stored pattern with explicit zeros.
+        function embed(M)
+            Z = copy(wide)
+            nonzeros(Z) .= 0
+            for (i, j, v) in zip(findnz(M)...)
+                Z[i, j] = v
+            end
+            return Z
+        end
+        ddi = SchwarzDecomposition(embed(A), doms; owner=parts, dropzeros=false)
+        @test nnz(ddi.A) == nnz(wide)
+        for M in (A2, sparse(transpose(A)), A, A2)
+            Z = embed(M)
+            @test refactor!(ddi, Z) === ddi
+            @test ddi.At == sparse(transpose(Z))
+            for sweep in (MulticolorSweep(), ParallelSweep())
+                @test solve(SchwarzProblem(ddi, f), SchwarzIteration(sweep=sweep, tol=1e-10, maxiter=5000)).u ≈
+                    M \ f rtol = 1e-8
+            end
+        end
+        Z = embed(sparse(transpose(A)))
+        refactor!(ddi, Z; At=copy(transpose(Z)))
+        @test solve(SchwarzProblem(ddi, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=200)).u ≈
+            sparse(transpose(A)) \ f rtol = 1e-8
+        @test_throws ArgumentError refactor!(ddi, A2)                   # pattern differs
+        @test_throws ArgumentError refactor!(ddi, Z; At=A)
+    end
+
+    @testset "refactor! with ChordalLDLt local factors" begin
+        m = 12
+        L = poisson2d(m)
+        parts = index_boxes(m, 3)
+        doms = overlapping_subdomains(L, parts; overlap=1)
+        dd = SchwarzDecomposition(L, doms; owner=parts)
+        f = ones(m * m)
+        refactor!(dd, 2L)
+        refactor!(dd, L + 3I)
+        @test solve(SchwarzProblem(dd, f), SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000)).u ≈
+            (L + 3I) \ f rtol = 1e-8
+        robin = SchwarzDecomposition(L, doms; owner=parts, transmission=RobinTransmission(10.0))
+        @test_throws ArgumentError refactor!(robin, 2L)
     end
 end

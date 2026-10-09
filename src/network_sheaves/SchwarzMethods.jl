@@ -9,7 +9,7 @@
 # that cochain is a global section that glues to the solution of A u = f.
 module SchwarzMethods
 
-export OverlapCover, ghost_layer_cover, Ownership, LocalProblem, RobinFace, SchwarzDecomposition, refactor,
+export OverlapCover, ghost_layer_cover, Ownership, LocalProblem, RobinFace, SchwarzDecomposition, refactor, refactor!,
     overlap_sheaf, overlapping_subdomains, localize, glue, overlap_disagreement,
     TransmissionCondition, DirichletTransmission, RobinTransmission, optimized_robin_parameter,
     SchwarzSweep, MultiplicativeSweep, MulticolorSweep, ParallelSweep, schwarz_step!,
@@ -567,15 +567,18 @@ struct SchwarzDecomposition{T,F}
     locals::Vector{LocalProblem{T,F}}
     colors::Vector{Vector{Int}}
     transmission::TransmissionCondition
+    gather::Base.RefValue{Any}              # value maps for refactor!, built on first use
 end
 
 function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}};
                               owner::Union{Nothing,AbstractVector{<:Integer}}=nothing,
                               transmission::TransmissionCondition=DirichletTransmission(),
-                              structure::Union{Nothing,AbstractMatrix}=nothing)
+                              structure::Union{Nothing,AbstractMatrix}=nothing,
+                              dropzeros::Bool=true)
     n = size(A, 1)
     @argcheck size(A, 2) == n "A must be square"
-    S = dropzeros(sparse(float.(A)))
+    S = sparse(float.(A))
+    dropzeros && (S = SparseArrays.dropzeros(S))
     @argcheck issymmetric(S) || transmission isa DirichletTransmission "Robin transmission needs a symmetric A"
     @argcheck !isempty(subdomains) "need at least one subdomain"
     for (i, d) in enumerate(subdomains)
@@ -599,7 +602,8 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
     ownership = owner === nothing ? Ownership(cover, P) : Ownership(cover, owner)
     locals = _build_locals(_Assembly(S, cover, ownership, transmission))
     colors = _greedy_coloring(_conflict_graph(cover))
-    return SchwarzDecomposition(S, copy(transpose(S)), P, cover, ownership, locals, colors, transmission)
+    return SchwarzDecomposition(S, copy(transpose(S)), P, cover, ownership, locals, colors, transmission,
+        Ref{Any}(nothing))
 end
 
 """
@@ -619,7 +623,65 @@ function refactor(dd::SchwarzDecomposition, A::AbstractMatrix)
     @argcheck issymmetric(S) || dd.transmission isa DirichletTransmission "Robin transmission needs a symmetric A"
     locals = _build_locals(_Assembly(S, dd.cover, dd.ownership, dd.transmission))
     return SchwarzDecomposition(S, copy(transpose(S)), dd.structure, dd.cover, dd.ownership, locals,
-        dd.colors, dd.transmission)
+        dd.colors, dd.transmission, Ref{Any}(nothing))
+end
+
+"""
+    refactor!(dd::SchwarzDecomposition, A; At = nothing) -> dd
+
+In-place [`refactor`](@ref) for a matrix `A` with exactly the stored pattern of
+`dd.A` (build `dd` with `dropzeros = false` so that explicit zeros keep their
+slots). The values of `A` are gathered into the local problems through index
+maps computed on the first call, and each sparse LU is refactored numerically,
+reusing its symbolic analysis (column ordering and fill pattern). `At`, if
+given, must be `transpose(A)` with the stored pattern of `dd.At`; otherwise it
+is gathered from `A`. Needs [`DirichletTransmission`](@ref). Local
+`ChordalLDLt` factors are recomputed from scratch.
+"""
+function refactor!(dd::SchwarzDecomposition, A::SparseMatrixCSC; At::Union{Nothing,SparseMatrixCSC}=nothing)
+    @argcheck dd.transmission isa DirichletTransmission "refactor! needs Dirichlet transmission"
+    @argcheck size(A) == size(dd.A) && A.colptr == dd.A.colptr && rowvals(A) == rowvals(dd.A) "A must have the stored pattern of the decomposed matrix"
+    lu_factors = dd.locals[1].factor isa SparseArrays.UMFPACK.UmfpackLU
+    @argcheck lu_factors || issymmetric(A) "a decomposition with ChordalLDLt factors needs a symmetric A"
+    copyto!(nonzeros(dd.A), nonzeros(A))
+    if dd.gather[] === nothing
+        # Slices of the matrix of nonzero positions are the index maps (every
+        # stored position is ≥ 1, so slicing keeps them all).
+        index = SparseMatrixCSC(size(A)..., A.colptr, rowvals(A), collect(1.0:nnz(A)))
+        transposed = round.(Int, nonzeros(copy(transpose(index))))
+        maps = Vector{NTuple{2,Vector{Int}}}(undef, length(dd.locals))
+        Threads.@threads for i in eachindex(dd.locals)
+            loc = dd.locals[i]
+            Ai, Ci = index[loc.dofs, loc.dofs], index[loc.dofs, loc.boundary]
+            maps[i] = (round.(Int, nonzeros(Ai)), round.(Int, nonzeros(Ci)))
+            nonzeros(Ai) .= view(nonzeros(A), maps[i][1])
+            nonzeros(Ci) .= view(nonzeros(A), maps[i][2])
+            factor = lu_factors ? _stable_lu(Ai) : _local_factor(Ai, true, i)
+            dd.locals[i] = LocalProblem(loc.dofs, loc.boundary, loc.interior, loc.ghosts, Ci, loc.faces, factor)
+        end
+        dd.gather[] = (transposed, maps)
+    else
+        transposed, maps = dd.gather[]
+        Threads.@threads for i in eachindex(dd.locals)
+            loc = dd.locals[i]
+            local_map, coupling_map = maps[i]
+            nonzeros(loc.coupling) .= view(nonzeros(A), coupling_map)
+            if lu_factors
+                loc.factor.nzval .= view(nonzeros(A), local_map)
+                lu!(loc.factor)
+            else
+                dd.locals[i] = LocalProblem(loc.dofs, loc.boundary, loc.interior, loc.ghosts, loc.coupling,
+                    loc.faces, _local_factor(dd.A[loc.dofs, loc.dofs], true, i))
+            end
+        end
+    end
+    if At === nothing
+        nonzeros(dd.At) .= view(nonzeros(A), transposed)
+    else
+        @argcheck At.colptr == dd.At.colptr && rowvals(At) == rowvals(dd.At) "At must have the stored pattern of transpose(A)"
+        copyto!(nonzeros(dd.At), nonzeros(At))
+    end
+    return dd
 end
 
 # The local factorizations are independent: build them concurrently.
