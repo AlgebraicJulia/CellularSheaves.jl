@@ -71,9 +71,10 @@ using LinearAlgebra
 using SparseArrays
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, SchwarzProblem,
     SchwarzIteration, MulticolorSweep, _stable_lu
+using Krylov: gmres
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
-    PolicyIteration, DirectPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,
+    PolicyIteration, DirectPolicyEvaluation, KrylovPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,
     grid_partition, grid_subdomains, value_at, control_at
 
 # ===========================================================================
@@ -331,21 +332,27 @@ function _minimize_hamiltonian!(u, prob::HJBProblem, Dp, Dm)
     return u
 end
 
+# Pointwise, so the grid is split into chunks improved concurrently.
 function _improve!(U::AbstractMatrix, prob::HJBProblem, V::AbstractVector)
     g = prob.grid
     d, D = prob.axes, ndims(g)
-    x = zeros(D)
-    Dp, Dm, u = zeros(d), zeros(d), zeros(d)
-    @inbounds for (n, I) in enumerate(_cartesian(g))
-        _coordinates!(x, g, I)
-        for k in 1:d
-            j = d + k
-            h = g.spacing[j]
-            Dp[k] = (_neighbour_value(prob, V, x, I, n, j, 1) - V[n]) / h
-            Dm[k] = (V[n] - _neighbour_value(prob, V, x, I, n, j, -1)) / h
+    C = _cartesian(g)
+    chunks = collect(Iterators.partition(1:length(g), cld(length(g), 8 * Threads.nthreads())))
+    Threads.@threads for chunk in chunks
+        x = zeros(D)
+        Dp, Dm, u = zeros(d), zeros(d), zeros(d)
+        @inbounds for n in chunk
+            I = C[n]
+            _coordinates!(x, g, I)
+            for k in 1:d
+                j = d + k
+                h = g.spacing[j]
+                Dp[k] = (_neighbour_value(prob, V, x, I, n, j, 1) - V[n]) / h
+                Dm[k] = (V[n] - _neighbour_value(prob, V, x, I, n, j, -1)) / h
+            end
+            _minimize_hamiltonian!(u, prob, Dp, Dm)
+            U[:, n] .= u
         end
-        _minimize_hamiltonian!(u, prob, Dp, Dm)
-        U[:, n] .= u
     end
     return U
 end
@@ -400,20 +407,83 @@ SchwarzPolicyEvaluation(blocks::AbstractVector{<:Integer}; overlap::Integer = 1,
         algorithm = SchwarzIteration(sweep = MulticolorSweep(), tol = 1e-10, maxiter = 10_000)) =
     SchwarzPolicyEvaluation(Vector{Int}(blocks), Int(overlap), algorithm)
 
+"""
+    KrylovPolicyEvaluation(; preconditioner = :symmetric_gauss_seidel, tol = 1e-10,
+                           maxiter = 5000, memory = 50)
+
+Solve each policy evaluation with restarted GMRES on the whole grid, right
+preconditioned by a point smoother of ``A_u = D + L + U``: `:gauss_seidel`
+(``(D + L)^{-1}``), `:symmetric_gauss_seidel`
+(``(D + U)^{-1} D (D + L)^{-1}``), `:jacobi` (``D^{-1}``) or `:none`. Warm
+started from the previous value function. This is the serial baseline: policy
+iteration is a semismooth Newton method for the discrete HJB equation
+(Bokanowski, Maroso and Zidani 2009), and this solver does each Newton step on
+one core with a global Krylov method, without domain decomposition.
+"""
+Base.@kwdef struct KrylovPolicyEvaluation
+    preconditioner::Symbol = :symmetric_gauss_seidel
+    tol::Float64 = 1e-10
+    maxiter::Int = 5000
+    memory::Int = 50
+end
+
+struct _Jacobi
+    inverse_diagonal::Vector{Float64}
+end
+LinearAlgebra.ldiv!(y::AbstractVector, P::_Jacobi, x::AbstractVector) = (y .= P.inverse_diagonal .* x)
+
+struct _GaussSeidel{L}
+    lower::L
+end
+LinearAlgebra.ldiv!(y::AbstractVector, P::_GaussSeidel, x::AbstractVector) = ldiv!(P.lower, copyto!(y, x))
+
+struct _SymmetricGaussSeidel{L, U}
+    lower::L
+    upper::U
+    diagonal::Vector{Float64}
+end
+function LinearAlgebra.ldiv!(y::AbstractVector, P::_SymmetricGaussSeidel, x::AbstractVector)
+    ldiv!(P.lower, copyto!(y, x))
+    y .*= P.diagonal
+    return ldiv!(P.upper, y)
+end
+
+function _preconditioner(A::SparseMatrixCSC, kind::Symbol)
+    kind === :none && return I
+    kind === :jacobi && return _Jacobi(1 ./ diag(A))
+    kind === :gauss_seidel && return _GaussSeidel(LowerTriangular(tril(A)))
+    kind === :symmetric_gauss_seidel &&
+        return _SymmetricGaussSeidel(LowerTriangular(tril(A)), UpperTriangular(triu(A)), diag(A))
+    throw(ArgumentError("unknown preconditioner $kind"))
+end
+
 _evaluation_data(::HJBProblem, ::DirectPolicyEvaluation) = nothing
+_evaluation_data(::HJBProblem, ::KrylovPolicyEvaluation) = nothing
 _evaluation_data(prob::HJBProblem, e::SchwarzPolicyEvaluation) =
     (grid_subdomains(prob.grid, e.blocks; overlap = e.overlap), grid_partition(prob.grid, e.blocks))
 
+# Each evaluation returns (V, iterations, converged, setup seconds).
 function _evaluate(::DirectPolicyEvaluation, data, A, b, V0)
-    V = _stable_lu(A) \ b
+    setup = @elapsed F = _stable_lu(A)
+    V = F \ b
     residual = norm(A * V - b) / max(norm(b), eps())
-    return V, 0, residual <= 1e-8
+    return V, 0, residual <= 1e-8, setup
+end
+
+function _evaluate(e::KrylovPolicyEvaluation, data, A, b, V0)
+    setup = @elapsed P = _preconditioner(A, e.preconditioner)
+    r0 = b - A * V0
+    iszero(norm(r0)) && return copy(V0), 0, true, setup
+    rtol = e.tol * max(norm(b), eps()) / norm(r0)
+    dV, stats = gmres(A, r0; N = P, ldiv = !(P isa UniformScaling), memory = e.memory, restart = true,
+        atol = 0.0, rtol = min(rtol, 0.5), itmax = e.maxiter)
+    return V0 + dV, stats.niter, stats.solved, setup
 end
 
 function _evaluate(e::SchwarzPolicyEvaluation, (subdomains, parts), A, b, V0)
-    dd = SchwarzDecomposition(A, subdomains; owner = parts)
+    setup = @elapsed dd = SchwarzDecomposition(A, subdomains; owner = parts)
     result = solve(SchwarzProblem(dd, b; u0 = V0), e.algorithm)
-    return result.u, result.iterations, result.converged
+    return result.u, result.iterations, result.converged, setup
 end
 
 # ===========================================================================
@@ -424,7 +494,8 @@ end
     PolicyIteration(; evaluation = DirectPolicyEvaluation(), tol = 1e-8, maxiter = 50)
 
 Howard's policy iteration: evaluate the current policy with `evaluation`
-([`DirectPolicyEvaluation`](@ref) or [`SchwarzPolicyEvaluation`](@ref)), then
+([`DirectPolicyEvaluation`](@ref), [`KrylovPolicyEvaluation`](@ref) or
+[`SchwarzPolicyEvaluation`](@ref)), then
 improve it pointwise. Starts from the clipped LQR feedback and stops when the
 value function changes by at most `tol` (relative to its largest value) in
 one iteration.
@@ -446,9 +517,13 @@ The result of `solve(problem, PolicyIteration(...))`.
 - `controls`: `d × N`, the optimal feedback at the grid points.
 - `iterations`: policy iterations used.
 - `value_changes`: per iteration, the largest change of the value function.
-- `linear_iterations`: per iteration, Schwarz iterations of the policy
-  evaluation (zero for the direct solver).
+- `linear_iterations`: per iteration, Schwarz or GMRES iterations of the
+  policy evaluation (zero for the direct solver).
 - `converged`: whether the value change fell below the tolerance.
+- `seconds`: wall time summed over the iterations, split into `assembly` of
+  ``A_u, b_u``, `setup` of the linear solver (LU, Schwarz decomposition with
+  its local factorizations, or preconditioner), the `linear` solve itself, and
+  policy `improvement`.
 """
 struct HJBSolution
     problem::HJBProblem
@@ -458,6 +533,7 @@ struct HJBSolution
     value_changes::Vector{Float64}
     linear_iterations::Vector{Int}
     converged::Bool
+    seconds::NamedTuple{(:assembly, :setup, :linear, :improvement), NTuple{4, Float64}}
 end
 
 function CommonSolve.solve(prob::HJBProblem, alg::PolicyIteration)
@@ -469,20 +545,24 @@ function CommonSolve.solve(prob::HJBProblem, alg::PolicyIteration)
     data = _evaluation_data(prob, alg.evaluation)
     changes, linear_iterations = Float64[], Int[]
     converged = false
+    t_assembly = t_setup = t_linear = t_improvement = 0.0
     for _ in 1:alg.maxiter
-        A, b = _assemble(prob, U)
-        Vnew, its, ok = _evaluate(alg.evaluation, data, A, b, V)
+        t_assembly += @elapsed A, b = _assemble(prob, U)
+        t_eval = @elapsed Vnew, its, ok, setup = _evaluate(alg.evaluation, data, A, b, V)
+        t_setup += setup
+        t_linear += t_eval - setup
         ok || @warn "policy evaluation did not converge"
         push!(changes, maximum(abs, Vnew - V))
         push!(linear_iterations, its)
         V = Vnew
-        _improve!(U, prob, V)
+        t_improvement += @elapsed _improve!(U, prob, V)
         if length(changes) > 1 && changes[end] <= alg.tol * max(1.0, maximum(abs, V))
             converged = true
             break
         end
     end
-    return HJBSolution(prob, V, U, length(changes), changes, linear_iterations, converged)
+    seconds = (assembly = t_assembly, setup = t_setup, linear = t_linear, improvement = t_improvement)
+    return HJBSolution(prob, V, U, length(changes), changes, linear_iterations, converged, seconds)
 end
 
 # ===========================================================================

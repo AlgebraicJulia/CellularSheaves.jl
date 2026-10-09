@@ -586,7 +586,13 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
 
     ownership = owner === nothing ? Ownership(cover, _structure(S)) : Ownership(cover, owner)
     asm = _Assembly(S, cover, ownership, transmission)
-    locals = [LocalProblem(asm, i) for i in eachindex(cover.subdomains)]
+    # The local factorizations are independent: build them concurrently.
+    first_local = LocalProblem(asm, 1)
+    locals = Vector{typeof(first_local)}(undef, length(cover.subdomains))
+    locals[1] = first_local
+    Threads.@threads for i in 2:length(locals)
+        locals[i] = LocalProblem(asm, i)
+    end
     colors = _greedy_coloring(_conflict_graph(cover))
     return SchwarzDecomposition(S, cover, ownership, locals, colors, transmission)
 end
@@ -774,7 +780,8 @@ struct MulticolorSweep <: SchwarzSweep end
     ParallelSweep()
 
 Lions' *parallel* Schwarz method (Lions 1988). All subdomains solve
-simultaneously from the previous cochain and no values are pushed. Copies on
+simultaneously from the previous cochain (concurrently, with `Threads.@threads`)
+and no values are pushed. Copies on
 overlaps disagree during the iteration (the cochain is not a section) and agree
 in the limit. With Dirichlet transmission the glued iterate coincides with
 restricted additive Schwarz (RAS) for the owner partition
@@ -882,7 +889,10 @@ function schwarz_step!(x::BlockVector, prob::SchwarzProblem, ::ParallelSweep)
     xs = _cochain_blocks(prob.decomposition, x)
     dd = prob.decomposition
     foreach(i -> _receive!(xs, dd, i), eachindex(xs))
-    updates = [_local_solve(prob, xs, i) for i in eachindex(xs)]
+    updates = Vector{Vector{eltype(prob.rhs)}}(undef, length(xs))
+    Threads.@threads for i in eachindex(xs)
+        updates[i] = _local_solve(prob, xs, i)
+    end
     for (xi, lp, update) in zip(xs, dd.locals, updates)
         xi[lp.interior] .= update
     end

@@ -1,75 +1,105 @@
 # Benchmarks for the double-integrator HJB solver (ControlSheaves.DoubleIntegratorHJB).
 #
-# Policy iteration on the planar problem with a disc thrust bound (‖u‖ ≤ 1),
-# discount 0.5, on n⁴ grids over [-2, 2]⁴. Each policy evaluation is solved by
-#   - a sparse LU of the whole grid (partial pivoting), while it fits, and
-#   - Schwarz on b⁴ overlapping boxes: multicolor sweeps, and GMRES
-#     preconditioned by a parallel sweep,
-# reporting wall time, policy iterations, Schwarz iterations, the process's peak
-# memory so far (Schwarz runs go first at each size, the direct LU last) and
-# the value at a few states (for grid convergence).
+# Planar problem with a disc thrust bound (‖u‖ ≤ 1), discount 0.5, on n⁴ grids
+# over [-2, 2]⁴, solved by policy iteration (a semismooth Newton method). The
+# methods differ only in how each Newton step A_u V = b_u is solved:
 #
-# Run with:  julia -t 8 --project=. docs/scripts/hjb_benchmarks.jl
-# Writes docs/figures/hjb/benchmarks.csv.
+#   direct      sparse LU of the whole grid (partial pivoting)
+#   gmres-gs    serial GMRES, Gauss–Seidel preconditioner          (serial baseline)
+#   gmres-sgs   serial GMRES, symmetric Gauss–Seidel preconditioner (serial baseline)
+#   multicolor  Schwarz on b⁴ overlapping boxes, multicolor sweeps  (threaded)
+#   ras-gmres   Schwarz on b⁴ boxes, GMRES with a RAS preconditioner (threaded)
+#
+# HJB_PHASE=correctness  every method on small grids, compared with the direct LU
+# HJB_PHASE=runtime      iterative methods only, at the thread count Julia was
+#                        started with; run once per thread count for scaling
+#
+# BLAS runs on one thread, so the only parallelism is the decomposition's.
+#
+# Run with, e.g.:
+#   HJB_PHASE=correctness julia -t 8 --project=. docs/scripts/hjb_benchmarks.jl
+#   HJB_PHASE=runtime HJB_SIZES=21,25,29 julia -t 4 --project=. docs/scripts/hjb_benchmarks.jl
+# Writes docs/figures/hjb/correctness.csv and docs/figures/hjb/runtime_t<threads>.csv.
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB: solve
-using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzIteration, SchwarzGMRES, MulticolorSweep, ParallelSweep
+using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzGMRES, ParallelSweep
+using LinearAlgebra
 using Printf
 
+BLAS.set_num_threads(1)
 const OUT = joinpath(@__DIR__, "..", "figures", "hjb")
 mkpath(OUT)
+const PHASE = get(ENV, "HJB_PHASE", "correctness")
+const THREADS = Threads.nthreads()
 const STATES = ([1.0, 0.0, 0.0, 0.0], [0.5, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, -0.5])
-const DIRECT_MAX = parse(Int, get(ENV, "HJB_DIRECT_MAX", "21"))
-const SIZES = parse.(Int, split(get(ENV, "HJB_SIZES", "13,17,21,25,29"), ","))
-
-struct HJBRow
-    n::Int
-    unknowns::Int
-    method::String
-    seconds::Float64
-    policy_iterations::Int
-    schwarz_iterations::Int
-    converged::Bool
-    maxrss_gb::Float64
-    values::Vector{Float64}
-end
-
-function run(n, method, evaluation)
-    grid = StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4))
-    prob = HJBProblem(grid; control_bound = 1.0, constraint = :disc)
-    GC.gc()
-    t = @elapsed sol = solve(prob, PolicyIteration(evaluation = evaluation))
-    row = HJBRow(n, length(grid), method, t, sol.iterations, sum(sol.linear_iterations), sol.converged,
-        Sys.maxrss() / 2^30, [value_at(sol, x) for x in STATES])
-    @printf("n=%d (%d unknowns) %-28s %8.1f s  PI %2d  Schwarz %5d  conv %s  maxrss %.1f GB  V = %s\n",
-        n, row.unknowns, method, t, row.policy_iterations, row.schwarz_iterations, row.converged,
-        row.maxrss_gb, join((@sprintf("%.4f", v) for v in row.values), ", "))
-    flush(stdout)
-    return row
-end
 
 blocks(n) = fill(max(2, round(Int, n / 7)), 4)        # about 7 points per box per dimension
 
-run(9, "warm-up", DirectPolicyEvaluation())
-run(9, "warm-up", SchwarzPolicyEvaluation(blocks(9)))
-run(9, "warm-up", SchwarzPolicyEvaluation(blocks(9); algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500)))
+function method(name, n)
+    name == "direct" && return DirectPolicyEvaluation()
+    name == "gmres-gs" && return KrylovPolicyEvaluation(preconditioner = :gauss_seidel)
+    name == "gmres-sgs" && return KrylovPolicyEvaluation(preconditioner = :symmetric_gauss_seidel)
+    name == "multicolor" && return SchwarzPolicyEvaluation(blocks(n))
+    name == "ras-gmres" && return SchwarzPolicyEvaluation(blocks(n);
+        algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))
+    error("unknown method $name")
+end
 
-rows = HJBRow[]
-for n in SIZES
-    b = blocks(n)
+struct Run
+    n::Int
+    method::String
+    threads::Int
+    total::Float64
+    sol::HJBSolution
+end
 
-    push!(rows, run(n, "Schwarz multicolor $(b[1])⁴", SchwarzPolicyEvaluation(b)))
-    push!(rows, run(n, "Schwarz GMRES $(b[1])⁴", SchwarzPolicyEvaluation(b;
-        algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))))
-    n <= DIRECT_MAX && push!(rows, run(n, "direct LU", DirectPolicyEvaluation()))
-    open(joinpath(OUT, "benchmarks.csv"), "w") do io
-        println(io, "n,unknowns,method,seconds,policy_iterations,schwarz_iterations,converged,peak_rss_so_far_gb,V1,V2,V3")
-        for r in rows
-            println(io, join((r.n, r.unknowns, repr(r.method), r.seconds, r.policy_iterations,
-                r.schwarz_iterations, r.converged, r.maxrss_gb, r.values...), ","))
+function run(n, name)
+    grid = StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4))
+    prob = HJBProblem(grid; control_bound = 1.0, constraint = :disc)
+    GC.gc()
+    t = @elapsed sol = solve(prob, PolicyIteration(evaluation = method(name, n)))
+    s = sol.seconds
+    @printf("n=%2d (%7d unknowns) %-10s t=%2d %8.2f s  [assembly %.1f, setup %.1f, linear %.1f, improvement %.1f]  PI %2d  inner %5d  conv %s\n",
+        n, length(grid), name, THREADS, t, s.assembly, s.setup, s.linear, s.improvement,
+        sol.iterations, sum(sol.linear_iterations), sol.converged)
+    flush(stdout)
+    return Run(n, name, THREADS, t, sol)
+end
+
+row(r::Run, extra...) = join((r.n, r.n^4, repr(r.method), r.threads, r.total, values(r.sol.seconds)...,
+    r.sol.iterations, sum(r.sol.linear_iterations), r.sol.converged, extra...), ",")
+const HEADER = "n,unknowns,method,threads,seconds,assembly,setup,linear,improvement,policy_iterations,inner_iterations,converged"
+
+for name in ("direct", "gmres-gs", "gmres-sgs", "multicolor", "ras-gmres")    # compile everything
+    run(9, name)
+end
+
+if PHASE == "correctness"
+    sizes = parse.(Int, split(get(ENV, "HJB_SIZES", "13,17"), ","))
+    open(joinpath(OUT, "correctness.csv"), "w") do io
+        println(io, HEADER, ",max_rel_diff_vs_direct,V1,V2,V3")
+        for n in sizes
+            ref = run(n, "direct")
+            scale = maximum(abs, ref.sol.values)
+            for name in ("direct", "gmres-gs", "gmres-sgs", "multicolor", "ras-gmres")
+                r = name == "direct" ? ref : run(n, name)
+                diff = maximum(abs, r.sol.values - ref.sol.values) / scale
+                @printf("    max |V − V_direct| / max|V_direct| = %.1e\n", diff)
+                println(io, row(r, diff, (value_at(r.sol, x) for x in STATES)...))
+                flush(io)
+            end
+        end
+    end
+else
+    sizes = parse.(Int, split(get(ENV, "HJB_SIZES", "21,25,29"), ","))
+    names = THREADS == 1 ? ("gmres-gs", "gmres-sgs", "multicolor", "ras-gmres") : ("multicolor", "ras-gmres")
+    open(joinpath(OUT, "runtime_t$(THREADS).csv"), "w") do io
+        println(io, HEADER)
+        for n in sizes, name in names
+            println(io, row(run(n, name)))
+            flush(io)
         end
     end
 end
-println("wrote ", joinpath(OUT, "benchmarks.csv"))

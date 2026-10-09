@@ -140,6 +140,14 @@ end
         krylov = solve(small, PolicyIteration(evaluation = SchwarzPolicyEvaluation([4, 4];
             algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))))
         @test krylov.values ≈ direct.values rtol = 1e-6
+        # The serial Newton baseline: global GMRES with a point smoother.
+        for preconditioner in (:gauss_seidel, :symmetric_gauss_seidel, :jacobi)
+            serial = solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(; preconditioner)))
+            @test serial.converged
+            @test serial.values ≈ direct.values rtol = 1e-6
+        end
+        @test_throws ArgumentError solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(preconditioner = :ilu)))
+        @test all(>=(0), values(stationary.seconds)) && stationary.seconds.setup > 0
     end
 
     @testset "planar problem" begin
