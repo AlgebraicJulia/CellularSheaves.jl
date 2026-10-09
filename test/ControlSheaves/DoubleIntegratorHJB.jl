@@ -140,6 +140,20 @@ end
         krylov = solve(small, PolicyIteration(evaluation = SchwarzPolicyEvaluation([4, 4];
             algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))))
         @test krylov.values ≈ direct.values rtol = 1e-6
+        # Block symmetric Gauss–Seidel: one block is the global smoother.
+        for blocks in ([1, 1], [4, 4])
+            blocked = solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(
+                preconditioner = :block_symmetric_gauss_seidel, blocks = blocks)))
+            @test blocked.values ≈ direct.values rtol = 1e-6
+        end
+        @test_throws ArgumentError solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(
+            preconditioner = :block_symmetric_gauss_seidel)))
+        # The parallel assembly into the fixed stencil matches a direct construction.
+        U = DIH._lqr_controls(small)
+        A, At, b = DIH._assemble(small, U, DIH._stencil(small.grid))
+        @test At == sparse(transpose(A))
+        @test all(sum(A; dims = 2) .>= small.discount - 1e-12)          # row diagonal dominance by ρ
+        @test CellularSheaves.NetworkSheaves.SchwarzMethods._within_pattern(A, DIH._stencil_pattern(DIH._stencil(small.grid)))
         # The serial Newton baseline: global GMRES with a point smoother.
         for preconditioner in (:gauss_seidel, :symmetric_gauss_seidel, :jacobi)
             serial = solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(; preconditioner)))

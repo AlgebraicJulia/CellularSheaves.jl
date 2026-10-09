@@ -70,7 +70,7 @@ using CommonSolve: solve
 using LinearAlgebra
 using SparseArrays
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, SchwarzProblem,
-    SchwarzIteration, MulticolorSweep, _stable_lu
+    SchwarzIteration, MulticolorSweep, refactor, _stable_lu, _threaded_mul!
 using Krylov: gmres
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
@@ -258,36 +258,91 @@ end
 # policy evaluation: assembly
 # ===========================================================================
 
-# The upwind system A_u V = b_u for the controls U (d × N).
-function _assemble(prob::HJBProblem, U::AbstractMatrix)
+# The full first-order stencil of the grid (each point and its ±1 neighbours
+# in every dimension) as the rows of a sparse matrix: the union of the
+# patterns of every upwind matrix A_u. Rows are stored as the columns of Aᵀ
+# (`colptr`, `rowval`), with the slot of each entry so that rows can be filled
+# in parallel; a slot is 0 where the neighbour is outside the grid.
+struct _Stencil
+    colptr::Vector{Int}
+    rowval::Vector{Int}
+    diagonal::Vector{Int}
+    plus::Matrix{Int}
+    minus::Matrix{Int}
+end
+
+function _stencil(g::StateGrid)
+    D, N = ndims(g), length(g)
+    C = _cartesian(g)
+    colptr = ones(Int, N + 1)
+    for n in 1:N
+        I = C[n]
+        colptr[n + 1] = colptr[n] + 1 + count(j -> I[j] > 1, 1:D) + count(j -> I[j] < g.points[j], 1:D)
+    end
+    rowval = Vector{Int}(undef, colptr[end] - 1)
+    diagonal = zeros(Int, N)
+    plus, minus = zeros(Int, D, N), zeros(Int, D, N)
+    for n in 1:N
+        I = C[n]
+        p = colptr[n]
+        for j in D:-1:1                   # n − s_D < … < n − s_1 < n < n + s_1 < … < n + s_D
+            I[j] > 1 || continue
+            rowval[p] = n - g.strides[j]; minus[j, n] = p; p += 1
+        end
+        rowval[p] = n; diagonal[n] = p; p += 1
+        for j in 1:D
+            I[j] < g.points[j] || continue
+            rowval[p] = n + g.strides[j]; plus[j, n] = p; p += 1
+        end
+    end
+    return _Stencil(colptr, rowval, diagonal, plus, minus)
+end
+
+# The full stencil as a symmetric pattern matrix (for the Schwarz cover).
+_stencil_pattern(st::_Stencil) =
+    SparseMatrixCSC(length(st.diagonal), length(st.diagonal), copy(st.colptr), copy(st.rowval), ones(length(st.rowval)))
+
+# The upwind system A_u V = b_u for the controls U (d × N), assembled row by row
+# in parallel into the fixed stencil. Returns A, Aᵀ (A by rows) and b; entries
+# of the stencil the policy does not use are stored zeros.
+function _assemble(prob::HJBProblem, U::AbstractMatrix, st::_Stencil)
     g = prob.grid
     d, D, N = prob.axes, ndims(g), length(g)
-    nnz_bound = (D + 1) * N
-    rows, cols, vals = Vector{Int}(undef, 0), Vector{Int}(undef, 0), Vector{Float64}(undef, 0)
-    sizehint!(rows, nnz_bound); sizehint!(cols, nnz_bound); sizehint!(vals, nnz_bound)
+    C = _cartesian(g)
+    vals = zeros(length(st.rowval))
     b = zeros(N)
-    x = zeros(D)
-    @inbounds for (n, I) in enumerate(_cartesian(g))
-        _coordinates!(x, g, I)
-        u = view(U, :, n)
-        diagonal = prob.discount
-        rhs = _running_cost(prob, x, u)
-        for j in 1:D
-            fj = j <= d ? x[d + j] : u[j - d]
-            iszero(fj) && continue
-            a = abs(fj) / g.spacing[j]
-            step = fj > 0 ? 1 : -1
-            diagonal += a
-            if 1 <= I[j] + step <= g.points[j]
-                push!(rows, n); push!(cols, n + step * g.strides[j]); push!(vals, -a)
-            else
-                rhs += a * _neighbour_value(prob, nothing, x, I, n, j, step)
+    chunks = collect(Iterators.partition(1:N, cld(N, 8 * Threads.nthreads())))
+    Threads.@threads for chunk in chunks
+        x = zeros(D)
+        @inbounds for n in chunk
+            I = C[n]
+            _coordinates!(x, g, I)
+            u = view(U, :, n)
+            diagonal = prob.discount
+            rhs = _running_cost(prob, x, u)
+            for j in 1:D
+                fj = j <= d ? x[d + j] : u[j - d]
+                iszero(fj) && continue
+                a = abs(fj) / g.spacing[j]
+                diagonal += a
+                slot = fj > 0 ? st.plus[j, n] : st.minus[j, n]
+                if slot != 0
+                    vals[slot] = -a
+                else
+                    rhs += a * _neighbour_value(prob, nothing, x, I, n, j, fj > 0 ? 1 : -1)
+                end
             end
+            vals[st.diagonal[n]] = diagonal
+            b[n] = rhs
         end
-        push!(rows, n); push!(cols, n); push!(vals, diagonal)
-        b[n] = rhs
     end
-    return sparse(rows, cols, vals, N, N), b
+    At = SparseMatrixCSC(N, N, st.colptr, st.rowval, vals)
+    return copy(transpose(At)), At, b
+end
+
+function _assemble(prob::HJBProblem, U::AbstractMatrix)
+    A, _, b = _assemble(prob, U, _stencil(prob.grid))
+    return A, b
 end
 
 # ===========================================================================
@@ -408,20 +463,27 @@ SchwarzPolicyEvaluation(blocks::AbstractVector{<:Integer}; overlap::Integer = 1,
     SchwarzPolicyEvaluation(Vector{Int}(blocks), Int(overlap), algorithm)
 
 """
-    KrylovPolicyEvaluation(; preconditioner = :symmetric_gauss_seidel, tol = 1e-10,
-                           maxiter = 5000, memory = 50)
+    KrylovPolicyEvaluation(; preconditioner = :symmetric_gauss_seidel, blocks = nothing,
+                           tol = 1e-10, maxiter = 5000, memory = 50)
 
 Solve each policy evaluation with restarted GMRES on the whole grid, right
 preconditioned by a point smoother of ``A_u = D + L + U``: `:gauss_seidel`
 (``(D + L)^{-1}``), `:symmetric_gauss_seidel`
-(``(D + U)^{-1} D (D + L)^{-1}``), `:jacobi` (``D^{-1}``) or `:none`. Warm
-started from the previous value function. This is the serial baseline: policy
-iteration is a semismooth Newton method for the discrete HJB equation
-(Bokanowski, Maroso and Zidani 2009), and this solver does each Newton step on
-one core with a global Krylov method, without domain decomposition.
+(``(D + U)^{-1} D (D + L)^{-1}``), `:jacobi` (``D^{-1}``), `:none`, or
+`:block_symmetric_gauss_seidel`: block Jacobi over the boxes of
+[`grid_partition`](@ref)`(grid, blocks)` with a symmetric Gauss–Seidel sweep
+inside each box, the boxes swept concurrently. Warm started from the previous
+value function; matrix–vector products are threaded.
+
+Policy iteration is a semismooth Newton method for the discrete HJB equation
+(Bokanowski, Maroso and Zidani 2009). With a point smoother this is the serial
+Newton–Krylov baseline; the block smoother is its parallel counterpart, equal
+to it with one block, and the nonoverlapping, inexact relative of
+[`SchwarzPolicyEvaluation`](@ref).
 """
 Base.@kwdef struct KrylovPolicyEvaluation
     preconditioner::Symbol = :symmetric_gauss_seidel
+    blocks::Union{Nothing, Vector{Int}} = nothing
     tol::Float64 = 1e-10
     maxiter::Int = 5000
     memory::Int = 50
@@ -448,40 +510,98 @@ function LinearAlgebra.ldiv!(y::AbstractVector, P::_SymmetricGaussSeidel, x::Abs
     return ldiv!(P.upper, y)
 end
 
-function _preconditioner(A::SparseMatrixCSC, kind::Symbol)
+_symmetric_gauss_seidel(A::SparseMatrixCSC) =
+    _SymmetricGaussSeidel(LowerTriangular(tril(A)), UpperTriangular(triu(A)), Vector(diag(A)))
+
+# Block Jacobi with a symmetric Gauss–Seidel sweep inside each block: the
+# blocks are independent and are swept concurrently. With one block it is the
+# global symmetric Gauss–Seidel preconditioner.
+struct _BlockSymmetricGaussSeidel{P}
+    blocks::Vector{Vector{Int}}
+    smoothers::Vector{P}
+end
+
+function _block_symmetric_gauss_seidel(A::SparseMatrixCSC, blocks::Vector{Vector{Int}})
+    first_smoother = _symmetric_gauss_seidel(A[blocks[1], blocks[1]])
+    smoothers = Vector{typeof(first_smoother)}(undef, length(blocks))
+    smoothers[1] = first_smoother
+    Threads.@threads for k in 2:length(blocks)
+        smoothers[k] = _symmetric_gauss_seidel(A[blocks[k], blocks[k]])
+    end
+    return _BlockSymmetricGaussSeidel(blocks, smoothers)
+end
+
+function LinearAlgebra.ldiv!(y::AbstractVector, P::_BlockSymmetricGaussSeidel, x::AbstractVector)
+    Threads.@threads for k in eachindex(P.blocks)
+        idx = P.blocks[k]
+        yk = x[idx]
+        ldiv!(yk, P.smoothers[k], copy(yk))
+        y[idx] = yk
+    end
+    return y
+end
+
+function _preconditioner(A::SparseMatrixCSC, kind::Symbol, blocks)
     kind === :none && return I
     kind === :jacobi && return _Jacobi(1 ./ Vector(diag(A)))
     kind === :gauss_seidel && return _GaussSeidel(LowerTriangular(tril(A)))
-    kind === :symmetric_gauss_seidel &&
-        return _SymmetricGaussSeidel(LowerTriangular(tril(A)), UpperTriangular(triu(A)), Vector(diag(A)))
+    kind === :symmetric_gauss_seidel && return _symmetric_gauss_seidel(A)
+    if kind === :block_symmetric_gauss_seidel
+        @argcheck blocks !== nothing "the block preconditioner needs `blocks`"
+        return _block_symmetric_gauss_seidel(A, blocks)
+    end
     throw(ArgumentError("unknown preconditioner $kind"))
 end
 
-_evaluation_data(::HJBProblem, ::DirectPolicyEvaluation) = nothing
-_evaluation_data(::HJBProblem, ::KrylovPolicyEvaluation) = nothing
-_evaluation_data(prob::HJBProblem, e::SchwarzPolicyEvaluation) =
-    (grid_subdomains(prob.grid, e.blocks; overlap = e.overlap), grid_partition(prob.grid, e.blocks))
+# A by rows (Aᵀ stored column-wise): a threaded matrix–vector product for GMRES.
+struct _RowMatrix
+    At::SparseMatrixCSC{Float64, Int}
+end
+Base.size(M::_RowMatrix) = (size(M.At, 2), size(M.At, 1))
+Base.size(M::_RowMatrix, d::Integer) = size(M)[d]
+Base.eltype(::_RowMatrix) = Float64
+LinearAlgebra.mul!(y::AbstractVector, M::_RowMatrix, x::AbstractVector) = _threaded_mul!(y, M.At, x)
+
+function _block_indices(labels::Vector{Int})
+    blocks = [Int[] for _ in 1:maximum(labels)]
+    for (k, b) in enumerate(labels)
+        push!(blocks[b], k)
+    end
+    return blocks
+end
+
+_evaluation_data(::HJBProblem, ::DirectPolicyEvaluation, st) = nothing
+_evaluation_data(prob::HJBProblem, e::KrylovPolicyEvaluation, st) =
+    e.blocks === nothing ? nothing : _block_indices(grid_partition(prob.grid, e.blocks))
+_evaluation_data(prob::HJBProblem, e::SchwarzPolicyEvaluation, st) =
+    (grid_subdomains(prob.grid, e.blocks; overlap = e.overlap), grid_partition(prob.grid, e.blocks),
+     _stencil_pattern(st), Ref{Any}(nothing))
 
 # Each evaluation returns (V, iterations, converged, setup seconds).
-function _evaluate(::DirectPolicyEvaluation, data, A, b, V0)
+function _evaluate(::DirectPolicyEvaluation, data, A, At, b, V0)
     setup = @elapsed F = _stable_lu(A)
     V = F \ b
     residual = norm(A * V - b) / max(norm(b), eps())
     return V, 0, residual <= 1e-8, setup
 end
 
-function _evaluate(e::KrylovPolicyEvaluation, data, A, b, V0)
-    setup = @elapsed P = _preconditioner(A, e.preconditioner)
-    r0 = b - A * V0
+function _evaluate(e::KrylovPolicyEvaluation, blocks, A, At, b, V0)
+    setup = @elapsed P = _preconditioner(A, e.preconditioner, blocks)
+    op = _RowMatrix(At)
+    r0 = b - mul!(similar(b), op, V0)
     iszero(norm(r0)) && return copy(V0), 0, true, setup
     rtol = e.tol * max(norm(b), eps()) / norm(r0)
-    dV, stats = gmres(A, r0; N = P, ldiv = !(P isa UniformScaling), memory = e.memory, restart = true,
+    dV, stats = gmres(op, r0; N = P, ldiv = !(P isa UniformScaling), memory = e.memory, restart = true,
         atol = 0.0, rtol = min(rtol, 0.5), itmax = e.maxiter)
     return V0 + dV, stats.niter, stats.solved, setup
 end
 
-function _evaluate(e::SchwarzPolicyEvaluation, (subdomains, parts), A, b, V0)
-    setup = @elapsed dd = SchwarzDecomposition(A, subdomains; owner = parts)
+# The cover, ownership and coloring are built once, from the full stencil, at
+# the first Newton step; later steps only refactor the local problems.
+function _evaluate(e::SchwarzPolicyEvaluation, (subdomains, parts, structure, cached), A, At, b, V0)
+    setup = @elapsed dd = cached[] === nothing ?
+        SchwarzDecomposition(A, subdomains; owner = parts, structure) : refactor(cached[], A)
+    cached[] = dd
     result = solve(SchwarzProblem(dd, b; u0 = V0), e.algorithm)
     return result.u, result.iterations, result.converged, setup
 end
@@ -542,13 +662,14 @@ function CommonSolve.solve(prob::HJBProblem, alg::PolicyIteration)
     U = _lqr_controls(prob)
     x = zeros(ndims(g))
     V = vec([riccati_value(prob, _coordinates!(x, g, I)) for I in _cartesian(g)])
-    data = _evaluation_data(prob, alg.evaluation)
+    st = _stencil(g)
+    data = _evaluation_data(prob, alg.evaluation, st)
     changes, linear_iterations = Float64[], Int[]
     converged = false
     t_assembly = t_setup = t_linear = t_improvement = 0.0
     for _ in 1:alg.maxiter
-        t_assembly += @elapsed A, b = _assemble(prob, U)
-        t_eval = @elapsed Vnew, its, ok, setup = _evaluate(alg.evaluation, data, A, b, V)
+        t_assembly += @elapsed A, At, b = _assemble(prob, U, st)
+        t_eval = @elapsed Vnew, its, ok, setup = _evaluate(alg.evaluation, data, A, At, b, V)
         t_setup += setup
         t_linear += t_eval - setup
         ok || @warn "policy evaluation did not converge"

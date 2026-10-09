@@ -9,7 +9,7 @@
 # that cochain is a global section that glues to the solution of A u = f.
 module SchwarzMethods
 
-export OverlapCover, ghost_layer_cover, Ownership, LocalProblem, RobinFace, SchwarzDecomposition,
+export OverlapCover, ghost_layer_cover, Ownership, LocalProblem, RobinFace, SchwarzDecomposition, refactor,
     overlap_sheaf, overlapping_subdomains, localize, glue, overlap_disagreement,
     TransmissionCondition, DirichletTransmission, RobinTransmission, optimized_robin_parameter,
     SchwarzSweep, MultiplicativeSweep, MulticolorSweep, ParallelSweep, schwarz_step!,
@@ -560,6 +560,8 @@ is greedy, largest conflict degree first.
 """
 struct SchwarzDecomposition{T,F}
     A::SparseMatrixCSC{T,Int}
+    At::SparseMatrixCSC{T,Int}              # Aᵀ, i.e. A by rows, for threaded residuals
+    structure::SparseMatrixCSC{Float64,Int} # symmetric pattern the cover was built from
     cover::OverlapCover
     ownership::Ownership
     locals::Vector{LocalProblem{T,F}}
@@ -569,7 +571,8 @@ end
 
 function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}};
                               owner::Union{Nothing,AbstractVector{<:Integer}}=nothing,
-                              transmission::TransmissionCondition=DirichletTransmission())
+                              transmission::TransmissionCondition=DirichletTransmission(),
+                              structure::Union{Nothing,AbstractMatrix}=nothing)
     n = size(A, 1)
     @argcheck size(A, 2) == n "A must be square"
     S = dropzeros(sparse(float.(A)))
@@ -579,22 +582,84 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
         @argcheck !isempty(d) "subdomain $i is empty"
         @argcheck all(k -> 1 <= k <= n, d) "subdomain $i has dof indices outside 1:$n"
     end
+    P = if structure === nothing
+        _pattern(_structure(S))
+    else
+        @argcheck size(structure) == size(S) "the structure must have the size of A"
+        Q = _pattern(sparse(structure))
+        Q = issymmetric(Q) ? Q : _structure(Q)
+        @argcheck _within_pattern(S, Q) "A has entries outside the given structure"
+        Q
+    end
 
-    cover = ghost_layer_cover(S, subdomains)
+    cover = ghost_layer_cover(P, subdomains)
     uncovered = findfirst(k -> isempty(_interior_members(cover, k)), 1:n)
     @argcheck uncovered === nothing "dof $uncovered lies in no subdomain; the subdomains must cover 1:$n"
 
-    ownership = owner === nothing ? Ownership(cover, _structure(S)) : Ownership(cover, owner)
-    asm = _Assembly(S, cover, ownership, transmission)
-    # The local factorizations are independent: build them concurrently.
+    ownership = owner === nothing ? Ownership(cover, P) : Ownership(cover, owner)
+    locals = _build_locals(_Assembly(S, cover, ownership, transmission))
+    colors = _greedy_coloring(_conflict_graph(cover))
+    return SchwarzDecomposition(S, copy(transpose(S)), P, cover, ownership, locals, colors, transmission)
+end
+
+"""
+    refactor(dd::SchwarzDecomposition, A) -> SchwarzDecomposition
+
+The decomposition of a new matrix `A` on the same cover: the overlap sheaf,
+ownership and coloring of `dd` are reused and only the local problems are
+refactored, concurrently. `A` must have its nonzeros inside the pattern `dd`
+was built from (pass `structure` to [`SchwarzDecomposition`](@ref) to build a
+cover for a whole family of matrices, such as the policy-evaluation matrices
+of a policy iteration, whose upwind stencils change direction).
+"""
+function refactor(dd::SchwarzDecomposition, A::AbstractMatrix)
+    S = dropzeros(sparse(float.(A)))
+    @argcheck size(S) == size(dd.A) "A must have the size of the decomposed matrix"
+    @argcheck _within_pattern(S, dd.structure) "A has entries outside the structure of the decomposition"
+    @argcheck issymmetric(S) || dd.transmission isa DirichletTransmission "Robin transmission needs a symmetric A"
+    locals = _build_locals(_Assembly(S, dd.cover, dd.ownership, dd.transmission))
+    return SchwarzDecomposition(S, copy(transpose(S)), dd.structure, dd.cover, dd.ownership, locals,
+        dd.colors, dd.transmission)
+end
+
+# The local factorizations are independent: build them concurrently.
+function _build_locals(asm::_Assembly)
     first_local = LocalProblem(asm, 1)
-    locals = Vector{typeof(first_local)}(undef, length(cover.subdomains))
+    locals = Vector{typeof(first_local)}(undef, length(asm.cover.subdomains))
     locals[1] = first_local
     Threads.@threads for i in 2:length(locals)
         locals[i] = LocalProblem(asm, i)
     end
-    colors = _greedy_coloring(_conflict_graph(cover))
-    return SchwarzDecomposition(S, cover, ownership, locals, colors, transmission)
+    return locals
+end
+
+# Whether every structural nonzero of S is a structural nonzero of P (same size).
+function _within_pattern(S::SparseMatrixCSC, P::SparseMatrixCSC)
+    for j in 1:size(S, 2)
+        rows = rowvals(P)
+        q, qend = first(nzrange(P, j)), last(nzrange(P, j))
+        for p in nzrange(S, j)
+            r = rowvals(S)[p]
+            while q <= qend && rows[q] < r
+                q += 1
+            end
+            (q <= qend && rows[q] == r) || return false
+        end
+    end
+    return true
+end
+
+# y = A x computed by rows from At = Aᵀ, concurrently.
+function _threaded_mul!(y::AbstractVector, At::SparseMatrixCSC, x::AbstractVector)
+    rows, vals = rowvals(At), nonzeros(At)
+    Threads.@threads for i in 1:size(At, 2)
+        acc = zero(eltype(y))
+        @inbounds for p in nzrange(At, i)
+            acc += vals[p] * x[rows[p]]
+        end
+        @inbounds y[i] = acc
+    end
+    return y
 end
 
 # Subdomains conflict when they share a dof that is interior to at least one of
@@ -672,7 +737,11 @@ restricted additive Schwarz (Cai–Sarkis 1999).
 """
 function glue(dd::SchwarzDecomposition, x::AbstractVector)
     xs = _cochain_blocks(dd, x)
-    return [_owned_value(dd, xs, k) for k in eachindex(dd.ownership.owner)]
+    u = Vector{eltype(eltype(xs))}(undef, length(dd.ownership.owner))
+    Threads.@threads for k in eachindex(u)
+        @inbounds u[k] = _owned_value(dd, xs, k)
+    end
+    return u
 end
 
 """
@@ -687,12 +756,18 @@ sheaf.
 """
 function overlap_disagreement(dd::SchwarzDecomposition, x::AbstractVector)
     xs = _cochain_blocks(dd, x)
-    acc = zero(real(eltype(eltype(xs))))
-    for ((i, j), idx) in dd.cover.overlaps
-        i < j || continue
-        acc += sum(abs2, view(xs[i], idx) .- view(xs[j], dd.cover.overlaps[j => i]))
+    pairs = [(i, j) for (i, j) in keys(dd.cover.overlaps) if i < j]
+    partial = zeros(real(eltype(eltype(xs))), length(pairs))
+    Threads.@threads for p in eachindex(pairs)
+        i, j = pairs[p]
+        a, b = dd.cover.overlaps[i => j], dd.cover.overlaps[j => i]
+        acc = zero(eltype(partial))
+        @inbounds for t in eachindex(a)
+            acc += abs2(xs[i][a[t]] - xs[j][b[t]])
+        end
+        partial[p] = acc
     end
-    return sqrt(acc)
+    return sqrt(sum(partial))
 end
 
 # ===== Problems =====
@@ -718,8 +793,10 @@ function SchwarzProblem(dd::SchwarzDecomposition{T}, f::AbstractVector;
     return SchwarzProblem(dd, Vector{T}(f), Vector{T}(u0))
 end
 
-_relative_residual(prob::SchwarzProblem, u) =
-    norm(prob.rhs - prob.decomposition.A * u) / _rhs_scale(prob)
+function _relative_residual(prob::SchwarzProblem, u)
+    Au = _threaded_mul!(similar(prob.rhs), prob.decomposition.At, u)
+    return norm(prob.rhs .- Au) / _rhs_scale(prob)
+end
 
 function _rhs_scale(prob::SchwarzProblem{T}) where {T}
     scale = norm(prob.rhs)

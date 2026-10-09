@@ -5,8 +5,9 @@
 # methods differ only in how each Newton step A_u V = b_u is solved:
 #
 #   direct      sparse LU of the whole grid (partial pivoting)
-#   gmres-gs    serial GMRES, Gauss–Seidel preconditioner          (serial baseline)
-#   gmres-sgs   serial GMRES, symmetric Gauss–Seidel preconditioner (serial baseline)
+#   gmres-gs    GMRES, Gauss–Seidel preconditioner                 (serial smoother)
+#   gmres-sgs   GMRES, symmetric Gauss–Seidel preconditioner       (serial smoother; the baseline at 1 thread)
+#   gmres-bsgs  GMRES, block symmetric Gauss–Seidel on 4⁴ boxes      (threaded)
 #   multicolor  Schwarz on b⁴ overlapping boxes, multicolor sweeps  (threaded)
 #   ras-gmres   Schwarz on b⁴ boxes, GMRES with a RAS preconditioner (threaded)
 #
@@ -14,7 +15,9 @@
 # HJB_PHASE=runtime      iterative methods only, at the thread count Julia was
 #                        started with; run once per thread count for scaling
 #
-# BLAS runs on one thread, so the only parallelism is the decomposition's.
+# BLAS runs on one thread. Assembly, policy improvement and matrix–vector
+# products are threaded for every method; the smoother or decomposition is
+# what differs.
 #
 # Run with, e.g.:
 #   HJB_PHASE=correctness julia -t 8 --project=. docs/scripts/hjb_benchmarks.jl
@@ -41,6 +44,7 @@ function method(name, n)
     name == "direct" && return DirectPolicyEvaluation()
     name == "gmres-gs" && return KrylovPolicyEvaluation(preconditioner = :gauss_seidel)
     name == "gmres-sgs" && return KrylovPolicyEvaluation(preconditioner = :symmetric_gauss_seidel)
+    name == "gmres-bsgs" && return KrylovPolicyEvaluation(preconditioner = :block_symmetric_gauss_seidel, blocks = fill(4, 4))
     name == "multicolor" && return SchwarzPolicyEvaluation(blocks(n))
     name == "ras-gmres" && return SchwarzPolicyEvaluation(blocks(n);
         algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))
@@ -72,7 +76,7 @@ row(r::Run, extra...) = join((r.n, r.n^4, repr(r.method), r.threads, r.total, va
     r.sol.iterations, sum(r.sol.linear_iterations), r.sol.converged, extra...), ",")
 const HEADER = "n,unknowns,method,threads,seconds,assembly,setup,linear,improvement,policy_iterations,inner_iterations,converged"
 
-for name in ("direct", "gmres-gs", "gmres-sgs", "multicolor", "ras-gmres")    # compile everything
+for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres")    # compile everything
     run(9, name)
 end
 
@@ -83,7 +87,7 @@ if PHASE == "correctness"
         for n in sizes
             ref = run(n, "direct")
             scale = maximum(abs, ref.sol.values)
-            for name in ("direct", "gmres-gs", "gmres-sgs", "multicolor", "ras-gmres")
+            for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres")
                 r = name == "direct" ? ref : run(n, name)
                 diff = maximum(abs, r.sol.values - ref.sol.values) / scale
                 @printf("    max |V − V_direct| / max|V_direct| = %.1e\n", diff)
@@ -94,7 +98,7 @@ if PHASE == "correctness"
     end
 else
     sizes = parse.(Int, split(get(ENV, "HJB_SIZES", "21,25,29"), ","))
-    names = THREADS == 1 ? ("gmres-gs", "gmres-sgs", "multicolor", "ras-gmres") : ("multicolor", "ras-gmres")
+    names = ("gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres")
     open(joinpath(OUT, "runtime_t$(THREADS).csv"), "w") do io
         println(io, HEADER)
         for n in sizes, name in names

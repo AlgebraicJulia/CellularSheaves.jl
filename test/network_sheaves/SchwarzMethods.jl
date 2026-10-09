@@ -659,5 +659,20 @@ end
         @test_throws ArgumentError solve(SchwarzProblem(dd, f), SheafADMM(rho=1.0))
         @test_throws ArgumentError TruncatedPushforwardCoarseSpace(dd)
         @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, transmission=RobinTransmission(10.0))
+
+        # refactor: a new matrix on the same cover.
+        A2 = A + 0.25I
+        dd2 = refactor(dd, A2)
+        @test dd2.cover === dd.cover && dd2.colors === dd.colors
+        r2 = solve(SchwarzProblem(dd2, f), SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000))
+        @test r2.u ≈ A2 \ f rtol = 1e-8
+        far = copy(A2); far[1, m * m] = -1e-3                          # outside the pattern
+        @test_throws ArgumentError refactor(dd, far)
+        # A cover built from a wider structure accepts any matrix inside it.
+        wide = A + sparse(transpose(A)) + I
+        ddw = SchwarzDecomposition(A, doms; owner=parts, structure=wide)
+        @test solve(SchwarzProblem(refactor(ddw, sparse(transpose(A))), f),
+            SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000)).u ≈ sparse(transpose(A)) \ f rtol = 1e-8
+        @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, structure=sparse(1.0I, m * m, m * m))
     end
 end
