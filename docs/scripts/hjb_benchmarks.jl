@@ -22,7 +22,7 @@ const OUT = joinpath(@__DIR__, "..", "figures", "hjb")
 mkpath(OUT)
 const STATES = ([1.0, 0.0, 0.0, 0.0], [0.5, 0.5, 0.0, 0.0], [0.0, 0.0, 0.5, -0.5])
 const DIRECT_MAX = parse(Int, get(ENV, "HJB_DIRECT_MAX", "21"))
-const SIZES = parse.(Int, split(get(ENV, "HJB_SIZES", "13,17,21,25,29")))
+const SIZES = parse.(Int, split(get(ENV, "HJB_SIZES", "13,17,21,25,29"), ","))
 
 struct HJBRow
     n::Int
