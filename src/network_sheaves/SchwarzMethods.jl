@@ -115,10 +115,11 @@ Solve each local problem exactly with a sparse factorization computed at setup:
 struct ExactLocalSolve <: LocalSolver end
 
 """
-    SymmetricGaussSeidelLocalSolve(; sweeps = 1)
+    SymmetricGaussSeidelLocalSolve(; sweeps = 1, ordering = :multicolor)
 
 Solve each local problem inexactly with `sweeps` symmetric Gauss–Seidel sweeps
-of ``\\tilde A_i = D + L + U``, i.e. the stationary iteration with
+of ``\\tilde A_i = D + L + U`` ([`SymmetricGaussSeidel`](@ref), in the given
+`ordering`), i.e. the stationary iteration with
 ``M_i^{-1} = (D + U)^{-1} D (D + L)^{-1}``, applied in correction form
 ``x_i \\leftarrow x_i + M_i^{-1}(b_i - \\tilde A_i x_i)`` from the current
 iterate. Setup needs no factorization. For a nonsingular M-matrix the
@@ -129,12 +130,15 @@ exactly the symmetric Gauss–Seidel pass a global point smoother would.
 """
 struct SymmetricGaussSeidelLocalSolve <: LocalSolver
     sweeps::Int
-    function SymmetricGaussSeidelLocalSolve(sweeps::Integer)
+    ordering::Symbol
+    function SymmetricGaussSeidelLocalSolve(sweeps::Integer, ordering::Symbol=:multicolor)
         @argcheck sweeps >= 1 "need at least one sweep"
-        return new(Int(sweeps))
+        @argcheck ordering in (:natural, :multicolor) "ordering must be :natural or :multicolor"
+        return new(Int(sweeps), ordering)
     end
 end
-SymmetricGaussSeidelLocalSolve(; sweeps::Integer=1) = SymmetricGaussSeidelLocalSolve(sweeps)
+SymmetricGaussSeidelLocalSolve(; sweeps::Integer=1, ordering::Symbol=:multicolor) =
+    SymmetricGaussSeidelLocalSolve(sweeps, ordering)
 
 # Local factorization: ChordalLDLt for symmetric matrices (with a positive
 # definiteness check), sparse LU with partial pivoting otherwise.
@@ -145,7 +149,7 @@ function _local_factor(::ExactLocalSolve, Ai::SparseMatrixCSC, symmetric::Bool, 
     return factor
 end
 _local_factor(s::SymmetricGaussSeidelLocalSolve, Ai::SparseMatrixCSC, symmetric::Bool, i::Int) =
-    SymmetricGaussSeidel(Ai; sweeps=s.sweeps)
+    SymmetricGaussSeidel(Ai; sweeps=s.sweeps, ordering=s.ordering, threaded=false)
 
 _factor_solve(M::ChordalLDLt, b::AbstractVector) = _ldlt_solve(M, b)
 _factor_solve(M, b::AbstractVector) = M \ b
@@ -159,40 +163,124 @@ _factor_solve!(z::AbstractVector, M::SparseArrays.UMFPACK.UmfpackLU, b::Abstract
 _local_update(M, b::AbstractVector, x::AbstractVector) = _factor_solve(M, b)
 
 """
-    SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps = 1)
+    SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps = 1, ordering = :multicolor,
+                         colors = nothing, threaded = size(A, 1) >= 50_000)
 
 The symmetric Gauss–Seidel preconditioner of ``A = D + L + U`` (``L``, ``U``
-strictly lower and upper): `ldiv!(y, M, r)` runs `sweeps` sweeps of the
-stationary iteration ``y \\leftarrow y + (D + U)^{-1} D (D + L)^{-1}(r - A y)``
-from ``y = 0``; one sweep applies ``(D + U)^{-1} D (D + L)^{-1}``. Both
-triangular solves run column by column on `A` itself, so new values of `A`
-on the same pattern take effect without any setup. The diagonal must be
-stored and nonzero.
+strictly lower and upper in the chosen ordering of the unknowns):
+`ldiv!(y, M, r)` runs `sweeps` sweeps of the stationary iteration
+``y \\leftarrow y + (D + U)^{-1} D (D + L)^{-1}(r - A y)`` from ``y = 0``; one
+sweep applies ``(D + U)^{-1} D (D + L)^{-1}``, a forward Gauss–Seidel pass
+followed by a backward one. The diagonal must be stored and nonzero.
+
+- `ordering = :natural` sweeps the unknowns in index order, column by column
+  of `A`: inherently sequential.
+- `ordering = :multicolor` sweeps them color by color for a coloring of the
+  graph of ``A + A^\\mathsf{T}`` (`colors`, a vector of index vectors, or a
+  greedy coloring in index order). Unknowns of one color are not coupled, so
+  each color is updated concurrently (when `threaded`), on CPU threads or a
+  GPU alike. On a grid whose stencil couples only axis neighbours the greedy
+  coloring is the red–black (checkerboard) one.
+
+New values of `A` on the same pattern take effect after [`refactor!`](@ref)
+gathers them (or `nonzeros(M.A)` is overwritten followed by `_refresh!(M)`),
+without any other setup.
 """
 struct SymmetricGaussSeidel{T}
     A::SparseMatrixCSC{T,Int}
-    diagonal::Vector{Int}       # position of A[j, j] in nonzeros(A)
+    diagonal::Vector{Int}           # position of A[j, j] in nonzeros(A)
     sweeps::Int
+    rows::SparseMatrixCSC{T,Int}    # Aᵀ, i.e. A by rows (multicolor only)
+    transpose_map::Vector{Int}      # nonzeros(rows) == nonzeros(A)[transpose_map]
+    row_diagonal::Vector{Int}       # position of A[i, i] in nonzeros(rows)
+    colors::Vector{Vector{Int}}     # empty for the natural ordering
+    threaded::Bool
 end
 
-function SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps::Integer=1)
+function SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps::Integer=1, ordering::Symbol=:multicolor,
+                              colors::Union{Nothing,AbstractVector{<:AbstractVector{<:Integer}}}=nothing,
+                              threaded::Bool=size(A, 1) >= 50_000)
     @argcheck size(A, 1) == size(A, 2) "A must be square"
     @argcheck sweeps >= 1 "need at least one sweep"
+    @argcheck ordering in (:natural, :multicolor) "ordering must be :natural or :multicolor"
     S = _float_sparse(A)
-    diagonal = map(1:size(S, 2)) do j
+    n = size(S, 1)
+    diagonal = _diagonal_positions(S)
+    if ordering === :natural
+        empty = SparseMatrixCSC(0, 0, [1], Int[], eltype(S)[])
+        return SymmetricGaussSeidel(S, diagonal, Int(sweeps), empty, Int[], Int[], Vector{Int}[], threaded)
+    end
+    groups = colors === nothing ? _matrix_coloring(S) : [Vector{Int}(c) for c in colors]
+    _check_coloring(S, groups)
+    index = SparseMatrixCSC(n, n, S.colptr, rowvals(S), collect(1:nnz(S)))
+    transposed = copy(transpose(index))
+    transpose_map = nonzeros(transposed)
+    rows = SparseMatrixCSC(n, n, transposed.colptr, rowvals(transposed), nonzeros(S)[transpose_map])
+    return SymmetricGaussSeidel(S, diagonal, Int(sweeps), rows, transpose_map, _diagonal_positions(rows),
+        groups, threaded)
+end
+
+function _diagonal_positions(S::SparseMatrixCSC)
+    return map(1:size(S, 2)) do j
         p = findfirst(q -> rowvals(S)[q] == j, nzrange(S, j))
         @argcheck p !== nothing && !iszero(nonzeros(S)[nzrange(S, j)[p]]) "the diagonal entry $j is zero"
         nzrange(S, j)[p]
     end
-    return SymmetricGaussSeidel(S, diagonal, Int(sweeps))
+end
+
+# Greedy coloring in index order of the graph of S + Sᵀ: each unknown takes the
+# smallest color none of its earlier neighbours has.
+function _matrix_coloring(S::SparseMatrixCSC)
+    P = _structure(S)
+    n = size(P, 1)
+    color = zeros(Int, n)
+    stamp = Int[]
+    for i in 1:n
+        for p in nzrange(P, i)
+            j = rowvals(P)[p]
+            (j != i && color[j] > 0) && (stamp[color[j]] = i)
+        end
+        c = findfirst(!=(i), stamp)
+        c === nothing && (push!(stamp, 0); c = length(stamp))
+        color[i] = c
+    end
+    groups = [Int[] for _ in 1:maximum(color; init=0)]
+    for i in 1:n
+        push!(groups[color[i]], i)
+    end
+    return groups
+end
+
+function _check_coloring(S::SparseMatrixCSC, groups::Vector{Vector{Int}})
+    n = size(S, 1)
+    color = zeros(Int, n)
+    for (c, g) in enumerate(groups), i in g
+        @argcheck 1 <= i <= n && color[i] == 0 "the colors must partition 1:$n"
+        color[i] = c
+    end
+    @argcheck all(>(0), color) "the colors must partition 1:$n"
+    for j in 1:n, p in nzrange(S, j)
+        i = rowvals(S)[p]
+        @argcheck i == j || color[i] != color[j] "unknowns $i and $j are coupled but have the same color"
+    end
+end
+
+# Bring the row copy up to date after new values were written into nonzeros(M.A).
+function _refresh!(M::SymmetricGaussSeidel)
+    isempty(M.colors) || (nonzeros(M.rows) .= view(nonzeros(M.A), M.transpose_map))
+    return M
 end
 
 Base.size(M::SymmetricGaussSeidel) = size(M.A)
 Base.size(M::SymmetricGaussSeidel, d::Integer) = size(M.A, d)
 Base.eltype(::SymmetricGaussSeidel{T}) where {T} = T
 
-# One sweep from zero: y = (D + U)⁻¹ D (D + L)⁻¹ r, by columns of A.
+_with_sweeps(M::SymmetricGaussSeidel, s::Int) = SymmetricGaussSeidel(M.A, M.diagonal, s, M.rows,
+    M.transpose_map, M.row_diagonal, M.colors, M.threaded)
+
+# One sweep from zero: y = (D + U)⁻¹ D (D + L)⁻¹ r.
 function _sgs_sweep!(y::AbstractVector, M::SymmetricGaussSeidel, r::AbstractVector)
+    isempty(M.colors) || return _multicolor_sweep!(y, M, r)
     A, d = M.A, M.diagonal
     rows, vals = rowvals(A), nonzeros(A)
     copyto!(y, r)
@@ -216,11 +304,48 @@ function _sgs_sweep!(y::AbstractVector, M::SymmetricGaussSeidel, r::AbstractVect
     return y
 end
 
+# Forward pass over the colors from y = 0, then a backward pass in reverse color
+# order, each unknown updated from its whole row with the latest values:
+# exactly (D + U)⁻¹ D (D + L)⁻¹ r in the color-by-color ordering.
+function _multicolor_sweep!(y::AbstractVector, M::SymmetricGaussSeidel, r::AbstractVector)
+    fill!(y, zero(eltype(y)))
+    for c in M.colors
+        _color_pass!(y, M, r, c)
+    end
+    for c in Iterators.reverse(M.colors)
+        _color_pass!(y, M, r, c)
+    end
+    return y
+end
+
+function _color_pass!(y::AbstractVector, M::SymmetricGaussSeidel, r::AbstractVector, color::Vector{Int})
+    R, d = M.rows, M.row_diagonal
+    cols, vals = rowvals(R), nonzeros(R)
+    @inline function update!(i)
+        acc = r[i]
+        @inbounds for p in nzrange(R, i)
+            j = cols[p]
+            j != i && (acc -= vals[p] * y[j])
+        end
+        @inbounds y[i] = acc / vals[d[i]]
+    end
+    if M.threaded
+        Threads.@threads for t in eachindex(color)
+            update!(@inbounds color[t])
+        end
+    else
+        for i in color
+            update!(i)
+        end
+    end
+    return y
+end
+
 # `sweeps` sweeps of the stationary iteration, correcting y in place.
 function _sgs_correct!(y::AbstractVector, M::SymmetricGaussSeidel, b::AbstractVector)
     r, z = similar(y), similar(y)
     for _ in 1:M.sweeps
-        mul!(r, M.A, y)
+        isempty(M.colors) || !M.threaded ? mul!(r, M.A, y) : _threaded_mul!(r, M.rows, y)
         r .= b .- r
         y .+= _sgs_sweep!(z, M, r)
     end
@@ -230,7 +355,7 @@ end
 function LinearAlgebra.ldiv!(y::AbstractVector, M::SymmetricGaussSeidel, r::AbstractVector)
     _sgs_sweep!(y, M, r)
     M.sweeps == 1 && return y
-    return _sgs_correct!(y, SymmetricGaussSeidel(M.A, M.diagonal, M.sweeps - 1), r)
+    return _sgs_correct!(y, _with_sweeps(M, M.sweeps - 1), r)
 end
 
 _factor_solve(M::SymmetricGaussSeidel, b::AbstractVector) = ldiv!(similar(b, eltype(M)), M, b)
@@ -860,14 +985,15 @@ end
 # A fresh local factor of the same kind as `old`, for the local matrix Ai.
 _refactored(::SparseArrays.UMFPACK.UmfpackLU, solver, Ai, i) = _stable_lu(Ai)
 _refactored(::ChordalLDLt, solver, Ai, i) = _local_factor(solver, Ai, true, i)
-_refactored(old::SymmetricGaussSeidel, solver, Ai, i) = SymmetricGaussSeidel(Ai; sweeps=old.sweeps)
+_refactored(old::SymmetricGaussSeidel, solver, Ai, i) = SymmetricGaussSeidel(Ai; sweeps=old.sweeps,
+    ordering=isempty(old.colors) ? :natural : :multicolor, threaded=old.threaded)
 
 # New values (in the stored order of the local matrix) for local factor i.
 function _refactor_values!(dd, i, F::SparseArrays.UMFPACK.UmfpackLU, values)
     F.nzval .= values
     lu!(F)                                   # numeric refactorization, symbolic analysis reused
 end
-_refactor_values!(dd, i, M::SymmetricGaussSeidel, values) = (nonzeros(M.A) .= values)
+_refactor_values!(dd, i, M::SymmetricGaussSeidel, values) = (nonzeros(M.A) .= values; _refresh!(M))
 function _refactor_values!(dd, i, ::ChordalLDLt, values)
     loc = dd.locals[i]
     dd.locals[i] = LocalProblem(loc.dofs, loc.boundary, loc.interior, loc.ghosts, loc.coupling, loc.faces,

@@ -703,21 +703,35 @@ end
         @test_throws ArgumentError refactor!(ddi, Z; At=A)
 
         # Inexact local solves: symmetric Gauss–Seidel inside each subdomain.
-        M = SymmetricGaussSeidel(A)
+        M = SymmetricGaussSeidel(A; ordering=:natural)
         D, Lo, Up = Diagonal(A), tril(A, -1), triu(A, 1)
         r = collect(range(-1.0, 1.0; length=m * m))
         @test ldiv!(similar(r), M, r) ≈ (Matrix(D + Up) \ (D * (Matrix(D + Lo) \ r))) rtol = 1e-12
-        M3 = SymmetricGaussSeidel(A; sweeps=3)
-        y = zeros(m * m)
-        for _ in 1:3
-            y += ldiv!(similar(r), M, r - A * y)
+        # Multicolor (red–black on this grid): the same formula in the color-by-color ordering.
+        Mc = SymmetricGaussSeidel(A)
+        @test length(Mc.colors) == 2
+        q = reduce(vcat, Mc.colors)
+        Aq = A[q, q]
+        Dq, Lq, Uq = Diagonal(Aq), tril(Aq, -1), triu(Aq, 1)
+        @test ldiv!(similar(r), Mc, r)[q] ≈ Matrix(Dq + Uq) \ (Dq * (Matrix(Dq + Lq) \ r[q])) rtol = 1e-12
+        @test ldiv!(similar(r), SymmetricGaussSeidel(A; threaded=true), r) ≈ ldiv!(similar(r), Mc, r) rtol = 1e-14
+        @test ldiv!(similar(r), SymmetricGaussSeidel(A; colors=Mc.colors), r) ≈ ldiv!(similar(r), Mc, r)
+        @test_throws ArgumentError SymmetricGaussSeidel(A; colors=[collect(1:m * m)])         # coupled, same color
+        @test_throws ArgumentError SymmetricGaussSeidel(A; colors=[collect(2:m * m)])         # not a partition
+        @test_throws ArgumentError SymmetricGaussSeidel(A; ordering=:random)
+        for MM in (M, Mc)
+            M3 = SymmetricGaussSeidel(A; sweeps=3, ordering=isempty(MM.colors) ? :natural : :multicolor)
+            y = zeros(m * m)
+            for _ in 1:3
+                y += ldiv!(similar(r), MM, r - A * y)
+            end
+            @test ldiv!(similar(r), M3, r) ≈ y rtol = 1e-12
         end
-        @test ldiv!(similar(r), M3, r) ≈ y rtol = 1e-12
         @test_throws ArgumentError SymmetricGaussSeidel(A - Diagonal(A))
         @test_throws ArgumentError SymmetricGaussSeidelLocalSolve(sweeps=0)
-        for sweeps in (1, 2)
+        for (sweeps, ordering) in ((1, :multicolor), (2, :multicolor), (1, :natural))
             dds = SchwarzDecomposition(A, doms; owner=parts,
-                local_solver=SymmetricGaussSeidelLocalSolve(; sweeps))
+                local_solver=SymmetricGaussSeidelLocalSolve(; sweeps, ordering))
             @test all(lp -> lp.factor isa SymmetricGaussSeidel, dds.locals)
             for sweep in (MultiplicativeSweep(), MulticolorSweep(), ParallelSweep())
                 rs = solve(SchwarzProblem(dds, f), SchwarzIteration(sweep=sweep, tol=1e-10, maxiter=20_000))

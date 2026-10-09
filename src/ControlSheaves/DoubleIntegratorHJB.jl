@@ -478,16 +478,17 @@ Solve each policy evaluation on the whole grid with restarted GMRES
 (`method = :gmres`, Krylov.jl) or with a BiCGStab whose vector operations are
 all threaded (`method = :bicgstab`, the solver of `SchwarzBiCGStab`), right
 preconditioned by a point smoother of ``A_u = D + L + U``: `:gauss_seidel`
-(``(D + L)^{-1}``), `:symmetric_gauss_seidel`
-(``(D + U)^{-1} D (D + L)^{-1}``), `:jacobi` (``D^{-1}``), `:none`, or
+(``(D + L)^{-1}``, natural order), `:symmetric_gauss_seidel`
+(``(D + U)^{-1} D (D + L)^{-1}`` in red–black order, each color updated
+concurrently; `SymmetricGaussSeidel`), `:jacobi` (``D^{-1}``), `:none`, or
 `:block_symmetric_gauss_seidel`: block Jacobi over the boxes of
 [`grid_partition`](@ref)`(grid, blocks)` with a symmetric Gauss–Seidel sweep
 inside each box, the boxes swept concurrently. Warm started from the previous
 value function; matrix–vector products are threaded.
 
 Policy iteration is a semismooth Newton method for the discrete HJB equation
-(Bokanowski, Maroso and Zidani 2009). With a point smoother this is the serial
-Newton–Krylov baseline; the block smoother is its parallel counterpart, equal
+(Bokanowski, Maroso and Zidani 2009). With a point smoother this is the global
+Newton–Krylov baseline; the block smoother is its block Jacobi counterpart, equal
 to it with one block, and the nonoverlapping, inexact relative of
 [`SchwarzPolicyEvaluation`](@ref).
 """
