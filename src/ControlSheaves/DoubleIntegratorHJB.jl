@@ -70,7 +70,7 @@ using CommonSolve: solve
 using LinearAlgebra
 using SparseArrays
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, SchwarzProblem,
-    SchwarzIteration, MulticolorSweep
+    SchwarzIteration, MulticolorSweep, _stable_lu
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
     PolicyIteration, DirectPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,
@@ -127,7 +127,7 @@ function grid_partition(g::StateGrid, blocks::AbstractVector{<:Integer})
     @argcheck all(1 .<= blocks .<= g.points)
     shape = Tuple(blocks)
     labels = LinearIndices(shape)
-    return [labels[ntuple(k -> 1 + ((I[k] - 1) * blocks[k]) ÷ g.points[k], ndims(g))...] for I in _cartesian(g)]
+    return vec([labels[ntuple(k -> 1 + ((I[k] - 1) * blocks[k]) ÷ g.points[k], ndims(g))...] for I in _cartesian(g)])
 end
 
 """
@@ -145,8 +145,8 @@ function grid_subdomains(g::StateGrid, blocks::AbstractVector{<:Integer}; overla
         max(1, first_ - overlap):min(g.points[k], last_ + overlap)
     end
     L = LinearIndices(Tuple(g.points))
-    return [vec(collect(L[CartesianIndices(ntuple(k -> ranges(k, B[k]), ndims(g)))]))
-            for B in CartesianIndices(Tuple(blocks))]
+    return vec([vec(collect(L[CartesianIndices(ntuple(k -> ranges(k, B[k]), ndims(g)))]))
+            for B in CartesianIndices(Tuple(blocks))])
 end
 
 # ===========================================================================
@@ -373,7 +373,8 @@ end
     DirectPolicyEvaluation()
 
 Solve each policy evaluation ``A_u V = b_u`` with a sparse LU factorization of
-the whole grid. The reference; its fill-in grows quickly with the dimension
+the whole grid (partial pivoting; see `SchwarzMethods`). The reference; its
+fill-in grows quickly with the dimension
 (on a ``n^4`` grid the separators have ``n^3`` points).
 """
 struct DirectPolicyEvaluation end
@@ -404,7 +405,9 @@ _evaluation_data(prob::HJBProblem, e::SchwarzPolicyEvaluation) =
     (grid_subdomains(prob.grid, e.blocks; overlap = e.overlap), grid_partition(prob.grid, e.blocks))
 
 function _evaluate(::DirectPolicyEvaluation, data, A, b, V0)
-    return lu(A) \ b, 0, true
+    V = _stable_lu(A) \ b
+    residual = norm(A * V - b) / max(norm(b), eps())
+    return V, 0, residual <= 1e-8
 end
 
 function _evaluate(e::SchwarzPolicyEvaluation, (subdomains, parts), A, b, V0)
@@ -462,7 +465,7 @@ function CommonSolve.solve(prob::HJBProblem, alg::PolicyIteration)
     g = prob.grid
     U = _lqr_controls(prob)
     x = zeros(ndims(g))
-    V = [riccati_value(prob, _coordinates!(x, g, I)) for I in _cartesian(g)]
+    V = vec([riccati_value(prob, _coordinates!(x, g, I)) for I in _cartesian(g)])
     data = _evaluation_data(prob, alg.evaluation)
     changes, linear_iterations = Float64[], Int[]
     converged = false

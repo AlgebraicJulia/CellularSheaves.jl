@@ -53,12 +53,25 @@ end
 # The sparsity pattern of S + Sᵀ. The ghost layers, overlaps and ownership of a
 # cover only depend on which dofs are coupled, so for a nonsymmetric matrix they
 # are computed from this symmetrized pattern.
-_structure(S::SparseMatrixCSC) = issymmetric(S) ? S : spones(S) + spones(sparse(transpose(S)))
+_pattern(S::SparseMatrixCSC) = SparseMatrixCSC(size(S)..., copy(S.colptr), copy(rowvals(S)), ones(nnz(S)))
+_structure(S::SparseMatrixCSC) = issymmetric(S) ? S : _pattern(S) + _pattern(sparse(transpose(S)))
+
+# Sparse LU with partial pivoting (UMFPACK pivot tolerance 1). UMFPACK's
+# default threshold of 0.1 lets element growth compound on upwind M-matrices:
+# on a 121² HJB policy-evaluation matrix it produced |U| ≈ 6e19 and a relative
+# residual of 8.5 with no error raised, while partial pivoting gives growth 1,
+# a residual of 1e-15, and a sparser factor.
+function _stable_lu(A::SparseMatrixCSC{Float64,Int64})
+    control = SparseArrays.UMFPACK.get_umfpack_control(Float64, Int64)
+    control[SparseArrays.UMFPACK.JL_UMFPACK_PIVOT_TOLERANCE] = 1.0
+    return lu(A; control)
+end
+_stable_lu(A::SparseMatrixCSC) = lu(A)
 
 # Local factorization: ChordalLDLt for symmetric matrices (with a positive
-# definiteness check), sparse LU otherwise.
+# definiteness check), sparse LU with partial pivoting otherwise.
 function _local_factor(Ai::SparseMatrixCSC, symmetric::Bool, i::Int)
-    symmetric || return lu(Ai)
+    symmetric || return _stable_lu(Ai)
     factor = ldlt!(ChordalLDLt(Ai), RowMaximum(); check=false)
     @argcheck all(>(0), factor.D.diag) "the local matrix of subdomain $i is not positive definite; increase the Robin parameter"
     return factor

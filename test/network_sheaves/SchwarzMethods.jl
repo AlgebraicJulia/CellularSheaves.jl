@@ -210,7 +210,8 @@ end
         @test_throws ArgumentError SchwarzDecomposition(A, nonoverlap; owner=parts,
             transmission=RobinTransmission(1.0))                             # Robin needs overlap
         @test_throws ArgumentError SchwarzProblem(dd, f[1:end-1])
-        @test_throws ArgumentError SchwarzDecomposition(sparse([1.0 2.0; 0.0 1.0]), [[1, 2]])
+        @test_throws ArgumentError SchwarzDecomposition(sparse([1.0 2.0; 0.0 1.0]), [[1, 2]];
+            transmission=RobinTransmission(1.0))                             # Robin needs symmetric A
     end
 
     @testset "multicolor Schwarz" begin
@@ -652,7 +653,8 @@ end
             @test r.u ≈ u rtol = 1e-8
         end
         g = solve(SchwarzProblem(dd, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=200))
-        @test g.converged && g.u ≈ u rtol = 1e-8
+        @test g.converged
+        @test g.u ≈ u rtol = 1e-8
         @test_throws ArgumentError solve(SchwarzProblem(dd, f), SchwarzCG())
         @test_throws ArgumentError solve(SchwarzProblem(dd, f), SheafADMM(rho=1.0))
         @test_throws ArgumentError TruncatedPushforwardCoarseSpace(dd)
