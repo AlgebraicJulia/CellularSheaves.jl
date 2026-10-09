@@ -584,7 +584,7 @@ gather_boxes(c::BoxCommunicator, layout::BoxLayout, x::AbstractArray, op::GridOp
 
 function gather_boxes(c::BoxCommunicator, layout::BoxLayout{D}, block::AbstractArray) where {D}
     @argcheck size(block) == length.(layout.owned) "the block must have the size of the owned box"
-    blocks = box_allgather(c, vec(Array(block)))
+    blocks = box_allgather(c, vec(Array(copy(block))))         # copy: a contiguous array on the same device
     out = zeros(eltype(block), layout.points...)
     for (r, block) in enumerate(blocks)
         other = BoxLayout(layout.points, layout.ranks, r - 1; overlap=layout.overlap)

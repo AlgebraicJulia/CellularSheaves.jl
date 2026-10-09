@@ -304,7 +304,7 @@ function CommonSolve.solve(prob::HJBProblem, alg::GridPolicyIteration)
         end
     end
     values = vec(gather_boxes(comm, layout, V, op))
-    owned_controls = Array(view(U, ntuple(k -> ushift[k] .+ (1:length(layout.owned[k])), D)..., :))
+    owned_controls = Array(copy(view(U, ntuple(k -> ushift[k] .+ (1:length(layout.owned[k])), D)..., :)))
     controls = reduce(vcat, (permutedims(vec(gather_boxes(comm, layout, selectdim(owned_controls, D + 1, k))))
                              for k in 1:d))
     seconds = (assembly = t_assembly, setup = 0.0, linear = t_linear, improvement = t_improvement)
