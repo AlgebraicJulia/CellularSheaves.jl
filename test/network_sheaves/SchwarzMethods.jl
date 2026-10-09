@@ -744,6 +744,14 @@ end
                 M \ f rtol = 1e-8
         end
         @test refactor(ddg, A2).locals[1].factor isa SymmetricGaussSeidel
+        # The direct RAS application equals one parallel sweep from the zero cochain.
+        for d in (dd, ddg)
+            P = CellularSheaves.NetworkSheaves.SchwarzMethods.SchwarzSweepPreconditioner(d, ParallelSweep())
+            sweep_prob = SchwarzProblem(d, r)
+            xz = localize(d, zeros(m * m))
+            schwarz_step!(xz, sweep_prob, ParallelSweep())
+            @test P * r ≈ glue(d, xz) rtol = 1e-13
+        end
     end
 
     @testset "refactor! with ChordalLDLt local factors" begin

@@ -860,6 +860,15 @@ function _within_pattern(S::SparseMatrixCSC, P::SparseMatrixCSC)
     return true
 end
 
+# A as a linear operator applied by rows from At = Aᵀ, concurrently (for Krylov.jl).
+struct _RowOperator{T}
+    At::SparseMatrixCSC{T,Int}
+end
+Base.size(M::_RowOperator) = (size(M.At, 2), size(M.At, 1))
+Base.size(M::_RowOperator, d::Integer) = size(M)[d]
+Base.eltype(::_RowOperator{T}) where {T} = T
+LinearAlgebra.mul!(y::AbstractVector, M::_RowOperator, x::AbstractVector) = _threaded_mul!(y, M.At, x)
+
 # y = A x computed by rows from At = Aᵀ, concurrently.
 function _threaded_mul!(y::AbstractVector, At::SparseMatrixCSC, x::AbstractVector)
     rows, vals = rowvals(At), nonzeros(At)
@@ -934,7 +943,11 @@ isomorphism from functions on the domain onto the global sections ``H^0``.
 """
 function localize(dd::SchwarzDecomposition, u::AbstractVector)
     @argcheck length(u) == size(dd.A, 1)
-    return mortar([u[d] for d in dd.cover.stalks])
+    pieces = Vector{Vector{eltype(u)}}(undef, length(dd.cover.stalks))
+    Threads.@threads for i in eachindex(pieces)
+        pieces[i] = u[dd.cover.stalks[i]]
+    end
+    return mortar(pieces)
 end
 
 """
@@ -1176,13 +1189,16 @@ end
 function schwarz_step!(x::BlockVector, prob::SchwarzProblem, ::ParallelSweep)
     xs = _cochain_blocks(prob.decomposition, x)
     dd = prob.decomposition
-    foreach(i -> _receive!(xs, dd, i), eachindex(xs))
+    # Receiving writes only i's ghosts and reads only owners' interiors: no races.
+    Threads.@threads for i in eachindex(xs)
+        _receive!(xs, dd, i)
+    end
     updates = Vector{Vector{eltype(prob.rhs)}}(undef, length(xs))
     Threads.@threads for i in eachindex(xs)
         updates[i] = _local_solve(prob, xs, i)
     end
-    for (xi, lp, update) in zip(xs, dd.locals, updates)
-        xi[lp.interior] .= update
+    Threads.@threads for i in eachindex(xs)
+        xs[i][dd.locals[i].interior] .= updates[i]
     end
     return x
 end
@@ -1576,18 +1592,41 @@ struct SchwarzSweepPreconditioner{T,D<:SchwarzDecomposition{T},S<:SchwarzSweep,C
     decomposition::D
     sweep::S
     coarse::C
+    owned::Vector{Vector{Int}}      # positions t in subdomain i with owner(dofs[t]) == i
 end
 
-SchwarzSweepPreconditioner(dd::SchwarzDecomposition{T}, sweep::SchwarzSweep, coarse=nothing) where {T} =
-    SchwarzSweepPreconditioner{T,typeof(dd),typeof(sweep),typeof(coarse)}(dd, sweep, coarse)
+function SchwarzSweepPreconditioner(dd::SchwarzDecomposition{T}, sweep::SchwarzSweep, coarse=nothing) where {T}
+    owned = Vector{Vector{Int}}(undef, length(dd.locals))
+    Threads.@threads for i in eachindex(owned)
+        dofs = dd.locals[i].dofs
+        owned[i] = [t for t in eachindex(dofs) if dd.ownership.owner[dofs[t]] == i]
+    end
+    return SchwarzSweepPreconditioner{T,typeof(dd),typeof(sweep),typeof(coarse)}(dd, sweep, coarse, owned)
+end
 
 Base.size(P::SchwarzSweepPreconditioner) = size(P.decomposition.A)
 Base.size(P::SchwarzSweepPreconditioner, d::Integer) = size(P.decomposition.A, d)
 Base.eltype(::SchwarzSweepPreconditioner{T}) where {T} = T
 
+# Restricted additive Schwarz from the zero cochain: the ghost values are zero,
+# so each local solve sees r on its dofs only, and gluing keeps the owned
+# entries. Same map as the general path below, without building the cochain.
+function _ras!(y::AbstractVector, P::SchwarzSweepPreconditioner, r::AbstractVector)
+    dd = P.decomposition
+    Threads.@threads for i in eachindex(dd.locals)
+        lp = dd.locals[i]
+        z = _factor_solve(lp.factor, r[lp.dofs])
+        @inbounds for t in P.owned[i]
+            y[lp.dofs[t]] = z[t]
+        end
+    end
+    return y
+end
+
 function LinearAlgebra.mul!(y::AbstractVector, P::SchwarzSweepPreconditioner{T}, r::AbstractVector) where {T}
     dd = P.decomposition
     @argcheck length(y) == length(r) == size(dd.A, 1)
+    P.sweep isa ParallelSweep && P.coarse === nothing && return _ras!(y, P, r)
     n = size(dd.A, 1)
     prob = SchwarzProblem(dd, Vector{T}(r), zeros(T, n))
     x = localize(dd, prob.u0)
@@ -1627,14 +1666,14 @@ end
 function solve(prob::SchwarzProblem{T}, alg::SchwarzGMRES) where {T}
     @argcheck alg.maxiter >= 1 && alg.memory >= 1
     dd = prob.decomposition
-    r0 = prob.rhs - dd.A * prob.u0
+    r0 = prob.rhs - _threaded_mul!(similar(prob.rhs), dd.At, prob.u0)
     initial = _relative_residual(prob, prob.u0)
     if initial <= alg.tol || iszero(norm(r0))
         return SchwarzResult(copy(prob.u0), localize(dd, prob.u0), T[initial], T[0], 0, true)
     end
     # GMRES solves A e = f − A u0 for the correction e from e = 0.
     P = SchwarzSweepPreconditioner(dd, alg.sweep, alg.coarse)
-    e, stats = gmres(dd.A, r0; N=P, memory=alg.memory, restart=true, atol=zero(T),
+    e, stats = gmres(_RowOperator(dd.At), r0; N=P, memory=alg.memory, restart=true, atol=zero(T),
         rtol=T(alg.tol) * _rhs_scale(prob) / norm(r0), itmax=alg.maxiter, history=true)
     u = prob.u0 + e
     residuals = T.(stats.residuals) ./ _rhs_scale(prob)
