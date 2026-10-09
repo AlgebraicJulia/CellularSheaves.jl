@@ -450,10 +450,10 @@ end
 
 function _preconditioner(A::SparseMatrixCSC, kind::Symbol)
     kind === :none && return I
-    kind === :jacobi && return _Jacobi(1 ./ diag(A))
+    kind === :jacobi && return _Jacobi(1 ./ Vector(diag(A)))
     kind === :gauss_seidel && return _GaussSeidel(LowerTriangular(tril(A)))
     kind === :symmetric_gauss_seidel &&
-        return _SymmetricGaussSeidel(LowerTriangular(tril(A)), UpperTriangular(triu(A)), diag(A))
+        return _SymmetricGaussSeidel(LowerTriangular(tril(A)), UpperTriangular(triu(A)), Vector(diag(A)))
     throw(ArgumentError("unknown preconditioner $kind"))
 end
 
