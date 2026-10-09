@@ -56,6 +56,12 @@ end
 _pattern(S::SparseMatrixCSC) = SparseMatrixCSC(size(S)..., copy(S.colptr), copy(rowvals(S)), ones(nnz(S)))
 _structure(S::SparseMatrixCSC) = issymmetric(S) ? S : _pattern(S) + _pattern(sparse(transpose(S)))
 
+# A as a SparseMatrixCSC{<:AbstractFloat,Int} with its stored pattern intact
+# (broadcasting `float.` over a sparse matrix drops explicit zeros).
+_float_sparse(A::SparseMatrixCSC) = SparseMatrixCSC(size(A)..., Vector{Int}(A.colptr), Vector{Int}(rowvals(A)),
+    float.(nonzeros(A)))
+_float_sparse(A::AbstractMatrix) = sparse(float.(A))
+
 # Sparse LU with partial pivoting (UMFPACK pivot tolerance 1). UMFPACK's
 # default threshold of 0.1 lets element growth compound on upwind M-matrices:
 # on a 121² HJB policy-evaluation matrix it produced |U| ≈ 6e19 and a relative
@@ -577,7 +583,7 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
                               dropzeros::Bool=true)
     n = size(A, 1)
     @argcheck size(A, 2) == n "A must be square"
-    S = sparse(float.(A))
+    S = _float_sparse(A)
     dropzeros && (S = SparseArrays.dropzeros(S))
     @argcheck issymmetric(S) || transmission isa DirichletTransmission "Robin transmission needs a symmetric A"
     @argcheck !isempty(subdomains) "need at least one subdomain"
