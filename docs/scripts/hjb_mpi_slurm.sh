@@ -12,6 +12,8 @@
 #   julia --project=$HJB_MPI_ENV -e 'using Pkg; Pkg.develop(path="<this repo>"); Pkg.add(["MPI", "MPIPreferences", "Statistics"])'
 #   julia --project=$HJB_MPI_ENV -e 'using MPIPreferences; MPIPreferences.use_system_binary(;
 #       library_names = ["/apps/mpi/gcc/14.2.0/openmpi/5.0.7_el97/lib/libmpi.so"], mpiexec = "srun")'
+# Precompile once in a single-task job with JULIA_CPU_TARGET=x86-64-v3 (the
+# target the ranks run with), or every rank precompiles at once.
 # Without the sandbox, drop `in-sandbox`.
 env=${HJB_MPI_ENV:-$HOME/bench-sysmpi}
 # Submitted with sbatch --export=..., the job also gets the submitting login
@@ -27,5 +29,5 @@ unset -f module ml which 2>/dev/null || true
 settings=$(env | grep -E '^HJB_' | sed 's/^/export /; s/=/="/; s/$/";/' | tr '\n' ' ')
 srun --mpi=pmix in-sandbox bash -lc "source /etc/profile.d/modules.sh && module load gcc/14.2.0 && \
     module load openmpi/5.0.7 && module load julia/1.12.6 && \
-    export UCX_WARN_UNUSED_ENV_VARS=n JULIA_THREAD_SLEEP_THRESHOLD=infinite && $settings \
+    export UCX_WARN_UNUSED_ENV_VARS=n JULIA_THREAD_SLEEP_THRESHOLD=infinite JULIA_CPU_TARGET=x86-64-v3 && $settings \
     julia -t \${SLURM_CPUS_PER_TASK:-1} --project=$env --startup-file=no docs/scripts/hjb_mpi_benchmarks.jl"
