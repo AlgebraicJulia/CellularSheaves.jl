@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000.0 470.0" font-family="Helvetica, Arial, sans-serif" font-size="13">
+<rect x="0" y="0" width="1000.0" height="470.0" rx="10" fill="#ffffff"/>
+<text x="240" y="30" font-size="15" fill="#222" text-anchor="middle" font-weight="bold" font-style="normal">The bag of supernode 4 on the formation</text>
+<text x="240" y="48" font-size="11.5" fill="#666" text-anchor="middle" font-weight="normal" font-style="normal">res = eliminated here;  sep = shared boundary with ancestors</text>
+<line x1="218.0" y1="265.0" x2="174.0" y2="188.78976446696942" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="174.0" y1="188.78976446696942" x2="86.00000000000003" y2="188.7897644669694" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="86.00000000000003" y1="188.7897644669694" x2="42.0" y2="265.0" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="42.0" y1="265.0" x2="85.99999999999996" y2="341.2102355330306" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="85.99999999999996" y1="341.2102355330306" x2="174.0" y2="341.2102355330306" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="174.0" y1="341.2102355330306" x2="218.0" y2="265.0" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="262.0" y1="265.0" x2="305.99999999999994" y2="341.2102355330306" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="305.99999999999994" y1="341.2102355330306" x2="393.99999999999994" y2="341.21023553303064" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="393.99999999999994" y1="341.21023553303064" x2="438.0" y2="265.0" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="438.0" y1="265.0" x2="394.00000000000006" y2="188.78976446696942" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="394.00000000000006" y1="188.78976446696942" x2="305.99999999999994" y2="188.78976446696942" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="305.99999999999994" y1="188.78976446696942" x2="262.0" y2="265.0" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="218.0" y1="265.0" x2="262.0" y2="265.0" stroke="#cccccc" stroke-width="1.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="218.0" y1="265.0" x2="130.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="174.0" y1="188.78976446696942" x2="130.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="86.00000000000003" y1="188.7897644669694" x2="130.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="42.0" y1="265.0" x2="130.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="85.99999999999996" y1="341.2102355330306" x2="130.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="174.0" y1="341.2102355330306" x2="130.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="262.0" y1="265.0" x2="350.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="305.99999999999994" y1="341.2102355330306" x2="350.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="393.99999999999994" y1="341.21023553303064" x2="350.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="438.0" y1="265.0" x2="350.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="394.00000000000006" y1="188.78976446696942" x2="350.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<line x1="305.99999999999994" y1="188.78976446696942" x2="350.0" y2="265.0" stroke="#999999" stroke-width="1.0" stroke-dasharray="3 3" stroke-opacity="0.7" stroke-linecap="round"/>
+<circle cx="218.0" cy="265.0" r="13" fill="#f4f4f4" stroke="#bbbbbb" stroke-width="2.0"/>
+<text x="218.0" y="269.0" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">1</text>
+<circle cx="174.0" cy="188.78976446696942" r="13" fill="#f4f4f4" stroke="#bbbbbb" stroke-width="2.0"/>
+<text x="174.0" y="192.78976446696942" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">2</text>
+<circle cx="86.00000000000003" cy="188.7897644669694" r="13" fill="#f4f4f4" stroke="#bbbbbb" stroke-width="2.0"/>
+<text x="86.00000000000003" y="192.7897644669694" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">3</text>
+<circle cx="42.0" cy="265.0" r="13" fill="#f4f4f4" stroke="#bbbbbb" stroke-width="2.0"/>
+<text x="42.0" y="269.0" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">4</text>
+<circle cx="85.99999999999996" cy="341.2102355330306" r="13" fill="#f4f4f4" stroke="#bbbbbb" stroke-width="2.0"/>
+<text x="85.99999999999996" y="345.2102355330306" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">5</text>
+<circle cx="174.0" cy="341.2102355330306" r="13" fill="#f4f4f4" stroke="#bbbbbb" stroke-width="2.0"/>
+<text x="174.0" y="345.2102355330306" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">6</text>
+<circle cx="262.0" cy="265.0" r="13" fill="#fbe4ec" stroke="#c2255c" stroke-width="2.0"/>
+<text x="262.0" y="269.0" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">7</text>
+<circle cx="305.99999999999994" cy="341.2102355330306" r="13" fill="#f4f4f4" stroke="#bbbbbb" stroke-width="2.0"/>
+<text x="305.99999999999994" y="345.2102355330306" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">8</text>
+<circle cx="393.99999999999994" cy="341.21023553303064" r="13" fill="#e4f3e8" stroke="#2f9e44" stroke-width="2.0"/>
+<text x="393.99999999999994" y="345.21023553303064" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">9</text>
+<circle cx="438.0" cy="265.0" r="13" fill="#f4f4f4" stroke="#bbbbbb" stroke-width="2.0"/>
+<text x="438.0" y="269.0" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">10</text>
+<circle cx="394.00000000000006" cy="188.78976446696942" r="13" fill="#f4f4f4" stroke="#bbbbbb" stroke-width="2.0"/>
+<text x="394.00000000000006" y="192.78976446696942" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">11</text>
+<circle cx="305.99999999999994" cy="188.78976446696942" r="13" fill="#e4f3e8" stroke="#2f9e44" stroke-width="2.0"/>
+<text x="305.99999999999994" y="192.78976446696942" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold" font-style="normal">12</text>
+<polygon points="130.0,253.0 142.0,265.0 130.0,277.0 118.0,265.0" fill="#2b2b2b" stroke="#000" stroke-width="1"/>
+<text x="130.0" y="268.5" font-size="9" fill="#ffffff" text-anchor="middle" font-weight="bold" font-style="normal">T1</text>
+<polygon points="350.0,253.0 362.0,265.0 350.0,277.0 338.0,265.0" fill="#2b2b2b" stroke="#000" stroke-width="1"/>
+<text x="350.0" y="268.5" font-size="9" fill="#ffffff" text-anchor="middle" font-weight="bold" font-style="normal">T2</text>
+<circle cx="60" cy="415" r="8" fill="#e4f3e8" stroke="#2f9e44" stroke-width="2"/>
+<text x="76" y="419" font-size="11" fill="#222" text-anchor="start" font-weight="normal" font-style="normal">res(4) = agents {9, 12} — 6 dofs</text>
+<circle cx="60" cy="440" r="8" fill="#fbe4ec" stroke="#c2255c" stroke-width="2"/>
+<text x="76" y="444" font-size="11" fill="#222" text-anchor="start" font-weight="normal" font-style="normal">sep(4) = agent {7} — 3 dofs</text>
+<text x="646.5" y="66" font-size="14" fill="#222" text-anchor="middle" font-weight="bold" font-style="normal">Stored factor blocks (to scale)</text>
+<rect x="570" y="95" width="102" height="102" rx="0" fill="#e4f3e8" fill-opacity="1.0" stroke="#2f9e44" stroke-width="2"/>
+<rect x="570" y="197" width="102" height="51" rx="0" fill="#fbe4ec" fill-opacity="1.0" stroke="#c2255c" stroke-width="2"/>
+<line x1="587" y1="95" x2="587" y2="248" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="570" y1="112" x2="672" y2="112" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="604" y1="95" x2="604" y2="248" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="570" y1="129" x2="672" y2="129" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="621" y1="95" x2="621" y2="248" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="570" y1="146" x2="672" y2="146" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="638" y1="95" x2="638" y2="248" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="570" y1="163" x2="672" y2="163" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="655" y1="95" x2="655" y2="248" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="570" y1="180" x2="672" y2="180" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="672" y1="95" x2="672" y2="248" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="570" y1="197" x2="672" y2="197" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="689" y1="95" x2="689" y2="248" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="570" y1="214" x2="672" y2="214" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="706" y1="95" x2="706" y2="248" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<line x1="570" y1="231" x2="672" y2="231" stroke="#ffffff" stroke-width="1" stroke-opacity="1.0" stroke-linecap="round"/>
+<rect x="672" y="95" width="51" height="102" rx="0" fill="#f4f4f4" fill-opacity="1.0" stroke="#cccccc" stroke-width="1"/>
+<text x="697.5" y="149.4" font-size="9" fill="#999" text-anchor="middle" font-weight="normal" font-style="normal">symmetric</text>
+<rect x="672" y="197" width="51" height="51" rx="0" fill="#fff8e6" fill-opacity="1.0" stroke="#e08214" stroke-width="1.6"/>
+<text x="697.5" y="220.8" font-size="9" fill="#b06000" text-anchor="middle" font-weight="normal" font-style="normal">update</text>
+<text x="697.5" y="234.39999999999998" font-size="9" fill="#b06000" text-anchor="middle" font-weight="normal" font-style="normal">→ parent</text>
+<text x="621" y="149.4" font-size="12" fill="#1c6b32" text-anchor="middle" font-weight="bold">D<tspan font-size="8.399999999999999" baseline-shift="-22%">11</tspan>  (6×6)</text>
+<text x="621" y="224.2" font-size="11.5" fill="#8f1d4e" text-anchor="middle" font-weight="bold">L<tspan font-size="8.049999999999999" baseline-shift="-22%">21</tspan> (3×6)</text>
+<text x="560" y="146" font-size="10" fill="#1c6b32" text-anchor="end" font-weight="normal" font-style="normal">9</text>
+<text x="560" y="173.2" font-size="10" fill="#1c6b32" text-anchor="end" font-weight="normal" font-style="normal">12</text>
+<text x="560" y="224.2" font-size="10" fill="#8f1d4e" text-anchor="end" font-weight="normal" font-style="normal">7</text>
+<text x="870" y="66" font-size="14" fill="#222" text-anchor="middle" font-weight="bold" font-style="normal">Per-solve dataflow</text>
+<rect x="790" y="385" width="44" height="30" rx="5" fill="#eaf1f7" fill-opacity="1.0" stroke="#4682b4" stroke-width="1.6"/>
+<text x="812" y="404" font-size="9.5" fill="#222" text-anchor="middle" font-weight="normal" font-style="normal">child 1</text>
+<line x1="812" y1="385" x2="856.435741832545" y2="324.8265996017621" stroke="#888" stroke-width="1.4" stroke-opacity="1.0" stroke-linecap="round"/>
+<polygon points="860,320 852.3516960156693,324.29691123520973 858.1436155377838,328.5740210361558" fill="#888"/>
+<rect x="848" y="385" width="44" height="30" rx="5" fill="#eaf1f7" fill-opacity="1.0" stroke="#4682b4" stroke-width="1.6"/>
+<text x="870" y="404" font-size="9.5" fill="#222" text-anchor="middle" font-weight="normal" font-style="normal">child 2</text>
+<line x1="870" y1="385" x2="868.1845280547218" y2="325.99716177845994" stroke="#888" stroke-width="1.4" stroke-opacity="1.0" stroke-linecap="round"/>
+<polygon points="868,320 864.6477403392199,328.10693253744637 871.8443344733718,327.8854988717801" fill="#888"/>
+<rect x="906" y="385" width="44" height="30" rx="5" fill="#eaf1f7" fill-opacity="1.0" stroke="#4682b4" stroke-width="1.6"/>
+<text x="928" y="404" font-size="9.5" fill="#222" text-anchor="middle" font-weight="normal" font-style="normal">child 3</text>
+<line x1="928" y1="385" x2="879.7481702853265" y2="324.68521285665815" stroke="#888" stroke-width="1.4" stroke-opacity="1.0" stroke-linecap="round"/>
+<polygon points="876,320 878.1864326664405,328.49585264674016 883.8086880944303,323.9980483043483" fill="#888"/>
+<rect x="810" y="275" width="120" height="44" rx="6" fill="#e4f3e8" fill-opacity="1.0" stroke="#2f9e44" stroke-width="2"/>
+<text x="870" y="293" font-size="10.5" fill="#222" text-anchor="middle" font-weight="normal" font-style="normal">solve</text>
+<text x="870" y="308" font-size="11.5" fill="#222" text-anchor="middle" font-weight="bold">D<tspan font-size="8.049999999999999" baseline-shift="-22%">11</tspan> y<tspan font-size="8.049999999999999" baseline-shift="-22%">1</tspan> = c<tspan font-size="8.049999999999999" baseline-shift="-22%">1</tspan></text>
+<line x1="870" y1="275" x2="870.0" y2="201.0" stroke="#c2255c" stroke-width="2.2" stroke-opacity="1.0" stroke-linecap="round"/>
+<polygon points="870,195 866.4,203.0 873.6,203.0" fill="#c2255c"/>
+<text x="882" y="240" font-size="11" fill="#c2255c" text-anchor="start" font-weight="normal">m<tspan font-size="7.699999999999999" baseline-shift="-22%">2</tspan> = f<tspan font-size="7.699999999999999" baseline-shift="-22%">2</tspan> − L<tspan font-size="7.699999999999999" baseline-shift="-22%">21</tspan> y<tspan font-size="7.699999999999999" baseline-shift="-22%">1</tspan></text>
+<text x="882" y="256" font-size="9.5" fill="#8f1d4e" text-anchor="start" font-weight="normal" font-style="normal">3 numbers, to parent</text>
+<rect x="824" y="150" width="92" height="44" rx="6" fill="#ffffff" fill-opacity="1.0" stroke="#777" stroke-width="1.6"/>
+<text x="870" y="168" font-size="10.5" fill="#222" text-anchor="middle" font-weight="normal" font-style="normal">parent 5</text>
+<text x="870" y="184" font-size="9.5" fill="#666" text-anchor="middle" font-weight="normal" font-style="normal">sep = agent 7</text>
+</svg>
