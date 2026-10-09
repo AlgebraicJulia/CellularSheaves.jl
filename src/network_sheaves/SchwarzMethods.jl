@@ -312,7 +312,7 @@ function _multicolor_sweep!(y::AbstractVector, M::SymmetricGaussSeidel, r::Abstr
     for c in M.colors
         _color_pass!(y, M, r, c)
     end
-    for c in Iterators.reverse(M.colors)
+    for c in Iterators.drop(Iterators.reverse(M.colors), 1)   # the last color would only repeat itself
         _color_pass!(y, M, r, c)
     end
     return y

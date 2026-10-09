@@ -73,10 +73,16 @@ using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, Schwa
     SchwarzIteration, MulticolorSweep, refactor!, _stable_lu, _threaded_mul!,
     LocalSolver, ExactLocalSolve, SymmetricGaussSeidel, _bicgstab!, _submatrix
 using Krylov: gmres
+using KernelAbstractions
+using KernelAbstractions: @kernel, @index, @Const, get_backend
+using Adapt: Adapt
+using CellularSheaves.NetworkSheaves: GridSchwarz
+using CellularSheaves.NetworkSheaves.GridSchwarz: AbstractStencil, GridOperator, grid_zeros, interior, red_black_sgs!,
+    GridWorkspace, grid_bicgstab!, grid_reduce, apply!, _unit, _shift
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
     PolicyIteration, DirectPolicyEvaluation, KrylovPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,
-    grid_partition, grid_subdomains, value_at, control_at
+    grid_partition, grid_subdomains, value_at, control_at, GridPolicyIteration
 
 # ===========================================================================
 # grid
@@ -761,5 +767,7 @@ function control_at(sol::HJBSolution, x::AbstractVector)
     end
     return _project!(u, prob)
 end
+
+include("DoubleIntegratorHJBGrid.jl")
 
 end # module DoubleIntegratorHJB

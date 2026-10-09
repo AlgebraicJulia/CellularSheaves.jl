@@ -187,6 +187,45 @@ end
         @test all(>=(0), values(stationary.seconds)) && stationary.seconds.setup > 0
     end
 
+    @testset "implicit grid policy iteration" begin
+        for (prob, rtol) in ((HJBProblem(grid1(41); control_bound = 1.0), 1e-7),
+                             (HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(9, 4)); control_bound = 1.0,
+                                 constraint = :disc), 1e-7))
+            g = prob.grid
+            n, d = Tuple(g.points), prob.axes
+            # The implicit upwind stencil and right-hand side reproduce the assembled system.
+            U = DIH._lqr_controls(prob)
+            A, b = DIH._assemble(prob, U)
+            Ug = reshape(permutedims(U), n..., d)
+            kp = DIH._KernelProblem(prob, ntuple(_ -> 0, length(n)))
+            op = CellularSheaves.NetworkSheaves.GridSchwarz.GridOperator(DIH._UpwindStencil(Ug, kp), n; ghost = 1)
+            x = grid_zeros(op)
+            interior(x, op) .= reshape(collect(range(-1.0, 2.0; length = length(g))), n)
+            y = grid_zeros(op)
+            apply!(y, op, x)
+            @test vec(interior(y, op)) ≈ A * vec(interior(x, op)) rtol = 1e-13
+            bg = grid_zeros(op)
+            DIH._launch!(DIH._grid_rhs_kernel!, op, bg, Ug, kp, op.ghost)
+            @test vec(interior(bg, op)) ≈ b rtol = 1e-13
+            # Same red–black preconditioner as the assembled path.
+            z = grid_zeros(op)
+            red_black_sgs!(z, op, x)
+            @test vec(interior(z, op)) ≈ ldiv!(similar(b), SymmetricGaussSeidel(A), vec(interior(x, op))) rtol = 1e-12
+            # Same discrete solution as the sparse policy iteration.
+            sparse_sol = solve(prob, PolicyIteration(evaluation = KrylovPolicyEvaluation(method = :bicgstab)))
+            grid_sol = solve(prob, GridPolicyIteration())
+            @test grid_sol.converged
+            @test grid_sol.values ≈ sparse_sol.values rtol = rtol
+            @test size(grid_sol.controls) == size(sparse_sol.controls)
+            @test count(abs.(grid_sol.controls - sparse_sol.controls) .> 1e-6) <= length(g) ÷ 100
+            @test abs(grid_sol.iterations - sparse_sol.iterations) <= 1
+            @test value_at(grid_sol, zeros(ndims(g))) ≈ value_at(sparse_sol, zeros(ndims(g))) rtol = 1e-7
+        end
+        @test_throws ArgumentError solve(HJBProblem(grid1(11)), GridPolicyIteration(preconditioner = :ilu))
+        unpreconditioned = solve(HJBProblem(grid1(21)), GridPolicyIteration(preconditioner = :none))
+        @test unpreconditioned.converged
+    end
+
     @testset "planar problem" begin
         g4 = StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(9, 4))
         box = solve(HJBProblem(g4; control_bound = 1.0), PolicyIteration())
