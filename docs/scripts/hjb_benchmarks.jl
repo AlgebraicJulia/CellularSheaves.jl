@@ -13,6 +13,8 @@
 #   multicolor-sgs, ras-sgs
 #               the same, with one symmetric Gauss–Seidel sweep as the local
 #               solve (the gmres-sgs kernel) instead of an exact sparse LU
+#   grid        implicit (matrix-free) GridPolicyIteration: stencil kernels on CPU
+#               threads, BiCGStab with one red–black SGS sweep
 #   bicgstab-sgs, ras-sgs-bicgstab
 #               gmres-sgs and ras-sgs with a BiCGStab whose vector operations
 #               are all threaded in place of Krylov.jl's GMRES
@@ -84,7 +86,8 @@ function run(n, name)
     grid = StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4))
     prob = HJBProblem(grid; control_bound = 1.0, constraint = :disc)
     GC.gc()
-    t = @elapsed sol = solve(prob, PolicyIteration(evaluation = method(name, n)))
+    alg = name == "grid" ? GridPolicyIteration() : PolicyIteration(evaluation = method(name, n))
+    t = @elapsed sol = solve(prob, alg)
     s = sol.seconds
     @printf("n=%2d (%7d unknowns) %-10s t=%2d %8.2f s  [assembly %.1f, setup %.1f, linear %.1f, improvement %.1f]  PI %2d  inner %5d  conv %s\n",
         n, length(grid), name, THREADS, t, s.assembly, s.setup, s.linear, s.improvement,
@@ -97,7 +100,7 @@ row(r::Run, extra...) = join((r.n, r.n^4, repr(r.method), r.threads, r.total, va
     r.sol.iterations, sum(r.sol.linear_iterations), r.sol.converged, extra...), ",")
 const HEADER = "n,unknowns,method,threads,seconds,assembly,setup,linear,improvement,policy_iterations,inner_iterations,converged"
 
-for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs", "bicgstab-sgs", "ras-sgs-bicgstab")    # compile everything
+for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs", "bicgstab-sgs", "ras-sgs-bicgstab", "grid")    # compile everything
     run(9, name)
 end
 
@@ -108,7 +111,7 @@ if PHASE == "correctness"
         for n in sizes
             ref = run(n, "direct")
             scale = maximum(abs, ref.sol.values)
-            for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs", "bicgstab-sgs", "ras-sgs-bicgstab")
+            for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs", "bicgstab-sgs", "ras-sgs-bicgstab", "grid")
                 r = name == "direct" ? ref : run(n, name)
                 diff = maximum(abs, r.sol.values - ref.sol.values) / scale
                 @printf("    max |V − V_direct| / max|V_direct| = %.1e\n", diff)
@@ -119,7 +122,7 @@ if PHASE == "correctness"
     end
 else
     sizes = parse.(Int, split(get(ENV, "HJB_SIZES", "21,25,29"), ","))
-    names = Tuple(split(get(ENV, "HJB_METHODS", "gmres-sgs,bicgstab-sgs,ras-sgs,ras-sgs-bicgstab,multicolor-sgs,gmres-bsgs"), ","))
+    names = Tuple(split(get(ENV, "HJB_METHODS", "grid,bicgstab-sgs,ras-sgs-bicgstab,gmres-sgs"), ","))
     open(joinpath(OUT, "runtime_t$(THREADS).csv"), "w") do io
         println(io, HEADER)
         for n in sizes, name in names
