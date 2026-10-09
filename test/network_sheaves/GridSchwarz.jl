@@ -3,6 +3,7 @@ using CellularSheaves
 using LinearAlgebra
 using SparseArrays
 using Random
+using MPI: mpiexec
 
 # The sparse matrix of a stored-coefficient stencil on a box (no neighbours
 # outside it), for checking the implicit kernels.
@@ -68,7 +69,7 @@ end
         M = SymmetricGaussSeidel(A)
         @test length(M.colors) == 2 && 1 in M.colors[1]
         @test vec(interior(z, op)) ≈ ldiv!(zeros(prod(n)), M, vec(interior(r, op))) rtol = 1e-12
-        @test all(iszero, z[1:op.ghost, ntuple(_ -> :, length(n) - 1)...])     # zero Dirichlet ghost layer
+        @test all(iszero, z[1:op.origin[1], ntuple(_ -> :, length(n) - 1)...])     # zero Dirichlet ghost layer
         # Parity flips the coloring.
         z1 = grid_zeros(op)
         red_black_sgs!(z1, GridOperator(coef; ghost=2, parity=1), r)
@@ -96,4 +97,42 @@ end
     end
     @test_throws ArgumentError GridOperator(zeros(4, 4, 4))              # needs 2D + 1 coefficients
     @test_throws ArgumentError GridOperator(zeros(4, 4, 5); ghost=0)
+end
+
+@testset "GridSchwarz boxes" begin
+    layout = BoxLayout((10, 7), (3, 2), 4; overlap = 1)                     # rank 4: coords (1, 1)
+    @test layout.coords == (1, 1)
+    @test layout.owned == (4:6, 4:7)
+    @test layout.extended == (3:7, 3:7)
+    @test layout.neighbors == ((3, 5), (1, -1))
+    @test box_coordinates((3, 2), 5) == (2, 1)
+    @test balanced_ranks(12, (40, 10)) == (6, 2)
+    @test balanced_ranks(16, (33, 33, 33, 33)) == (2, 2, 2, 2)
+    @test prod(balanced_ranks(6, (9, 9, 9, 9))) == 6
+    @test_throws ArgumentError BoxLayout((10, 7), (3, 7), 0; overlap = 1)  # boxes of one point < width 2
+    s = CoefficientStencil(zeros(3, 4, 5))
+    own = box_operator(layout, s)
+    @test own.origin == (2, 2) && own.padded == (7, 8) && size(own) == (3, 4)
+    ext = box_operator(layout, CoefficientStencil(zeros(5, 5, 5)), :extended)
+    @test ext.origin == (1, 1) && ext.padded == own.padded && size(ext) == (5, 5)
+    @test own.parity == (4 + 4 - 2) & 1 && ext.parity == (3 + 3 - 2) & 1
+    # One box: exchange is a no-op, gather returns the interior.
+    single = BoxLayout((5, 4), (1, 1), 0)
+    op = box_operator(single, CoefficientStencil(zeros(5, 4, 5)))
+    x = grid_zeros(op)
+    interior(x, op) .= reshape(1.0:20.0, 5, 4)
+    @test exchange!(SerialBoxes(), single, x) === x
+    @test gather_boxes(SerialBoxes(), single, x, op) == reshape(1.0:20.0, 5, 4)
+
+    # The same tests under MPI on several ranks.
+
+    script = joinpath(@__DIR__, "..", "mpi", "grid_boxes.jl")
+    project = Base.active_project()
+    for n in (1, 3, 4)
+        ok = mpiexec() do exe                                        # the launcher environment applies inside the block
+            cmd = `$exe -n $n $(Base.julia_cmd()) --project=$project --startup-file=no $script`
+            success(pipeline(cmd; stdout, stderr))
+        end
+        @test ok
+    end
 end

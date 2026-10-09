@@ -10,7 +10,7 @@
 # No matrix is ever formed: every application evaluates the stencil inside a
 # kernel, from a stencil object that either stores the coefficients or
 # computes them from the problem data on the fly. Vectors live in arrays
-# padded with `ghost` layers on every side, where a box reads its neighbours'
+# padded with ghost cells around the box, where a box reads its neighbours'
 # values (or zero Dirichlet data). Every kernel is a KernelAbstractions kernel,
 # so the same code runs on CPU threads and GPUs. Coupling only axis neighbours
 # makes the grid graph bipartite: the red–black coloring is exact, and
@@ -18,7 +18,8 @@
 module GridSchwarz
 
 export AbstractStencil, CoefficientStencil, GridOperator, grid_zeros, interior, apply!, red_black_sgs!,
-    grid_dot, grid_reduce, GridWorkspace, grid_bicgstab!
+    grid_dot, grid_reduce, GridWorkspace, grid_bicgstab!, BoxLayout, box_coordinates, balanced_ranks, box_operator,
+    BoxCommunicator, SerialBoxes, mpi_boxes, box_count, box_rank, box_allreduce, exchange!, box_allgather, gather_boxes
 
 using Adapt: Adapt
 using ArgCheck: @argcheck
@@ -71,16 +72,20 @@ KernelAbstractions.get_backend(s::CoefficientStencil) = get_backend(s.coef)
     (s.coef[I, 1], ntuple(j -> s.coef[I, 1 + j], Val(D)), ntuple(j -> s.coef[I, 1 + D + j], Val(D)))
 
 """
-    GridOperator(stencil::AbstractStencil, n; ghost = 1, parity = 0, eltype = Float64)
+    GridOperator(stencil::AbstractStencil, n; ghost = 1, origin = ghost, padded = n .+ 2ghost,
+                 parity = 0, eltype = Float64)
     GridOperator(coef::AbstractArray; ghost = 1, parity = 0)
 
 The implicit operator of `stencil` on a box of `n = (n₁, …, n_D)` interior
 points (the second form wraps stored coefficients in a
-[`CoefficientStencil`](@ref)). Vectors are arrays of size ``n_k + 2\\,``
-`ghost` per dimension ([`grid_zeros`](@ref)); the operator acts on the
-[`interior`](@ref) and reads the ghost layer for the neighbours of boundary
-points. A coefficient pointing out of the global domain should be zero, with
-the boundary data moved into the right-hand side.
+[`CoefficientStencil`](@ref)). Vectors are arrays of size `padded`
+([`grid_zeros`](@ref)), by default the box plus `ghost` layers on every side;
+interior point `I` sits at `I + origin` (`origin` a number or an `NTuple`),
+so several operators can act on overlapping regions of the same storage
+(the owned box of a subdomain and its overlap-extended box). The operator acts
+on the [`interior`](@ref) and reads the surrounding cells for the neighbours of
+boundary points. A coefficient pointing out of the global domain should be
+zero, with the boundary data moved into the right-hand side.
 
 `parity` is the parity of the global index of the first interior point, so
 boxes of one global grid agree on the red–black coloring.
@@ -88,15 +93,18 @@ boxes of one global grid agree on the red–black coloring.
 struct GridOperator{T,D,S<:AbstractStencil{D}}
     stencil::S
     size::NTuple{D,Int}
-    ghost::Int
+    origin::NTuple{D,Int}
+    padded::NTuple{D,Int}
     parity::Int
 end
 
-function GridOperator(stencil::AbstractStencil{D}, n::NTuple{D,Integer}; ghost::Integer=1, parity::Integer=0,
-                      eltype::Type=Float64) where {D}
-    @argcheck ghost >= 1 "need at least one ghost layer"
+function GridOperator(stencil::AbstractStencil{D}, n::NTuple{D,Integer}; ghost::Integer=1,
+                      origin::Union{Integer,NTuple{D,Integer}}=ghost, padded::NTuple{D,Integer}=n .+ 2ghost,
+                      parity::Integer=0, eltype::Type=Float64) where {D}
+    o = origin isa Integer ? ntuple(_ -> Int(origin), D) : Int.(origin)
     @argcheck all(>=(1), n) "the box needs at least one point per dimension"
-    return GridOperator{eltype,D,typeof(stencil)}(stencil, Int.(n), Int(ghost), Int(parity) & 1)
+    @argcheck all(>=(1), o) && all(o .+ n .< padded) "need at least one cell around the box in the padded array"
+    return GridOperator{eltype,D,typeof(stencil)}(stencil, Int.(n), o, Int.(padded), Int(parity) & 1)
 end
 
 function GridOperator(coef::AbstractArray{T}; ghost::Integer=1, parity::Integer=0) where {T}
@@ -114,10 +122,9 @@ KernelAbstractions.get_backend(op::GridOperator) = get_backend(op.stencil)
 """
     grid_zeros(op::GridOperator) -> array
 
-A zero vector for `op`: its interior plus `op.ghost` layers on every side, on
-the backend of `op`.
+A zero vector of the padded size of `op`, on the backend of `op`.
 """
-grid_zeros(op::GridOperator{T}) where {T} = KernelAbstractions.zeros(get_backend(op), T, (size(op) .+ 2op.ghost)...)
+grid_zeros(op::GridOperator{T}) where {T} = KernelAbstractions.zeros(get_backend(op), T, op.padded...)
 
 """
     interior(x, op::GridOperator)
@@ -125,12 +132,13 @@ grid_zeros(op::GridOperator{T}) where {T} = KernelAbstractions.zeros(get_backend
 The view of the interior of the padded vector `x`.
 """
 interior(x::AbstractArray, op::GridOperator) =
-    view(x, ntuple(k -> (op.ghost + 1):(op.ghost + size(op, k)), ndims(op))...)
+    view(x, ntuple(k -> (op.origin[k] + 1):(op.origin[k] + size(op, k)), ndims(op))...)
 
 @inline _unit(j, ::Val{D}) where {D} = CartesianIndex(ntuple(k -> k == j ? 1 : 0, Val(D)))
-@inline _shift(g, ::Val{D}) where {D} = CartesianIndex(ntuple(_ -> g, Val(D)))
+@inline _shift(g::Integer, ::Val{D}) where {D} = CartesianIndex(ntuple(_ -> g, Val(D)))
+@inline _shift(o::NTuple{D,Int}, ::Val{D}) where {D} = CartesianIndex(o)
 
-@kernel function _apply_kernel!(y, stencil, @Const(x), g::Int, ::Val{D}) where {D}
+@kernel function _apply_kernel!(y, stencil, @Const(x), g, ::Val{D}) where {D}
     I = @index(Global, Cartesian)
     J = I + _shift(g, Val(D))
     c0, cm, cp = _coefficients(stencil, I)
@@ -151,7 +159,7 @@ boundary points.
 """
 function apply!(y::AbstractArray, op::GridOperator{T,D}, x::AbstractArray) where {T,D}
     backend = get_backend(op)
-    _apply_kernel!(backend)(y, op.stencil, x, op.ghost, Val(D); ndrange=size(op))
+    _apply_kernel!(backend)(y, op.stencil, x, op.origin, Val(D); ndrange=size(op))
     synchronize(backend)
     return y
 end
@@ -159,7 +167,7 @@ end
 # One Gauss–Seidel pass over the points of one color: each point of the color
 # is updated from its row with the current values of its neighbours, which all
 # have the other color, so the points of a color are independent.
-@kernel function _color_kernel!(y, stencil, @Const(r), g::Int, shift::Int, color::Int, ::Val{D}) where {D}
+@kernel function _color_kernel!(y, stencil, @Const(r), g, shift::Int, color::Int, ::Val{D}) where {D}
     I = @index(Global, Cartesian)
     if (sum(Tuple(I)) + shift) & 1 == color
         J = I + _shift(g, Val(D))
@@ -175,27 +183,36 @@ end
 
 function _color_pass!(y, op::GridOperator{T,D}, r, color::Int) where {T,D}
     backend = get_backend(op)
-    _color_kernel!(backend)(y, op.stencil, r, op.ghost, op.parity - D, color, Val(D); ndrange=size(op))
+    _color_kernel!(backend)(y, op.stencil, r, op.origin, op.parity - D, color, Val(D); ndrange=size(op))
     synchronize(backend)
     return y
 end
 
 """
-    red_black_sgs!(y, op::GridOperator, r) -> y
+    red_black_sgs!(y, op::GridOperator, r; exchange = identity) -> y
 
 One symmetric Gauss–Seidel sweep for ``A y = r`` from ``y = 0`` in red–black
 order, i.e. ``y = (D + U)^{-1} D (D + L)^{-1} r`` with the red points (even
 global index sum) ordered first: a forward pass red then black, and a backward
 pass black then red. The backward black pass would recompute the values the
 forward pass just wrote (black points only see red neighbours), so the sweep is
-red, black, red. The ghost layer of `y` is zero throughout: the local problem
-has zero Dirichlet data, as in restricted additive Schwarz. Equal to
+red, black, red.
+Equal to
 `SymmetricGaussSeidel` with the red–black coloring on the assembled matrix.
+
+When `op` is one box of a distributed grid, `exchange(y)` refreshes the ghost
+layer from the neighbouring boxes after each color: the sweep is then the
+global red–black sweep, identical to a single-box sweep of the whole grid, at
+the price of two halo exchanges (the first and last passes need none).
+With the default `identity` the ghost layer stays zero: the local problem has
+zero Dirichlet data, as in restricted additive Schwarz.
 """
-function red_black_sgs!(y::AbstractArray, op::GridOperator, r::AbstractArray)
+function red_black_sgs!(y::AbstractArray, op::GridOperator, r::AbstractArray; exchange=identity)
     fill!(y, zero(eltype(y)))
     _color_pass!(y, op, r, 0)
+    exchange(y)
     _color_pass!(y, op, r, 1)
+    exchange(y)
     _color_pass!(y, op, r, 0)
     return y
 end
@@ -205,11 +222,11 @@ end
 # Partial reductions of f(x[J], y[J]) with ⊕ along the first dimension; the
 # host or device then reduces the partial array (deterministic for a fixed
 # backend). The reduction starts from zero, so ⊕ is + or max of nonnegatives.
-@kernel function _rowreduce_kernel!(partial, f, op, @Const(x), @Const(y), g::Int, n1::Int, ::Val{D}) where {D}
+@kernel function _rowreduce_kernel!(partial, f, op, @Const(x), @Const(y), o, n1::Int, ::Val{D}) where {D}
     K = @index(Global, Cartesian)
     acc = zero(eltype(partial))
     for i in 1:n1
-        J = CartesianIndex(i + g, ntuple(k -> K[k] + g, Val(D - 1))...)
+        J = CartesianIndex(i + o[1], ntuple(k -> K[k] + o[k + 1], Val(D - 1))...)
         acc = op(acc, f(x[J], y[J]))
     end
     partial[K] = acc
@@ -234,12 +251,12 @@ grid_dot(x, y, op::GridOperator, partial) = grid_reduce(*, +, x, y, op, partial)
 """
 function grid_reduce(f, ⊕, x, y, op::GridOperator{T,D}, partial) where {T,D}
     backend = get_backend(op)
-    _rowreduce_kernel!(backend)(partial, f, ⊕, x, y, op.ghost, size(op, 1), Val(D); ndrange=_reduction_shape(op))
+    _rowreduce_kernel!(backend)(partial, f, ⊕, x, y, op.origin, size(op, 1), Val(D); ndrange=_reduction_shape(op))
     synchronize(backend)
     return reduce(⊕, partial)
 end
 
-@kernel function _lincomb_kernel!(out, a, x, b, y, c, z, g::Int, ::Val{D}) where {D}
+@kernel function _lincomb_kernel!(out, a, x, b, y, c, z, g, ::Val{D}) where {D}
     I = @index(Global, Cartesian)
     J = I + _shift(g, Val(D))
     out[J] = a * x[J] + b * y[J] + c * z[J]
@@ -248,7 +265,7 @@ end
 # out = a x + b y + c z on the interior (out may alias any of x, y, z).
 function _lincomb!(out, op::GridOperator{T,D}, a, x, b, y, c, z) where {T,D}
     backend = get_backend(op)
-    _lincomb_kernel!(backend)(out, T(a), x, T(b), y, T(c), z, op.ghost, Val(D); ndrange=size(op))
+    _lincomb_kernel!(backend)(out, T(a), x, T(b), y, T(c), z, op.origin, Val(D); ndrange=size(op))
     synchronize(backend)
     return out
 end
@@ -342,6 +359,186 @@ function grid_bicgstab!(x, op::GridOperator{T}, M!, b, ws::GridWorkspace; tol::R
         last(residuals) <= target && return it, true, residuals
     end
     return maxiter, false, residuals
+end
+
+
+# ===== Boxes of a distributed grid =====
+
+"""
+    BoxLayout(points, ranks, coords; overlap = 1)
+
+Box `coords` (0-based, one per dimension) of the partition of a grid of
+`points` into `ranks[1] × … × ranks[D]` boxes of nearly equal index ranges,
+one per rank: the vertices of the overlap sheaf of the cover, the boxes that
+share a face being its edges. Fields:
+
+- `owned`: the global index ranges the box owns;
+- `extended`: `owned` grown by `overlap` points into each neighbour (clipped
+  at the grid boundary), the subdomain of a restricted additive Schwarz solve;
+- `width = overlap + 1`: the ghost cells stored around `owned`, enough for the
+  extended box and its stencil;
+- `neighbors[d] = (lower, upper)`: the ranks of the boxes sharing a face
+  across dimension `d`, or `-1`.
+
+Local vectors are padded arrays of size `length.(owned) .+ 2width`
+([`box_operator`](@ref)). Ranks are numbered column-major over `coords`.
+"""
+struct BoxLayout{D}
+    points::NTuple{D,Int}
+    ranks::NTuple{D,Int}
+    coords::NTuple{D,Int}
+    owned::NTuple{D,UnitRange{Int}}
+    extended::NTuple{D,UnitRange{Int}}
+    overlap::Int
+    width::Int
+    neighbors::NTuple{D,NTuple{2,Int}}
+end
+
+function BoxLayout(points::NTuple{D,Integer}, ranks::NTuple{D,Integer}, coords::NTuple{D,Integer};
+                   overlap::Integer=1) where {D}
+    @argcheck overlap >= 0 "the overlap must be nonnegative"
+    @argcheck all(1 .<= ranks .<= points) "need between 1 and points[d] boxes in dimension d"
+    @argcheck all(0 .<= coords .< ranks) "box coordinates must lie in 0:ranks[d]-1"
+    owned = ntuple(d -> _split(points[d], ranks[d], coords[d]), D)
+    w = overlap + 1
+    for d in 1:D, c in 0:(ranks[d] - 1)
+        @argcheck length(_split(points[d], ranks[d], c)) >= w "boxes of fewer than overlap + 1 = $w points in dimension $d"
+    end
+    extended = ntuple(d -> max(1, first(owned[d]) - overlap):min(points[d], last(owned[d]) + overlap), D)
+    rank(c) = sum(c[d] * prod(ranks[1:(d - 1)]; init=1) for d in 1:D)
+    neighbors = ntuple(D) do d
+        lower = coords[d] > 0 ? rank(ntuple(k -> k == d ? coords[k] - 1 : coords[k], D)) : -1
+        upper = coords[d] < ranks[d] - 1 ? rank(ntuple(k -> k == d ? coords[k] + 1 : coords[k], D)) : -1
+        (lower, upper)
+    end
+    return BoxLayout{D}(Int.(points), Int.(ranks), Int.(coords), owned, extended, Int(overlap), w, neighbors)
+end
+
+BoxLayout(points::NTuple{D,Integer}, ranks::NTuple{D,Integer}, rank::Integer; overlap::Integer=1) where {D} =
+    BoxLayout(points, ranks, box_coordinates(ranks, rank); overlap)
+
+_split(n, k, c) = (c * n ÷ k + 1):((c + 1) * n ÷ k)
+
+"""
+    box_coordinates(ranks, rank) -> NTuple
+
+The 0-based coordinates of box `rank` (0-based, column-major) in a
+`ranks[1] × … × ranks[D]` partition.
+"""
+box_coordinates(ranks::NTuple{D,Integer}, rank::Integer) where {D} =
+    Tuple(CartesianIndices(ranks)[rank + 1]) .- 1
+
+"""
+    balanced_ranks(nboxes, points) -> NTuple
+
+A factorization of `nboxes` into boxes per dimension that keeps the boxes of a
+grid of `points` close to cubes (fewest ghost cells per owned cell): each prime
+factor, largest first, splits the dimension whose boxes are currently longest.
+"""
+function balanced_ranks(nboxes::Integer, points::NTuple{D,Integer}) where {D}
+    @argcheck nboxes >= 1
+    factors = Int[]
+    m, p = Int(nboxes), 2
+    while m > 1
+        while m % p == 0
+            push!(factors, p)
+            m ÷= p
+        end
+        p += 1
+    end
+    ranks = ones(Int, D)
+    for f in sort!(factors; rev=true)
+        d = argmax(ntuple(k -> points[k] / ranks[k], D))
+        ranks[d] *= f
+    end
+    return Tuple(ranks)
+end
+
+"""
+    box_operator(layout, stencil, region = :owned; eltype = Float64) -> GridOperator
+
+The [`GridOperator`](@ref) of `stencil` on the `owned` or `extended` box of
+`layout`, both acting on the same padded local arrays, with the red–black
+parity of the global grid.
+"""
+function box_operator(layout::BoxLayout{D}, stencil::AbstractStencil{D}, region::Symbol=:owned;
+                      eltype::Type=Float64) where {D}
+    @argcheck region in (:owned, :extended)
+    box = region === :owned ? layout.owned : layout.extended
+    origin = ntuple(d -> layout.width - (first(layout.owned[d]) - first(box[d])), D)
+    padded = length.(layout.owned) .+ 2layout.width
+    parity = sum(first.(box)) - D
+    return GridOperator(stencil, length.(box); origin, padded, parity, eltype)
+end
+
+"""
+    BoxCommunicator
+
+How the boxes of a distributed grid talk to each other. Implementations:
+[`SerialBoxes`](@ref) (one box, nothing to exchange) and, with MPI.jl loaded,
+[`mpi_boxes`](@ref). Each implements `box_count(c)`, `box_rank(c)`,
+`box_allreduce(c, x, op)` (`op` is `+` or `max`), `exchange!(c, layout, x)`
+(fill the `layout.width` ghost cells of `x` from the neighbouring boxes) and
+`box_allgather(c, v)` (the vectors `v` of all ranks, in rank order).
+"""
+abstract type BoxCommunicator end
+
+"""
+    SerialBoxes()
+
+The communicator of a grid held as a single box by one process.
+"""
+struct SerialBoxes <: BoxCommunicator end
+
+box_count(::SerialBoxes) = 1
+box_rank(::SerialBoxes) = 0
+box_allreduce(::SerialBoxes, x, op) = x
+exchange!(::SerialBoxes, layout::BoxLayout, x) = x
+box_allgather(::SerialBoxes, v::AbstractVector) = [Vector(v)]
+
+"""
+    mpi_boxes(comm) -> BoxCommunicator
+
+The [`BoxCommunicator`](@ref) of the MPI communicator `comm`: one box per
+rank, halo exchanges with `MPI.Sendrecv!` between face neighbours, one
+dimension at a time (so edge and corner ghost cells arrive in ``D`` rounds),
+inner products with `MPI.Allreduce`. Needs `using MPI` (a package extension).
+"""
+function mpi_boxes end
+
+# The slabs of the padded array exchanged across dimension d: the first and
+# last `width` owned layers are sent, the ghost layers below and above them are
+# received; the other dimensions span the whole padded range, so ghost cells
+# filled across earlier dimensions are passed on (edges and corners).
+function _slabs(layout::BoxLayout{D}, d::Int) where {D}
+    w = layout.width
+    n = length(layout.owned[d])
+    padded = length.(layout.owned) .+ 2w
+    slab(r) = ntuple(k -> k == d ? r : (1:padded[k]), D)
+    return (send_lower=slab((w + 1):(2w)), recv_lower=slab(1:w),
+            send_upper=slab((n + 1):(n + w)), recv_upper=slab((n + w + 1):(n + 2w)))
+end
+
+"""
+    gather_boxes(c::BoxCommunicator, layout, x, op) -> Array
+    gather_boxes(c::BoxCommunicator, layout, block) -> Array
+
+The global array assembled, on every rank, from the owned interiors of `x` (a
+padded local array, `op` its owned operator), or from the owned `block`s (of
+size `length.(layout.owned)`), of every box.
+"""
+gather_boxes(c::BoxCommunicator, layout::BoxLayout, x::AbstractArray, op::GridOperator) =
+    gather_boxes(c, layout, interior(x, op))
+
+function gather_boxes(c::BoxCommunicator, layout::BoxLayout{D}, block::AbstractArray) where {D}
+    @argcheck size(block) == length.(layout.owned) "the block must have the size of the owned box"
+    blocks = box_allgather(c, vec(Array(block)))
+    out = zeros(eltype(block), layout.points...)
+    for (r, block) in enumerate(blocks)
+        other = BoxLayout(layout.points, layout.ranks, r - 1; overlap=layout.overlap)
+        out[other.owned...] .= reshape(block, length.(other.owned))
+    end
+    return out
 end
 
 end # module

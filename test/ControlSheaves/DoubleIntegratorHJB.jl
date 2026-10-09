@@ -205,7 +205,7 @@ end
             apply!(y, op, x)
             @test vec(interior(y, op)) ≈ A * vec(interior(x, op)) rtol = 1e-13
             bg = grid_zeros(op)
-            DIH._launch!(DIH._grid_rhs_kernel!, op, bg, Ug, kp, op.ghost)
+            DIH._launch!(DIH._grid_rhs_kernel!, op, bg, Ug, kp, op.origin, ntuple(_ -> 0, length(n)))
             @test vec(interior(bg, op)) ≈ b rtol = 1e-13
             # Same red–black preconditioner as the assembled path.
             z = grid_zeros(op)

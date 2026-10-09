@@ -64,16 +64,20 @@ end
 # the grid coordinates: the same discretization as `_assemble`, never stored.
 # A coefficient towards a neighbour outside the grid is zero; its Riccati
 # boundary value is moved into the right-hand side (`_grid_rhs_kernel!`).
+# The controls of box point I are U[I + ushift, :] (the controls are stored on
+# the overlap-extended box, which the owned box sits inside).
 struct _UpwindStencil{D,A,K} <: AbstractStencil{D}
     U::A
     kp::K
+    ushift::NTuple{D,Int}
 end
 
-_UpwindStencil(U::AbstractArray, kp::_KernelProblem{D}) where {D} = _UpwindStencil{D,typeof(U),typeof(kp)}(U, kp)
+_UpwindStencil(U::AbstractArray, kp::_KernelProblem{D}, ushift::NTuple{D,Int}=ntuple(_ -> 0, D)) where {D} =
+    _UpwindStencil{D,typeof(U),typeof(kp)}(U, kp, ushift)
 
 function Adapt.adapt_structure(to, s::_UpwindStencil{D}) where {D}
     U = Adapt.adapt(to, s.U)
-    return _UpwindStencil{D,typeof(U),typeof(s.kp)}(U, s.kp)
+    return _UpwindStencil{D,typeof(U),typeof(s.kp)}(U, s.kp, s.ushift)
 end
 KernelAbstractions.get_backend(s::_UpwindStencil) = get_backend(s.U)
 
@@ -81,7 +85,7 @@ KernelAbstractions.get_backend(s::_UpwindStencil) = get_backend(s.U)
     kp = s.kp
     d = D ÷ 2
     x = _coordinates(kp, I)
-    u = _controls(s.U, I, Val(D ÷ 2))
+    u = _controls(s.U, I + CartesianIndex(s.ushift), Val(D ÷ 2))
     c0 = kp.discount
     for j in 1:D
         c0 += abs(_drift(x, u, j, d)) / kp.spacing[j]
@@ -99,11 +103,11 @@ end
 
 # The right-hand side of the policy evaluation: running cost plus the Riccati
 # values of upwind neighbours outside the grid.
-@kernel function _grid_rhs_kernel!(b, @Const(U), kp::_KernelProblem{D}, g::Int) where {D}
+@kernel function _grid_rhs_kernel!(b, @Const(U), kp::_KernelProblem{D}, g, ushift) where {D}
     I = @index(Global, Cartesian)
     d = D ÷ 2
     x = _coordinates(kp, I)
-    u = _controls(U, I, Val(D ÷ 2))
+    u = _controls(U, I + CartesianIndex(ushift), Val(D ÷ 2))
     rhs = _cost(kp, x, u)
     for j in 1:D
         fj = _drift(x, u, j, d)
@@ -120,7 +124,7 @@ end
 # Howard's improvement: minimize the discrete Hamiltonian pointwise (see
 # `_minimize_hamiltonian!`), reading V on the ghost layer for neighbours in
 # other boxes and the Riccati value outside the grid.
-@kernel function _grid_improve_kernel!(U, @Const(V), kp::_KernelProblem{D}, g::Int) where {D}
+@kernel function _grid_improve_kernel!(U, @Const(V), kp::_KernelProblem{D}, g) where {D}
     I = @index(Global, Cartesian)
     d = D ÷ 2
     x = _coordinates(kp, I)
@@ -173,7 +177,7 @@ end
 end
 
 # The initial policy (clipped LQR feedback) and value (Riccati) on the box.
-@kernel function _grid_initialize_kernel!(U, V, kp::_KernelProblem{D}, g::Int) where {D}
+@kernel function _grid_initialize_kernel!(U, V, kp::_KernelProblem{D}, g) where {D}
     I = @index(Global, Cartesian)
     d = D ÷ 2
     x = _coordinates(kp, I)
@@ -205,25 +209,43 @@ function _launch!(kernel, op::GridOperator, args...)
 end
 
 """
-    GridPolicyIteration(; backend = KernelAbstractions.CPU(), preconditioner = :red_black_sgs,
+    GridPolicyIteration(; backend = KernelAbstractions.CPU(), communicator = SerialBoxes(),
+                        ranks = nothing, overlap = 1, preconditioner = :red_black_sgs,
                         tol = 1e-8, maxiter = 50, linear_tol = 1e-10, linear_maxiter = 2000)
 
 Howard's policy iteration (as [`PolicyIteration`](@ref)) without assembling
-sparse matrices or storing stencil coefficients: the policy evaluation operator is
-an implicit `GridOperator` whose upwind stencil is computed inside each kernel
-from the controls and the grid coordinates, and right-hand side, policy
-evaluation and improvement are
-KernelAbstractions kernels on `backend` (`CPU()` runs them on Julia threads;
-a GPU backend such as `CUDABackend()` from CUDA.jl runs them on the device).
-Each evaluation is solved with BiCGStab (`grid_bicgstab!`) right-preconditioned
-by one red–black symmetric Gauss–Seidel sweep (`red_black_sgs!`,
-`preconditioner = :red_black_sgs`) or unpreconditioned (`:none`), warm-started
-from the previous value function. Gives the same discrete solution as
+sparse matrices or storing stencil coefficients: the policy evaluation operator
+is an implicit `GridOperator` whose upwind stencil is computed inside each
+kernel from the controls and the grid coordinates, and the right-hand side,
+policy evaluation and improvement are KernelAbstractions kernels on `backend`
+(`CPU()` runs them on Julia threads; a GPU backend such as `CUDABackend()` from
+CUDA.jl runs them on the device).
+
+The grid is split into one box per rank of `communicator` (`SerialBoxes()`: a
+single box; `mpi_boxes(comm)` with MPI.jl: one box per MPI rank), `ranks`
+boxes per dimension (default `balanced_ranks`), each storing its owned points
+plus ghost cells. Each evaluation is solved with BiCGStab (`grid_bicgstab!`,
+inner products reduced over all ranks), right-preconditioned by
+
+- `:red_black_sgs`: one global red–black symmetric Gauss–Seidel sweep, the
+  same operator for any number of ranks (two halo exchanges per sweep);
+- `:ras`: restricted additive Schwarz on the boxes extended by `overlap`
+  points, with one local red–black sweep per box (one halo exchange per
+  application; the boxes are the vertices of the overlap sheaf and the
+  exchanges run along its edges). Equal to `:red_black_sgs` on one box;
+- `:none`.
+
+Warm started from the previous value function; the policy is improved on each
+extended box after a halo exchange of the values. Every rank returns the whole
+solution. On one box this gives the same discrete solution as
 [`PolicyIteration`](@ref), whose `KrylovPolicyEvaluation(method = :bicgstab)`
 uses the identical preconditioner on the assembled matrices.
 """
-Base.@kwdef struct GridPolicyIteration{B}
+Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator}
     backend::B = KernelAbstractions.CPU()
+    communicator::C = SerialBoxes()
+    ranks::Union{Nothing,Vector{Int}} = nothing
+    overlap::Int = 1
     preconditioner::Symbol = :red_black_sgs
     tol::Float64 = 1e-8
     maxiter::Int = 50
@@ -233,39 +255,62 @@ end
 
 function CommonSolve.solve(prob::HJBProblem, alg::GridPolicyIteration)
     @argcheck alg.maxiter >= 1 && alg.tol > 0
-    @argcheck alg.preconditioner in (:red_black_sgs, :none) "preconditioner must be :red_black_sgs or :none"
+    @argcheck alg.preconditioner in (:red_black_sgs, :ras, :none) "preconditioner must be :red_black_sgs, :ras or :none"
     g = prob.grid
     D, d = ndims(g), prob.axes
-    n = Tuple(g.points)
-    kp = _KernelProblem(prob, ntuple(_ -> 0, D))
+    comm = alg.communicator
+    points = Tuple(g.points)
+    ranks = alg.ranks === nothing ? balanced_ranks(box_count(comm), points) : Tuple(alg.ranks)
+    @argcheck length(ranks) == D && prod(ranks) == box_count(comm) "ranks must have one entry per dimension and multiply to the number of boxes"
+    layout = BoxLayout(points, ranks, box_rank(comm); overlap=alg.overlap)
+    exchange(x) = exchange!(comm, layout, x)
+    allreduce(x, op) = box_allreduce(comm, x, op)
     backend = alg.backend
-    U = KernelAbstractions.zeros(backend, Float64, n..., d)
-    op = GridOperator(_UpwindStencil(U, kp), n; ghost=1)
+    # Controls live on the extended box; the owned box reads them shifted.
+    ushift = first.(layout.owned) .- first.(layout.extended)
+    U = KernelAbstractions.zeros(backend, Float64, length.(layout.extended)..., d)
+    kp_owned = _KernelProblem(prob, first.(layout.owned) .- 1)
+    kp_extended = _KernelProblem(prob, first.(layout.extended) .- 1)
+    op = box_operator(layout, _UpwindStencil(U, kp_owned, ushift), :owned)
+    op_extended = box_operator(layout, _UpwindStencil(U, kp_extended), :extended)
     V, Vnew, b = grid_zeros(op), grid_zeros(op), grid_zeros(op)
     ws = GridWorkspace(op)
-    precondition! = alg.preconditioner === :none ? copyto! : (y, v) -> red_black_sgs!(y, op, v)
-    _launch!(_grid_initialize_kernel!, op, U, V, kp, op.ghost)
+    precondition! = if alg.preconditioner === :none
+        copyto!
+    elseif alg.preconditioner === :ras
+        (y, v) -> (exchange(v); red_black_sgs!(y, op_extended, v))
+    else
+        (y, v) -> red_black_sgs!(y, op, v; exchange)
+    end
+    _launch!(_grid_initialize_kernel!, op_extended, U, V, kp_extended, op_extended.origin)
     changes, linear_iterations = Float64[], Int[]
     converged = false
     t_assembly = t_linear = t_improvement = 0.0
     for _ in 1:alg.maxiter
-        t_assembly += @elapsed _launch!(_grid_rhs_kernel!, op, b, U, kp, op.ghost)
+        t_assembly += @elapsed _launch!(_grid_rhs_kernel!, op, b, U, kp_owned, op.origin, ushift)
         t_linear += @elapsed begin
             copyto!(Vnew, V)
-            its, ok, _ = grid_bicgstab!(Vnew, op, precondition!, b, ws; tol=alg.linear_tol, maxiter=alg.linear_maxiter)
+            its, ok, _ = grid_bicgstab!(Vnew, op, precondition!, b, ws; tol=alg.linear_tol,
+                maxiter=alg.linear_maxiter, reduce=x -> allreduce(x, +), exchange)
         end
         ok || @warn "policy evaluation did not converge"
-        push!(changes, grid_reduce((a, c) -> abs(a - c), max, Vnew, V, op, ws.partial))
+        push!(changes, allreduce(grid_reduce((a, c) -> abs(a - c), max, Vnew, V, op, ws.partial), max))
         push!(linear_iterations, its)
         V, Vnew = Vnew, V
-        t_improvement += @elapsed _launch!(_grid_improve_kernel!, op, U, V, kp, op.ghost)
-        if length(changes) > 1 && changes[end] <= alg.tol * max(1.0, grid_reduce((a, c) -> abs(a), max, V, V, op, ws.partial))
+        t_improvement += @elapsed begin
+            exchange(V)
+            _launch!(_grid_improve_kernel!, op_extended, U, V, kp_extended, op_extended.origin)
+        end
+        scale = allreduce(grid_reduce((a, c) -> abs(a), max, V, V, op, ws.partial), max)
+        if length(changes) > 1 && changes[end] <= alg.tol * max(1.0, scale)
             converged = true
             break
         end
     end
-    values = vec(Array(interior(V, op)))
-    controls = permutedims(reshape(Array(U), length(g), d))
+    values = vec(gather_boxes(comm, layout, V, op))
+    owned_controls = Array(view(U, ntuple(k -> ushift[k] .+ (1:length(layout.owned[k])), D)..., :))
+    controls = reduce(vcat, (permutedims(vec(gather_boxes(comm, layout, selectdim(owned_controls, D + 1, k))))
+                             for k in 1:d))
     seconds = (assembly = t_assembly, setup = 0.0, linear = t_linear, improvement = t_improvement)
     return HJBSolution(prob, values, controls, length(changes), changes, linear_iterations, converged, seconds)
 end
