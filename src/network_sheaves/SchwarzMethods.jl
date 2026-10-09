@@ -127,6 +127,10 @@ _local_factor(s::SymmetricGaussSeidelLocalSolve, Ai::SparseMatrixCSC, symmetric:
 _factor_solve(M::ChordalLDLt, b::AbstractVector) = _ldlt_solve(M, b)
 _factor_solve(M, b::AbstractVector) = M \ b
 
+# In place where the factor allows it.
+_factor_solve!(z::AbstractVector, M, b::AbstractVector) = copyto!(z, _factor_solve(M, b))
+_factor_solve!(z::AbstractVector, M::SparseArrays.UMFPACK.UmfpackLU, b::AbstractVector) = ldiv!(z, M, b)
+
 # The new local values from the current ones x: an exact solve ignores x, an
 # inexact one corrects it.
 _local_update(M, b::AbstractVector, x::AbstractVector) = _factor_solve(M, b)
@@ -207,6 +211,7 @@ function LinearAlgebra.ldiv!(y::AbstractVector, M::SymmetricGaussSeidel, r::Abst
 end
 
 _factor_solve(M::SymmetricGaussSeidel, b::AbstractVector) = ldiv!(similar(b, eltype(M)), M, b)
+_factor_solve!(z::AbstractVector, M::SymmetricGaussSeidel, b::AbstractVector) = ldiv!(z, M, b)
 _local_update(M::SymmetricGaussSeidel, b::AbstractVector, x::AbstractVector) = _sgs_correct!(copy(x), M, b)
 
 # Solve M v = b for a ChordalLDLt factor with X = P' L D L' P.
@@ -1593,6 +1598,8 @@ struct SchwarzSweepPreconditioner{T,D<:SchwarzDecomposition{T},S<:SchwarzSweep,C
     sweep::S
     coarse::C
     owned::Vector{Vector{Int}}      # positions t in subdomain i with owner(dofs[t]) == i
+    rhs::Vector{Vector{T}}          # per-subdomain buffers for the direct RAS apply
+    solution::Vector{Vector{T}}
 end
 
 function SchwarzSweepPreconditioner(dd::SchwarzDecomposition{T}, sweep::SchwarzSweep, coarse=nothing) where {T}
@@ -1601,7 +1608,9 @@ function SchwarzSweepPreconditioner(dd::SchwarzDecomposition{T}, sweep::SchwarzS
         dofs = dd.locals[i].dofs
         owned[i] = [t for t in eachindex(dofs) if dd.ownership.owner[dofs[t]] == i]
     end
-    return SchwarzSweepPreconditioner{T,typeof(dd),typeof(sweep),typeof(coarse)}(dd, sweep, coarse, owned)
+    rhs = [zeros(T, length(lp.dofs)) for lp in dd.locals]
+    return SchwarzSweepPreconditioner{T,typeof(dd),typeof(sweep),typeof(coarse)}(dd, sweep, coarse, owned,
+        rhs, map(similar, rhs))
 end
 
 Base.size(P::SchwarzSweepPreconditioner) = size(P.decomposition.A)
@@ -1615,7 +1624,11 @@ function _ras!(y::AbstractVector, P::SchwarzSweepPreconditioner, r::AbstractVect
     dd = P.decomposition
     Threads.@threads for i in eachindex(dd.locals)
         lp = dd.locals[i]
-        z = _factor_solve(lp.factor, r[lp.dofs])
+        b, z = P.rhs[i], P.solution[i]
+        @inbounds for t in eachindex(b)
+            b[t] = r[lp.dofs[t]]
+        end
+        _factor_solve!(z, lp.factor, b)
         @inbounds for t in P.owned[i]
             y[lp.dofs[t]] = z[t]
         end
