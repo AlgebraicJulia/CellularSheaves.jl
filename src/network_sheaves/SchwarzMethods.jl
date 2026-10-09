@@ -40,6 +40,29 @@ using ..GraphHomomorphisms: GraphHomomorphism, fiber_vertices
 _adjacent(S::SparseMatrixCSC, k::Int) =
     (rowvals(S)[p] for p in nzrange(S, k) if rowvals(S)[p] != k && !iszero(nonzeros(S)[p]))
 
+# S[rows, cols] for sorted `rows`, keeping every stored entry (explicit zeros
+# included), and the positions in nonzeros(S) its entries come from. A binary
+# search per entry: no work arrays of the size of S, so it is cheap to call
+# for many small subdomains concurrently.
+function _submatrix(S::SparseMatrixCSC, rows::Vector{Int}, cols::AbstractVector{<:Integer})
+    issorted(rows) || throw(ArgumentError("rows must be sorted"))
+    colptr = Vector{Int}(undef, length(cols) + 1)
+    colptr[1] = 1
+    rowval, src = Int[], Int[]
+    rv = rowvals(S)
+    for (c, j) in enumerate(cols)
+        for p in nzrange(S, j)
+            t = searchsortedfirst(rows, rv[p])
+            if t <= length(rows) && rows[t] == rv[p]
+                push!(rowval, t)
+                push!(src, p)
+            end
+        end
+        colptr[c + 1] = length(rowval) + 1
+    end
+    return SparseMatrixCSC(length(rows), length(cols), colptr, rowval, nonzeros(S)[src]), src
+end
+
 # Γ: dofs outside `dofs` that S couples to `dofs` (the discrete Dirichlet boundary).
 function _boundary(S::SparseMatrixCSC, dofs::Vector{Int})
     inside = falses(size(S, 1))
@@ -267,25 +290,38 @@ function OverlapCover(subdomains::AbstractVector{<:AbstractVector{<:Integer}},
                       ndofs::Integer=maximum(d -> isempty(d) ? 0 : maximum(d), subdomains; init=0);
                       ghosts::Union{Nothing,AbstractVector{<:AbstractVector{<:Integer}}}=nothing)
     @argcheck !isempty(subdomains) "need at least one subdomain"
-    doms = [sort!(unique(Vector{Int}(d))) for d in subdomains]
-    layers = ghosts === nothing ? [Int[] for _ in doms] : [setdiff(Vector{Int}(g), d) for (g, d) in zip(ghosts, doms)]
-    @argcheck length(layers) == length(doms) "need one ghost layer per subdomain"
-    stalks = [sort!(union(d, g)) for (d, g) in zip(doms, layers)]
+    @argcheck ghosts === nothing || length(ghosts) == length(subdomains) "need one ghost layer per subdomain"
+    N = length(subdomains)
+    doms, stalks, interior = Vector{Vector{Int}}(undef, N), Vector{Vector{Int}}(undef, N), Vector{BitVector}(undef, N)
+    Threads.@threads for i in 1:N
+        d = sort!(unique(Vector{Int}(subdomains[i])))
+        g = ghosts === nothing ? Int[] : setdiff(Vector{Int}(ghosts[i]), d)
+        doms[i] = d
+        stalks[i] = sort!(union(d, g))
+        interior[i] = BitVector(insorted(k, d) for k in stalks[i])
+    end
     for (i, s) in enumerate(stalks)
         @argcheck isempty(s) || (1 <= first(s) && last(s) <= ndofs) "subdomain $i has dof indices outside 1:$ndofs"
     end
-    interior = [BitVector(insorted(k, d) for k in s) for (s, d) in zip(stalks, doms)]
     members = [Tuple{Int,Int}[] for _ in 1:ndofs]
     for (i, s) in enumerate(stalks), (ℓ, k) in enumerate(s)
         push!(members[k], (i, ℓ))
     end
-    graph = SimpleGraph(length(stalks))
+    # Each subdomain lists, per neighbour, its own positions of the shared dofs in
+    # increasing dof order, so the lists of i => j and j => i are aligned.
+    local_overlaps = Vector{Dict{Int,Vector{Int}}}(undef, N)
+    Threads.@threads for i in 1:N
+        mine = Dict{Int,Vector{Int}}()
+        for (ℓ, k) in enumerate(stalks[i]), (j, _) in members[k]
+            j == i || push!(get!(mine, j, Int[]), ℓ)
+        end
+        local_overlaps[i] = mine
+    end
+    graph = SimpleGraph(N)
     overlaps = Dict{Pair{Int,Int},Vector{Int}}()
-    for m in members, a in eachindex(m), b in (a + 1):lastindex(m)
-        (i, ℓi), (j, ℓj) = m[a], m[b]
-        add_edge!(graph, i, j)
-        push!(get!(overlaps, i => j, Int[]), ℓi)
-        push!(get!(overlaps, j => i, Int[]), ℓj)
+    for i in 1:N, (j, positions) in local_overlaps[i]
+        i < j && add_edge!(graph, i, j)
+        overlaps[i => j] = positions
     end
     return OverlapCover(doms, stalks, interior, members, graph, overlaps)
 end
@@ -300,7 +336,11 @@ that `A` couples to ``\\Omega_i``. See [`OverlapCover`](@ref).
 function ghost_layer_cover(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}})
     S = _structure(dropzeros(sparse(A)))
     doms = [sort!(unique(Vector{Int}(d))) for d in subdomains]
-    return OverlapCover(doms, size(S, 1); ghosts=[_boundary(S, d) for d in doms])
+    layers = Vector{Vector{Int}}(undef, length(doms))
+    Threads.@threads for i in eachindex(doms)
+        layers[i] = _boundary(S, doms[i])
+    end
+    return OverlapCover(doms, size(S, 1); ghosts=layers)
 end
 
 # Position of dof k in the interior of subdomain i, or nothing.
@@ -621,13 +661,13 @@ function LocalProblem(asm::_Assembly, i::Int)
     ghosts = findall(!, asm.cover.interior[i])
     boundary = asm.cover.stalks[i][ghosts]
     faces = _robin_faces(asm, i, boundary)
-    Ai = S[dofs, dofs]
+    Ai, _ = _submatrix(S, dofs, dofs)
     if !isempty(faces)
         local_dofs = [face.dof for face in faces]
         Ai = Ai + sparse(local_dofs, local_dofs, [face.weight for face in faces], length(dofs), length(dofs))
     end
     factor = _local_factor(asm.local_solver, Ai, issymmetric(S), i)
-    return LocalProblem(dofs, boundary, interior, ghosts, S[dofs, boundary], faces, factor)
+    return LocalProblem(dofs, boundary, interior, ghosts, first(_submatrix(S, dofs, boundary)), faces, factor)
 end
 
 _robin_faces(::_Assembly{T,DirichletTransmission}, i, boundary) where {T} = RobinFace{T}[]
@@ -788,17 +828,13 @@ function refactor!(dd::SchwarzDecomposition, A::SparseMatrixCSC; At::Union{Nothi
     @argcheck !(dd.locals[1].factor isa ChordalLDLt) || issymmetric(A) "a decomposition with ChordalLDLt factors needs a symmetric A"
     copyto!(nonzeros(dd.A), nonzeros(A))
     if dd.gather[] === nothing
-        # Slices of the matrix of nonzero positions are the index maps (every
-        # stored position is ≥ 1, so slicing keeps them all).
-        index = SparseMatrixCSC(size(A)..., A.colptr, rowvals(A), collect(1.0:nnz(A)))
-        transposed = round.(Int, nonzeros(copy(transpose(index))))
+        index = SparseMatrixCSC(size(A)..., A.colptr, rowvals(A), collect(1:nnz(A)))
+        transposed = nonzeros(copy(transpose(index)))
         maps = Vector{NTuple{2,Vector{Int}}}(undef, length(dd.locals))
         Threads.@threads for i in eachindex(dd.locals)
             loc = dd.locals[i]
-            Ai, Ci = index[loc.dofs, loc.dofs], index[loc.dofs, loc.boundary]
-            maps[i] = (round.(Int, nonzeros(Ai)), round.(Int, nonzeros(Ci)))
-            nonzeros(Ai) .= view(nonzeros(A), maps[i][1])
-            nonzeros(Ci) .= view(nonzeros(A), maps[i][2])
+            (Ai, local_map), (Ci, coupling_map) = _submatrix(A, loc.dofs, loc.dofs), _submatrix(A, loc.dofs, loc.boundary)
+            maps[i] = (local_map, coupling_map)
             factor = _refactored(loc.factor, dd.local_solver, Ai, i)
             dd.locals[i] = LocalProblem(loc.dofs, loc.boundary, loc.interior, loc.ghosts, Ci, loc.faces, factor)
         end

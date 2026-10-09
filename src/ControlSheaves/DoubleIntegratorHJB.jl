@@ -71,7 +71,7 @@ using LinearAlgebra
 using SparseArrays
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, SchwarzProblem,
     SchwarzIteration, MulticolorSweep, refactor!, _stable_lu, _threaded_mul!,
-    LocalSolver, ExactLocalSolve, SymmetricGaussSeidel, _bicgstab!
+    LocalSolver, ExactLocalSolve, SymmetricGaussSeidel, _bicgstab!, _submatrix
 using Krylov: gmres
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
@@ -523,11 +523,11 @@ struct _BlockSymmetricGaussSeidel{P}
 end
 
 function _block_symmetric_gauss_seidel(A::SparseMatrixCSC, blocks::Vector{Vector{Int}})
-    first_smoother = _symmetric_gauss_seidel(A[blocks[1], blocks[1]])
+    first_smoother = _symmetric_gauss_seidel(first(_submatrix(A, blocks[1], blocks[1])))
     smoothers = Vector{typeof(first_smoother)}(undef, length(blocks))
     smoothers[1] = first_smoother
     Threads.@threads for k in 2:length(blocks)
-        smoothers[k] = _symmetric_gauss_seidel(A[blocks[k], blocks[k]])
+        smoothers[k] = _symmetric_gauss_seidel(first(_submatrix(A, blocks[k], blocks[k])))
     end
     return _BlockSymmetricGaussSeidel(blocks, smoothers)
 end
