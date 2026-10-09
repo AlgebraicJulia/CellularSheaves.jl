@@ -20,6 +20,7 @@ end
   include("network_sheaves/Asynch.jl")
   include("network_sheaves/ADT.jl")
   include("network_sheaves/Parser.jl")
+  include("network_sheaves/RestrictionMaps.jl")
   include("network_sheaves/SheafLaplacian.jl")
   include("network_sheaves/HarmonicExtension.jl")
   include("network_sheaves/DistributedSolve.jl")
