@@ -618,4 +618,44 @@ end
         @test admm.u ≈ As \ fs rtol = 1e-6
         @test 5 * robin.iterations < admm.iterations
     end
+
+    @testset "nonsymmetric M-matrices (upwind transport)" begin
+        # ρu + b·∇u = 1 on an m×m grid with a rotating velocity field, upwinded:
+        # a nonsingular, nonsymmetric M-matrix.
+        m = 24
+        h = 1 / (m + 1)
+        idx(i, j) = (j - 1) * m + i
+        I_, J_, V_ = Int[], Int[], Float64[]
+        for j in 1:m, i in 1:m
+            x, y = i * h - 0.5, j * h - 0.5
+            b = (-y, x)
+            diag = 0.5
+            for (k, (di, dj)) in enumerate(((1, 0), (0, 1)))
+                a = abs(b[k]) / h
+                s = b[k] > 0 ? 1 : -1
+                diag += a
+                ii, jj = i + s * di, j + s * dj
+                (1 <= ii <= m && 1 <= jj <= m) && (push!(I_, idx(i, j)); push!(J_, idx(ii, jj)); push!(V_, -a))
+            end
+            push!(I_, idx(i, j)); push!(J_, idx(i, j)); push!(V_, diag)
+        end
+        A = sparse(I_, J_, V_, m * m, m * m)
+        f = ones(m * m)
+        @test !issymmetric(A)
+        parts = index_boxes(m, 3)
+        doms = overlapping_subdomains(A, parts; overlap=1)
+        dd = SchwarzDecomposition(A, doms; owner=parts)
+        u = A \ f
+        for sweep in (MultiplicativeSweep(), MulticolorSweep(), ParallelSweep())
+            r = solve(SchwarzProblem(dd, f), SchwarzIteration(sweep=sweep, tol=1e-10, maxiter=5000))
+            @test r.converged
+            @test r.u ≈ u rtol = 1e-8
+        end
+        g = solve(SchwarzProblem(dd, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=200))
+        @test g.converged && g.u ≈ u rtol = 1e-8
+        @test_throws ArgumentError solve(SchwarzProblem(dd, f), SchwarzCG())
+        @test_throws ArgumentError solve(SchwarzProblem(dd, f), SheafADMM(rho=1.0))
+        @test_throws ArgumentError TruncatedPushforwardCoarseSpace(dd)
+        @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, transmission=RobinTransmission(10.0))
+    end
 end

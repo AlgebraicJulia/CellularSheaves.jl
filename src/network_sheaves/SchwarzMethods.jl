@@ -50,6 +50,23 @@ function _boundary(S::SparseMatrixCSC, dofs::Vector{Int})
     return sort!(unique!(Γ))
 end
 
+# The sparsity pattern of S + Sᵀ. The ghost layers, overlaps and ownership of a
+# cover only depend on which dofs are coupled, so for a nonsymmetric matrix they
+# are computed from this symmetrized pattern.
+_structure(S::SparseMatrixCSC) = issymmetric(S) ? S : spones(S) + spones(sparse(transpose(S)))
+
+# Local factorization: ChordalLDLt for symmetric matrices (with a positive
+# definiteness check), sparse LU otherwise.
+function _local_factor(Ai::SparseMatrixCSC, symmetric::Bool, i::Int)
+    symmetric || return lu(Ai)
+    factor = ldlt!(ChordalLDLt(Ai), RowMaximum(); check=false)
+    @argcheck all(>(0), factor.D.diag) "the local matrix of subdomain $i is not positive definite; increase the Robin parameter"
+    return factor
+end
+
+_factor_solve(M::ChordalLDLt, b::AbstractVector) = _ldlt_solve(M, b)
+_factor_solve(M, b::AbstractVector) = M \ b
+
 # Solve M v = b for a ChordalLDLt factor with X = P' L D L' P.
 function _ldlt_solve(M, b::AbstractVector)
     c = M.P' \ b
@@ -134,7 +151,7 @@ where the ghost layer ``\\Gamma_i`` is the set of dofs outside ``\\Omega_i``
 that `A` couples to ``\\Omega_i``. See [`OverlapCover`](@ref).
 """
 function ghost_layer_cover(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}})
-    S = dropzeros(sparse(A))
+    S = _structure(dropzeros(sparse(A)))
     doms = [sort!(unique(Vector{Int}(d))) for d in subdomains]
     return OverlapCover(doms, size(S, 1); ghosts=[_boundary(S, d) for d in doms])
 end
@@ -218,7 +235,7 @@ function overlapping_subdomains(A::AbstractMatrix, parts::AbstractVector{<:Integ
     @argcheck length(parts) == n "need one part label per dof"
     @argcheck overlap >= 0
     @argcheck all(>=(1), parts) "part labels must be positive"
-    S = dropzeros(sparse(A))
+    S = _structure(dropzeros(sparse(A)))
     subdomains = Vector{Vector{Int}}(undef, maximum(parts))
     for i in eachindex(subdomains)
         mark = parts .== i
@@ -459,8 +476,7 @@ function LocalProblem(asm::_Assembly, i::Int)
         local_dofs = [face.dof for face in faces]
         Ai = Ai + sparse(local_dofs, local_dofs, [face.weight for face in faces], length(dofs), length(dofs))
     end
-    factor = ldlt!(ChordalLDLt(Ai), RowMaximum(); check=false)
-    @argcheck all(>(0), factor.D.diag) "the local matrix of subdomain $i is not positive definite; increase the Robin parameter"
+    factor = _local_factor(Ai, issymmetric(S), i)
     return LocalProblem(dofs, boundary, interior, ghosts, S[dofs, boundary], faces, factor)
 end
 
@@ -491,9 +507,17 @@ end
 """
     SchwarzDecomposition(A, subdomains; owner=nothing, transmission=DirichletTransmission())
 
-A domain decomposition of the sparse symmetric positive-definite system
-``A u = f`` (typically a finite-difference or finite-element discretization of
-an elliptic PDE), prepared for Schwarz iteration. `subdomains[i]` lists the
+A domain decomposition of the sparse system ``A u = f``, prepared for Schwarz
+iteration. `A` is typically symmetric positive definite (a finite-difference or
+finite-element discretization of an elliptic PDE). With
+[`DirichletTransmission`](@ref), `A` may also be nonsymmetric, for example the
+M-matrix of an upwind discretization of a transport or Hamilton–Jacobi–Bellman
+equation: the local problems are then factored with a sparse LU, and the ghost
+layers come from the symmetrized sparsity pattern of `A`. Multiplicative and
+additive Schwarz converge for nonsingular M-matrices (Frommer and Szyld,
+*Weighted max norm estimates for additive Schwarz methods*, 1999). Robin
+transmission, the coarse spaces, [`SchwarzCG`](@ref) and [`SheafADMM`](@ref)
+need a symmetric `A`. `subdomains[i]` lists the
 global dofs of ``\\Omega_i``; together they must cover `1:size(A, 1)`. They may
 overlap, or not: with `overlap = 0` in [`overlapping_subdomains`](@ref) the
 sweeps are block Gauss–Seidel and block Jacobi. The decomposition bundles
@@ -536,7 +560,7 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
     n = size(A, 1)
     @argcheck size(A, 2) == n "A must be square"
     S = dropzeros(sparse(float.(A)))
-    @argcheck issymmetric(S) "A must be symmetric"
+    @argcheck issymmetric(S) || transmission isa DirichletTransmission "Robin transmission needs a symmetric A"
     @argcheck !isempty(subdomains) "need at least one subdomain"
     for (i, d) in enumerate(subdomains)
         @argcheck !isempty(d) "subdomain $i is empty"
@@ -547,7 +571,7 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
     uncovered = findfirst(k -> isempty(_interior_members(cover, k)), 1:n)
     @argcheck uncovered === nothing "dof $uncovered lies in no subdomain; the subdomains must cover 1:$n"
 
-    ownership = owner === nothing ? Ownership(cover, S) : Ownership(cover, owner)
+    ownership = owner === nothing ? Ownership(cover, _structure(S)) : Ownership(cover, owner)
     asm = _Assembly(S, cover, ownership, transmission)
     locals = [LocalProblem(asm, i) for i in eachindex(cover.subdomains)]
     colors = _greedy_coloring(_conflict_graph(cover))
@@ -771,7 +795,7 @@ function _local_solve(prob::SchwarzProblem, xs, i::Int)
     for face in lp.faces
         b[face.dof] += face.weight * xs[face.source][face.source_dof]
     end
-    return _ldlt_solve(lp.factor, b)
+    return _factor_solve(lp.factor, b)
 end
 
 # Receive, solve on Ω_i, then publish the result to the neighbours.
@@ -922,6 +946,7 @@ function TruncatedPushforwardCoarseSpace(dd::SchwarzDecomposition{T},
                                          hom::GraphHomomorphism=GraphHomomorphism(collect(eachindex(dd.locals)));
                                          modes::AbstractVecOrMat=ones(T, size(dd.A, 1), 1)) where {T}
     _check_hom(dd, hom)
+    @argcheck issymmetric(dd.A) "coarse spaces need a symmetric A"
     n = size(dd.A, 1)
     Z = reshape(modes, size(modes, 1), :)
     @argcheck size(Z, 1) == n "modes must have one row per dof"
@@ -987,7 +1012,8 @@ function ExactPushforwardCoarseSpace(dd::SchwarzDecomposition, hom::GraphHomomor
                                      sweep::SchwarzSweep=MulticolorSweep(),
                                      transmission::TransmissionCondition=DirichletTransmission())
     _check_hom(dd, hom)
-    aggregates = [reduce(vcat, (dd.cover.subdomains[i] for i in fiber_vertices(hom, h)))
+    @argcheck issymmetric(dd.A) "coarse spaces need a symmetric A"
+    aggregates =[reduce(vcat, (dd.cover.subdomains[i] for i in fiber_vertices(hom, h)))
                   for h in 1:hom.n_target]
     owner = hom.vertex_map[dd.ownership.owner]
     return ExactPushforwardCoarseSpace(hom, SchwarzDecomposition(dd.A, aggregates; owner, transmission), sweep)
@@ -1129,6 +1155,7 @@ end
 
 function solve(prob::SchwarzProblem{T}, alg::SchwarzCG) where {T}
     @argcheck alg.maxiter >= 1
+    @argcheck issymmetric(prob.decomposition.A) "SchwarzCG needs a symmetric A; use SchwarzIteration or SchwarzGMRES"
     dd = prob.decomposition
     residuals = T[_relative_residual(prob, prob.u0)]
     # CG solves for the correction e in A e = f − A u0 from e = 0, so the
@@ -1189,7 +1216,7 @@ function _additive!(y::AbstractVector, dd::SchwarzDecomposition{T}, r::AbstractV
     corrections = Vector{Vector{T}}(undef, length(dd.locals))
     Threads.@threads for i in eachindex(dd.locals)
         lp = dd.locals[i]
-        corrections[i] = _ldlt_solve(lp.factor, r[lp.dofs])
+        corrections[i] = _factor_solve(lp.factor, r[lp.dofs])
     end
     fill!(y, zero(eltype(y)))
     for (lp, z) in zip(dd.locals, corrections)
@@ -1453,6 +1480,7 @@ function _diffuse_sections!(zs, dd::SchwarzDecomposition, vs, steps::Int)
 end
 
 function solve(prob::SchwarzProblem{T}, alg::SheafADMM) where {T}
+    @argcheck issymmetric(prob.decomposition.A) "sheaf ADMM needs a symmetric A"
     @argcheck alg.rho > 0 "the ADMM penalty must be positive"
     @argcheck alg.penalty in (:stalk, :shared) "penalty must be :stalk or :shared"
     @argcheck alg.projection_steps === nothing || alg.projection_steps >= 1

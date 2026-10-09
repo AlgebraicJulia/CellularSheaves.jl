@@ -67,4 +67,8 @@ include("CoordinationProfiling.jl")
 import .CoordinationProfiling
 export CoordinationProfiling
 
+include("DoubleIntegratorHJB.jl")
+import .DoubleIntegratorHJB
+export DoubleIntegratorHJB
+
 end # module ControlSheaves
