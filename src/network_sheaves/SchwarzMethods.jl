@@ -16,7 +16,8 @@ export OverlapCover, ghost_layer_cover, Ownership, LocalProblem, RobinFace, Schw
     AbstractCoarseSpace, TruncatedPushforwardCoarseSpace, ExactPushforwardCoarseSpace,
     coarse_dimension, coarse_correct!,
     SchwarzProblem, SchwarzIteration, SchwarzCG, SchwarzResult, SchwarzPreconditioner, solve,
-    SheafADMM, LocalObjective, local_objectives, SchwarzGMRES, SchwarzSweepPreconditioner
+    SheafADMM, LocalObjective, local_objectives, SchwarzGMRES, SchwarzSweepPreconditioner,
+    LocalSolver, ExactLocalSolve, SymmetricGaussSeidelLocalSolve, SymmetricGaussSeidel
 
 using ArgCheck: @argcheck
 using BlockArrays: BlockVector, mortar, blocks
@@ -74,17 +75,139 @@ function _stable_lu(A::SparseMatrixCSC{Float64,Int64})
 end
 _stable_lu(A::SparseMatrixCSC) = lu(A)
 
+"""
+    LocalSolver
+
+How each subdomain problem ``\\tilde A_i x_i = b_i`` is solved:
+[`ExactLocalSolve`](@ref) or [`SymmetricGaussSeidelLocalSolve`](@ref).
+"""
+abstract type LocalSolver end
+
+"""
+    ExactLocalSolve()
+
+Solve each local problem exactly with a sparse factorization computed at setup:
+`ChordalLDLt` for a symmetric local matrix, LU with partial pivoting otherwise.
+"""
+struct ExactLocalSolve <: LocalSolver end
+
+"""
+    SymmetricGaussSeidelLocalSolve(; sweeps = 1)
+
+Solve each local problem inexactly with `sweeps` symmetric Gauss–Seidel sweeps
+of ``\\tilde A_i = D + L + U``, i.e. the stationary iteration with
+``M_i^{-1} = (D + U)^{-1} D (D + L)^{-1}``, applied in correction form
+``x_i \\leftarrow x_i + M_i^{-1}(b_i - \\tilde A_i x_i)`` from the current
+iterate. Setup needs no factorization. For a nonsingular M-matrix the
+Gauss–Seidel splitting is regular, so the Schwarz methods with inexact local
+solves still converge (Frommer and Szyld, *Weighted max norm estimates for
+additive Schwarz methods*, 1999). With `sweeps = 1` each subdomain does
+exactly the symmetric Gauss–Seidel pass a global point smoother would.
+"""
+struct SymmetricGaussSeidelLocalSolve <: LocalSolver
+    sweeps::Int
+    function SymmetricGaussSeidelLocalSolve(sweeps::Integer)
+        @argcheck sweeps >= 1 "need at least one sweep"
+        return new(Int(sweeps))
+    end
+end
+SymmetricGaussSeidelLocalSolve(; sweeps::Integer=1) = SymmetricGaussSeidelLocalSolve(sweeps)
+
 # Local factorization: ChordalLDLt for symmetric matrices (with a positive
 # definiteness check), sparse LU with partial pivoting otherwise.
-function _local_factor(Ai::SparseMatrixCSC, symmetric::Bool, i::Int)
+function _local_factor(::ExactLocalSolve, Ai::SparseMatrixCSC, symmetric::Bool, i::Int)
     symmetric || return _stable_lu(Ai)
     factor = ldlt!(ChordalLDLt(Ai), RowMaximum(); check=false)
     @argcheck all(>(0), factor.D.diag) "the local matrix of subdomain $i is not positive definite; increase the Robin parameter"
     return factor
 end
+_local_factor(s::SymmetricGaussSeidelLocalSolve, Ai::SparseMatrixCSC, symmetric::Bool, i::Int) =
+    SymmetricGaussSeidel(Ai; sweeps=s.sweeps)
 
 _factor_solve(M::ChordalLDLt, b::AbstractVector) = _ldlt_solve(M, b)
 _factor_solve(M, b::AbstractVector) = M \ b
+
+# The new local values from the current ones x: an exact solve ignores x, an
+# inexact one corrects it.
+_local_update(M, b::AbstractVector, x::AbstractVector) = _factor_solve(M, b)
+
+"""
+    SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps = 1)
+
+The symmetric Gauss–Seidel preconditioner of ``A = D + L + U`` (``L``, ``U``
+strictly lower and upper): `ldiv!(y, M, r)` runs `sweeps` sweeps of the
+stationary iteration ``y \\leftarrow y + (D + U)^{-1} D (D + L)^{-1}(r - A y)``
+from ``y = 0``; one sweep applies ``(D + U)^{-1} D (D + L)^{-1}``. Both
+triangular solves run column by column on `A` itself, so new values of `A`
+on the same pattern take effect without any setup. The diagonal must be
+stored and nonzero.
+"""
+struct SymmetricGaussSeidel{T}
+    A::SparseMatrixCSC{T,Int}
+    diagonal::Vector{Int}       # position of A[j, j] in nonzeros(A)
+    sweeps::Int
+end
+
+function SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps::Integer=1)
+    @argcheck size(A, 1) == size(A, 2) "A must be square"
+    @argcheck sweeps >= 1 "need at least one sweep"
+    S = _float_sparse(A)
+    diagonal = map(1:size(S, 2)) do j
+        p = findfirst(q -> rowvals(S)[q] == j, nzrange(S, j))
+        @argcheck p !== nothing && !iszero(nonzeros(S)[nzrange(S, j)[p]]) "the diagonal entry $j is zero"
+        nzrange(S, j)[p]
+    end
+    return SymmetricGaussSeidel(S, diagonal, Int(sweeps))
+end
+
+Base.size(M::SymmetricGaussSeidel) = size(M.A)
+Base.size(M::SymmetricGaussSeidel, d::Integer) = size(M.A, d)
+Base.eltype(::SymmetricGaussSeidel{T}) where {T} = T
+
+# One sweep from zero: y = (D + U)⁻¹ D (D + L)⁻¹ r, by columns of A.
+function _sgs_sweep!(y::AbstractVector, M::SymmetricGaussSeidel, r::AbstractVector)
+    A, d = M.A, M.diagonal
+    rows, vals = rowvals(A), nonzeros(A)
+    copyto!(y, r)
+    @inbounds for j in 1:size(A, 2)
+        yj = y[j] /= vals[d[j]]
+        for p in nzrange(A, j)
+            i = rows[p]
+            i > j && (y[i] -= vals[p] * yj)
+        end
+    end
+    @inbounds for j in 1:size(A, 2)
+        y[j] *= vals[d[j]]
+    end
+    @inbounds for j in size(A, 2):-1:1
+        yj = y[j] /= vals[d[j]]
+        for p in nzrange(A, j)
+            i = rows[p]
+            i < j && (y[i] -= vals[p] * yj)
+        end
+    end
+    return y
+end
+
+# `sweeps` sweeps of the stationary iteration, correcting y in place.
+function _sgs_correct!(y::AbstractVector, M::SymmetricGaussSeidel, b::AbstractVector)
+    r, z = similar(y), similar(y)
+    for _ in 1:M.sweeps
+        mul!(r, M.A, y)
+        r .= b .- r
+        y .+= _sgs_sweep!(z, M, r)
+    end
+    return y
+end
+
+function LinearAlgebra.ldiv!(y::AbstractVector, M::SymmetricGaussSeidel, r::AbstractVector)
+    _sgs_sweep!(y, M, r)
+    M.sweeps == 1 && return y
+    return _sgs_correct!(y, SymmetricGaussSeidel(M.A, M.diagonal, M.sweeps - 1), r)
+end
+
+_factor_solve(M::SymmetricGaussSeidel, b::AbstractVector) = ldiv!(similar(b, eltype(M)), M, b)
+_local_update(M::SymmetricGaussSeidel, b::AbstractVector, x::AbstractVector) = _sgs_correct!(copy(x), M, b)
 
 # Solve M v = b for a ChordalLDLt factor with X = P' L D L' P.
 function _ldlt_solve(M, b::AbstractVector)
@@ -462,8 +585,10 @@ Everything one subdomain needs for its local solve:
 - `coupling`: the block ``A_{\\Omega_i \\Gamma_i}``;
 - `faces`: the [`RobinFace`](@ref)s of the interface (empty for
   [`DirichletTransmission`](@ref));
-- `factor`: a sparse `ChordalLDLt` factorization of the local matrix
-  ``\\tilde A_i``, computed once and reused by every local solve.
+- `factor`: how ``\\tilde A_i`` is solved, set by the [`LocalSolver`](@ref): a sparse
+  `ChordalLDLt` or LU factorization of the local matrix
+  ``\\tilde A_i``, computed once and reused by every local solve, or a
+  [`SymmetricGaussSeidel`](@ref) smoother of it.
 """
 struct LocalProblem{T,F}
     dofs::Vector{Int}
@@ -481,6 +606,7 @@ struct _Assembly{T,C<:TransmissionCondition}
     cover::OverlapCover
     ownership::Ownership
     transmission::C
+    local_solver::LocalSolver
 end
 
 function LocalProblem(asm::_Assembly, i::Int)
@@ -495,7 +621,7 @@ function LocalProblem(asm::_Assembly, i::Int)
         local_dofs = [face.dof for face in faces]
         Ai = Ai + sparse(local_dofs, local_dofs, [face.weight for face in faces], length(dofs), length(dofs))
     end
-    factor = _local_factor(Ai, issymmetric(S), i)
+    factor = _local_factor(asm.local_solver, Ai, issymmetric(S), i)
     return LocalProblem(dofs, boundary, interior, ghosts, S[dofs, boundary], faces, factor)
 end
 
@@ -524,7 +650,8 @@ end
 # ===== Decomposition =====
 
 """
-    SchwarzDecomposition(A, subdomains; owner=nothing, transmission=DirichletTransmission())
+    SchwarzDecomposition(A, subdomains; owner=nothing, transmission=DirichletTransmission(),
+                         structure=nothing, dropzeros=true, local_solver=ExactLocalSolve())
 
 A domain decomposition of the sparse system ``A u = f``, prepared for Schwarz
 iteration. `A` is typically symmetric positive definite (a finite-difference or
@@ -548,7 +675,10 @@ sweeps are block Gauss–Seidel and block Jacobi. The decomposition bundles
 - `ownership`: the [`Ownership`](@ref) of each dof, from the vector `owner`
   if given and from the sparsity of `A` otherwise;
 - `locals`: one [`LocalProblem`](@ref) per subdomain, built with the given
-  [`TransmissionCondition`](@ref);
+  [`TransmissionCondition`](@ref) and solved with the given
+  [`LocalSolver`](@ref) (exact factorizations by default; `structure` widens
+  the pattern the cover is built from, `dropzeros = false` keeps explicit
+  zeros of `A` stored, see [`refactor!`](@ref));
 - `colors`: a coloring of the subdomains for [`MulticolorSweep`](@ref);
 - `transmission`: the [`TransmissionCondition`](@ref) the local problems were built with.
 
@@ -573,6 +703,7 @@ struct SchwarzDecomposition{T,F}
     locals::Vector{LocalProblem{T,F}}
     colors::Vector{Vector{Int}}
     transmission::TransmissionCondition
+    local_solver::LocalSolver
     gather::Base.RefValue{Any}              # value maps for refactor!, built on first use
 end
 
@@ -580,7 +711,8 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
                               owner::Union{Nothing,AbstractVector{<:Integer}}=nothing,
                               transmission::TransmissionCondition=DirichletTransmission(),
                               structure::Union{Nothing,AbstractMatrix}=nothing,
-                              dropzeros::Bool=true)
+                              dropzeros::Bool=true,
+                              local_solver::LocalSolver=ExactLocalSolve())
     n = size(A, 1)
     @argcheck size(A, 2) == n "A must be square"
     S = _float_sparse(A)
@@ -606,10 +738,10 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
     @argcheck uncovered === nothing "dof $uncovered lies in no subdomain; the subdomains must cover 1:$n"
 
     ownership = owner === nothing ? Ownership(cover, P) : Ownership(cover, owner)
-    locals = _build_locals(_Assembly(S, cover, ownership, transmission))
+    locals = _build_locals(_Assembly(S, cover, ownership, transmission, local_solver))
     colors = _greedy_coloring(_conflict_graph(cover))
     return SchwarzDecomposition(S, copy(transpose(S)), P, cover, ownership, locals, colors, transmission,
-        Ref{Any}(nothing))
+        local_solver, Ref{Any}(nothing))
 end
 
 """
@@ -627,9 +759,9 @@ function refactor(dd::SchwarzDecomposition, A::AbstractMatrix)
     @argcheck size(S) == size(dd.A) "A must have the size of the decomposed matrix"
     @argcheck _within_pattern(S, dd.structure) "A has entries outside the structure of the decomposition"
     @argcheck issymmetric(S) || dd.transmission isa DirichletTransmission "Robin transmission needs a symmetric A"
-    locals = _build_locals(_Assembly(S, dd.cover, dd.ownership, dd.transmission))
+    locals = _build_locals(_Assembly(S, dd.cover, dd.ownership, dd.transmission, dd.local_solver))
     return SchwarzDecomposition(S, copy(transpose(S)), dd.structure, dd.cover, dd.ownership, locals,
-        dd.colors, dd.transmission, Ref{Any}(nothing))
+        dd.colors, dd.transmission, dd.local_solver, Ref{Any}(nothing))
 end
 
 """
@@ -639,7 +771,8 @@ In-place [`refactor`](@ref) for a matrix `A` with exactly the stored pattern of
 `dd.A` (build `dd` with `dropzeros = false` so that explicit zeros keep their
 slots). The values of `A` are gathered into the local problems through index
 maps computed on the first call, and each sparse LU is refactored numerically,
-reusing its symbolic analysis (column ordering and fill pattern). `At`, if
+reusing its symbolic analysis (column ordering and fill pattern); with
+[`SymmetricGaussSeidelLocalSolve`](@ref) the gather is all there is to do. `At`, if
 given, must be `transpose(A)` with the stored pattern of `dd.At`; otherwise it
 is gathered from `A`. Needs [`DirichletTransmission`](@ref). Local
 `ChordalLDLt` factors are recomputed from scratch.
@@ -647,8 +780,7 @@ is gathered from `A`. Needs [`DirichletTransmission`](@ref). Local
 function refactor!(dd::SchwarzDecomposition, A::SparseMatrixCSC; At::Union{Nothing,SparseMatrixCSC}=nothing)
     @argcheck dd.transmission isa DirichletTransmission "refactor! needs Dirichlet transmission"
     @argcheck size(A) == size(dd.A) && A.colptr == dd.A.colptr && rowvals(A) == rowvals(dd.A) "A must have the stored pattern of the decomposed matrix"
-    lu_factors = dd.locals[1].factor isa SparseArrays.UMFPACK.UmfpackLU
-    @argcheck lu_factors || issymmetric(A) "a decomposition with ChordalLDLt factors needs a symmetric A"
+    @argcheck !(dd.locals[1].factor isa ChordalLDLt) || issymmetric(A) "a decomposition with ChordalLDLt factors needs a symmetric A"
     copyto!(nonzeros(dd.A), nonzeros(A))
     if dd.gather[] === nothing
         # Slices of the matrix of nonzero positions are the index maps (every
@@ -662,7 +794,7 @@ function refactor!(dd::SchwarzDecomposition, A::SparseMatrixCSC; At::Union{Nothi
             maps[i] = (round.(Int, nonzeros(Ai)), round.(Int, nonzeros(Ci)))
             nonzeros(Ai) .= view(nonzeros(A), maps[i][1])
             nonzeros(Ci) .= view(nonzeros(A), maps[i][2])
-            factor = lu_factors ? _stable_lu(Ai) : _local_factor(Ai, true, i)
+            factor = _refactored(loc.factor, dd.local_solver, Ai, i)
             dd.locals[i] = LocalProblem(loc.dofs, loc.boundary, loc.interior, loc.ghosts, Ci, loc.faces, factor)
         end
         dd.gather[] = (transposed, maps)
@@ -672,13 +804,7 @@ function refactor!(dd::SchwarzDecomposition, A::SparseMatrixCSC; At::Union{Nothi
             loc = dd.locals[i]
             local_map, coupling_map = maps[i]
             nonzeros(loc.coupling) .= view(nonzeros(A), coupling_map)
-            if lu_factors
-                loc.factor.nzval .= view(nonzeros(A), local_map)
-                lu!(loc.factor)
-            else
-                dd.locals[i] = LocalProblem(loc.dofs, loc.boundary, loc.interior, loc.ghosts, loc.coupling,
-                    loc.faces, _local_factor(dd.A[loc.dofs, loc.dofs], true, i))
-            end
+            _refactor_values!(dd, i, loc.factor, view(nonzeros(A), local_map))
         end
     end
     if At === nothing
@@ -688,6 +814,23 @@ function refactor!(dd::SchwarzDecomposition, A::SparseMatrixCSC; At::Union{Nothi
         copyto!(nonzeros(dd.At), nonzeros(At))
     end
     return dd
+end
+
+# A fresh local factor of the same kind as `old`, for the local matrix Ai.
+_refactored(::SparseArrays.UMFPACK.UmfpackLU, solver, Ai, i) = _stable_lu(Ai)
+_refactored(::ChordalLDLt, solver, Ai, i) = _local_factor(solver, Ai, true, i)
+_refactored(old::SymmetricGaussSeidel, solver, Ai, i) = SymmetricGaussSeidel(Ai; sweeps=old.sweeps)
+
+# New values (in the stored order of the local matrix) for local factor i.
+function _refactor_values!(dd, i, F::SparseArrays.UMFPACK.UmfpackLU, values)
+    F.nzval .= values
+    lu!(F)                                   # numeric refactorization, symbolic analysis reused
+end
+_refactor_values!(dd, i, M::SymmetricGaussSeidel, values) = (nonzeros(M.A) .= values)
+function _refactor_values!(dd, i, ::ChordalLDLt, values)
+    loc = dd.locals[i]
+    dd.locals[i] = LocalProblem(loc.dofs, loc.boundary, loc.interior, loc.ghosts, loc.coupling, loc.faces,
+        _local_factor(dd.local_solver, dd.A[loc.dofs, loc.dofs], true, i))
 end
 
 # The local factorizations are independent: build them concurrently.
@@ -960,7 +1103,7 @@ function _local_solve(prob::SchwarzProblem, xs, i::Int)
     for face in lp.faces
         b[face.dof] += face.weight * xs[face.source][face.source_dof]
     end
-    return _factor_solve(lp.factor, b)
+    return _local_update(lp.factor, b, xs[i][lp.interior])
 end
 
 # Receive, solve on Ω_i, then publish the result to the neighbours.

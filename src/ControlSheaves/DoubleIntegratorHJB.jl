@@ -70,7 +70,8 @@ using CommonSolve: solve
 using LinearAlgebra
 using SparseArrays
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, SchwarzProblem,
-    SchwarzIteration, MulticolorSweep, refactor!, _stable_lu, _threaded_mul!
+    SchwarzIteration, MulticolorSweep, refactor!, _stable_lu, _threaded_mul!,
+    LocalSolver, ExactLocalSolve, SymmetricGaussSeidel
 using Krylov: gmres
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
@@ -442,7 +443,8 @@ fill-in grows quickly with the dimension
 struct DirectPolicyEvaluation end
 
 """
-    SchwarzPolicyEvaluation(blocks; overlap = 1, algorithm = SchwarzIteration(...))
+    SchwarzPolicyEvaluation(blocks; overlap = 1, algorithm = SchwarzIteration(...),
+                            local_solver = ExactLocalSolve())
 
 Solve each policy evaluation by Schwarz domain decomposition: the grid is cut
 into `blocks[1] × blocks[2] × …` boxes ([`grid_partition`](@ref)), extended by
@@ -451,17 +453,22 @@ policy iteration refactors one `SchwarzDecomposition` (built at the first
 step, then updated in place with `refactor!`) for the new
 ``A_u`` on the same subdomains and solves it with `algorithm`
 (a `SchwarzIteration` or `SchwarzGMRES`), warm-started from the previous
-value function.
+value function. With `local_solver = SymmetricGaussSeidelLocalSolve()` each
+subdomain does the same symmetric Gauss–Seidel pass as the
+[`KrylovPolicyEvaluation`](@ref) smoothers (one shared kernel) instead of an
+exact sparse LU, so setup only gathers the new matrix values.
 """
 struct SchwarzPolicyEvaluation{A}
     blocks::Vector{Int}
     overlap::Int
     algorithm::A
+    local_solver::LocalSolver
 end
 
 SchwarzPolicyEvaluation(blocks::AbstractVector{<:Integer}; overlap::Integer = 1,
-        algorithm = SchwarzIteration(sweep = MulticolorSweep(), tol = 1e-10, maxiter = 10_000)) =
-    SchwarzPolicyEvaluation(Vector{Int}(blocks), Int(overlap), algorithm)
+        algorithm = SchwarzIteration(sweep = MulticolorSweep(), tol = 1e-10, maxiter = 10_000),
+        local_solver::LocalSolver = ExactLocalSolve()) =
+    SchwarzPolicyEvaluation(Vector{Int}(blocks), Int(overlap), algorithm, local_solver)
 
 """
     KrylovPolicyEvaluation(; preconditioner = :symmetric_gauss_seidel, blocks = nothing,
@@ -500,19 +507,9 @@ struct _GaussSeidel{L}
 end
 LinearAlgebra.ldiv!(y::AbstractVector, P::_GaussSeidel, x::AbstractVector) = ldiv!(P.lower, copyto!(y, x))
 
-struct _SymmetricGaussSeidel{L, U}
-    lower::L
-    upper::U
-    diagonal::Vector{Float64}
-end
-function LinearAlgebra.ldiv!(y::AbstractVector, P::_SymmetricGaussSeidel, x::AbstractVector)
-    ldiv!(P.lower, copyto!(y, x))
-    y .*= P.diagonal
-    return ldiv!(P.upper, y)
-end
-
-_symmetric_gauss_seidel(A::SparseMatrixCSC) =
-    _SymmetricGaussSeidel(LowerTriangular(tril(A)), UpperTriangular(triu(A)), Vector(diag(A)))
+# The symmetric Gauss–Seidel pass is SchwarzMethods.SymmetricGaussSeidel, the
+# same kernel SchwarzPolicyEvaluation uses inside each subdomain.
+_symmetric_gauss_seidel(A::SparseMatrixCSC) = SymmetricGaussSeidel(A)
 
 # Block Jacobi with a symmetric Gauss–Seidel sweep inside each block: the
 # blocks are independent and are swept concurrently. With one block it is the
@@ -602,7 +599,8 @@ end
 # values into the local problems and refactor their LUs numerically in place.
 function _evaluate(e::SchwarzPolicyEvaluation, (subdomains, parts, structure, cached), A, At, b, V0)
     setup = @elapsed dd = cached[] === nothing ?
-        SchwarzDecomposition(A, subdomains; owner = parts, structure, dropzeros = false) :
+        SchwarzDecomposition(A, subdomains; owner = parts, structure, dropzeros = false,
+local_solver = e.local_solver) :
         refactor!(cached[], A; At)
     cached[] = dd
     result = solve(SchwarzProblem(dd, b; u0 = V0), e.algorithm)

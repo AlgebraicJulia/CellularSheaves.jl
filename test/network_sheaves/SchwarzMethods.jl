@@ -701,6 +701,49 @@ end
             sparse(transpose(A)) \ f rtol = 1e-8
         @test_throws ArgumentError refactor!(ddi, A2)                   # pattern differs
         @test_throws ArgumentError refactor!(ddi, Z; At=A)
+
+        # Inexact local solves: symmetric Gauss–Seidel inside each subdomain.
+        M = SymmetricGaussSeidel(A)
+        D, Lo, Up = Diagonal(A), tril(A, -1), triu(A, 1)
+        r = collect(range(-1.0, 1.0; length=m * m))
+        @test ldiv!(similar(r), M, r) ≈ (Matrix(D + Up) \ (D * (Matrix(D + Lo) \ r))) rtol = 1e-12
+        M3 = SymmetricGaussSeidel(A; sweeps=3)
+        y = zeros(m * m)
+        for _ in 1:3
+            y += ldiv!(similar(r), M, r - A * y)
+        end
+        @test ldiv!(similar(r), M3, r) ≈ y rtol = 1e-12
+        @test_throws ArgumentError SymmetricGaussSeidel(A - Diagonal(A))
+        @test_throws ArgumentError SymmetricGaussSeidelLocalSolve(sweeps=0)
+        for sweeps in (1, 2)
+            dds = SchwarzDecomposition(A, doms; owner=parts,
+                local_solver=SymmetricGaussSeidelLocalSolve(; sweeps))
+            @test all(lp -> lp.factor isa SymmetricGaussSeidel, dds.locals)
+            for sweep in (MultiplicativeSweep(), MulticolorSweep(), ParallelSweep())
+                rs = solve(SchwarzProblem(dds, f), SchwarzIteration(sweep=sweep, tol=1e-10, maxiter=20_000))
+                @test rs.converged
+                @test rs.u ≈ u rtol = 1e-8
+            end
+            gs = solve(SchwarzProblem(dds, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=500))
+            @test gs.converged
+            @test gs.u ≈ u rtol = 1e-8
+        end
+        # Inexact local solves take more iterations than exact ones.
+        exact = solve(SchwarzProblem(dd, f), SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000))
+        inexact = solve(SchwarzProblem(SchwarzDecomposition(A, doms; owner=parts,
+                local_solver=SymmetricGaussSeidelLocalSolve()), f),
+            SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=20_000))
+        @test inexact.iterations > exact.iterations
+        # refactor! only gathers the new values into the smoothers.
+        ddg = SchwarzDecomposition(embed(A), doms; owner=parts, dropzeros=false,
+            local_solver=SymmetricGaussSeidelLocalSolve())
+        for M in (A2, sparse(transpose(A)), A2)
+            refactor!(ddg, embed(M))
+            @test all(lp -> lp.factor isa SymmetricGaussSeidel, ddg.locals)
+            @test solve(SchwarzProblem(ddg, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=500)).u ≈
+                M \ f rtol = 1e-8
+        end
+        @test refactor(ddg, A2).locals[1].factor isa SymmetricGaussSeidel
     end
 
     @testset "refactor! with ChordalLDLt local factors" begin

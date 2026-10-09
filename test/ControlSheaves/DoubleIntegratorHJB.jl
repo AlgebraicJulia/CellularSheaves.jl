@@ -3,6 +3,7 @@ using CellularSheaves
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB: solve
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzIteration, SchwarzGMRES, MulticolorSweep, ParallelSweep
+const SchwarzMethods = CellularSheaves.NetworkSheaves.SchwarzMethods
 using LinearAlgebra
 using SparseArrays
 
@@ -140,6 +141,16 @@ end
         krylov = solve(small, PolicyIteration(evaluation = SchwarzPolicyEvaluation([4, 4];
             algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))))
         @test krylov.values ≈ direct.values rtol = 1e-6
+        # Inexact local solves: the global smoother's symmetric Gauss–Seidel
+        # pass inside each subdomain, no factorization.
+        sgs = SchwarzMethods.SymmetricGaussSeidelLocalSolve()
+        for algorithm in (SchwarzIteration(sweep = MulticolorSweep(), tol = 1e-10, maxiter = 20_000),
+                          SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))
+            inexact = solve(small, PolicyIteration(evaluation = SchwarzPolicyEvaluation([4, 4];
+                algorithm, local_solver = sgs)))
+            @test inexact.converged
+            @test inexact.values ≈ direct.values rtol = 1e-6
+        end
         # Block symmetric Gauss–Seidel: one block is the global smoother.
         for blocks in ([1, 1], [4, 4])
             blocked = solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(

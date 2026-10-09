@@ -10,6 +10,9 @@
 #   gmres-bsgs  GMRES, block symmetric Gauss–Seidel on 4⁴ boxes      (threaded)
 #   multicolor  Schwarz on b⁴ overlapping boxes, multicolor sweeps  (threaded)
 #   ras-gmres   Schwarz on b⁴ boxes, GMRES with a RAS preconditioner (threaded)
+#   multicolor-sgs, ras-sgs
+#               the same, with one symmetric Gauss–Seidel sweep as the local
+#               solve (the gmres-sgs kernel) instead of an exact sparse LU
 #
 # HJB_PHASE=correctness  every method on small grids, compared with the direct LU
 # HJB_PHASE=runtime      iterative methods only, at the thread count Julia was
@@ -27,7 +30,8 @@
 using CellularSheaves
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB: solve
-using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzGMRES, ParallelSweep
+using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzGMRES, ParallelSweep, SchwarzIteration,
+    MulticolorSweep, SymmetricGaussSeidelLocalSolve
 using LinearAlgebra
 using Printf
 
@@ -48,6 +52,12 @@ function method(name, n)
     name == "multicolor" && return SchwarzPolicyEvaluation(blocks(n))
     name == "ras-gmres" && return SchwarzPolicyEvaluation(blocks(n);
         algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))
+    name == "multicolor-sgs" && return SchwarzPolicyEvaluation(blocks(n);
+        algorithm = SchwarzIteration(sweep = MulticolorSweep(), tol = 1e-10, maxiter = 20_000),
+        local_solver = SymmetricGaussSeidelLocalSolve())
+    name == "ras-sgs" && return SchwarzPolicyEvaluation(blocks(n);
+        algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500),
+        local_solver = SymmetricGaussSeidelLocalSolve())
     error("unknown method $name")
 end
 
@@ -76,7 +86,7 @@ row(r::Run, extra...) = join((r.n, r.n^4, repr(r.method), r.threads, r.total, va
     r.sol.iterations, sum(r.sol.linear_iterations), r.sol.converged, extra...), ",")
 const HEADER = "n,unknowns,method,threads,seconds,assembly,setup,linear,improvement,policy_iterations,inner_iterations,converged"
 
-for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres")    # compile everything
+for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs")    # compile everything
     run(9, name)
 end
 
@@ -87,7 +97,7 @@ if PHASE == "correctness"
         for n in sizes
             ref = run(n, "direct")
             scale = maximum(abs, ref.sol.values)
-            for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres")
+            for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs")
                 r = name == "direct" ? ref : run(n, name)
                 diff = maximum(abs, r.sol.values - ref.sol.values) / scale
                 @printf("    max |V − V_direct| / max|V_direct| = %.1e\n", diff)
@@ -98,7 +108,7 @@ if PHASE == "correctness"
     end
 else
     sizes = parse.(Int, split(get(ENV, "HJB_SIZES", "21,25,29"), ","))
-    names = ("gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres")
+    names = Tuple(split(get(ENV, "HJB_METHODS", "gmres-sgs,gmres-bsgs,ras-sgs,multicolor-sgs,ras-gmres,multicolor"), ","))
     open(joinpath(OUT, "runtime_t$(THREADS).csv"), "w") do io
         println(io, HEADER)
         for n in sizes, name in names
