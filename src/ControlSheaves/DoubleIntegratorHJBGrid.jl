@@ -9,6 +9,7 @@
 struct _KernelProblem{D,M}
     lower::NTuple{D,Float64}
     spacing::NTuple{D,Float64}
+    inverse_spacing::NTuple{D,Float64}
     points::NTuple{D,Int}
     offset::NTuple{D,Int}
     position_weight::Float64
@@ -23,7 +24,7 @@ end
 function _KernelProblem(prob::HJBProblem, offset::NTuple{D,Int}) where {D}
     g = prob.grid
     @argcheck ndims(g) == D
-    return _KernelProblem{D,D * D}(Tuple(g.lower), Tuple(g.spacing), Tuple(g.points), offset,
+    return _KernelProblem{D,D * D}(Tuple(g.lower), Tuple(g.spacing), Tuple(1 ./ g.spacing), Tuple(g.points), offset,
         prob.position_weight, prob.velocity_weight, prob.control_weight, prob.discount, prob.control_bound,
         prob.constraint === :disc, Tuple(vec(prob.riccati)))
 end
@@ -81,23 +82,18 @@ function Adapt.adapt_structure(to, s::_UpwindStencil{D}) where {D}
 end
 KernelAbstractions.get_backend(s::_UpwindStencil) = get_backend(s.U)
 
-@inline function GridSchwarz._coefficients(s::_UpwindStencil{D}, I) where {D}
+Base.@propagate_inbounds function GridSchwarz._coefficients(s::_UpwindStencil{D}, I) where {D}
     kp = s.kp
     d = D ÷ 2
     x = _coordinates(kp, I)
     u = _controls(s.U, I + CartesianIndex(s.ushift), Val(D ÷ 2))
+    a = ntuple(j -> _drift(x, u, j, d) * kp.inverse_spacing[j], Val(D))     # signed upwind rates
     c0 = kp.discount
     for j in 1:D
-        c0 += abs(_drift(x, u, j, d)) / kp.spacing[j]
+        c0 += abs(a[j])
     end
-    cm = ntuple(Val(D)) do j
-        f = _drift(x, u, j, d)
-        f < 0 && kp.offset[j] + I[j] > 1 ? -f / kp.spacing[j] : 0.0
-    end
-    cp = ntuple(Val(D)) do j
-        f = _drift(x, u, j, d)
-        f > 0 && kp.offset[j] + I[j] < kp.points[j] ? f / kp.spacing[j] : 0.0
-    end
+    cm = ntuple(j -> a[j] < 0 && kp.offset[j] + I[j] > 1 ? -a[j] : 0.0, Val(D))
+    cp = ntuple(j -> a[j] > 0 && kp.offset[j] + I[j] < kp.points[j] ? a[j] : 0.0, Val(D))
     return c0, cm, cp
 end
 

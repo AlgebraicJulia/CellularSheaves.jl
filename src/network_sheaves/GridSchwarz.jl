@@ -68,7 +68,7 @@ function Adapt.adapt_structure(to, s::CoefficientStencil{D}) where {D}
 end
 KernelAbstractions.get_backend(s::CoefficientStencil) = get_backend(s.coef)
 
-@inline _coefficients(s::CoefficientStencil{D}, I) where {D} =
+Base.@propagate_inbounds _coefficients(s::CoefficientStencil{D}, I) where {D} =
     (s.coef[I, 1], ntuple(j -> s.coef[I, 1 + j], Val(D)), ntuple(j -> s.coef[I, 1 + D + j], Val(D)))
 
 """
@@ -138,16 +138,49 @@ interior(x::AbstractArray, op::GridOperator) =
 @inline _shift(g::Integer, ::Val{D}) where {D} = CartesianIndex(ntuple(_ -> g, Val(D)))
 @inline _shift(o::NTuple{D,Int}, ::Val{D}) where {D} = CartesianIndex(o)
 
-@kernel function _apply_kernel!(y, stencil, @Const(x), g, ::Val{D}) where {D}
-    I = @index(Global, Cartesian)
-    J = I + _shift(g, Val(D))
-    c0, cm, cp = _coefficients(stencil, I)
-    acc = c0 * x[J]
-    for j in 1:D
-        e = _unit(j, Val(D))
-        acc -= cm[j] * x[J - e] + cp[j] * x[J + e]
+# Each kernel has one body per point, launched in one of two shapes:
+# one point per work item on GPUs, and one grid row (along the first, contiguous
+# dimension) per work item on the CPU backend, where decoding a Cartesian index
+# per point would cost more than the stencil itself.
+_rowwise(backend) = backend isa KernelAbstractions.CPU
+_rows(op::GridOperator{T,D}) where {T,D} = CartesianIndices(D == 1 ? (1,) : Base.tail(size(op)))
+@inline _point(i, K, ::Val{D}) where {D} = CartesianIndex(i, ntuple(k -> K[k], Val(D - 1))...)
+
+function _launch(kernel_points, kernel_rows, op::GridOperator, args...)
+    backend = get_backend(op)
+    if _rowwise(backend)
+        rows = _rows(op)
+        groups = cld(length(rows), 8 * Threads.nthreads())
+        kernel_rows(backend, groups)(args..., rows, size(op, 1); ndrange=length(rows))
+    else
+        kernel_points(backend)(args...; ndrange=size(op))
     end
-    y[J] = acc
+    synchronize(backend)
+end
+
+@inline function _apply_point!(y, stencil, x, g, I, ::Val{D}) where {D}
+    @inbounds begin
+        J = I + _shift(g, Val(D))
+        c0, cm, cp = _coefficients(stencil, I)
+        acc = c0 * x[J]
+        for j in 1:D
+            e = _unit(j, Val(D))
+            acc -= cm[j] * x[J - e] + cp[j] * x[J + e]
+        end
+        y[J] = acc
+    end
+end
+
+@kernel function _apply_kernel!(y, stencil, @Const(x), g, ::Val{D}) where {D}
+    _apply_point!(y, stencil, x, g, @index(Global, Cartesian), Val(D))
+end
+
+@kernel function _apply_rows_kernel!(y, stencil, @Const(x), g, ::Val{D}, rows, n1) where {D}
+    row = @index(Global, Linear)
+    K = rows[row]
+    for i in 1:n1
+        _apply_point!(y, stencil, x, g, _point(i, K, Val(D)), Val(D))
+    end
 end
 
 """
@@ -158,18 +191,15 @@ Set the interior of `y` to ``A x`` by evaluating the stencil at every point
 boundary points.
 """
 function apply!(y::AbstractArray, op::GridOperator{T,D}, x::AbstractArray) where {T,D}
-    backend = get_backend(op)
-    _apply_kernel!(backend)(y, op.stencil, x, op.origin, Val(D); ndrange=size(op))
-    synchronize(backend)
+    _launch(_apply_kernel!, _apply_rows_kernel!, op, y, op.stencil, x, op.origin, Val(D))
     return y
 end
 
 # One Gauss–Seidel pass over the points of one color: each point of the color
 # is updated from its row with the current values of its neighbours, which all
 # have the other color, so the points of a color are independent.
-@kernel function _color_kernel!(y, stencil, @Const(r), g, shift::Int, color::Int, ::Val{D}) where {D}
-    I = @index(Global, Cartesian)
-    if (sum(Tuple(I)) + shift) & 1 == color
+@inline function _color_point!(y, stencil, r, g, I, ::Val{D}) where {D}
+    @inbounds begin
         J = I + _shift(g, Val(D))
         c0, cm, cp = _coefficients(stencil, I)
         acc = r[J]
@@ -181,10 +211,25 @@ end
     end
 end
 
+@kernel function _color_kernel!(y, stencil, @Const(r), g, shift::Int, color::Int, ::Val{D}) where {D}
+    I = @index(Global, Cartesian)
+    if (sum(Tuple(I)) + shift) & 1 == color
+        _color_point!(y, stencil, r, g, I, Val(D))
+    end
+end
+
+# Along a row the colors alternate: visit only the points of `color`.
+@kernel function _color_rows_kernel!(y, stencil, @Const(r), g, shift::Int, color::Int, ::Val{D}, rows, n1) where {D}
+    row = @index(Global, Linear)
+    K = rows[row]
+    first_i = 1 + ((color - (1 + sum(Tuple(K)) + shift)) & 1)
+    for i in first_i:2:n1
+        _color_point!(y, stencil, r, g, _point(i, K, Val(D)), Val(D))
+    end
+end
+
 function _color_pass!(y, op::GridOperator{T,D}, r, color::Int) where {T,D}
-    backend = get_backend(op)
-    _color_kernel!(backend)(y, op.stencil, r, op.origin, op.parity - D, color, Val(D); ndrange=size(op))
-    synchronize(backend)
+    _launch(_color_kernel!, _color_rows_kernel!, op, y, op.stencil, r, op.origin, op.parity - D, color, Val(D))
     return y
 end
 
@@ -257,16 +302,23 @@ function grid_reduce(f, ⊕, x, y, op::GridOperator{T,D}, partial) where {T,D}
 end
 
 @kernel function _lincomb_kernel!(out, a, x, b, y, c, z, g, ::Val{D}) where {D}
-    I = @index(Global, Cartesian)
-    J = I + _shift(g, Val(D))
+    J = @index(Global, Cartesian) + _shift(g, Val(D))
     out[J] = a * x[J] + b * y[J] + c * z[J]
+end
+
+@kernel function _lincomb_rows_kernel!(out, a, x, b, y, c, z, g, ::Val{D}, rows, n1) where {D}
+    row = @index(Global, Linear)
+    K = rows[row]
+    o = _shift(g, Val(D))
+    @inbounds @simd for i in 1:n1
+        J = _point(i, K, Val(D)) + o
+        out[J] = a * x[J] + b * y[J] + c * z[J]
+    end
 end
 
 # out = a x + b y + c z on the interior (out may alias any of x, y, z).
 function _lincomb!(out, op::GridOperator{T,D}, a, x, b, y, c, z) where {T,D}
-    backend = get_backend(op)
-    _lincomb_kernel!(backend)(out, T(a), x, T(b), y, T(c), z, op.origin, Val(D); ndrange=size(op))
-    synchronize(backend)
+    _launch(_lincomb_kernel!, _lincomb_rows_kernel!, op, out, T(a), x, T(b), y, T(c), z, op.origin, Val(D))
     return out
 end
 
