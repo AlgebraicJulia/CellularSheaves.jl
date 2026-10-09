@@ -744,6 +744,13 @@ end
                 M \ f rtol = 1e-8
         end
         @test refactor(ddg, A2).locals[1].factor isa SymmetricGaussSeidel
+        # Threaded BiCGStab, with exact and inexact local solves.
+        for d in (dd, ddg)
+            bs = solve(SchwarzProblem(d, f), SchwarzBiCGStab(tol=1e-10, maxiter=500))
+            @test bs.converged
+            @test bs.u ≈ d.A \ f rtol = 1e-8
+            @test last(bs.residuals) <= 1e-10
+        end
         # The direct RAS application equals one parallel sweep from the zero cochain.
         for d in (dd, ddg)
             P = CellularSheaves.NetworkSheaves.SchwarzMethods.SchwarzSweepPreconditioner(d, ParallelSweep())

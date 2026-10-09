@@ -13,6 +13,9 @@
 #   multicolor-sgs, ras-sgs
 #               the same, with one symmetric Gauss–Seidel sweep as the local
 #               solve (the gmres-sgs kernel) instead of an exact sparse LU
+#   bicgstab-sgs, ras-sgs-bicgstab
+#               gmres-sgs and ras-sgs with a BiCGStab whose vector operations
+#               are all threaded in place of Krylov.jl's GMRES
 #
 # HJB_PHASE=correctness  every method on small grids, compared with the direct LU
 # HJB_PHASE=runtime      iterative methods only, at the thread count Julia was
@@ -25,13 +28,17 @@
 # Run with, e.g.:
 #   HJB_PHASE=correctness julia -t 8 --project=. docs/scripts/hjb_benchmarks.jl
 #   HJB_PHASE=runtime HJB_SIZES=21,25,29 julia -t 4 --project=. docs/scripts/hjb_benchmarks.jl
+# Run with JULIA_THREAD_SLEEP_THRESHOLD=infinite: the solvers alternate short
+# serial and threaded phases, and waking sleeping worker threads otherwise
+# costs milliseconds per threaded call (measured: 4.3 ms instead of 0.8 ms for
+# a threaded A*x at 21^4 on 32 threads).
 # Writes docs/figures/hjb/correctness.csv and docs/figures/hjb/runtime_t<threads>.csv.
 
 using CellularSheaves
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB: solve
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzGMRES, ParallelSweep, SchwarzIteration,
-    MulticolorSweep, SymmetricGaussSeidelLocalSolve
+    MulticolorSweep, SymmetricGaussSeidelLocalSolve, SchwarzBiCGStab
 using LinearAlgebra
 using Printf
 
@@ -48,6 +55,7 @@ function method(name, n)
     name == "direct" && return DirectPolicyEvaluation()
     name == "gmres-gs" && return KrylovPolicyEvaluation(preconditioner = :gauss_seidel)
     name == "gmres-sgs" && return KrylovPolicyEvaluation(preconditioner = :symmetric_gauss_seidel)
+    name == "bicgstab-sgs" && return KrylovPolicyEvaluation(method = :bicgstab, preconditioner = :symmetric_gauss_seidel)
     name == "gmres-bsgs" && return KrylovPolicyEvaluation(preconditioner = :block_symmetric_gauss_seidel, blocks = fill(4, 4))
     name == "multicolor" && return SchwarzPolicyEvaluation(blocks(n))
     name == "ras-gmres" && return SchwarzPolicyEvaluation(blocks(n);
@@ -57,6 +65,9 @@ function method(name, n)
         local_solver = SymmetricGaussSeidelLocalSolve())
     name == "ras-sgs" && return SchwarzPolicyEvaluation(blocks(n);
         algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500),
+        local_solver = SymmetricGaussSeidelLocalSolve())
+    name == "ras-sgs-bicgstab" && return SchwarzPolicyEvaluation(blocks(n);
+        algorithm = SchwarzBiCGStab(tol = 1e-10, maxiter = 500),
         local_solver = SymmetricGaussSeidelLocalSolve())
     error("unknown method $name")
 end
@@ -86,7 +97,7 @@ row(r::Run, extra...) = join((r.n, r.n^4, repr(r.method), r.threads, r.total, va
     r.sol.iterations, sum(r.sol.linear_iterations), r.sol.converged, extra...), ",")
 const HEADER = "n,unknowns,method,threads,seconds,assembly,setup,linear,improvement,policy_iterations,inner_iterations,converged"
 
-for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs")    # compile everything
+for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs", "bicgstab-sgs", "ras-sgs-bicgstab")    # compile everything
     run(9, name)
 end
 
@@ -97,7 +108,7 @@ if PHASE == "correctness"
         for n in sizes
             ref = run(n, "direct")
             scale = maximum(abs, ref.sol.values)
-            for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs")
+            for name in ("direct", "gmres-gs", "gmres-sgs", "gmres-bsgs", "multicolor", "ras-gmres", "multicolor-sgs", "ras-sgs", "bicgstab-sgs", "ras-sgs-bicgstab")
                 r = name == "direct" ? ref : run(n, name)
                 diff = maximum(abs, r.sol.values - ref.sol.values) / scale
                 @printf("    max |V − V_direct| / max|V_direct| = %.1e\n", diff)
@@ -108,7 +119,7 @@ if PHASE == "correctness"
     end
 else
     sizes = parse.(Int, split(get(ENV, "HJB_SIZES", "21,25,29"), ","))
-    names = Tuple(split(get(ENV, "HJB_METHODS", "gmres-sgs,gmres-bsgs,ras-sgs,multicolor-sgs,ras-gmres,multicolor"), ","))
+    names = Tuple(split(get(ENV, "HJB_METHODS", "gmres-sgs,bicgstab-sgs,ras-sgs,ras-sgs-bicgstab,multicolor-sgs,gmres-bsgs"), ","))
     open(joinpath(OUT, "runtime_t$(THREADS).csv"), "w") do io
         println(io, HEADER)
         for n in sizes, name in names

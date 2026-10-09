@@ -17,7 +17,7 @@ export OverlapCover, ghost_layer_cover, Ownership, LocalProblem, RobinFace, Schw
     coarse_dimension, coarse_correct!,
     SchwarzProblem, SchwarzIteration, SchwarzCG, SchwarzResult, SchwarzPreconditioner, solve,
     SheafADMM, LocalObjective, local_objectives, SchwarzGMRES, SchwarzSweepPreconditioner,
-    LocalSolver, ExactLocalSolve, SymmetricGaussSeidelLocalSolve, SymmetricGaussSeidel
+    LocalSolver, ExactLocalSolve, SymmetricGaussSeidelLocalSolve, SymmetricGaussSeidel, SchwarzBiCGStab
 
 using ArgCheck: @argcheck
 using BlockArrays: BlockVector, mortar, blocks
@@ -1693,6 +1693,132 @@ function solve(prob::SchwarzProblem{T}, alg::SchwarzGMRES) where {T}
     residuals[end] = _relative_residual(prob, u)
     return SchwarzResult(u, localize(dd, u), residuals, zeros(T, length(residuals)),
         stats.niter, last(residuals) <= alg.tol)
+end
+
+# ===== BiCGStab acceleration =====
+
+"""
+    SchwarzBiCGStab(; sweep=ParallelSweep(), coarse=nothing, tol=1e-8, maxiter=1000)
+
+BiCGStab (van der Vorst 1992) right-preconditioned with one step of the
+stationary Schwarz iteration ([`SchwarzSweepPreconditioner`](@ref)), for
+nonsymmetric ``A``. Each iteration applies ``A`` and the preconditioner twice
+and needs only four inner products, against GMRES's growing orthogonalization;
+every vector operation is threaded, so with a threaded preconditioner no part
+of an iteration runs on one core. Iteration stops when
+``\\|f - A u\\| \\le \\mathrm{tol}\\,\\|f\\|``; the relative residual of the final
+iterate is checked and recorded. A breakdown (vanishing ``\\hat r^\\mathsf{T} r``
+or ``\\hat r^\\mathsf{T} v``) restarts from the current iterate.
+"""
+Base.@kwdef struct SchwarzBiCGStab{S<:SchwarzSweep,C<:Union{Nothing,AbstractCoarseSpace}}
+    sweep::S = ParallelSweep()
+    coarse::C = nothing
+    tol::Float64 = 1e-8
+    maxiter::Int = 1000
+end
+
+function solve(prob::SchwarzProblem{T}, alg::SchwarzBiCGStab) where {T}
+    @argcheck alg.maxiter >= 1
+    dd = prob.decomposition
+    P = SchwarzSweepPreconditioner(dd, alg.sweep, alg.coarse)
+    u = copy(prob.u0)
+    iterations, _, residuals = _bicgstab!(u, (y, x) -> _threaded_mul!(y, dd.At, x), (y, x) -> mul!(y, P, x),
+        prob.rhs; tol=alg.tol, maxiter=alg.maxiter)
+    residuals ./= _rhs_scale(prob)
+    residuals[end] = _relative_residual(prob, u)
+    return SchwarzResult(u, localize(dd, u), residuals, zeros(T, length(residuals)),
+        iterations, last(residuals) <= alg.tol)
+end
+
+# Contiguous index ranges for threaded vector operations.
+function _chunks(n::Int)
+    k = clamp(cld(n, 8192), 1, 4 * Threads.nthreads())
+    return [((c - 1) * n ÷ k + 1):(c * n ÷ k) for c in 1:k]
+end
+
+# Threaded Σ f(i) over 1:n, summed in a fixed order (deterministic).
+function _threaded_sum(f, n::Int, ::Type{T}) where {T}
+    ranges = _chunks(n)
+    partial = zeros(T, length(ranges))
+    Threads.@threads for c in eachindex(ranges)
+        acc = zero(T)
+        @inbounds @simd for i in ranges[c]
+            acc += f(i)
+        end
+        partial[c] = acc
+    end
+    return sum(partial)
+end
+
+function _threaded_foreach(f, n::Int)
+    ranges = _chunks(n)
+    Threads.@threads for c in eachindex(ranges)
+        @inbounds for i in ranges[c]
+            f(i)
+        end
+    end
+end
+
+"""
+    _bicgstab!(x, A!, M!, b; tol, maxiter) -> (iterations, converged, residual norms)
+
+Right-preconditioned BiCGStab for A x = b from the initial `x`, overwritten
+with the solution. `A!(y, v)` sets y = A v and `M!(y, v)` sets y = M⁻¹ v.
+Stops when ‖b − A x‖ ≤ tol ‖b‖. All vector operations are threaded.
+"""
+function _bicgstab!(x::Vector{T}, A!, M!, b::AbstractVector; tol::Real, maxiter::Integer) where {T}
+    n = length(b)
+    r, rhat, p, v, s, t, phat, shat = (zeros(T, n) for _ in 1:8)
+    A!(r, x)
+    _threaded_foreach(i -> (r[i] = b[i] - r[i]), n)
+    copyto!(rhat, r)
+    target = tol * max(sqrt(_threaded_sum(i -> abs2(b[i]), n, T)), eps(T))
+    residuals = T[sqrt(_threaded_sum(i -> abs2(r[i]), n, T))]
+    last(residuals) <= target && return 0, true, residuals
+    ρ = α = ω = one(T)
+    for it in 1:maxiter
+        ρnew = _threaded_sum(i -> rhat[i] * r[i], n, T)
+        if iszero(ρnew)                               # breakdown: restart the shadow residual
+            copyto!(rhat, r); fill!(p, zero(T)); fill!(v, zero(T))
+            ρ = α = ω = one(T)
+            ρnew = _threaded_sum(i -> abs2(r[i]), n, T)
+        end
+        β = (ρnew / ρ) * (α / ω)
+        let β = β, ω = ω                           # (let: closures must not capture reassigned locals)
+            _threaded_foreach(i -> (p[i] = r[i] + β * (p[i] - ω * v[i])), n)
+        end
+        M!(phat, p)
+        A!(v, phat)
+        σ = _threaded_sum(i -> rhat[i] * v[i], n, T)
+        if iszero(σ)
+            copyto!(rhat, r); fill!(p, zero(T)); fill!(v, zero(T))
+            ρ = α = ω = one(T)
+            push!(residuals, last(residuals))
+            continue
+        end
+        α = ρnew / σ
+        let α = α
+            _threaded_foreach(i -> (s[i] = r[i] - α * v[i]), n)
+        end
+        snorm = sqrt(_threaded_sum(i -> abs2(s[i]), n, T))
+        if snorm <= target
+            let α = α
+                _threaded_foreach(i -> (x[i] += α * phat[i]), n)
+            end
+            push!(residuals, snorm)
+            return it, true, residuals
+        end
+        M!(shat, s)
+        A!(t, shat)
+        ω = _threaded_sum(i -> t[i] * s[i], n, T) / _threaded_sum(i -> abs2(t[i]), n, T)
+        let α = α, ω = ω
+            _threaded_foreach(i -> (x[i] += α * phat[i] + ω * shat[i]; r[i] = s[i] - ω * t[i]), n)
+        end
+        ρ = ρnew
+        push!(residuals, sqrt(_threaded_sum(i -> abs2(r[i]), n, T)))
+        last(residuals) <= target && return it, true, residuals
+    end
+    return maxiter, false, residuals
 end
 
 # ===== Sheaf ADMM =====

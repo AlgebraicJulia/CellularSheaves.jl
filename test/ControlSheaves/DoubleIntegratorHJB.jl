@@ -141,6 +141,18 @@ end
         krylov = solve(small, PolicyIteration(evaluation = SchwarzPolicyEvaluation([4, 4];
             algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))))
         @test krylov.values ≈ direct.values rtol = 1e-6
+        # Threaded BiCGStab, globally and with the Schwarz preconditioner.
+        for preconditioner in (:symmetric_gauss_seidel, :none)
+            bicg = solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(; method = :bicgstab, preconditioner)))
+            @test bicg.converged
+            @test bicg.values ≈ direct.values rtol = 1e-6
+        end
+        @test_throws ArgumentError solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(method = :cg)))
+        rasbicg = solve(small, PolicyIteration(evaluation = SchwarzPolicyEvaluation([4, 4];
+            algorithm = SchwarzMethods.SchwarzBiCGStab(tol = 1e-10, maxiter = 500),
+            local_solver = SchwarzMethods.SymmetricGaussSeidelLocalSolve())))
+        @test rasbicg.converged
+        @test rasbicg.values ≈ direct.values rtol = 1e-6
         # Inexact local solves: the global smoother's symmetric Gauss–Seidel
         # pass inside each subdomain, no factorization.
         sgs = SchwarzMethods.SymmetricGaussSeidelLocalSolve()

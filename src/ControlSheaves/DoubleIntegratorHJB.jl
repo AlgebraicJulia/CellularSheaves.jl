@@ -71,7 +71,7 @@ using LinearAlgebra
 using SparseArrays
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, SchwarzProblem,
     SchwarzIteration, MulticolorSweep, refactor!, _stable_lu, _threaded_mul!,
-    LocalSolver, ExactLocalSolve, SymmetricGaussSeidel
+    LocalSolver, ExactLocalSolve, SymmetricGaussSeidel, _bicgstab!
 using Krylov: gmres
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
@@ -471,10 +471,12 @@ SchwarzPolicyEvaluation(blocks::AbstractVector{<:Integer}; overlap::Integer = 1,
     SchwarzPolicyEvaluation(Vector{Int}(blocks), Int(overlap), algorithm, local_solver)
 
 """
-    KrylovPolicyEvaluation(; preconditioner = :symmetric_gauss_seidel, blocks = nothing,
-                           tol = 1e-10, maxiter = 5000, memory = 50)
+    KrylovPolicyEvaluation(; method = :gmres, preconditioner = :symmetric_gauss_seidel,
+                           blocks = nothing, tol = 1e-10, maxiter = 5000, memory = 50)
 
-Solve each policy evaluation with restarted GMRES on the whole grid, right
+Solve each policy evaluation on the whole grid with restarted GMRES
+(`method = :gmres`, Krylov.jl) or with a BiCGStab whose vector operations are
+all threaded (`method = :bicgstab`, the solver of `SchwarzBiCGStab`), right
 preconditioned by a point smoother of ``A_u = D + L + U``: `:gauss_seidel`
 (``(D + L)^{-1}``), `:symmetric_gauss_seidel`
 (``(D + U)^{-1} D (D + L)^{-1}``), `:jacobi` (``D^{-1}``), `:none`, or
@@ -490,6 +492,7 @@ to it with one block, and the nonoverlapping, inexact relative of
 [`SchwarzPolicyEvaluation`](@ref).
 """
 Base.@kwdef struct KrylovPolicyEvaluation
+    method::Symbol = :gmres
     preconditioner::Symbol = :symmetric_gauss_seidel
     blocks::Union{Nothing, Vector{Int}} = nothing
     tol::Float64 = 1e-10
@@ -584,11 +587,19 @@ function _evaluate(::DirectPolicyEvaluation, data, A, At, b, V0)
 end
 
 function _evaluate(e::KrylovPolicyEvaluation, blocks, A, At, b, V0)
+    @argcheck e.method in (:gmres, :bicgstab) "unknown Krylov method $(e.method)"
     setup = @elapsed P = _preconditioner(A, e.preconditioner, blocks)
     op = _RowMatrix(At)
     r0 = b - mul!(similar(b), op, V0)
     iszero(norm(r0)) && return copy(V0), 0, true, setup
     rtol = e.tol * max(norm(b), eps()) / norm(r0)
+    if e.method === :bicgstab
+        dV = zeros(length(b))
+        precondition! = P isa UniformScaling ? copyto! : (y, x) -> ldiv!(y, P, x)
+        its, ok, _ = _bicgstab!(dV, (y, x) -> _threaded_mul!(y, At, x), precondition!, r0;
+            tol = min(rtol, 0.5), maxiter = e.maxiter)
+        return V0 + dV, its, ok, setup
+    end
     dV, stats = gmres(op, r0; N = P, ldiv = !(P isa UniformScaling), memory = e.memory, restart = true,
         atol = 0.0, rtol = min(rtol, 0.5), itmax = e.maxiter)
     return V0 + dV, stats.niter, stats.solved, setup
