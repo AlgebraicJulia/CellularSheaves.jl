@@ -160,7 +160,7 @@ tbody tr { cursor: pointer; }
         <canvas id="tour" aria-label="Rotating 2-D projection of the 4-D grid"></canvas>
         <label class="row small">Sublevel set V ≤ <span class="readout" id="levread"></span>
           <input type="range" id="level" min="2" max="100" value="35" style="flex:1;min-width:120px" aria-label="Fraction of nodes shown, lowest value first"></label>
-        <p class="small">Every other grid node (9⁴ points), rotated through all six coordinate planes and projected to 2-D. The sublevel slider keeps the cheapest fraction of states. Drag to turn it by hand.</p>
+        <p class="small">Every other grid node (<span id="tourcount">9⁴</span> points), rotated through all six coordinate planes and projected to 2-D. The sublevel slider keeps the cheapest fraction of states. Drag to turn it by hand.</p>
       </div>
       <div class="card">
         <h2 id="legtitle">Legend</h2>
@@ -213,8 +213,9 @@ function parse(buf) {
   if (i32() !== 0x484A4231) throw new Error("not an HJB1 file");
   const n = i32(), dims = i32(), d = i32(), K = i32();
   if (dims !== 4 || d !== 2) throw new Error("expected the planar (4-D) problem");
-  const lower = [f32(), f32(), f32(), f32()], h = [f32(), f32(), f32(), f32()];
-  const [rho, ubar, r, w, c] = [f32(), f32(), f32(), f32(), f32()].map(x => +x.toPrecision(6));
+  const r6 = x => +x.toPrecision(6);
+  const lower = [f32(), f32(), f32(), f32()].map(r6), h = [f32(), f32(), f32(), f32()].map(r6);
+  const [rho, ubar, r, w, c] = [f32(), f32(), f32(), f32(), f32()].map(r6);
   const N = n ** 4;
   const half = () => { const raw = new Uint16Array(buf.slice(o, o + 2 * N)); o += 2 * N; const a = new Float32Array(N); for (let i = 0; i < N; i++) a[i] = HALF[raw[i]]; return a; };
   const snaps = [];
@@ -222,7 +223,7 @@ function parse(buf) {
     const iteration = i32(), change = f32();
     snaps.push({ iteration, change, V: half(), u1: half(), u2: half() });
   }
-  return { n, N, lower, h, upper: lower.map((l, i) => l + h[i] * (n - 1)), rho, ubar, r, w, c, snaps };
+  return { n, N, lower, h, upper: lower.map((l, i) => r6(l + h[i] * (n - 1))), rho, ubar, r, w, c, snaps };
 }
 
 let D = null;
@@ -697,6 +698,7 @@ load().then(buf => {
   // probe: a state left of the target, moving up and to the right
   const near = v => Math.round((v - D.lower[0]) / D.h[0]);
   S.probe = [near(-1.5), near(1.0), near(0.5), near(1.0)];
+  $("#tourcount").textContent = `${Math.ceil(D.n / 2)}⁴`;
   $("#nodes").textContent = `${D.n}⁴ = ${D.N.toLocaleString()}`;
   CHANGE = hexrgb(css("--change")); buildColours();
   makePanels(); tourPoints(); wire(); syncProbe();

@@ -4,7 +4,9 @@
 #
 #   sysimage/julia.sh docs/scripts/hjb_policy_iteration_demo.jl [n] [output]
 #
-# Writes a little-endian binary file (default docs/figures/hjb/policy_iteration.bin):
+# Writes a little-endian binary file (default docs/figures/hjb/policy_iteration.bin,
+# next to the page docs/figures/hjb/policy_iteration.html, which reads it; the
+# file is not committed):
 #   Int32  magic 0x48_4A_42_31 ("HJB1"), n, D = 4, d = 2, K snapshots
 #   Float32 lower[4], spacing[4], discount, control bound, control weight,
 #           position weight, velocity weight
