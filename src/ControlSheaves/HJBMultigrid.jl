@@ -175,11 +175,11 @@ end
 # the hierarchy
 # ---------------------------------------------------------------------------
 
-struct _Level{O,L,A,U,C}
+struct _Level{O,L,X,A,U,C}
     op::O
     layout::L
-    x::A
-    b::A
+    x::X                                # the level's iterate and right-hand side (the fine level uses BiCGStab's)
+    b::X
     r::A
     e::A
     controls::U                         # rediscretization: this level's policy
