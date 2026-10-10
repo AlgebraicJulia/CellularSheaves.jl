@@ -113,6 +113,21 @@ relative_difference(B1, B2) = norm(B1 - B2) / norm(B1)
               multigrid_of_schwarz(A, n, whole, factors; composition = :multiplicative)
     end
 
+    # The V-cycle orders differ only by cross terms through the couplings Rᵢ A Rⱼᵀ
+    # between boxes: for disjoint aligned boxes and A without couplings between
+    # them, they agree.
+    n, factors = (16, 12), [(2, 2), (2, 2)]
+    disjoint = [(x, y) for x in (1:8, 9:16) for y in (1:4, 5:12)]
+    owner = zeros(Int, prod(n))
+    for (i, U) in enumerate(disjoint)
+        owner[findnz(box_restriction(n, U))[2]] .= i
+    end
+    rows, cols, vals = findnz(random_stencil_matrix(rng, n, (false, false)))
+    keep = owner[rows] .== owner[cols]
+    A0 = sparse(rows[keep], cols[keep], vals[keep], prod(n), prod(n))
+    @test schwarz_of_multigrid(A0, n, disjoint, factors; composition = :multiplicative) ≈
+          multigrid_of_schwarz(A0, n, disjoint, factors; composition = :multiplicative)
+
     # A cover that cuts blocks: the square is not cartesian, and both the operator
     # identity and the additive equality fail.
     n, factors = (16, 12), [(2, 2)]

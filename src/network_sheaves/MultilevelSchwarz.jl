@@ -54,12 +54,25 @@ With additive composition over the levels (BPX, Bramble–Pasciak–Xu 1990; the
 multilevel additive Schwarz of Dryja–Widlund) both are the double sum
 ``\\sum_{i,ℓ}`` of the same corrections, so for an aligned cover they are **the same
 operator**: exchanging the sums over boxes and levels is exactly base change. With
-multiplicative composition over the levels (V-cycles) they are a sum of products,
-``\\sum_i \\prod_ℓ``, against a product of sums, ``\\prod_ℓ \\sum_i``, and differ: inside
-a box's V-cycle residuals are taken with ``A_i``, blind to the other boxes'
-corrections, while the global V-cycle takes them with ``A``, whose couplings
-``R_i A R_j^T`` between boxes enter at every level. They agree when the cover is a
-single box.
+multiplicative composition over the levels (V-cycles) they differ. Write
+``C_{i,ℓ}`` for box ``i``'s correction on level ``ℓ`` lifted to the fine grid
+(the same in both orders). A V-cycle is a noncommutative polynomial
+``p(C_0, C_1, …; A)`` of its corrections, built by ``B ← B + C_k (I - A B)``, and
+since ``R_i^T X A_i Y R_i = (R_i^T X R_i) A (R_i^T Y R_i)`` for ``A_i = R_i A R_i^T``,
+
+```math
+\\texttt{schwarz\\_of\\_multigrid} = \\sum_i p(C_{i,0}, C_{i,1}, …; A), \\qquad
+\\texttt{multigrid\\_of\\_schwarz} = p\\Big(\\sum_i C_{i,0}, \\sum_i C_{i,1}, …; A\\Big).
+```
+
+A polynomial of degree one (additive composition) commutes with the sum; the
+products ``C_{i,ℓ} A C_{j,ℓ'}`` of a V-cycle leave the cross terms ``i ≠ j``, each
+through the coupling ``R_i A R_j^T`` between two boxes. So the box-wise V-cycles
+equal the global one exactly when no two boxes are coupled (disjoint boxes and no
+stencil across their faces, or a single box), and the difference is linear in the
+couplings. Already with one level the second of two exact Schwarz sweeps solves
+nothing new inside a box (``C_i A C_i = C_i``) but on the whole grid picks up the
+neighbours' corrections. See `docs/scripts/multilevel_schwarz_orders.jl`.
 
 Neither construction has a global coarse problem: the coarsest level is still
 covered by the pushed-forward boxes, so each box's coarsest problem is local.

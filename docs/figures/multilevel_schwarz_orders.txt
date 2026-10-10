@@ -1,0 +1,15 @@
+1. Both V-cycles are the same polynomial, of the box corrections or of their sums
+   Jacobi           Σᵢ p(Cᵢ) vs schwarz_of_multigrid 0.0e+00, p(Σᵢ Cᵢ) vs multigrid_of_schwarz 0.0e+00, orders differ by 1.021
+   Jacobi, ω = 1/4  Σᵢ p(Cᵢ) vs schwarz_of_multigrid 0.0e+00, p(Σᵢ Cᵢ) vs multigrid_of_schwarz 0.0e+00, orders differ by 0.403
+2. Disjoint boxes, couplings between boxes scaled by ε: the difference is O(ε)
+   ε = 1     difference 2.54e-01
+   ε = 0.1   difference 2.48e-02
+   ε = 0.01  difference 2.48e-03
+   ε = 0     difference 0.00e+00
+3. One level, two sweeps of Schwarz with exact box solves: no multigrid needed
+   Σᵢ p(Cᵢ) = Σᵢ Cᵢ (a box solved twice is solved once): 2.0e-16
+   p(Σᵢ Cᵢ) vs Σᵢ p(Cᵢ): 1.604 (the second sweep sees the neighbours' corrections)
+4. As preconditioners: spectral radius of I − B A (overlapping boxes)
+   ω = 1    additive: 9.200 (both orders)   V-cycle: in each box 3.472, on the hierarchy 229.969
+   ω = 0.5  additive: 4.100 (both orders)   V-cycle: in each box 3.092, on the hierarchy 7.514
+   ω = 0.25 additive: 1.550 (both orders)   V-cycle: in each box 2.198, on the hierarchy 0.790
