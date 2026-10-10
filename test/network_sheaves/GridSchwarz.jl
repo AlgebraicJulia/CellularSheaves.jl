@@ -123,6 +123,21 @@ end
     interior(x, op) .= reshape(1.0:20.0, 5, 4)
     @test exchange!(SerialBoxes(), single, x) === x
     @test gather_boxes(SerialBoxes(), single, x, op) == reshape(1.0:20.0, 5, 4)
+    # Periodic dimensions: the end boxes are neighbours across the seam, the
+    # extended boxes stay clipped there, and a lone box is its own neighbour.
+    ring = BoxLayout((10, 7), (3, 2), 0; overlap = 1, periodic = (true, false))
+    @test ring.neighbors == ((2, 1), (-1, 3))
+    @test ring.extended == (1:4, 1:4)
+    torus = BoxLayout((6, 5), (1, 1), 0; overlap = 1, periodic = (true, false))
+    @test torus.neighbors == ((0, 0), (-1, -1))
+    op = box_operator(torus, CoefficientStencil(zeros(6, 5, 5)))
+    x = grid_zeros(op)                                       # padded 10 × 9, interior 3:8 × 3:7
+    values = reshape(1.0:30.0, 6, 5)
+    interior(x, op) .= values
+    exchange!(SerialBoxes(), torus, x)
+    @test x[1:2, 3:7] == values[5:6, :]                       # below the seam: the last rows
+    @test x[9:10, 3:7] == values[1:2, :]                      # above it: the first rows
+    @test all(iszero, x[:, 1:2]) && all(iszero, x[:, 8:9])    # the other dimension is not periodic
 
     # The same tests under MPI on several ranks.
 

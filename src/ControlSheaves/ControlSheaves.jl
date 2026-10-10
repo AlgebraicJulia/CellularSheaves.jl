@@ -71,4 +71,8 @@ include("DoubleIntegratorHJB.jl")
 import .DoubleIntegratorHJB
 export DoubleIntegratorHJB
 
+include("MechanicalHJB.jl")
+import .MechanicalHJB
+export MechanicalHJB
+
 end # module ControlSheaves

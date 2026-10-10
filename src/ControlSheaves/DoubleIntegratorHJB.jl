@@ -652,7 +652,8 @@ end
 The result of `solve(problem, PolicyIteration(...))`.
 
 # Fields
-- `problem`: the [`HJBProblem`](@ref).
+- `problem`: the problem solved (an [`HJBProblem`](@ref), or a
+  [`MechanicalHJBProblem`](@ref CellularSheaves.ControlSheaves.MechanicalHJB.MechanicalHJBProblem)).
 - `values`: the value function at the grid points.
 - `controls`: `d × N`, the optimal feedback at the grid points.
 - `iterations`: policy iterations used.
@@ -665,8 +666,8 @@ The result of `solve(problem, PolicyIteration(...))`.
   its local factorizations, or preconditioner), the `linear` solve itself, and
   policy `improvement`.
 """
-struct HJBSolution
-    problem::HJBProblem
+struct HJBSolution{P}
+    problem::P
     values::Vector{Float64}
     controls::Matrix{Float64}
     iterations::Int
@@ -747,7 +748,7 @@ end
 The value function at the state `x`, by multilinear interpolation on the grid;
 the unbounded LQR value outside it.
 """
-function value_at(sol::HJBSolution, x::AbstractVector)
+function value_at(sol::HJBSolution{<:HJBProblem}, x::AbstractVector)
     v = _interpolate(sol.problem.grid, sol.values, x)
     return v === nothing ? riccati_value(sol.problem, x) : v
 end
@@ -759,7 +760,7 @@ The optimal feedback at the state `x`: the grid policy interpolated
 multilinearly and projected onto the constraint set; the clipped LQR feedback
 outside the grid.
 """
-function control_at(sol::HJBSolution, x::AbstractVector)
+function control_at(sol::HJBSolution{<:HJBProblem}, x::AbstractVector)
     prob = sol.problem
     u = _interpolate(prob.grid, sol.controls, x)
     if u === nothing

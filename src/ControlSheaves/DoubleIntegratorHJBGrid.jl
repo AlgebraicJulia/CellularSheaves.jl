@@ -3,44 +3,106 @@
 # GridOperator (GridSchwarz), so one code path runs on CPU threads, on GPUs
 # and, box by box, on the ranks of a distributed solve. Included in
 # DoubleIntegratorHJB.
+#
+# The kernels are written for any controlled mechanical system whose state is
+# ordered (positions, then momenta or velocities), d = D ÷ 2 of each, with one
+# control per momentum. A problem type plugs in by providing
+#
+#   _state_grid(prob) -> StateGrid        _periodic(prob) -> NTuple{D,Bool}
+#   _control_count(prob) -> d             _discount(prob) -> ρ
+#   _kernel_model(prob) -> m              (a plain-bits struct, so it runs on GPUs)
+#
+# and methods of the model hooks for typeof(m):
+#
+#   _drifts(m, x, u) -> NTuple{D}         the vector field f(x, u)
+#   _cost(m, x, u)                        the running cost ℓ(x, u)
+#   _dirichlet(m) -> Bool                 at the edge of a non-periodic dimension,
+#   _boundary_value(m, x)                   true: V = _boundary_value outside the grid;
+#                                           false: the outward flux is dropped (a
+#                                           reflecting boundary, a state constraint)
+#   _argmin_hamiltonian(m, x, Dp, Dm)     the control minimizing the upwind discrete
+#                                           Hamiltonian, given the forward and backward
+#                                           differences of V along the d momenta
+#   _initial_value(m, x), _initial_control(m, x)   the starting guess
 
 # Everything a kernel needs to know about the problem and the box, as plain
 # bits. Point I of the box (1-based) is the grid point offset .+ I.
-struct _KernelProblem{D,M}
+struct _KernelProblem{D,S}
     lower::NTuple{D,Float64}
     spacing::NTuple{D,Float64}
     inverse_spacing::NTuple{D,Float64}
     points::NTuple{D,Int}
     offset::NTuple{D,Int}
-    position_weight::Float64
-    velocity_weight::Float64
-    control_weight::Float64
+    periodic::NTuple{D,Bool}
     discount::Float64
-    control_bound::Float64
-    disc::Bool
-    riccati::NTuple{M,Float64}
+    model::S
 end
 
-function _KernelProblem(prob::HJBProblem, offset::NTuple{D,Int}) where {D}
-    g = prob.grid
+function _KernelProblem(prob, offset::NTuple{D,Int}) where {D}
+    g = _state_grid(prob)
     @argcheck ndims(g) == D
-    return _KernelProblem{D,D * D}(Tuple(g.lower), Tuple(g.spacing), Tuple(1 ./ g.spacing), Tuple(g.points), offset,
-        prob.position_weight, prob.velocity_weight, prob.control_weight, prob.discount, prob.control_bound,
-        prob.constraint === :disc, Tuple(vec(prob.riccati)))
+    m = _kernel_model(prob)
+    return _KernelProblem{D,typeof(m)}(Tuple(g.lower), Tuple(g.spacing), Tuple(1 ./ g.spacing), Tuple(g.points),
+        offset, _periodic(prob), _discount(prob), m)
 end
 
 @inline _coordinates(kp::_KernelProblem{D}, I) where {D} =
     ntuple(k -> kp.lower[k] + (kp.offset[k] + I[k] - 1) * kp.spacing[k], Val(D))
 
-@inline function _riccati(kp::_KernelProblem{D}, x) where {D}
+# Whether grid point I has a neighbour below / above it in dimension j.
+@inline _has_lower(kp::_KernelProblem, I, j) = kp.periodic[j] || kp.offset[j] + I[j] > 1
+@inline _has_upper(kp::_KernelProblem, I, j) = kp.periodic[j] || kp.offset[j] + I[j] < kp.points[j]
+
+@inline _moved(x::NTuple{D}, j, step) where {D} = ntuple(k -> k == j ? x[k] + step : x[k], Val(D))
+
+@inline _controls(U, I, ::Val{d}) where {d} = ntuple(k -> U[I, k], Val(d))
+
+# The minimizer over u ∈ [-ū, ū] of the upwind Hamiltonian of one momentum,
+#   φ(u) = r u² / 2 + (g + u)⁺ Dp + (g + u)⁻ Dm,
+# whose drift g + u is the force g without control plus the control u: on each
+# side of the kink u = -g, φ is a quadratic with its own one-sided difference.
+@inline function _box_argmin(r, ū, g, Dp, Dm)
+    φ(u) = r * u^2 / 2 + max(g + u, 0.0) * Dp + min(g + u, 0.0) * Dm
+    up = clamp(-Dp / r, max(-g, -ū), ū)               # drift ≥ 0: the forward difference
+    um = clamp(-Dm / r, -ū, min(-g, ū))               # drift ≤ 0: the backward difference
+    -g > ū && return um                               # the drift cannot be made nonnegative
+    -g < -ū && return up                              # nor nonpositive
+    return φ(up) <= φ(um) ? up : um
+end
+
+# ---------------------------------------------------------------------------
+# the double integrator: q̇ = v, v̇ = u, with the Riccati value outside the grid
+# ---------------------------------------------------------------------------
+
+struct _DoubleIntegratorModel{M}
+    position_weight::Float64
+    velocity_weight::Float64
+    control_weight::Float64
+    control_bound::Float64
+    disc::Bool
+    riccati::NTuple{M,Float64}
+end
+
+_state_grid(prob::HJBProblem) = prob.grid
+_periodic(prob::HJBProblem) = ntuple(_ -> false, ndims(prob.grid))
+_control_count(prob::HJBProblem) = prob.axes
+_discount(prob::HJBProblem) = prob.discount
+_kernel_model(prob::HJBProblem) =
+    _DoubleIntegratorModel{length(prob.riccati)}(prob.position_weight, prob.velocity_weight, prob.control_weight,
+        prob.control_bound, prob.constraint === :disc, Tuple(vec(prob.riccati)))
+
+@inline function _riccati(m::_DoubleIntegratorModel, x::NTuple{D}) where {D}
     acc = 0.0
     for i in 1:D, j in 1:D
-        acc += x[i] * kp.riccati[i + D * (j - 1)] * x[j]
+        acc += x[i] * m.riccati[i + D * (j - 1)] * x[j]
     end
     return acc / 2
 end
 
-@inline function _cost(kp::_KernelProblem{D}, x, u) where {D}
+@inline _drifts(::_DoubleIntegratorModel, x::NTuple{D}, u) where {D} =
+    ntuple(j -> j <= D ÷ 2 ? x[D ÷ 2 + j] : u[j - D ÷ 2], Val(D))
+
+@inline function _cost(m::_DoubleIntegratorModel, x::NTuple{D}, u) where {D}
     d = D ÷ 2
     q = 0.0
     v = 0.0
@@ -52,104 +114,38 @@ end
     for k in 1:d
         uu += u[k]^2
     end
-    return (kp.position_weight * q + kp.velocity_weight * v + kp.control_weight * uu) / 2
+    return (m.position_weight * q + m.velocity_weight * v + m.control_weight * uu) / 2
 end
 
-@inline _moved(x::NTuple{D}, j, step) where {D} = ntuple(k -> k == j ? x[k] + step : x[k], Val(D))
+_dirichlet(::_DoubleIntegratorModel) = true
+@inline _boundary_value(m::_DoubleIntegratorModel, x) = _riccati(m, x)
+@inline _initial_value(m::_DoubleIntegratorModel, x) = _riccati(m, x)
 
-@inline _controls(U, I, ::Val{d}) where {d} = ntuple(k -> U[I, k], Val(d))
-
-@inline _drift(x, u, j, d) = j <= d ? x[d + j] : u[j - d]
-
-# The upwind stencil of a policy, evaluated on the fly from the controls and
-# the grid coordinates: the same discretization as `_assemble`, never stored.
-# A coefficient towards a neighbour outside the grid is zero; its Riccati
-# boundary value is moved into the right-hand side (`_grid_rhs_kernel!`).
-# The controls of box point I are U[I + ushift, :] (the controls are stored on
-# the overlap-extended box, which the owned box sits inside).
-struct _UpwindStencil{D,A,K} <: AbstractStencil{D}
-    U::A
-    kp::K
-    ushift::NTuple{D,Int}
-end
-
-_UpwindStencil(U::AbstractArray, kp::_KernelProblem{D}, ushift::NTuple{D,Int}=ntuple(_ -> 0, D)) where {D} =
-    _UpwindStencil{D,typeof(U),typeof(kp)}(U, kp, ushift)
-
-function Adapt.adapt_structure(to, s::_UpwindStencil{D}) where {D}
-    U = Adapt.adapt(to, s.U)
-    return _UpwindStencil{D,typeof(U),typeof(s.kp)}(U, s.kp, s.ushift)
-end
-KernelAbstractions.get_backend(s::_UpwindStencil) = get_backend(s.U)
-
-Base.@propagate_inbounds function GridSchwarz._coefficients(s::_UpwindStencil{D}, I) where {D}
-    kp = s.kp
+# The clipped LQR feedback.
+@inline function _initial_control(m::_DoubleIntegratorModel, x::NTuple{D}) where {D}
     d = D ÷ 2
-    x = _coordinates(kp, I)
-    u = _controls(s.U, I + CartesianIndex(s.ushift), Val(D ÷ 2))
-    a = ntuple(j -> _drift(x, u, j, d) * kp.inverse_spacing[j], Val(D))     # signed upwind rates
-    c0 = kp.discount
-    for j in 1:D
-        c0 += abs(a[j])
-    end
-    cm = ntuple(j -> a[j] < 0 && kp.offset[j] + I[j] > 1 ? -a[j] : 0.0, Val(D))
-    cp = ntuple(j -> a[j] > 0 && kp.offset[j] + I[j] < kp.points[j] ? a[j] : 0.0, Val(D))
-    return c0, cm, cp
-end
-
-# The right-hand side of the policy evaluation: running cost plus the Riccati
-# values of upwind neighbours outside the grid.
-@kernel function _grid_rhs_kernel!(b, @Const(U), kp::_KernelProblem{D}, g, ushift) where {D}
-    I = @index(Global, Cartesian)
-    d = D ÷ 2
-    x = _coordinates(kp, I)
-    u = _controls(U, I + CartesianIndex(ushift), Val(D ÷ 2))
-    rhs = _cost(kp, x, u)
-    for j in 1:D
-        fj = _drift(x, u, j, d)
-        G = kp.offset[j] + I[j]
-        if fj > 0 && G == kp.points[j]
-            rhs += fj / kp.spacing[j] * _riccati(kp, _moved(x, j, kp.spacing[j]))
-        elseif fj < 0 && G == 1
-            rhs -= fj / kp.spacing[j] * _riccati(kp, _moved(x, j, -kp.spacing[j]))
+    # (No variable a closure captures is reassigned: GPUs can't run the boxed
+    # captures that would create.)
+    ulqr = ntuple(Val(D ÷ 2)) do k
+        acc = 0.0
+        for j in 1:D
+            acc -= m.riccati[(d + k) + D * (j - 1)] * x[j]
         end
+        acc / m.control_weight
     end
-    b[I + _shift(g, Val(D))] = rhs
+    ū = m.control_bound
+    if m.disc && d == 2
+        nu = sqrt(ulqr[1]^2 + ulqr[2]^2)
+        scale = nu > ū ? ū / nu : 1.0
+        return ntuple(k -> ulqr[k] * scale, Val(D ÷ 2))
+    end
+    return ntuple(k -> clamp(ulqr[k], -ū, ū), Val(D ÷ 2))
 end
 
-# Howard's improvement: minimize the discrete Hamiltonian pointwise (see
-# `_minimize_hamiltonian!`), reading V on the ghost layer for neighbours in
-# other boxes and the Riccati value outside the grid.
-@kernel function _grid_improve_kernel!(U, @Const(V), kp::_KernelProblem{D}, g) where {D}
-    I = @index(Global, Cartesian)
-    d = D ÷ 2
-    x = _coordinates(kp, I)
-    J = I + _shift(g, Val(D))
-    v0 = V[J]
-    Dp = ntuple(Val(D ÷ 2)) do k
-        j = d + k
-        vp = kp.offset[j] + I[j] < kp.points[j] ? V[J + _unit(j, Val(D))] : _riccati(kp, _moved(x, j, kp.spacing[j]))
-        (vp - v0) / kp.spacing[j]
-    end
-    Dm = ntuple(Val(D ÷ 2)) do k
-        j = d + k
-        vm = kp.offset[j] + I[j] > 1 ? V[J - _unit(j, Val(D))] : _riccati(kp, _moved(x, j, -kp.spacing[j]))
-        (v0 - vm) / kp.spacing[j]
-    end
-    u = _argmin_hamiltonian(kp, Dp, Dm)
-    for k in 1:d
-        U[I, k] = u[k]
-    end
-end
-
-@inline function _argmin_hamiltonian(kp::_KernelProblem, Dp::NTuple{d}, Dm::NTuple{d}) where {d}
-    r, ū = kp.control_weight, kp.control_bound
-    if !kp.disc || d == 1
-        return ntuple(Val(d)) do k
-            up = clamp(-Dp[k] / r, 0.0, ū)
-            um = clamp(-Dm[k] / r, -ū, 0.0)
-            r * up^2 / 2 + up * Dp[k] <= r * um^2 / 2 + um * Dm[k] ? up : um
-        end
+@inline function _argmin_hamiltonian(m::_DoubleIntegratorModel, x, Dp::NTuple{d}, Dm::NTuple{d}) where {d}
+    r, ū = m.control_weight, m.control_bound
+    if !m.disc || d == 1
+        return ntuple(k -> _box_argmin(r, ū, 0.0, Dp[k], Dm[k]), Val(d))
     end
     best = Inf
     u1 = u2 = 0.0
@@ -174,35 +170,108 @@ end
     end
 end
 
-# The initial policy (clipped LQR feedback) and value (Riccati) on the box.
-@kernel function _grid_initialize_kernel!(U, V, kp::_KernelProblem{D}, g) where {D}
+# ---------------------------------------------------------------------------
+# kernels
+# ---------------------------------------------------------------------------
+
+# The upwind stencil of a policy, evaluated on the fly from the controls and
+# the grid coordinates: the same discretization as `_assemble`, never stored.
+# Towards a neighbour outside the grid the coefficient is zero: with Dirichlet
+# data its value moves into the right-hand side (`_grid_rhs_kernel!`) and the
+# flux stays on the diagonal; at a reflecting boundary the flux is dropped.
+# Across the seam of a periodic dimension the neighbour is in the ghost layer.
+# The controls of box point I are U[I + ushift, :] (the controls are stored on
+# the overlap-extended box, which the owned box sits inside).
+struct _UpwindStencil{D,A,K} <: AbstractStencil{D}
+    U::A
+    kp::K
+    ushift::NTuple{D,Int}
+end
+
+_UpwindStencil(U::AbstractArray, kp::_KernelProblem{D}, ushift::NTuple{D,Int}=ntuple(_ -> 0, D)) where {D} =
+    _UpwindStencil{D,typeof(U),typeof(kp)}(U, kp, ushift)
+
+function Adapt.adapt_structure(to, s::_UpwindStencil{D}) where {D}
+    U = Adapt.adapt(to, s.U)
+    return _UpwindStencil{D,typeof(U),typeof(s.kp)}(U, s.kp, s.ushift)
+end
+KernelAbstractions.get_backend(s::_UpwindStencil) = get_backend(s.U)
+
+Base.@propagate_inbounds function GridSchwarz._coefficients(s::_UpwindStencil{D}, I) where {D}
+    kp = s.kp
+    x = _coordinates(kp, I)
+    u = _controls(s.U, I + CartesianIndex(s.ushift), Val(D ÷ 2))
+    f = _drifts(kp.model, x, u)
+    a = ntuple(j -> f[j] * kp.inverse_spacing[j], Val(D))                 # signed upwind rates
+    dirichlet = _dirichlet(kp.model)
+    c0 = kp.discount
+    for j in 1:D
+        if dirichlet || (a[j] > 0 ? _has_upper(kp, I, j) : _has_lower(kp, I, j))
+            c0 += abs(a[j])
+        end
+    end
+    cm = ntuple(j -> a[j] < 0 && _has_lower(kp, I, j) ? -a[j] : 0.0, Val(D))
+    cp = ntuple(j -> a[j] > 0 && _has_upper(kp, I, j) ? a[j] : 0.0, Val(D))
+    return c0, cm, cp
+end
+
+# The right-hand side of the policy evaluation: running cost plus, with
+# Dirichlet data, the boundary values of upwind neighbours outside the grid.
+@kernel function _grid_rhs_kernel!(b, @Const(U), kp::_KernelProblem{D}, g, ushift) where {D}
+    I = @index(Global, Cartesian)
+    m = kp.model
+    x = _coordinates(kp, I)
+    u = _controls(U, I + CartesianIndex(ushift), Val(D ÷ 2))
+    rhs = _cost(m, x, u)
+    if _dirichlet(m)
+        f = _drifts(m, x, u)
+        for j in 1:D
+            if f[j] > 0 && !_has_upper(kp, I, j)
+                rhs += f[j] / kp.spacing[j] * _boundary_value(m, _moved(x, j, kp.spacing[j]))
+            elseif f[j] < 0 && !_has_lower(kp, I, j)
+                rhs -= f[j] / kp.spacing[j] * _boundary_value(m, _moved(x, j, -kp.spacing[j]))
+            end
+        end
+    end
+    b[I + _shift(g, Val(D))] = rhs
+end
+
+# The value one step from x along dimension j (step = ±h), seen from grid point
+# I: from V (or its ghost layer), the boundary data, or, at a reflecting
+# boundary, v0 itself (a zero difference: no flux through the boundary).
+@inline function _neighbour_value(kp::_KernelProblem{D}, V, I, J, x, v0, j, upper::Bool) where {D}
+    if upper ? _has_upper(kp, I, j) : _has_lower(kp, I, j)
+        return upper ? V[J + _unit(j, Val(D))] : V[J - _unit(j, Val(D))]
+    end
+    _dirichlet(kp.model) || return v0
+    return _boundary_value(kp.model, _moved(x, j, upper ? kp.spacing[j] : -kp.spacing[j]))
+end
+
+# Howard's improvement: minimize the discrete Hamiltonian pointwise (see
+# `_minimize_hamiltonian!`), reading V on the ghost layer for neighbours in
+# other boxes or across a periodic seam.
+@kernel function _grid_improve_kernel!(U, @Const(V), kp::_KernelProblem{D}, g) where {D}
     I = @index(Global, Cartesian)
     d = D ÷ 2
     x = _coordinates(kp, I)
-    V[I + _shift(g, Val(D))] = _riccati(kp, x)
-    # (No variable a closure captures is reassigned: GPUs can't run the boxed
-    # captures that would create.)
-    ulqr = ntuple(Val(D ÷ 2)) do k
-        acc = 0.0
-        for j in 1:D
-            acc -= kp.riccati[(d + k) + D * (j - 1)] * x[j]
-        end
-        acc / kp.control_weight
-    end
-    ū = kp.control_bound
-    disc = kp.disc && d == 2
-    scale = 1.0
-    if disc
-        nu = 0.0
-        for k in 1:d
-            nu += ulqr[k]^2
-        end
-        nu = sqrt(nu)
-        nu > ū && (scale = ū / nu)
-    end
+    J = I + _shift(g, Val(D))
+    v0 = V[J]
+    Dp = ntuple(k -> (_neighbour_value(kp, V, I, J, x, v0, d + k, true) - v0) / kp.spacing[d + k], Val(D ÷ 2))
+    Dm = ntuple(k -> (v0 - _neighbour_value(kp, V, I, J, x, v0, d + k, false)) / kp.spacing[d + k], Val(D ÷ 2))
+    u = _argmin_hamiltonian(kp.model, x, Dp, Dm)
     for k in 1:d
-        uk = ulqr[k] * scale
-        U[I, k] = disc ? uk : clamp(uk, -ū, ū)
+        U[I, k] = u[k]
+    end
+end
+
+# The initial policy and value on the box.
+@kernel function _grid_initialize_kernel!(U, V, kp::_KernelProblem{D}, g) where {D}
+    I = @index(Global, Cartesian)
+    x = _coordinates(kp, I)
+    V[I + _shift(g, Val(D))] = _initial_value(kp.model, x)
+    u = _initial_control(kp.model, x)
+    for k in 1:(D ÷ 2)
+        U[I, k] = u[k]
     end
 end
 
@@ -242,13 +311,15 @@ inner products reduced over all ranks), right-preconditioned by
 
 Warm started from the previous value function; the policy is improved on each
 extended box after a halo exchange of the values. Every rank returns the whole
-solution. On one box this gives the same discrete solution as
+solution. Also solves [`MechanicalHJBProblem`](@ref CellularSheaves.ControlSheaves.MechanicalHJB.MechanicalHJBProblem)s,
+whose joint angles are periodic dimensions of the grid. On one box this gives the same discrete solution as
 [`PolicyIteration`](@ref), whose `KrylovPolicyEvaluation(method = :bicgstab)`
 uses the identical preconditioner on the assembled matrices.
 
 `callback(snapshot)`, if given, is called on every rank with the state of the
 iteration as whole-grid host arrays: once with the initial guess
-(`iteration = 0`: the Riccati values and the clipped LQR policy), then after
+(`iteration = 0`: the initial guess, for `HJBProblem` the Riccati values and the
+clipped LQR policy), then after
 each policy iteration ``k`` with the values ``V^k`` of the policy just evaluated
 and the policy improved from them. `snapshot` is a named tuple
 `(iteration, values, controls, change)` with `values` a vector and `controls`
@@ -268,16 +339,22 @@ Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator,F}
     callback::F = nothing
 end
 
-function CommonSolve.solve(prob::HJBProblem, alg::GridPolicyIteration)
+CommonSolve.solve(prob::HJBProblem, alg::GridPolicyIteration) = _grid_solve(prob, alg)
+
+# The solve for any problem type that implements the interface at the top of this file.
+function _grid_solve(prob, alg::GridPolicyIteration)
     @argcheck alg.maxiter >= 1 && alg.tol > 0
     @argcheck alg.preconditioner in (:red_black_sgs, :ras, :none) "preconditioner must be :red_black_sgs, :ras or :none"
-    g = prob.grid
-    D, d = ndims(g), prob.axes
+    g = _state_grid(prob)
+    D, d = ndims(g), _control_count(prob)
     comm = alg.communicator
     points = Tuple(g.points)
+    periodic = _periodic(prob)
+    # Red–black ordering around a periodic dimension needs an even number of points.
+    @argcheck alg.preconditioner === :none || all(k -> !periodic[k] || iseven(points[k]), 1:D) "red–black sweeps need an even number of points in periodic dimensions"
     ranks = alg.ranks === nothing ? balanced_ranks(box_count(comm), points) : Tuple(alg.ranks)
     @argcheck length(ranks) == D && prod(ranks) == box_count(comm) "ranks must have one entry per dimension and multiply to the number of boxes"
-    layout = BoxLayout(points, ranks, box_rank(comm); overlap=alg.overlap)
+    layout = BoxLayout(points, ranks, box_rank(comm); overlap=alg.overlap, periodic)
     exchange(x) = exchange!(comm, layout, x)
     allreduce(x, op) = box_allreduce(comm, x, op)
     backend = alg.backend

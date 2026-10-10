@@ -417,7 +417,7 @@ end
 # ===== Boxes of a distributed grid =====
 
 """
-    BoxLayout(points, ranks, coords; overlap = 1)
+    BoxLayout(points, ranks, coords; overlap = 1, periodic = (false, …))
 
 Box `coords` (0-based, one per dimension) of the partition of a grid of
 `points` into `ranks[1] × … × ranks[D]` boxes of nearly equal index ranges,
@@ -430,7 +430,12 @@ share a face being its edges. Fields:
 - `width = overlap + 1`: the ghost cells stored around `owned`, enough for the
   extended box and its stencil;
 - `neighbors[d] = (lower, upper)`: the ranks of the boxes sharing a face
-  across dimension `d`, or `-1`.
+  across dimension `d`, or `-1`;
+- `periodic[d]`: whether dimension `d` wraps around (an angle). The first and
+  last boxes of a periodic dimension are then neighbours (a box alone in its
+  dimension is its own neighbour), and halo exchanges fill the ghost cells
+  across the seam from the other end of the grid. The extended boxes stay
+  clipped at the seam: a Schwarz subdomain does not wrap around.
 
 Local vectors are padded arrays of size `length.(owned) .+ 2width`
 ([`box_operator`](@ref)). Ranks are numbered column-major over `coords`.
@@ -444,10 +449,11 @@ struct BoxLayout{D}
     overlap::Int
     width::Int
     neighbors::NTuple{D,NTuple{2,Int}}
+    periodic::NTuple{D,Bool}
 end
 
 function BoxLayout(points::NTuple{D,Integer}, ranks::NTuple{D,Integer}, coords::NTuple{D,Integer};
-                   overlap::Integer=1) where {D}
+                   overlap::Integer=1, periodic::NTuple{D,Bool}=ntuple(_ -> false, D)) where {D}
     @argcheck overlap >= 0 "the overlap must be nonnegative"
     @argcheck all(1 .<= ranks .<= points) "need between 1 and points[d] boxes in dimension d"
     @argcheck all(0 .<= coords .< ranks) "box coordinates must lie in 0:ranks[d]-1"
@@ -458,16 +464,18 @@ function BoxLayout(points::NTuple{D,Integer}, ranks::NTuple{D,Integer}, coords::
     end
     extended = ntuple(d -> max(1, first(owned[d]) - overlap):min(points[d], last(owned[d]) + overlap), D)
     rank(c) = sum(c[d] * prod(ranks[1:(d - 1)]; init=1) for d in 1:D)
+    moved(d, c) = rank(ntuple(k -> k == d ? c : coords[k], D))
     neighbors = ntuple(D) do d
-        lower = coords[d] > 0 ? rank(ntuple(k -> k == d ? coords[k] - 1 : coords[k], D)) : -1
-        upper = coords[d] < ranks[d] - 1 ? rank(ntuple(k -> k == d ? coords[k] + 1 : coords[k], D)) : -1
+        lower = coords[d] > 0 ? moved(d, coords[d] - 1) : periodic[d] ? moved(d, ranks[d] - 1) : -1
+        upper = coords[d] < ranks[d] - 1 ? moved(d, coords[d] + 1) : periodic[d] ? moved(d, 0) : -1
         (lower, upper)
     end
-    return BoxLayout{D}(Int.(points), Int.(ranks), Int.(coords), owned, extended, Int(overlap), w, neighbors)
+    return BoxLayout{D}(Int.(points), Int.(ranks), Int.(coords), owned, extended, Int(overlap), w, neighbors, periodic)
 end
 
-BoxLayout(points::NTuple{D,Integer}, ranks::NTuple{D,Integer}, rank::Integer; overlap::Integer=1) where {D} =
-    BoxLayout(points, ranks, box_coordinates(ranks, rank); overlap)
+BoxLayout(points::NTuple{D,Integer}, ranks::NTuple{D,Integer}, rank::Integer; overlap::Integer=1,
+          periodic::NTuple{D,Bool}=ntuple(_ -> false, D)) where {D} =
+    BoxLayout(points, ranks, box_coordinates(ranks, rank); overlap, periodic)
 
 _split(n, k, c) = (c * n ÷ k + 1):((c + 1) * n ÷ k)
 
@@ -527,10 +535,11 @@ end
     BoxCommunicator
 
 How the boxes of a distributed grid talk to each other. Implementations:
-[`SerialBoxes`](@ref) (one box, nothing to exchange) and, with MPI.jl loaded,
+[`SerialBoxes`](@ref) (one box) and, with MPI.jl loaded,
 [`mpi_boxes`](@ref). Each implements `box_count(c)`, `box_rank(c)`,
 `box_allreduce(c, x, op)` (`op` is `+` or `max`), `exchange!(c, layout, x)`
-(fill the `layout.width` ghost cells of `x` from the neighbouring boxes) and
+(fill the `layout.width` ghost cells of `x` from the neighbouring boxes,
+across the seams of periodic dimensions too) and
 `box_allgather(c, v)` (the vectors `v` of all ranks, in rank order).
 """
 abstract type BoxCommunicator end
@@ -538,14 +547,23 @@ abstract type BoxCommunicator end
 """
     SerialBoxes()
 
-The communicator of a grid held as a single box by one process.
+The communicator of a grid held as a single box by one process. Its halo
+exchange only wraps periodic dimensions around (the box is its own neighbour).
 """
 struct SerialBoxes <: BoxCommunicator end
 
 box_count(::SerialBoxes) = 1
 box_rank(::SerialBoxes) = 0
 box_allreduce(::SerialBoxes, x, op) = x
-exchange!(::SerialBoxes, layout::BoxLayout, x) = x
+function exchange!(::SerialBoxes, layout::BoxLayout{D}, x) where {D}
+    for d in 1:D
+        layout.periodic[d] || continue
+        s = _slabs(layout, d)
+        view(x, s.recv_upper...) .= view(x, s.send_lower...)
+        view(x, s.recv_lower...) .= view(x, s.send_upper...)
+    end
+    return x
+end
 box_allgather(::SerialBoxes, v::AbstractVector) = [Vector(v)]
 
 """

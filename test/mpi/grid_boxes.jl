@@ -4,6 +4,7 @@ using MPI
 using Test
 using CellularSheaves
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB
+using CellularSheaves.ControlSheaves.MechanicalHJB
 
 MPI.Init()
 comm = MPI.COMM_WORLD
@@ -12,11 +13,13 @@ nranks = box_count(boxes)
 
 @testset "rank $(box_rank(boxes)) of $nranks" begin
     # The halo exchange delivers the neighbours' owned values, edges and
-    # corners included: fill the owned box with the global linear index.
-    for points in ((13, 11), (7, 6, 5, 4))
+    # corners included, wrapping around periodic dimensions: fill the owned
+    # box with the global linear index.
+    for (points, periodic) in (((13, 11), (false, false)), ((7, 6, 5, 4), (false, false, false, false)),
+                               ((12, 11), (true, false)), ((6, 6, 5, 4), (true, true, false, false)))
         D = length(points)
         ranks = balanced_ranks(nranks, points)
-        layout = BoxLayout(points, ranks, box_rank(boxes); overlap = 1)
+        layout = BoxLayout(points, ranks, box_rank(boxes); overlap = 1, periodic)
         op = box_operator(layout, CoefficientStencil(zeros(length.(layout.owned)..., 2D + 1)))
         x = grid_zeros(op)
         L = LinearIndices(points)
@@ -25,6 +28,7 @@ nranks = box_count(boxes)
         w = layout.width
         for J in CartesianIndices(x)
             G = Tuple(J) .- w .+ first.(layout.owned) .- 1          # global index of padded cell J
+            G = ntuple(k -> periodic[k] ? mod1(G[k], points[k]) : G[k], D)
             inside_owned = all(first.(layout.owned) .<= G .<= last.(layout.owned))
             in_grid = all(1 .<= G .<= points)
             if inside_owned || in_grid
@@ -50,4 +54,14 @@ nranks = box_count(boxes)
         @test ras.values ≈ serial.values rtol = 1e-7
         @test count(abs.(ras.controls - serial.controls) .> 1e-6) <= length(serial.values) ÷ 100
     end
+
+    # The two-link arm: periodic joint angles, reflecting momentum bounds.
+    arm = MechanicalHJBProblem(TwoLinkArm(); angle_points = 8, momentum_points = 5)
+    serial = solve(arm, GridPolicyIteration())
+    distributed = solve(arm, GridPolicyIteration(communicator = boxes))
+    @test distributed.converged
+    @test distributed.values ≈ serial.values rtol = 1e-9
+    ras = solve(arm, GridPolicyIteration(communicator = boxes, preconditioner = :ras))
+    @test ras.converged
+    @test ras.values ≈ serial.values rtol = 1e-7
 end
