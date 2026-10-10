@@ -18,3 +18,15 @@ Galerkin coarse operator as their composite with the fine operator.
 ```@autodocs
 Modules = [CellularSheaves.NetworkSheaves.GridMultigrid]
 ```
+
+## Schwarz and multigrid commute
+
+Restriction to a box cover commutes with the pushforward hierarchy when every box
+is a union of whole blocks (base change), so the Galerkin coarse operator of a
+local problem is the local problem of the Galerkin coarse operator, and additive
+"multigrid in each box, then Schwarz" equals "Schwarz on every level of the
+pushforward hierarchy". A dense reference implementation of both orders:
+
+```@autodocs
+Modules = [CellularSheaves.NetworkSheaves.MultilevelSchwarz]
+```
