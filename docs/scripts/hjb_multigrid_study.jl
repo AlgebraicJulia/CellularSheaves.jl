@@ -35,21 +35,23 @@ end
 integrator(n) = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = :disc)
 arm(na, np) = MechanicalHJBProblem(TwoLinkArm(); angle_points = na, momentum_points = np, torque_bound = (6.0, 3.0))
 
-# The deepest hierarchy whose coarsest grid keeps at least 3 points per dimension.
-function deepest(points)
-    levels, n = 1, collect(points)
-    while all(iseven, n) && all(n .÷ 2 .>= 3)
-        n .÷= 2
-        levels += 1
+# The automatic hierarchy (Multigrid(levels = :auto)): its number of levels and coarsest grid.
+function hierarchy(prob, mg)
+    points, periodic = Tuple(DIH._state_grid(prob).points), DIH._periodic(prob)
+    levels = DIH._plan_levels(mg, points, periodic)
+    n = points
+    for _ in 2:levels
+        n = coarse_points(n, coarsening_factors(n, periodic))
     end
-    return levels, Tuple(n)
+    return levels, n
 end
 
 cases = size_name == "small" ?
-    [("double integrator 12^4", integrator(12)), ("double integrator 24^4", integrator(24)),
-     ("arm 16^2x12^2", arm(16, 12)), ("arm 24^2x20^2", arm(24, 20))] :
-    [("double integrator 24^4", integrator(24)), ("double integrator 48^4", integrator(48)),
-     ("arm 32^2x24^2", arm(32, 24)), ("arm 48^2x40^2", arm(48, 40)), ("arm 64^2x48^2", arm(64, 48))]
+    [("double integrator 12^4", integrator(12)), ("double integrator 25^4", integrator(25)),
+     ("arm 16^2x12^2", arm(16, 12)), ("arm 24^2x21^2", arm(24, 21))] :
+    [("double integrator 33^4", integrator(33)), ("double integrator 49^4", integrator(49)),
+     ("double integrator 65^4", integrator(65)),
+     ("arm 32^2x25^2", arm(32, 25)), ("arm 48^2x41^2", arm(48, 41)), ("arm 64^2x49^2", arm(64, 49))]
 
 # Fraction of coarse points (level 2) where the rediscretized and Galerkin
 # coefficients differ by more than 1% of the diagonal, under policy U.
@@ -59,11 +61,12 @@ function coarse_operator_difference(prob, U)
     D = length(n)
     layout = GS.BoxLayout(n, ntuple(_ -> 1, D), 0; periodic = DIH._periodic(prob))
     op = GS.box_operator(layout, DIH._UpwindStencil(U, DIH._KernelProblem(prob, ntuple(_ -> 0, D))))
-    nc = coarse_points(n)
+    r = coarsening_factors(n, DIH._periodic(prob))
+    nc = coarse_points(n, r)
     galerkin = zeros(nc..., 2D + 1)
     galerkin_coefficients!(galerkin, op)
     Uc = zeros(nc..., size(U, D + 1))
-    DIH._restrict_controls_kernel!(KernelAbstractions.CPU())(Uc, U, Val(D), Val(size(U, D + 1)); ndrange = nc)
+    DIH._restrict_controls_kernel!(KernelAbstractions.CPU())(Uc, U, r, n, Val(D), Val(size(U, D + 1)); ndrange = nc)
     coarse = DIH._coarsen(prob)
     opc = GS.box_operator(coarse_layout(layout), DIH._UpwindStencil(Uc, DIH._KernelProblem(coarse, ntuple(_ -> 0, D))))
     redisc = zeros(nc..., 2D + 1)
@@ -83,11 +86,11 @@ open(out, "w") do io
     for (label, prob) in cases
         warm = occursin("arm", label) ? arm(8, 6) : integrator(8)
         solve(warm, GridPolicyIteration(backend = backend, multigrid = Multigrid(levels = 2)))       # compile
-        levels, coarsest = deepest(Tuple(DIH._state_grid(prob).points))
+        levels, coarsest = hierarchy(prob, Multigrid())
         reference, difference = nothing, NaN
         for (method, mg) in (("one level", nothing),
-                             ("rediscretize", Multigrid(; levels, coarse_operator = :rediscretize)),
-                             ("galerkin", Multigrid(; levels, coarse_operator = :galerkin)))
+                             ("rediscretize", Multigrid(coarse_operator = :rediscretize)),
+                             ("galerkin", Multigrid(coarse_operator = :galerkin)))
             t = @elapsed sol = solve(prob, GridPolicyIteration(backend = backend, maxiter = 100, multigrid = mg))
             if reference === nothing
                 reference = sol.values

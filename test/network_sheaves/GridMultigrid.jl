@@ -39,10 +39,16 @@ end
 
 @testset "GridMultigrid" begin
     rng = Random.MersenneTwister(5)
-    for (n, periodic) in (((8, 6), (true, false)), ((6, 4), (false, false)), ((4, 4, 6), (true, true, false)))
+    # Even counts (blocks of 2^D), odd counts (a last block of one point), a
+    # periodic dimension not divisible by 4 (left alone: semicoarsening), and a
+    # non-periodic dimension of two points (left alone).
+    for (n, periodic) in (((8, 6), (true, false)), ((6, 4), (false, false)), ((4, 4, 6), (true, true, false)),
+                          ((7, 5), (false, false)), ((6, 9), (true, false)), ((8, 2, 5), (true, false, false)))
         D = length(n)
-        nc = coarse_points(n)
-        @test nc == n .÷ 2
+        r = coarsening_factors(n, periodic)
+        @test r == ntuple(k -> (periodic[k] ? n[k] % 4 == 0 : n[k] > 2) ? 2 : 1, D)
+        nc = coarse_points(n, r)
+        @test nc == ntuple(k -> r[k] == 2 ? cld(n[k], 2) : n[k], D)
         layout = BoxLayout(n, ntuple(_ -> 1, D), 0; overlap = 1, periodic)
         layoutc = coarse_layout(layout)
         @test layoutc.points == nc && layoutc.periodic == periodic
@@ -70,18 +76,21 @@ end
             T[:, k] = vec(interior(xc, opc))
         end
         @test T * E ≈ I                                   # T is a left inverse of E
-        @test T ≈ E' / 2^D                                # the average is the scaled adjoint
-        ψ = aggregation_homomorphism(n)
+        @test T ≈ Diagonal(1 ./ vec(sum(E; dims = 1))) * E'   # the average: Eᵀ scaled by the block sizes
+        ψ = aggregation_homomorphism(n, r)
         @test all(E[i, ψ.vertex_map[i]] == 1 for i in 1:N)   # E is the pullback along ψ
 
-        # Galerkin coarse operator = T A E, and = (R₀ A R₀ᵀ) / 2^D of the aggregation coarse space.
+        # Galerkin coarse operator = T A E (and, for blocks of 2^D points, (R₀ A R₀ᵀ) / 2^D
+        # of the aggregation coarse space).
         A = dense_operator(op, layout)
         coefc = zeros(nc..., 2D + 1)
         galerkin_coefficients!(coefc, op)
         Ac = dense_operator(box_operator(layoutc, CoefficientStencil(coefc)), layoutc)
         @test Ac ≈ T * A * E
-        cs = AggregateCoarseSpace(layout, nc)
-        @test Ac ≈ coarse_matrix(cs, op, SerialBoxes()) / 2^D
+        if r == ntuple(_ -> 2, D) && all(iseven, n)
+            cs = AggregateCoarseSpace(layout, nc)
+            @test Ac ≈ coarse_matrix(cs, op, SerialBoxes()) / 2^D
+        end
 
         # The same pair from the sheaf machinery: the pushforward of the constant
         # sheaf along ψ has one-dimensional stalks (the constants on each block),
@@ -115,12 +124,13 @@ end
         coef[:, :, :, a[j] > 0 ? 1 + D + j : 1 + j] .= abs(a[j])
     end
     layout = BoxLayout(n, (1, 1, 1), 0; periodic = (true, true, true))
-    coefc = zeros(coarse_points(n)..., 2D + 1)
+    coefc = zeros(coarse_points(n, (2, 2, 2))..., 2D + 1)
     galerkin_coefficients!(coefc, box_operator(layout, CoefficientStencil(coef)))
     @test all(coefc[:, :, :, 1] .≈ ρ + sum(abs, a) / 2)
     for j in 1:D
         @test all(coefc[:, :, :, (a[j] > 0 ? 1 + D + j : 1 + j)] .≈ abs(a[j]) / 2)
         @test all(iszero, coefc[:, :, :, (a[j] > 0 ? 1 + j : 1 + D + j)])
     end
-    @test_throws ArgumentError coarse_points((8, 7))
+    @test_throws ArgumentError coarse_points((8, 7), (2, 3))
+    @test coarsening_factors((3, 2, 12, 6), (false, false, true, true)) == (2, 1, 2, 1)
 end

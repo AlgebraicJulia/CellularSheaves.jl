@@ -1,22 +1,26 @@
 # Geometric multigrid for the policy evaluations of GridPolicyIteration: a
-# V-cycle over cell-centred coarse grids (GridMultigrid), preconditioning
-# BiCGStab on the fine grid, with red–black SGS smoothing on every level but
-# the coarsest, which is solved directly (dense LU, or PathPack's semiring LU
-# with the PATHPACK package extension). Included in DoubleIntegratorHJB.
+# V-cycle over coarse grids (GridMultigrid), preconditioning BiCGStab on the
+# fine grid, with red–black SGS smoothing on every level but the coarsest,
+# which is solved directly (dense LU, or PathPack's semiring LU with the
+# PATHPACK package extension). Included in DoubleIntegratorHJB.
 
 """
-    Multigrid(; levels = 3, coarse_operator = :rediscretize, coarsest = :pathpack,
-              presmooth = 1, postsmooth = 1)
+    Multigrid(; levels = :auto, coarsest_size = 4096, coarse_operator = :rediscretize,
+              coarsest = :pathpack, presmooth = 1, postsmooth = 1)
 
 A V-cycle preconditioner for [`GridPolicyIteration`](@ref): pass it as
-`GridPolicyIteration(multigrid = Multigrid(...))`. The fine grid and
-`levels - 1` cell-centred coarse grids, each with half the points per
-dimension (every dimension of every level but the coarsest needs an even
-number of points), are linked by the pullback ``E`` (copy each coarse value
-onto its block) and the pushforward transfer ``T`` (block average) of the
-constant sheaf along the aggregation homomorphism (see
-[`GridMultigrid`](@ref CellularSheaves.NetworkSheaves.GridMultigrid)).
+`GridPolicyIteration(multigrid = Multigrid(...))`. Each coarse grid halves
+the points of every dimension that can be coarsened (an odd count leaves one
+block of one point; a periodic dimension is halved while its count is a
+multiple of 4; see [`GridMultigrid`](@ref CellularSheaves.NetworkSheaves.GridMultigrid)),
+and the levels are linked by the pullback ``E`` (copy each coarse value onto
+its block) and the pushforward transfer ``T`` (block average) of the constant
+sheaf along the aggregation homomorphism.
 
+- `levels = :auto` coarsens until the coarsest grid has at most
+  `coarsest_size` points, or cannot be coarsened further: ``O(\\log n)``
+  levels on a grid of ``n`` points per dimension. An integer asks for exactly
+  that many levels, fine grid included.
 - `coarse_operator = :rediscretize`: each coarse level is the same HJB problem
   discretized on the coarse grid, under the policy pushed forward to it (the
   block average of the controls, which stays in the convex control set);
@@ -39,7 +43,8 @@ guess. All work arrays are allocated once per solve. Single box only
 (`SerialBoxes()`; CPU threads or one GPU, whose coarsest solve runs on the host).
 """
 Base.@kwdef struct Multigrid
-    levels::Int = 3
+    levels::Union{Int,Symbol} = :auto
+    coarsest_size::Int = 4096
     coarse_operator::Symbol = :rediscretize
     coarsest::Symbol = :pathpack
     presmooth::Int = 1
@@ -54,22 +59,30 @@ _with_grid(prob::HJBProblem, grid::StateGrid) =
     HJBProblem(grid, prob.axes, prob.position_weight, prob.velocity_weight, prob.control_weight, prob.discount,
         prob.control_bound, prob.constraint, prob.riccati)
 
-# The problem on the cell-centred coarse grid: points at the block centres,
-# spacing 2h.
+# The problem on the coarse grid (GridMultigrid's coarsening): a halved
+# dimension of even count keeps the block centres (lower + h/2, spacing 2h),
+# one of odd count every other point (same ends, spacing 2h); either way the
+# coarse grid is uniform, so it is again a StateGrid.
 function _coarsen(prob)
     g = _state_grid(prob)
+    D = ndims(g)
+    r = coarsening_factors(Tuple(g.points), _periodic(prob))
     h = g.spacing
-    return _with_grid(prob, StateGrid(g.lower .+ h ./ 2, g.upper .- h ./ 2, g.points .÷ 2))
+    lower = [r[k] == 2 && iseven(g.points[k]) ? g.lower[k] + h[k] / 2 : g.lower[k] for k in 1:D]
+    upper = [r[k] == 2 && iseven(g.points[k]) ? g.upper[k] - h[k] / 2 : g.upper[k] for k in 1:D]
+    return _with_grid(prob, StateGrid(lower, upper, collect(coarse_points(Tuple(g.points), r))))
 end
 
-@kernel function _restrict_controls_kernel!(Uc, @Const(U), ::Val{D}, ::Val{d}) where {D,d}
+# The policy pushed forward to the coarse grid: the average over each block.
+@kernel function _restrict_controls_kernel!(Uc, @Const(U), r, nf, ::Val{D}, ::Val{d}) where {D,d}
     Ic = @index(Global, Cartesian)
+    children = _children(Ic, r, nf, Val(D))
     for c in 1:d
         acc = 0.0
-        for k in 0:(2^D - 1)
-            acc += U[_child(Ic, k, Val(D)), c]
+        for I in children
+            acc += U[I, c]
         end
-        Uc[Ic, c] = acc / 2^D
+        Uc[Ic, c] = acc / length(children)
     end
 end
 
@@ -199,28 +212,38 @@ struct _Hierarchy{V,S,B,C}
     postsmooth::Int
 end
 
-function _check_multigrid(mg::Multigrid, points::NTuple{D,Int}) where {D}
-    @argcheck mg.levels >= 2 "a multigrid hierarchy needs at least 2 levels"
+# The number of levels of the hierarchy of a grid of `points` (fine grid
+# included): `mg.levels`, checked, or with :auto as many as it takes to bring
+# the coarsest grid down to mg.coarsest_size points or to a grid that cannot
+# be coarsened.
+function _plan_levels(mg::Multigrid, points::NTuple{D,Int}, periodic::NTuple{D,Bool}) where {D}
     @argcheck mg.coarse_operator in (:rediscretize, :galerkin) "coarse_operator must be :rediscretize or :galerkin"
     @argcheck mg.coarsest in (:pathpack, :dense) "coarsest must be :pathpack or :dense"
     @argcheck mg.presmooth >= 1 && mg.postsmooth >= 0
-    n = points
-    for ℓ in 1:(mg.levels - 1)
-        @argcheck all(iseven, n) "level $ℓ has $(n) points: every level but the coarsest needs an even number of points per dimension"
-        n = n .÷ 2
+    @argcheck mg.levels === :auto || (mg.levels isa Int && mg.levels >= 2) "levels must be :auto or an integer ≥ 2"
+    @argcheck mg.coarsest_size >= 1
+    levels, n = 1, points
+    while true
+        r = coarsening_factors(n, periodic)
+        done = mg.levels === :auto ? (prod(n) <= mg.coarsest_size || all(==(1), r)) : levels == mg.levels
+        done && break
+        @argcheck any(==(2), r) "level $levels ($(n) points) cannot be coarsened: ask for fewer levels or use levels = :auto"
+        n = coarse_points(n, r)
+        levels += 1
     end
-    @argcheck all(n .>= 2) "the coarsest grid ($(n) points) is too small"
+    @argcheck levels >= 2 "the grid ($(points) points) is already at most coarsest_size = $(mg.coarsest_size) points"
+    return levels
 end
 
 function _Hierarchy(mg::Multigrid, prob, op, layout, U, backend)
     D = ndims(op)
     d = size(U, D + 1)
-    _check_multigrid(mg, size(op))
+    nlevels = _plan_levels(mg, size(op), layout.periodic)
     galerkin = mg.coarse_operator === :galerkin
     first_level = _Level(op, layout, nothing, nothing, grid_zeros(op), grid_zeros(op), U, nothing)
     levels = Any[first_level]
     problem = prob
-    for _ in 2:mg.levels
+    for _ in 2:nlevels
         problem = _coarsen(problem)
         layout = coarse_layout(layout)
         n = layout.points
@@ -251,7 +274,8 @@ function _update!(H::_Hierarchy)
         else
             backend = get_backend(coarse.op)
             d = size(coarse.controls, D + 1)
-            _restrict_controls_kernel!(backend)(coarse.controls, fine.controls, Val(D), Val(d);
+            _restrict_controls_kernel!(backend)(coarse.controls, fine.controls,
+                ntuple(k -> size(coarse.op, k) == size(fine.op, k) ? 1 : 2, D), size(fine.op), Val(D), Val(d);
                 ndrange=size(coarse.op))
             KernelAbstractions.synchronize(backend)
         end

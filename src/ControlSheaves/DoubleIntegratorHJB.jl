@@ -82,7 +82,7 @@ using CellularSheaves.NetworkSheaves.GridSchwarz: AbstractStencil, GridOperator,
     balanced_ranks, box_operator, box_count, box_rank, box_allreduce, exchange!, gather_boxes, AggregateCoarseSpace,
     coarse_matrix, coarse_restrict, coarse_prolong_add!, _lincomb!, CoefficientStencil
 using CellularSheaves.NetworkSheaves.GridMultigrid: coarse_layout, restrict_average!, prolong_add!, stencil_coefficients!,
-    galerkin_coefficients!, _child
+    galerkin_coefficients!, coarsening_factors, coarse_points, _children
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
     PolicyIteration, DirectPolicyEvaluation, KrylovPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,

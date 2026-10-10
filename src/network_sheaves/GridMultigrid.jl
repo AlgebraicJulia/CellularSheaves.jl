@@ -5,14 +5,23 @@ Hierarchies of structured grids for multigrid solvers of the implicit stencil
 operators of [`GridSchwarz`](@ref CellularSheaves.NetworkSheaves.GridSchwarz),
 with the maps between levels written as a pushforward–pullback pair.
 
-**Coarsening.** A grid of ``n_1 \\times \\dots \\times n_D`` points (every
-``n_k`` even) is cut into blocks of ``2^D`` points; the coarse grid has one
-point per block, at its centre (cell-centred coarsening: spacing ``2h``,
-``n_k / 2`` points, the first at ``\\mathrm{lower} + h/2``). Periodic
-dimensions stay periodic. The map sending each fine point to its block is a
-graph homomorphism ``ψ : G_\\text{fine} → G_\\text{coarse}`` of the grid
-graphs ([`aggregation_homomorphism`](@ref)): an edge inside a block is
-collapsed, an edge between blocks goes to the edge between their centres.
+**Coarsening.** Each dimension ``k`` of a grid is coarsened by a factor
+``r_k \\in \\{1, 2\\}`` ([`coarsening_factors`](@ref)): with ``r_k = 2`` the
+points ``2b - 1, 2b`` form block ``b`` (an odd count leaves a last block of one
+point), so the coarse grid has ``\\lceil n_k / 2 \\rceil`` points; with
+``r_k = 1`` the dimension is not coarsened. A non-periodic dimension is
+coarsened while it has more than two points: the coarse points are the block
+centres (spacing ``2h``, the first at ``\\mathrm{lower} + h/2``) for an even
+count, and every other point (same ends, spacing ``2h``) for an odd one, so
+every level is a uniform grid. A periodic dimension is coarsened only while
+its count is a multiple of 4, which keeps every coarse level's count even, as
+red–black Gauss–Seidel around the circle needs (otherwise it is left alone:
+semicoarsening). Halving the grid at every level gives ``O(\\log n)`` levels
+on grids of ``n`` points per dimension, whatever the counts. The map sending
+each fine point to its block is a graph homomorphism
+``ψ : G_\\text{fine} → G_\\text{coarse}`` of the grid graphs
+([`aggregation_homomorphism`](@ref)): an edge inside a block is collapsed, an
+edge between blocks goes to the edge between their points.
 
 **Transfers as pushforward and pullback.** Grid functions are 0-cochains of
 the constant sheaf ``\\underline{ℝ}``. Its pushforward ``ψ_* \\underline{ℝ}``
@@ -37,8 +46,9 @@ aggregation; Braess 1995).
 **Rediscretization.** For the first-order upwind operators of the HJB solvers,
 ``A_c = T A E`` is again a first-order upwind discretization on the coarse
 grid. Its coupling across a block face in dimension ``j`` is the upwind rate
-``f_j^\\pm / h`` summed over the ``2^{D-1}`` children on that (outflow) face and
-averaged over the ``2^D`` children of the block, that is ``\\bar f_j^\\pm / (2h)``
+``f_j^\\pm / h`` summed over the children on that (outflow) face and averaged
+over all the children of the block: ``\\bar f_j^\\pm / (2h)`` for a block of two points
+per dimension,
 with ``\\bar f_j`` the drift averaged over the outflow face; its diagonal is
 ``ρ`` plus the outflow rates. Rediscretizing the scheme on the coarse grid
 instead takes the drift at the block centre. The two coincide exactly when
@@ -52,8 +62,8 @@ discretizations of the same transport operator.
 """
 module GridMultigrid
 
-export coarse_points, coarse_layout, aggregation_homomorphism, restrict_average!, prolong_add!,
-    stencil_coefficients!, galerkin_coefficients!
+export coarsening_factors, coarse_points, coarse_layout, aggregation_homomorphism, restrict_average!,
+    prolong_add!, stencil_coefficients!, galerkin_coefficients!
 
 using ArgCheck: @argcheck
 using KernelAbstractions
@@ -62,61 +72,83 @@ using ..GridSchwarz: GridOperator, BoxLayout, _coefficients, _shift
 using ..GraphHomomorphisms: GraphHomomorphism
 
 """
-    coarse_points(points) -> NTuple
+    coarsening_factors(points, periodic) -> NTuple
 
-The number of points per dimension of the cell-centred coarse grid of a grid
-of `points` (every entry even): `points .÷ 2`.
+The factor ``r_k \\in \\{1, 2\\}`` by which each dimension of a grid of `points`
+is coarsened (see the module documentation): 2 for a non-periodic dimension
+of more than two points and for a periodic dimension whose count is a
+multiple of 4, 1 otherwise. All ones means the grid cannot be coarsened.
 """
-function coarse_points(points::NTuple{D,Integer}) where {D}
-    @argcheck all(iseven, points) "cell-centred coarsening needs an even number of points in every dimension"
-    return Int.(points) .÷ 2
+coarsening_factors(points::NTuple{D,Integer}, periodic::NTuple{D,Bool}) where {D} =
+    ntuple(k -> (periodic[k] ? points[k] % 4 == 0 : points[k] > 2) ? 2 : 1, D)
+
+"""
+    coarse_points(points, factors) -> NTuple
+
+The number of points per dimension of the coarse grid: ``\\lceil n_k / 2 \\rceil``
+where the factor is 2, ``n_k`` where it is 1.
+"""
+function coarse_points(points::NTuple{D,Integer}, factors::NTuple{D,Integer}) where {D}
+    @argcheck all(in((1, 2)), factors) "coarsening factors must be 1 or 2"
+    return ntuple(k -> factors[k] == 2 ? cld(Int(points[k]), 2) : Int(points[k]), D)
 end
 
 """
     coarse_layout(layout::BoxLayout) -> BoxLayout
 
-The single-box layout of the coarse grid of the single-box `layout`, with the
-same periodic dimensions and overlap.
+The single-box layout of the coarse grid of the single-box `layout`
+(factors from [`coarsening_factors`](@ref)), with the same periodic dimensions
+and overlap.
 """
 function coarse_layout(layout::BoxLayout{D}) where {D}
     @argcheck all(==(1), layout.ranks) "grid hierarchies are single-box"
-    return BoxLayout(coarse_points(layout.points), ntuple(_ -> 1, D), 0; overlap=layout.overlap,
+    factors = coarsening_factors(layout.points, layout.periodic)
+    return BoxLayout(coarse_points(layout.points, factors), ntuple(_ -> 1, D), 0; overlap=layout.overlap,
         periodic=layout.periodic)
 end
 
+# The factors relating a fine grid of nf points to a coarse grid of nc points.
+function _factors(nf::NTuple{D,Int}, nc::NTuple{D,Int}) where {D}
+    factors = ntuple(k -> nc[k] == nf[k] ? 1 : 2, D)
+    @argcheck nc == coarse_points(nf, factors) "a grid of $(nc) points is not a coarse grid of one of $(nf) points"
+    return factors
+end
+
 """
-    aggregation_homomorphism(points) -> GraphHomomorphism
+    aggregation_homomorphism(points, factors) -> GraphHomomorphism
 
 The graph homomorphism ``ψ`` from the grid graph of `points` (vertices
-numbered column-major) to the grid graph of its cell-centred coarse grid,
-sending each point to its block of ``2^D`` points.
+numbered column-major) to the grid graph of its coarse grid, sending each
+point to its block.
 """
-function aggregation_homomorphism(points::NTuple{D,Integer}) where {D}
-    nc = coarse_points(points)
+function aggregation_homomorphism(points::NTuple{D,Integer}, factors::NTuple{D,Integer}) where {D}
+    nc = coarse_points(points, factors)
     L = LinearIndices(nc)
-    vmap = [L[CartesianIndex(ntuple(k -> (I[k] + 1) ÷ 2, D))] for I in CartesianIndices(Tuple(points))]
+    vmap = [L[CartesianIndex(ntuple(k -> _block(I[k], factors[k]), D))] for I in CartesianIndices(Tuple(points))]
     return GraphHomomorphism(vec(vmap), prod(nc))
 end
 
-@inline _child(Ic, k, ::Val{D}) where {D} = CartesianIndex(ntuple(d -> 2Ic[d] - 1 + ((k >> (d - 1)) & 1), Val(D)))
+# The block of fine index i, and the fine indices of block b.
+@inline _block(i, r) = r == 2 ? (i + 1) ÷ 2 : i
+@inline _children(b, r, n) = r == 2 ? ((2b - 1):min(2b, n)) : (b:b)
+@inline _children(Ic, r::NTuple{D}, n::NTuple{D}, ::Val{D}) where {D} =
+    CartesianIndices(ntuple(d -> _children(Ic[d], r[d], n[d]), Val(D)))
 
-@kernel function _restrict_average_kernel!(rc, @Const(rf), gc, gf, ::Val{D}) where {D}
+@kernel function _restrict_average_kernel!(rc, @Const(rf), gc, gf, r, nf, ::Val{D}) where {D}
     Ic = @index(Global, Cartesian)
     acc = zero(eltype(rc))
-    for k in 0:(2^D - 1)
-        acc += rf[_child(Ic, k, Val(D)) + _shift(gf, Val(D))]
+    count = 0
+    for I in _children(Ic, r, nf, Val(D))
+        acc += rf[I + _shift(gf, Val(D))]
+        count += 1
     end
-    rc[Ic + _shift(gc, Val(D))] = acc / 2^D
+    rc[Ic + _shift(gc, Val(D))] = acc / count
 end
 
-@kernel function _prolong_add_kernel!(xf, @Const(xc), gf, gc, ::Val{D}) where {D}
+@kernel function _prolong_add_kernel!(xf, @Const(xc), gf, gc, r, ::Val{D}) where {D}
     I = @index(Global, Cartesian)
-    Ic = CartesianIndex(ntuple(d -> (I[d] + 1) ÷ 2, Val(D)))
+    Ic = CartesianIndex(ntuple(d -> _block(I[d], r[d]), Val(D)))
     xf[I + _shift(gf, Val(D))] += xc[Ic + _shift(gc, Val(D))]
-end
-
-function _check_levels(opf::GridOperator{T,D}, opc::GridOperator{S,D}) where {T,S,D}
-    @argcheck size(opc) == coarse_points(size(opf)) "the coarse operator must be on the coarse grid of the fine one"
 end
 
 """
@@ -124,12 +156,12 @@ end
 
 The pushforward transfer ``T``: set the interior of the coarse vector `rc`
 (operator `opc`) to the averages of the fine vector `rf` (operator `opf`) over
-the blocks of ``2^D`` points.
+the blocks.
 """
 function restrict_average!(rc::AbstractArray, opc::GridOperator{T,D}, rf::AbstractArray, opf::GridOperator) where {T,D}
-    _check_levels(opf, opc)
+    r = _factors(size(opf), size(opc))
     backend = get_backend(opc)
-    _restrict_average_kernel!(backend)(rc, rf, opc.origin, opf.origin, Val(D); ndrange=size(opc))
+    _restrict_average_kernel!(backend)(rc, rf, opc.origin, opf.origin, r, size(opf), Val(D); ndrange=size(opc))
     synchronize(backend)
     return rc
 end
@@ -141,9 +173,9 @@ The pullback ``E = ψ^*``: add to every point of the interior of the fine
 vector `xf` the value of the coarse vector `xc` at its block.
 """
 function prolong_add!(xf::AbstractArray, opf::GridOperator{T,D}, xc::AbstractArray, opc::GridOperator) where {T,D}
-    _check_levels(opf, opc)
+    r = _factors(size(opf), size(opc))
     backend = get_backend(opf)
-    _prolong_add_kernel!(backend)(xf, xc, opf.origin, opc.origin, Val(D); ndrange=size(opf))
+    _prolong_add_kernel!(backend)(xf, xc, opf.origin, opc.origin, r, Val(D); ndrange=size(opf))
     synchronize(backend)
     return xf
 end
@@ -173,31 +205,39 @@ function stencil_coefficients!(coef::AbstractArray, op::GridOperator{T,D}) where
     return coef
 end
 
-# T A E at coarse point Ic: average over the children of (c₀ minus the
-# couplings to children of the same block), and per face the couplings of the
-# children on that face to the neighbouring block.
-@kernel function _galerkin_kernel!(coefc, stencil, ::Val{D}) where {D}
+# T A E at coarse point Ic: the average over the block's children of (c₀ minus
+# the couplings to children of the same block), and per face the couplings of
+# the children on that face to the neighbouring block.
+@kernel function _galerkin_kernel!(coefc, stencil, r, nf, ::Val{D}) where {D}
     Ic = @index(Global, Cartesian)
+    children = _children(Ic, r, nf, Val(D))
+    lo = first(children)
+    hi = last(children)
     diag = 0.0
     low = ntuple(_ -> 0.0, Val(D))
     high = ntuple(_ -> 0.0, Val(D))
-    for k in 0:(2^D - 1)
-        c0, cm, cp = _coefficients(stencil, _child(Ic, k, Val(D)))
+    count = 0
+    for I in children
+        count += 1
+        c0, cm, cp = _coefficients(stencil, I)
         diag += c0
         for j in 1:D
-            if (k >> (j - 1)) & 1 == 1          # upper child in dimension j
-                diag -= cm[j]                    # its lower neighbour is in the block
+            if I[j] == lo[j]
+                low = Base.setindex(low, low[j] + cm[j], j)     # to the block below
+            else
+                diag -= cm[j]                                    # to a child of this block
+            end
+            if I[j] == hi[j]
                 high = Base.setindex(high, high[j] + cp[j], j)
             else
                 diag -= cp[j]
-                low = Base.setindex(low, low[j] + cm[j], j)
             end
         end
     end
-    coefc[Ic, 1] = diag / 2^D
+    coefc[Ic, 1] = diag / count
     for j in 1:D
-        coefc[Ic, 1 + j] = low[j] / 2^D
-        coefc[Ic, 1 + D + j] = high[j] / 2^D
+        coefc[Ic, 1 + j] = low[j] / count
+        coefc[Ic, 1 + D + j] = high[j] / count
     end
 end
 
@@ -206,15 +246,16 @@ end
 
 The Galerkin coarse operator ``T A E`` (pushforward ∘ operator ∘ pullback; see
 the module documentation) of the stencil of `opf`, as stored coefficients of
-the coarse grid (the layout of [`stencil_coefficients!`](@ref)). A coupling of a
-fine point to a neighbour outside a non-periodic grid (a zero ghost value)
-becomes a coupling of its block to the coarse ghost, also zero.
+the coarse grid whose size `coefc` gives (the layout of
+[`stencil_coefficients!`](@ref)). A coupling of a fine point to a neighbour
+outside a non-periodic grid (a zero ghost value) becomes a coupling of its
+block to the coarse ghost, also zero.
 """
 function galerkin_coefficients!(coefc::AbstractArray, opf::GridOperator{T,D}) where {T,D}
-    nc = coarse_points(size(opf))
-    @argcheck size(coefc) == (nc..., 2D + 1)
+    @argcheck ndims(coefc) == D + 1 && size(coefc, D + 1) == 2D + 1
+    r = _factors(size(opf), ntuple(k -> size(coefc, k), D))
     backend = get_backend(opf)
-    _galerkin_kernel!(backend)(coefc, opf.stencil, Val(D); ndrange=nc)
+    _galerkin_kernel!(backend)(coefc, opf.stencil, r, size(opf), Val(D); ndrange=size(coefc)[1:D])
     synchronize(backend)
     return coefc
 end
