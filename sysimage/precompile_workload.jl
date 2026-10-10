@@ -3,6 +3,9 @@
 # not in the image; the code compiled here for its own types is discarded, but
 # the dependencies' methods for standard types (sparse matrices, Float64
 # vectors, KernelAbstractions launches, Krylov solves, graphs) are kept.
+# PackageCompiler runs this file with the image project only; CellularSheaves
+# (not an image package) comes from the full environment, stacked after it.
+push!(LOAD_PATH, joinpath(get(ENV, "CS_SYSIMAGE_DIR", joinpath(homedir(), "sysimage")), "env"))
 using CellularSheaves
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB
 using LinearAlgebra, SparseArrays, Statistics, Random, Test

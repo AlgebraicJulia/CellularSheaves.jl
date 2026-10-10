@@ -96,10 +96,32 @@ image = joinpath(DIR, "cellularsheaves-deps-$(VERSION)-$key.so")
 if isfile(image)
     println("up to date: ", image)
 else
+    # PackageCompiler compiles only direct dependencies of the project it builds
+    # from: give it a project listing every image package directly, with the
+    # environment's exact manifest and preferences.
+    image_project = joinpath(DIR, "image-project")
+    rm(image_project; recursive=true, force=true)
+    mkpath(image_project)
+    uuid_of = Dict(info.name => uuid for (uuid, info) in deps)
+    open(joinpath(image_project, "Project.toml"), "w") do io
+        println(io, "[deps]")
+        for p in packages
+            println(io, p, " = \"", uuid_of[p], "\"")
+        end
+    end
+    cp(manifest, joinpath(image_project, "Manifest.toml"))
+    preferences = joinpath(ENVDIR, "LocalPreferences.toml")
+    isfile(preferences) && cp(preferences, joinpath(image_project, "LocalPreferences.toml"))
+    Pkg.activate(image_project)
+    Pkg.instantiate()
     pushfirst!(LOAD_PATH, BUILDER)
     @eval using PackageCompiler
-    PackageCompiler.create_sysimage(Symbol.(packages); sysimage_path=image, project=ENVDIR,
+    # The workload loads CellularSheaves, which is not an image package: run it
+    # with the full environment on the load path.
+    push!(LOAD_PATH, ENVDIR)
+    PackageCompiler.create_sysimage(Symbol.(packages); sysimage_path=image, project=image_project,
         precompile_execution_file=joinpath(@__DIR__, "precompile_workload.jl"), cpu_target=CPU_TARGET)
+    Pkg.activate(ENVDIR)
 end
 current = joinpath(DIR, "current.so")
 rm(current; force=true)
