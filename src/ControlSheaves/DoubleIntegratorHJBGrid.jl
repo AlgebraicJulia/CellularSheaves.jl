@@ -285,7 +285,7 @@ end
     GridPolicyIteration(; backend = KernelAbstractions.CPU(), communicator = SerialBoxes(),
                         ranks = nothing, overlap = 1, preconditioner = :red_black_sgs,
                         tol = 1e-8, maxiter = 50, linear_tol = 1e-10, linear_maxiter = 2000,
-                        callback = nothing)
+                        forcing = 0, callback = nothing)
 
 Howard's policy iteration (as [`PolicyIteration`](@ref)) without assembling
 sparse matrices or storing stencil coefficients: the policy evaluation operator
@@ -309,8 +309,16 @@ inner products reduced over all ranks), right-preconditioned by
   exchanges run along its edges). Equal to `:red_black_sgs` on one box;
 - `:none`.
 
-Warm started from the previous value function; the policy is improved on each
-extended box after a halo exchange of the values. Every rank returns the whole
+Warm started from the previous value function. With `forcing = η > 0` the
+evaluations are inexact, as in an inexact Newton method (policy iteration is
+Newton's method on the discrete HJB equation): evaluation ``k`` is solved to
+the relative residual ``\\min(0.1, \\max(\\mathrm{linear\\_tol}, η\\, δ_{k-1} / \\max(1, \\|V\\|_∞)))``,
+``δ_{k-1}`` the previous change of the values, so the first evaluations, of
+policies still far from optimal, take few Krylov iterations; convergence is
+only declared after an evaluation solved to `linear_tol`. With `forcing = 0`
+(the default) every evaluation is solved to `linear_tol`.
+
+The policy is improved on each extended box after a halo exchange of the values. Every rank returns the whole
 solution. Also solves [`MechanicalHJBProblem`](@ref CellularSheaves.ControlSheaves.MechanicalHJB.MechanicalHJBProblem)s,
 whose joint angles are periodic dimensions of the grid. On one box this gives the same discrete solution as
 [`PolicyIteration`](@ref), whose `KrylovPolicyEvaluation(method = :bicgstab)`
@@ -336,6 +344,7 @@ Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator,F}
     maxiter::Int = 50
     linear_tol::Float64 = 1e-10
     linear_maxiter::Int = 2000
+    forcing::Float64 = 0.0
     callback::F = nothing
 end
 
@@ -392,11 +401,15 @@ function _grid_solve(prob, alg::GridPolicyIteration)
     changes, linear_iterations = Float64[], Int[]
     converged = false
     t_assembly = t_linear = t_improvement = 0.0
+    scale = 1.0
+    tight = alg.forcing == 0                 # solve every evaluation to linear_tol
     for _ in 1:alg.maxiter
+        δ = isempty(changes) ? 1.0 : changes[end] / max(1.0, scale)
+        tolk = tight ? alg.linear_tol : clamp(alg.forcing * δ, alg.linear_tol, 0.1)
         t_assembly += @elapsed _launch!(_grid_rhs_kernel!, op, b, U, kp_owned, op.origin, ushift)
         t_linear += @elapsed begin
             copyto!(Vnew, V)
-            its, ok, _ = grid_bicgstab!(Vnew, op, precondition!, b, ws; tol=alg.linear_tol,
+            its, ok, _ = grid_bicgstab!(Vnew, op, precondition!, b, ws; tol=tolk,
                 maxiter=alg.linear_maxiter, reduce=x -> allreduce(x, +), exchange)
         end
         ok || @warn "policy evaluation did not converge"
@@ -410,8 +423,11 @@ function _grid_solve(prob, alg::GridPolicyIteration)
         report(length(changes), changes[end], V)
         scale = allreduce(grid_reduce((a, c) -> abs(a), max, V, V, op, ws.partial), max)
         if length(changes) > 1 && changes[end] <= alg.tol * max(1.0, scale)
-            converged = true
-            break
+            if tolk <= alg.linear_tol
+                converged = true
+                break
+            end
+            tight = true                     # settled on inexact evaluations: confirm with an exact one
         end
     end
     values, controls = gathered(V)

@@ -78,6 +78,11 @@ const DIH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
             @test other.converged
             @test other.values ≈ sol.values rtol = 1e-7
         end
+        # So do inexact evaluations (inexact Newton), with fewer Krylov iterations.
+        inexact = solve(prob, GridPolicyIteration(forcing = 0.1))
+        @test inexact.converged
+        @test inexact.values ≈ sol.values rtol = 1e-7
+        @test sum(inexact.linear_iterations) < sum(sol.linear_iterations)
         # The discrete equation holds: the improved policy is the policy evaluated,
         # and (A_u V)(x) = ℓ(x, u) at every grid point.
         g = prob.grid

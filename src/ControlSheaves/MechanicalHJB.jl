@@ -234,8 +234,8 @@ end
 """
     MechanicalHJBProblem(arm::TwoLinkArm; angle_points = 32, momentum_points = 33,
                          momentum_bound = nothing, target = (0, 0), torque_bound = (5, 2.5),
-                         configuration_weight = 1, kinetic_weight = 0.01, control_weight = 0.05,
-                         discount = 0.5)
+                         configuration_weight = 1, kinetic_weight = 0.01, control_weight = 0.02,
+                         discount = 0.2)
 
 The discounted HJB problem of the module docstring for `arm`, on a grid of the
 state ``x = (θ_1, θ_2, p_1, p_2)``: `angle_points` (even) points around each
@@ -244,7 +244,11 @@ default `momentum_bound` ``P`` is 1.2 times the largest momenta the
 unactuated, frictionless arm reaches falling from upright to hanging down
 (energy ``2(b_1 + b_2)``; ``|p_k| \\le \\sqrt{2 T M_{kk}}``). `target` is the
 configuration ``q^\\star`` held at no cost (default upright, the unstable
-equilibrium), `torque_bound` the motor limits ``\\bar τ`` (N m).
+equilibrium), `torque_bound` the motor limits ``\\bar τ`` (N m). The default
+discount ``ρ = 0.2`` (a horizon of about 5 s) makes a swing-up worth its
+cost: hanging down costs ``2w`` per second for ever, ``2w/ρ`` discounted, and a
+swing-up of a few seconds less.
+With a much larger ``ρ`` the optimal policy from hanging down is to stay there.
 
 Solve with `solve(problem, GridPolicyIteration(...))`; query the result with
 [`value_at`](@ref), [`control_at`](@ref) and [`closed_loop`](@ref).
@@ -262,7 +266,7 @@ end
 
 function MechanicalHJBProblem(arm::TwoLinkArm; angle_points::Integer = 32, momentum_points::Integer = 33,
         momentum_bound = nothing, target = (0.0, 0.0), torque_bound = (5.0, 2.5), configuration_weight::Real = 1.0,
-        kinetic_weight::Real = 0.01, control_weight::Real = 0.05, discount::Real = 0.5)
+        kinetic_weight::Real = 0.01, control_weight::Real = 0.02, discount::Real = 0.2)
     @argcheck angle_points >= 4 && iseven(angle_points) "need an even number (≥ 4) of angle points"
     @argcheck momentum_points >= 3
     @argcheck all(>=(0), torque_bound) "torque bounds must be nonnegative"
