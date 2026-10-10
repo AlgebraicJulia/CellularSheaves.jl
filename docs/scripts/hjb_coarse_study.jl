@@ -14,6 +14,10 @@ using CellularSheaves.ControlSheaves.MechanicalHJB
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB: solve
 using KernelAbstractions
 using Printf
+using LinearAlgebra
+# One BLAS thread: the dense coarse LU is small, and BLAS threads competing with
+# spinning Julia threads (JULIA_THREAD_SLEEP_THRESHOLD=infinite) slow it down by orders of magnitude.
+BLAS.set_num_threads(1)
 
 backend_name = length(ARGS) >= 1 ? ARGS[1] : "cpu"
 size_name = length(ARGS) >= 2 ? ARGS[2] : "small"

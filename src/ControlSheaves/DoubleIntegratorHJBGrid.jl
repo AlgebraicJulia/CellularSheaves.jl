@@ -318,7 +318,10 @@ is computed from the stencil, summed over all ranks and factorized by dense LU
 on every rank once per policy evaluation. `coarse_correction = :multiplicative`
 applies the coarse correction ``z = R_0^\\mathsf{T} A_0^{-1} R_0 v`` first and the
 one-level preconditioner ``M`` to the remaining residual,
-``z + M(v - Az)``; `:additive` returns ``M v + z``.
+``z + M(v - Az)``; `:additive` returns ``M v + z``. The coarse LU uses BLAS: with
+Julia threads spinning (`JULIA_THREAD_SLEEP_THRESHOLD=infinite`) run BLAS on
+one thread (`BLAS.set_num_threads(1)`), or the competing threads slow the
+small factorization down by orders of magnitude.
 
 Warm started from the previous value function. With `forcing = η > 0` the
 evaluations are inexact, as in an inexact Newton method (policy iteration is
