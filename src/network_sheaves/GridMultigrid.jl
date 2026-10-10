@@ -35,14 +35,20 @@ M-matrix with positive row sums again such an M-matrix (Nicolaides 1987's
 aggregation; Braess 1995).
 
 **Rediscretization.** For the first-order upwind operators of the HJB solvers,
-``A_c = T A E`` is the same scheme discretized again on the coarse grid
-wherever the drift does not change sign inside a block: a coupling ``f_j / h``
-of each of the ``2^{D-1}`` points on a block face, averaged over the ``2^D``
-points of the block, is ``f_j / (2h)``, and the diagonal is
-``ρ + \\sum_j |f_j| / (2h)``; a drift varying linearly across the block averages
-to its value at the centre. The two coarse operators differ only on blocks
-that straddle a switching surface of the drift, where Galerkin averages the
-upwind directions and rediscretization upwinds the averaged drift.
+``A_c = T A E`` is again a first-order upwind discretization on the coarse
+grid. Its coupling across a block face in dimension ``j`` is the upwind rate
+``f_j^\\pm / h`` summed over the ``2^{D-1}`` children on that (outflow) face and
+averaged over the ``2^D`` children of the block, that is ``\\bar f_j^\\pm / (2h)``
+with ``\\bar f_j`` the drift averaged over the outflow face; its diagonal is
+``ρ`` plus the outflow rates. Rediscretizing the scheme on the coarse grid
+instead takes the drift at the block centre. The two coincide exactly when
+each drift component ``f_j`` is constant along its own axis ``x_j`` within the
+block and keeps its sign there (constant drift; the position rows ``\\dot q = v``
+of a mechanical system written in velocities). Otherwise they differ at first
+order in ``h``: by the variation of ``f_j`` along ``x_j`` across half a block, and
+where ``f_j`` changes sign inside the block, by averaging the upwind rates
+rather than upwinding the averaged drift. Both are consistent coarse
+discretizations of the same transport operator.
 """
 module GridMultigrid
 

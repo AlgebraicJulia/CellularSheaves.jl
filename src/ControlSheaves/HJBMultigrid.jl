@@ -21,7 +21,10 @@ constant sheaf along the aggregation homomorphism (see
   discretized on the coarse grid, under the policy pushed forward to it (the
   block average of the controls, which stays in the convex control set);
   `:galerkin`: the composite ``T A E`` of the next finer level's operator.
-  The two agree except on blocks straddling a switching surface of the drift.
+  The two coincide where each drift component is constant along its own axis
+  within a block, and otherwise differ at first order in the grid spacing
+  (Galerkin takes the drift on the outflow face, rediscretization at the block
+  centre).
 - `coarsest`: `:pathpack` factorizes the coarsest grid's evaluation, as the
   closure ``V = P^* (D^{-1} b)`` of its discounted transition matrix
   ``P = D^{-1} N`` over the (+, ×) semiring, with PathPack's chordal LU
