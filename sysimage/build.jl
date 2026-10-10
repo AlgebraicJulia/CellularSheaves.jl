@@ -16,8 +16,11 @@
 #   CS_CUDA_VERSION   CUDA toolkit version of the cluster module (default 12.9);
 #                     "artifact" lets CUDA.jl download its own runtime
 #   CS_CPU_TARGET     JULIA_CPU_TARGET of the image (default
-#                     "x86-64-v3;x86-64-v4,clone_all": AVX2 everywhere, AVX-512
-#                     clones for CPUs that have it)
+#                     "haswell,-rdrnd;skylake-avx512,-rdrnd,clone_all": AVX2 and
+#                     AES-NI everywhere, AVX-512 clones for CPUs that have it).
+#                     Not "x86-64-v3": that level lacks AES-NI, which a package
+#                     in the image calls through an LLVM intrinsic, and the build
+#                     aborts with "Cannot select: intrinsic %llvm.x86.aesni.aesenc"
 #
 # The image is written to $CS_SYSIMAGE_DIR/cellularsheaves-deps-<julia>-<hash>.so,
 # keyed by a hash of the environment's manifest, and linked as current.so. Run
@@ -42,7 +45,7 @@ const EXTRA = ["MPI", "MPIPreferences", "CUDA", "KernelAbstractions", "Adapt", "
                "SparseArrays"]
 const MPI_LIBRARY = get(ENV, "CS_MPI_LIBRARY", "/apps/mpi/gcc/14.2.0/openmpi/5.0.7_el97/lib/libmpi.so")
 const CUDA_VERSION = get(ENV, "CS_CUDA_VERSION", "12.9")
-const CPU_TARGET = get(ENV, "CS_CPU_TARGET", "x86-64-v3;x86-64-v4,clone_all")
+const CPU_TARGET = get(ENV, "CS_CPU_TARGET", "haswell,-rdrnd;skylake-avx512,-rdrnd,clone_all")
 
 mkpath(ENVDIR)
 mkpath(BUILDER)
@@ -116,9 +119,6 @@ else
     Pkg.instantiate()
     pushfirst!(LOAD_PATH, BUILDER)
     @eval using PackageCompiler
-    # The workload loads CellularSheaves, which is not an image package: run it
-    # with the full environment on the load path.
-    push!(LOAD_PATH, ENVDIR)
     PackageCompiler.create_sysimage(Symbol.(packages); sysimage_path=image, project=image_project,
         precompile_execution_file=joinpath(@__DIR__, "precompile_workload.jl"), cpu_target=CPU_TARGET)
     Pkg.activate(ENVDIR)

@@ -6,9 +6,11 @@
 #
 # Writes a little-endian binary file (default docs/figures/hjb/policy_iteration.bin):
 #   Int32  magic 0x48_4A_42_31 ("HJB1"), n, D = 4, d = 2, K snapshots
-#   Float32 lower[4], spacing[4], discount, control bound, control weight
-#   K × { Int32 iteration, Float32 change, Float32 values[N], Float32 u₁[N], Float32 u₂[N] }
-# with N = n⁴ in column-major grid order (q₁ fastest, then q₂, v₁, v₂).
+#   Float32 lower[4], spacing[4], discount, control bound, control weight,
+#           position weight, velocity weight
+#   K × { Int32 iteration, Float32 change, Float16 values[N], Float16 u₁[N], Float16 u₂[N] }
+# with N = n⁴ in column-major grid order (q₁ fastest, then q₂, v₁, v₂). Half
+# precision keeps the page's download small; the plot needs 3 digits at most.
 using CellularSheaves
 using CellularSheaves.ControlSheaves.DoubleIntegratorHJB
 using Printf
@@ -28,12 +30,13 @@ mkpath(dirname(out))
 open(out, "w") do io
     write(io, htol.(Int32[0x484A4231, n, 4, prob.axes, length(snapshots)]))
     g = prob.grid
-    write(io, htol.(Float32[g.lower; g.spacing; prob.discount; prob.control_bound; prob.control_weight]))
+    write(io, htol.(Float32[g.lower; g.spacing; prob.discount; prob.control_bound; prob.control_weight;
+                            prob.position_weight; prob.velocity_weight]))
     for s in snapshots
         write(io, htol(Int32(s.iteration)), htol(Float32(s.change)))
-        write(io, htol.(Float32.(s.values)))
+        write(io, htol.(Float16.(s.values)))
         for k in 1:prob.axes
-            write(io, htol.(Float32.(s.controls[k, :])))
+            write(io, htol.(Float16.(s.controls[k, :])))
         end
     end
 end

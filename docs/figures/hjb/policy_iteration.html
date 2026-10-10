@@ -1,0 +1,698 @@
+<title>Double Integrator Policy Iteration</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg: #f4f6f8;
+  --surface: #ffffff;
+  --ink: #131a22;
+  --muted: #586373;
+  --faint: #8a94a3;
+  --line: #d8dee6;
+  --accent: #0d6c78;
+  --accent-ink: #ffffff;
+  --change: #d9531a;
+  --probe: #131a22;
+  --halo: rgba(255,255,255,0.85);
+  --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0d1115; --surface: #151b21; --ink: #e6ebf0; --muted: #98a3b1; --faint: #6a7583;
+    --line: #283039; --accent: #5ec6d3; --accent-ink: #0b1418; --change: #ff8c50;
+    --probe: #f4f7fa; --halo: rgba(8,12,16,0.85);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1115; --surface: #151b21; --ink: #e6ebf0; --muted: #98a3b1; --faint: #6a7583;
+  --line: #283039; --accent: #5ec6d3; --accent-ink: #0b1418; --change: #ff8c50;
+  --probe: #f4f7fa; --halo: rgba(8,12,16,0.85);
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1320px; margin: 0 auto; padding: 28px 20px 48px; display: grid; gap: 22px; }
+header { display: grid; gap: 8px; max-width: 78ch; }
+.eyebrow { font: 500 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+h1 { font-size: clamp(24px, 3.4vw, 34px); line-height: 1.12; margin: 0; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { font-size: 13px; margin: 0; font-weight: 600; letter-spacing: .02em; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 72ch; }
+.math { font-family: var(--mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 14px 28px; align-items: center; padding: 14px 16px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; }
+.group { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.label { font: 500 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+button { font: inherit; color: inherit; cursor: pointer; }
+.play { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--accent); color: var(--accent-ink);
+  display: grid; place-items: center; font-size: 13px; }
+.iter { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.iter input { width: min(240px, 46vw); }
+.readout { font: 500 13px var(--mono); font-variant-numeric: tabular-nums; min-width: 9ch; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 7px 12px; font-size: 13px; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.probe { display: grid; grid-template-columns: repeat(4, auto); gap: 6px 14px; }
+.probe label { display: grid; grid-template-columns: 2ch 92px 5.5ch; gap: 6px; align-items: center; font: 13px var(--mono); font-variant-numeric: tabular-nums; }
+.probe input { width: 100%; }
+input[type=range] { accent-color: var(--accent); }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 22px; align-items: start; }
+.slices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+figure { margin: 0; display: grid; gap: 6px; }
+figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+figcaption .sub { color: var(--muted); font-size: 12px; }
+.plot { position: relative; display: grid; grid-template-columns: 22px minmax(0,1fr); grid-template-rows: minmax(0,1fr) 18px; }
+.plot canvas { grid-column: 2; grid-row: 1; width: 100%; aspect-ratio: 1; max-width: 100%; display: block; border-radius: 4px; touch-action: none; cursor: crosshair; background: var(--line); }
+.ylab { grid-column: 1; grid-row: 1; writing-mode: vertical-rl; transform: rotate(180deg); display: flex; justify-content: space-between; font: 10.5px var(--mono); color: var(--faint); padding-block: 2px; }
+.xlab { grid-column: 2; grid-row: 2; display: flex; justify-content: space-between; font: 10.5px var(--mono); color: var(--faint); padding-inline: 2px; align-items: end; }
+.axname { color: var(--ink); font-weight: 500; }
+
+aside { display: grid; gap: 18px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; }
+#tour { width: 100%; aspect-ratio: 1; max-width: 100%; display: block; border-radius: 6px; cursor: grab; touch-action: none; }
+.row { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+.small { font-size: 12px; color: var(--muted); }
+.ghost { border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 4px 10px; font-size: 12px; }
+#legend { width: 100%; height: 40px; display: block; }
+dl.stats { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; font-size: 13px; }
+dl.stats dt { color: var(--muted); }
+dl.stats dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+#conv { width: 100%; height: auto; display: block; overflow: visible; }
+
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 6px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font: 500 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+td { font-family: var(--mono); }
+th:first-child, td:first-child { text-align: left; }
+tr.current td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+tbody tr { cursor: pointer; }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; color: var(--muted); font-size: 13px; }
+.notes h2 { color: var(--ink); margin-bottom: 4px; }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 9px; font: 12px/1.45 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 4px 16px rgba(0,0,0,.14); white-space: pre; }
+#status { color: var(--muted); font-family: var(--mono); font-size: 13px; }
+
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: minmax(0,1fr); }
+  aside { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+}
+@media (max-width: 760px) {
+  .slices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .probe { grid-template-columns: repeat(2, auto); }
+  .controls { position: static; }
+  .wrap { padding-inline: 16px; }
+}
+@media (max-width: 440px) {
+  .slices { grid-template-columns: minmax(0, 1fr); }
+  .probe { grid-template-columns: minmax(0,1fr); }
+  .probe label { grid-template-columns: 2ch minmax(0,1fr) 5.5ch; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <span class="eyebrow">CellularSheaves.jl · DoubleIntegratorHJB · GridPolicyIteration</span>
+    <h1>How policy iteration learns to steer a thrust-limited puck</h1>
+    <p class="lede">A puck in the plane obeys <span class="math">q̇ = v, v̇ = u</span> with thrust in the disc <span class="math">‖u‖ ≤ ū</span>.
+      Howard's policy iteration alternates between evaluating the current feedback law (a linear solve over all <span id="nodes">n⁴</span> grid nodes of the 4-D state <span class="math">(q₁, q₂, v₁, v₂)</span>) and improving it by pointwise minimization of the Hamiltonian.
+      Six slices through the 4-D state space show the value function and policy at every iteration. The rotating projection shows the whole grid at once.</p>
+  </header>
+
+  <section class="controls" aria-label="Controls">
+    <div class="group iter">
+      <button class="play" id="play" aria-label="Play iterations">▶</button>
+      <div class="group" style="gap:6px">
+        <span class="label">Iteration</span>
+        <input type="range" id="k" min="0" max="0" value="0" aria-label="Policy iteration">
+        <span class="readout" id="kread">0 / 0</span>
+      </div>
+    </div>
+    <div class="group">
+      <span class="label">Show</span>
+      <div class="seg" role="group" aria-label="Field shown">
+        <button data-mode="value" aria-pressed="true">Value V</button>
+        <button data-mode="policy" aria-pressed="false">Policy u</button>
+        <button data-mode="change" aria-pressed="false">Policy change</button>
+      </div>
+    </div>
+    <div class="group">
+      <span class="label" title="The slice point: the coordinates held fixed in each panel, and the start of the simulated trajectory">Probe</span>
+      <div class="probe" id="probe"></div>
+    </div>
+  </section>
+
+  <div class="layout">
+    <div>
+      <div class="slices" id="slices"></div>
+      <p class="small" style="margin-top:10px">Each panel varies two coordinates and holds the other two at the probe. Click or drag in a panel to move the probe. The white curve projects the closed-loop trajectory from the probe under the current iteration's policy, and the dot marks the probe.</p>
+    </div>
+    <aside>
+      <div class="card">
+        <div class="row"><h2>All 4 dimensions, rotating</h2><button class="ghost" id="tourplay">Pause</button></div>
+        <canvas id="tour" aria-label="Rotating 2-D projection of the 4-D grid"></canvas>
+        <label class="row small">Sublevel set V ≤ <span class="readout" id="levread"></span>
+          <input type="range" id="level" min="2" max="100" value="35" style="flex:1;min-width:120px" aria-label="Fraction of nodes shown, lowest value first"></label>
+        <p class="small">Every other grid node (9⁴ points), rotated through all six coordinate planes and projected to 2-D. The sublevel slider keeps the cheapest fraction of states. Drag to turn it by hand.</p>
+      </div>
+      <div class="card">
+        <h2 id="legtitle">Legend</h2>
+        <canvas id="legend"></canvas>
+        <p class="small" id="legnote"></p>
+      </div>
+      <div class="card">
+        <h2>Convergence</h2>
+        <svg id="conv" viewBox="0 0 330 150" role="img" aria-label="Value change per iteration, log scale"></svg>
+        <dl class="stats" id="stats"></dl>
+      </div>
+    </aside>
+  </div>
+
+  <section class="card">
+    <h2>Iterations</h2>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Iteration</th><th>max |ΔV|</th><th>Nodes whose policy changed</th><th>Saturated nodes</th><th>V at probe</th><th>Cost of trajectory</th></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+  </section>
+
+  <section class="notes">
+    <div><h2>Iteration 0</h2><p>Iteration 0 starts from the Riccati solution of the unconstrained LQR problem, with value <span class="math">½xᵀPx</span> and a feedback clipped to the disc. Clipping makes the true cost of that policy higher than the LQR value, so V rises at iteration 1. From then on policy iteration only lowers it (monotone convergence for M-matrix schemes).</p></div>
+    <div><h2>What to look for</h2><p>Watch the <b>Policy u</b> view in the phase planes. Away from the origin the thrust saturates (full colour), and the switching curves where the thrust direction flips sharpen from iteration to iteration. In the <b>Policy change</b> view the edits start everywhere and then settle onto those curves.</p></div>
+    <div><h2>Check</h2><p>The trajectory's discounted running cost <span class="math">∫e^{−ρt}ℓ dt</span> is computed in your browser from the interpolated policy. At convergence it should match the grid's V at the probe, up to discretization error.</p></div>
+  </section>
+  <p id="status">Loading policy_iteration.bin…</p>
+</div>
+<div id="tip" hidden></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const AX = ["q₁", "q₂", "v₁", "v₂"];
+const PAIRS = [
+  [0, 2, "x-axis phase plane"], [1, 3, "y-axis phase plane"], [0, 1, "position"],
+  [2, 3, "velocity"], [0, 3, "x position, y velocity"], [1, 2, "y position, x velocity"]];
+
+// ---------- data ----------
+const HALF = new Float32Array(65536);
+for (let h = 0; h < 65536; h++) {
+  const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 31, f = h & 1023;
+  HALF[h] = e === 0 ? s * f * 2 ** -24 : e === 31 ? (f ? NaN : s * Infinity) : s * (1 + f / 1024) * 2 ** (e - 15);
+}
+function parse(buf) {
+  const dv = new DataView(buf); let o = 0;
+  const i32 = () => { const v = dv.getInt32(o, true); o += 4; return v; };
+  const f32 = () => { const v = dv.getFloat32(o, true); o += 4; return v; };
+  if (i32() !== 0x484A4231) throw new Error("not an HJB1 file");
+  const n = i32(), dims = i32(), d = i32(), K = i32();
+  if (dims !== 4 || d !== 2) throw new Error("expected the planar (4-D) problem");
+  const lower = [f32(), f32(), f32(), f32()], h = [f32(), f32(), f32(), f32()];
+  const [rho, ubar, r, w, c] = [f32(), f32(), f32(), f32(), f32()].map(x => +x.toPrecision(6));
+  const N = n ** 4;
+  const half = () => { const raw = new Uint16Array(buf.slice(o, o + 2 * N)); o += 2 * N; const a = new Float32Array(N); for (let i = 0; i < N; i++) a[i] = HALF[raw[i]]; return a; };
+  const snaps = [];
+  for (let k = 0; k < K; k++) {
+    const iteration = i32(), change = f32();
+    snaps.push({ iteration, change, V: half(), u1: half(), u2: half() });
+  }
+  return { n, N, lower, h, upper: lower.map((l, i) => l + h[i] * (n - 1)), rho, ubar, r, w, c, snaps };
+}
+
+let D = null;
+const S = { k: 0, mode: "value", probe: [0, 0, 0, 0], tour: !matchMedia("(prefers-reduced-motion: reduce)").matches, level: 0.35 };
+const idx = (i0, i1, i2, i3) => i0 + D.n * (i1 + D.n * (i2 + D.n * i3));
+const coord = (a, i) => D.lower[a] + D.h[a] * i;
+
+function summarize() {
+  const { snaps, N, ubar } = D;
+  let vmax = 0;
+  snaps.forEach((s, k) => {
+    for (let i = 0; i < N; i++) if (s.V[i] > vmax) vmax = s.V[i];
+    let changed = 0, sat = 0;
+    const p = snaps[k - 1];
+    for (let i = 0; i < N; i++) {
+      if (Math.hypot(s.u1[i], s.u2[i]) > 0.995 * ubar) sat++;
+      if (p && Math.hypot(s.u1[i] - p.u1[i], s.u2[i] - p.u2[i]) > 1e-3 * ubar) changed++;
+    }
+    s.changed = p ? changed : null; s.saturated = sat;
+  });
+  D.vmax = vmax;
+}
+
+// ---------- interpolation & simulation ----------
+function interp4(F, x) {
+  const n = D.n; const f = [], b = [];
+  for (let a = 0; a < 4; a++) {
+    let g = (x[a] - D.lower[a]) / D.h[a];
+    g = Math.min(Math.max(g, 0), n - 1 - 1e-9);
+    b[a] = Math.floor(g); f[a] = g - b[a];
+  }
+  let s = 0;
+  for (let m = 0; m < 16; m++) {
+    let wgt = 1; const c = [0, 0, 0, 0];
+    for (let a = 0; a < 4; a++) { const bit = (m >> a) & 1; wgt *= bit ? f[a] : 1 - f[a]; c[a] = b[a] + bit; }
+    if (wgt) s += wgt * F[idx(c[0], c[1], c[2], c[3])];
+  }
+  return s;
+}
+function control(snap, x) {
+  let u1 = interp4(snap.u1, x), u2 = interp4(snap.u2, x);
+  const m = Math.hypot(u1, u2);
+  if (m > D.ubar) { u1 *= D.ubar / m; u2 *= D.ubar / m; }
+  return [u1, u2];
+}
+function simulate(snap, x0) {
+  const dt = 0.02, T = 16, pts = [x0.slice()];
+  let x = x0.slice(), cost = 0, t = 0;
+  const f = x => { const u = control(snap, x); return [x[2], x[3], u[0], u[1], u]; };
+  const ell = (x, u) => 0.5 * (D.w * (x[0] ** 2 + x[1] ** 2) + D.c * (x[2] ** 2 + x[3] ** 2) + D.r * (u[0] ** 2 + u[1] ** 2));
+  const add = (x, k, s) => x.map((xi, i) => xi + s * k[i]);
+  for (let step = 0; t < T; step++) {
+    const k1 = f(x), k2 = f(add(x, k1, dt / 2)), k3 = f(add(x, k2, dt / 2)), k4 = f(add(x, k3, dt));
+    const l1 = ell(x, k1[4]);
+    x = x.map((xi, i) => xi + dt / 6 * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+    t += dt;
+    const l2 = ell(x, control(snap, x));
+    cost += dt / 2 * (Math.exp(-D.rho * (t - dt)) * l1 + Math.exp(-D.rho * t) * l2);
+    if (step % 2 === 1) pts.push(x.slice());
+  }
+  // tail beyond T: the LQR-like decay makes it negligible, but bound it by the last running cost
+  return { pts, cost };
+}
+
+// ---------- colour ----------
+function oklch(L, C, h) {
+  const a = C * Math.cos(h), b = C * Math.sin(h);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b, m_ = L - 0.1055613458 * a - 0.0638541728 * b, s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3, m = m_ ** 3, s = s_ ** 3;
+  const R = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const G = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const B = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
+  const g = x => { x = Math.min(1, Math.max(0, x)); return Math.round(255 * (x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055)); };
+  return [g(R), g(G), g(B)];
+}
+const isDark = () => { const t = document.documentElement.dataset.theme; return t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; };
+let RAMP, WHEEL, GREY;
+function buildColours() {
+  const dark = isDark();
+  RAMP = []; GREY = [];
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255;
+    // one hue (blue-teal), cheap states quiet, expensive states saturated
+    const L = dark ? 0.2 + 0.72 * t : 0.97 - 0.66 * t;
+    const C = 0.02 + 0.13 * Math.sin(Math.PI * Math.min(1, t * 1.15) * 0.92);
+    RAMP.push(oklch(L, C, (dark ? 215 + 40 * t : 235 + 25 * t) * Math.PI / 180));
+    GREY.push(oklch(dark ? 0.2 + 0.4 * t : 0.97 - 0.42 * t, 0.008, 4.2));
+  }
+  WHEEL = [];
+  for (let a = 0; a < 360; a++) {
+    const row = [];
+    for (let m = 0; m <= 32; m++) row.push(oklch(dark ? 0.74 : 0.7, 0.155 * (m / 32), (a + 20) * Math.PI / 180));
+    WHEEL.push(row);
+  }
+}
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const vt = v => Math.sqrt(Math.min(1, Math.max(0, v / D.vmax)));
+const BANDS = 14;
+
+// ---------- panels ----------
+const panels = [];
+function makePanels() {
+  const host = $("#slices");
+  for (const [a, b, name] of PAIRS) {
+    const fig = document.createElement("figure");
+    fig.innerHTML = `<figcaption><h2>${AX[a]} × ${AX[b]}</h2><span class="sub">${name}</span></figcaption>
+      <div class="plot"><canvas></canvas>
+      <div class="ylab"><span>${D.lower[b]}</span><span class="axname">${AX[b]}</span><span>${D.upper[b]}</span></div>
+      <div class="xlab"><span>${D.lower[a]}</span><span class="axname">${AX[a]}</span><span>${D.upper[a]}</span></div></div>`;
+    host.appendChild(fig);
+    const cv = fig.querySelector("canvas");
+    cv.setAttribute("aria-label", `Slice in the ${AX[a]}, ${AX[b]} plane`);
+    const p = { a, b, cv };
+    panels.push(p);
+    const toGrid = e => {
+      const r = cv.getBoundingClientRect();
+      const fx = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), fy = Math.min(1, Math.max(0, 1 - (e.clientY - r.top) / r.height));
+      return [fx * (D.n - 1), fy * (D.n - 1)];
+    };
+    const setProbe = e => {
+      const [gx, gy] = toGrid(e);
+      S.probe[a] = Math.round(gx); S.probe[b] = Math.round(gy);
+      syncProbe(); renderAll();
+    };
+    cv.addEventListener("pointerdown", e => { cv.setPointerCapture(e.pointerId); setProbe(e); });
+    cv.addEventListener("pointermove", e => {
+      if (e.buttons & 1) setProbe(e);
+      const [gx, gy] = toGrid(e);
+      const x = S.probe.map((i, k) => coord(k, i));
+      x[a] = D.lower[a] + gx * D.h[a]; x[b] = D.lower[b] + gy * D.h[b];
+      const s = D.snaps[S.k];
+      const V = interp4(s.V, x), u = [interp4(s.u1, x), interp4(s.u2, x)];
+      const ang = Math.atan2(u[1], u[0]) * 180 / Math.PI;
+      tip(e, `${AX[0]} ${fmt(x[0])}  ${AX[1]} ${fmt(x[1])}\n${AX[2]} ${fmt(x[2])}  ${AX[3]} ${fmt(x[3])}\nV   ${V.toFixed(3)}\nu   (${fmt(u[0])}, ${fmt(u[1])})\n|u| ${Math.hypot(...u).toFixed(2)} at ${ang.toFixed(0)}°`);
+    });
+    cv.addEventListener("pointerleave", () => { $("#tip").hidden = true; });
+  }
+}
+const fmt = v => (v >= 0 ? " " : "") + v.toFixed(2);
+function tip(e, text) {
+  const t = $("#tip"); t.textContent = text; t.hidden = false;
+  const w = t.offsetWidth, h = t.offsetHeight;
+  let x = e.clientX + 14, y = e.clientY + 14;
+  if (x + w > innerWidth - 8) x = e.clientX - w - 14;
+  if (y + h > innerHeight - 8) y = e.clientY - h - 14;
+  t.style.left = x + "px"; t.style.top = y + "px";
+}
+function slice2(F, a, b) {
+  const n = D.n, out = new Float32Array(n * n), c = S.probe.slice();
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { c[a] = i; c[b] = j; out[i + n * j] = F[idx(c[0], c[1], c[2], c[3])]; }
+  return out;
+}
+function bil(F, gx, gy) {
+  const n = D.n, i = Math.min(n - 2, Math.floor(gx)), j = Math.min(n - 2, Math.floor(gy)), fx = gx - i, fy = gy - j, o = i + n * j;
+  return (1 - fy) * ((1 - fx) * F[o] + fx * F[o + 1]) + fy * ((1 - fx) * F[o + n] + fx * F[o + n + 1]);
+}
+function sizeCanvas(cv, cap) {
+  const r = cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
+  const P = Math.max(60, Math.min(cap, Math.round(r.width * dpr)));
+  if (cv.width !== P) { cv.width = P; cv.height = P; }
+  return { P, scale: P / r.width };
+}
+let traj = null;
+function renderPanel(p) {
+  const { a, b, cv } = p, n = D.n;
+  const { P, scale } = sizeCanvas(cv, 420);
+  const ctx = cv.getContext("2d"), s = D.snaps[S.k], prev = D.snaps[S.k - 1];
+  const V = slice2(s.V, a, b), U1 = slice2(s.u1, a, b), U2 = slice2(s.u2, a, b);
+  const P1 = prev && slice2(prev.u1, a, b), P2 = prev && slice2(prev.u2, a, b);
+  const img = ctx.createImageData(P, P), px = img.data, band = new Int16Array(P * P);
+  const k = (n - 1) / (P - 1);
+  for (let y = 0; y < P; y++) for (let x = 0; x < P; x++) {
+    const gx = x * k, gy = (P - 1 - y) * k, t = vt(bil(V, gx, gy));
+    band[x + P * y] = Math.min(BANDS - 1, Math.floor(t * BANDS));
+    let rgb;
+    if (S.mode === "value") rgb = RAMP[Math.round(t * 255)];
+    else if (S.mode === "policy") {
+      const u1 = bil(U1, gx, gy), u2 = bil(U2, gx, gy);
+      const ang = ((Math.atan2(u2, u1) * 180 / Math.PI) + 360) % 360, m = Math.min(1, Math.hypot(u1, u2) / D.ubar);
+      rgb = WHEEL[Math.floor(ang) % 360][Math.round(m * 32)];
+    } else {
+      const g = GREY[Math.round(t * 255)];
+      if (P1) {
+        const dlt = Math.min(1, Math.hypot(bil(U1, gx, gy) - bil(P1, gx, gy), bil(U2, gx, gy) - bil(P2, gx, gy)) / D.ubar);
+        const al = Math.sqrt(dlt), c = CHANGE;
+        rgb = [g[0] + al * (c[0] - g[0]), g[1] + al * (c[1] - g[1]), g[2] + al * (c[2] - g[2])];
+      } else rgb = g;
+    }
+    const o = 4 * (x + P * y); px[o] = rgb[0]; px[o + 1] = rgb[1]; px[o + 2] = rgb[2]; px[o + 3] = 255;
+  }
+  // iso-value contours: band boundaries
+  const dark = isDark();
+  for (let y = 1; y < P; y++) for (let x = 1; x < P; x++) {
+    const i = x + P * y, bnd = band[i];
+    if (bnd !== band[i - 1] || bnd !== band[i - P]) {
+      const o = 4 * i, f = S.mode === "value" ? (dark ? 1.18 : 0.86) : (dark ? 0.8 : 0.9);
+      px[o] = Math.min(255, px[o] * f); px[o + 1] = Math.min(255, px[o + 1] * f); px[o + 2] = Math.min(255, px[o + 2] * f);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const toPx = (va, vb) => [(va - D.lower[a]) / (D.upper[a] - D.lower[a]) * P, (1 - (vb - D.lower[b]) / (D.upper[b] - D.lower[b])) * P];
+  // thrust glyphs on nodes (policy view)
+  if (S.mode === "policy") {
+    const step = P / scale < 220 ? 2 : 1, cell = P / (n - 1) * step;
+    ctx.strokeStyle = css("--halo"); ctx.lineWidth = 1.4 * scale; ctx.lineCap = "round";
+    ctx.fillStyle = css("--halo");
+    for (let j = 0; j < n; j += step) for (let i = 0; i < n; i += step) {
+      const u1 = U1[i + n * j], u2 = U2[i + n * j], L = 0.42 * cell * Math.min(1, Math.hypot(u1, u2) / D.ubar);
+      if (L < 1) continue;
+      const cx = i / (n - 1) * P, cy = (1 - j / (n - 1)) * P, ang = Math.atan2(-u2, u1);
+      const ex = cx + L * Math.cos(ang), ey = cy + L * Math.sin(ang);
+      ctx.beginPath(); ctx.moveTo(cx - 0.35 * L * Math.cos(ang), cy - 0.35 * L * Math.sin(ang)); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - 3.2 * scale * Math.cos(ang - 0.5), ey - 3.2 * scale * Math.sin(ang - 0.5));
+      ctx.lineTo(ex - 3.2 * scale * Math.cos(ang + 0.5), ey - 3.2 * scale * Math.sin(ang + 0.5)); ctx.fill();
+    }
+  }
+  // trajectory projection
+  if (traj) {
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    for (const [col, wdt] of [[css("--halo"), 4.2], [css("--probe"), 1.9]]) {
+      ctx.strokeStyle = col; ctx.lineWidth = wdt * scale; ctx.beginPath();
+      traj.pts.forEach((x, i) => { const [X, Y] = toPx(x[a], x[b]); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+      ctx.stroke();
+    }
+  }
+  const [X, Y] = toPx(coord(a, S.probe[a]), coord(b, S.probe[b]));
+  ctx.fillStyle = css("--probe"); ctx.strokeStyle = css("--halo"); ctx.lineWidth = 2.2 * scale;
+  ctx.beginPath(); ctx.arc(X, Y, 4.5 * scale, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+  // origin marker (the target)
+  const [ox, oy] = toPx(0, 0);
+  ctx.strokeStyle = css("--probe"); ctx.globalAlpha = 0.55; ctx.lineWidth = 1 * scale;
+  ctx.beginPath(); ctx.moveTo(ox - 5 * scale, oy); ctx.lineTo(ox + 5 * scale, oy); ctx.moveTo(ox, oy - 5 * scale); ctx.lineTo(ox, oy + 5 * scale); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+let CHANGE = [217, 83, 26];
+const hexrgb = h => { const m = h.replace("#", ""); return [0, 2, 4].map(i => parseInt(m.slice(i, i + 2), 16)); };
+
+// ---------- 4-D tour ----------
+const tourState = { R: [[1, 0, 0, 0], [0, 0, 1, 0], [0, 1, 0, 0], [0, 0, 0, 1]], pts: null, last: 0 };
+function tourPoints() {
+  const n = D.n, sel = [];
+  for (let i3 = 0; i3 < n; i3 += 2) for (let i2 = 0; i2 < n; i2 += 2) for (let i1 = 0; i1 < n; i1 += 2) for (let i0 = 0; i0 < n; i0 += 2)
+    sel.push([idx(i0, i1, i2, i3), [coord(0, i0), coord(1, i1), coord(2, i2), coord(3, i3)]]);
+  tourState.pts = sel;
+}
+function rotate(R, p, q, th) {
+  const c = Math.cos(th), s = Math.sin(th);
+  for (const row of R) { const a = row[p], b = row[q]; row[p] = c * a - s * b; row[q] = s * a + c * b; }
+}
+function renderTour() {
+  const cv = $("#tour"), { P, scale } = sizeCanvas(cv, 720), ctx = cv.getContext("2d");
+  const s = D.snaps[S.k], prev = D.snaps[S.k - 1], R = tourState.R;
+  ctx.fillStyle = css("--surface"); ctx.fillRect(0, 0, P, P);
+  ctx.fillStyle = css("--bg"); ctx.beginPath(); ctx.arc(P / 2, P / 2, P * 0.48, 0, 2 * Math.PI); ctx.fill();
+  const sc = P / 9.6, cx = P / 2, cy = P / 2;
+  // threshold: the cheapest fraction of the subsampled nodes
+  const vals = tourState.pts.map(([i]) => s.V[i]).sort((x, y) => x - y);
+  const thr = vals[Math.max(0, Math.min(vals.length - 1, Math.floor(S.level * vals.length) - 1))];
+  $("#levread").textContent = thr.toFixed(2);
+  const order = tourState.pts.filter(([i]) => s.V[i] <= thr).sort((p, q) => s.V[q[0]] - s.V[p[0]]);
+  const r = Math.max(2.4, 3.1 * scale);
+  for (const [i, x] of order) {
+    const X = cx + sc * (R[0][0] * x[0] + R[0][1] * x[1] + R[0][2] * x[2] + R[0][3] * x[3]);
+    const Y = cy - sc * (R[1][0] * x[0] + R[1][1] * x[1] + R[1][2] * x[2] + R[1][3] * x[3]);
+    let rgb;
+    if (S.mode === "value") rgb = RAMP[Math.round(vt(s.V[i]) * 255)];
+    else if (S.mode === "policy") {
+      const ang = ((Math.atan2(s.u2[i], s.u1[i]) * 180 / Math.PI) + 360) % 360;
+      rgb = WHEEL[Math.floor(ang) % 360][Math.round(Math.min(1, Math.hypot(s.u1[i], s.u2[i]) / D.ubar) * 32)];
+    } else {
+      const dl = prev ? Math.hypot(s.u1[i] - prev.u1[i], s.u2[i] - prev.u2[i]) / D.ubar : 0;
+      rgb = dl > 1e-3 ? CHANGE : GREY[Math.round(vt(s.V[i]) * 255)];
+    }
+    ctx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+    ctx.fillRect(X - r / 2, Y - r / 2, r, r);
+  }
+  // axes
+  ctx.font = `${11 * scale}px ${css("--mono")}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (let a = 0; a < 4; a++) {
+    const ex = R[0][a], ey = R[1][a], L = sc * 2;
+    ctx.strokeStyle = css("--faint"); ctx.lineWidth = 1 * scale;
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + L * ex, cy - L * ey); ctx.stroke();
+    ctx.fillStyle = css("--muted");
+    ctx.fillText(AX[a], cx + (L + 12 * scale) * ex, cy - (L + 12 * scale) * ey);
+  }
+  if (traj) {
+    for (const [col, wdt] of [[css("--halo"), 4], [css("--probe"), 1.8]]) {
+      ctx.strokeStyle = col; ctx.lineWidth = wdt * scale; ctx.beginPath();
+      traj.pts.forEach((x, k) => {
+        const X = cx + sc * (R[0][0] * x[0] + R[0][1] * x[1] + R[0][2] * x[2] + R[0][3] * x[3]);
+        const Y = cy - sc * (R[1][0] * x[0] + R[1][1] * x[1] + R[1][2] * x[2] + R[1][3] * x[3]);
+        k ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y);
+      });
+      ctx.stroke();
+    }
+  }
+}
+const SPEEDS = [[0, 1, 0.31], [0, 2, 0.23], [0, 3, 0.17], [1, 2, 0.29], [1, 3, 0.13], [2, 3, 0.37]];
+function tick(t) {
+  if (S.tour && !document.hidden) {
+    const dt = Math.min(0.05, (t - (tourState.last || t)) / 1000);
+    for (const [p, q, w] of SPEEDS) rotate(tourState.R, p, q, w * dt * 0.7);
+    renderTour();
+  }
+  tourState.last = t;
+  requestAnimationFrame(tick);
+}
+
+// ---------- legend, convergence, stats ----------
+function renderLegend() {
+  const cv = $("#legend"), r = cv.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  const ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = `${10.5 * dpr}px ${css("--mono")}`; ctx.fillStyle = css("--muted"); ctx.textBaseline = "top";
+  const barH = 12 * dpr;
+  if (S.mode === "policy") {
+    $("#legtitle").textContent = "Policy u: thrust direction and magnitude";
+    $("#legnote").textContent = `Hue gives the thrust direction in the (u₁, u₂) plane and saturation gives |u|/ū, so full colour means the disc constraint is active (ū = ${D.ubar}). Arrows show the thrust direction as vectors (u₁ right, u₂ up), not the motion in the panel's coordinates.`;
+    const cx = H / 2, rr = H / 2 - 2 * dpr;
+    for (let a = 0; a < 360; a += 2) for (let m = 0; m <= 32; m += 2) {
+      const c = WHEEL[a][m]; ctx.fillStyle = `rgb(${c})`;
+      const th = a * Math.PI / 180, rad = rr * m / 32;
+      ctx.fillRect(cx + rad * Math.cos(th) - 1.5 * dpr, H / 2 - rad * Math.sin(th) - 1.5 * dpr, 3 * dpr, 3 * dpr);
+    }
+    ctx.fillStyle = css("--muted"); ctx.textBaseline = "middle";
+    ctx.fillText("+u₁ →   ↑ +u₂   (centre: no thrust)", H + 10 * dpr, H / 2);
+    return;
+  }
+  const ramp = S.mode === "value" ? RAMP : GREY;
+  for (let x = 0; x < W; x++) { const c = ramp[Math.round(x / (W - 1) * 255)]; ctx.fillStyle = `rgb(${c})`; ctx.fillRect(x, 0, 1, barH); }
+  ctx.fillStyle = css("--muted");
+  const ticks = [0, 0.25, 1, 2.5, 5, 10, 20, 40, 80].filter(v => v <= D.vmax);
+  ticks.push(Math.floor(D.vmax));
+  let lastX = -1e9;
+  for (const v of ticks) {
+    const x = vt(v) * (W - 1); if (x - lastX < 26 * dpr) continue;
+    ctx.fillRect(x, barH, 1, 4 * dpr);
+    ctx.textAlign = x < 10 ? "left" : x > W - 20 ? "right" : "center";
+    ctx.fillText(String(v), x, barH + 6 * dpr); lastX = x;
+  }
+  if (S.mode === "value") {
+    $("#legtitle").textContent = "Value V (discounted cost-to-go)";
+    $("#legnote").textContent = "√-scaled so the basin near the target stays readable. The darker lines are iso-value contours.";
+  } else {
+    $("#legtitle").textContent = "Policy change since the previous iteration";
+    $("#legnote").textContent = "Orange marks nodes where policy improvement moved the thrust, with intensity √(|Δu|/ū). The grey underlay is V.";
+  }
+}
+function renderConv() {
+  const svg = $("#conv"), W = 330, H = 150, m = { l: 40, r: 8, t: 8, b: 26 };
+  const pts = D.snaps.map((s, k) => [k, s.change]).filter(([, c]) => isFinite(c) && c > 0);
+  const K = D.snaps.length - 1;
+  const ly = pts.map(([, c]) => Math.log10(c));
+  const lo = Math.floor(Math.min(...ly)), hi = Math.ceil(Math.max(...ly));
+  const X = k => m.l + (W - m.l - m.r) * k / Math.max(1, K), Y = l => m.t + (H - m.t - m.b) * (hi - l) / Math.max(1, hi - lo);
+  let g = "";
+  for (let e = lo; e <= hi; e += Math.max(1, Math.ceil((hi - lo) / 5))) {
+    g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(e)}" y2="${Y(e)}" stroke="var(--line)" stroke-width="1"/>`;
+    g += `<text x="${m.l - 6}" y="${Y(e) + 3.5}" text-anchor="end" fill="var(--muted)" font-size="10" font-family="var(--mono)">1e${e}</text>`;
+  }
+  for (let k = 0; k <= K; k += Math.max(1, Math.ceil(K / 8)))
+    g += `<text x="${X(k)}" y="${H - 8}" text-anchor="middle" fill="var(--muted)" font-size="10" font-family="var(--mono)">${D.snaps[k].iteration}</text>`;
+  g += `<polyline fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" points="${pts.map(([k, c]) => `${X(k)},${Y(Math.log10(c))}`).join(" ")}"/>`;
+  for (const [k, c] of pts)
+    g += `<circle data-k="${k}" cx="${X(k)}" cy="${Y(Math.log10(c))}" r="${k === S.k ? 5.5 : 3.5}" fill="${k === S.k ? "var(--ink)" : "var(--accent)"}" stroke="var(--surface)" stroke-width="2" style="cursor:pointer"><title>iteration ${D.snaps[k].iteration}: max |ΔV| = ${c.toExponential(2)}</title></circle>`;
+  if (S.k === 0) g += `<line x1="${X(0)}" x2="${X(0)}" y1="${m.t}" y2="${H - m.b}" stroke="var(--ink)" stroke-dasharray="3 3"/>`;
+  g += `<text x="${m.l}" y="${H - 8}" text-anchor="start" fill="var(--faint)" font-size="10" font-family="var(--mono)" dx="-34">iter</text>`;
+  svg.innerHTML = g;
+  svg.querySelectorAll("circle").forEach(c => c.addEventListener("click", () => setK(+c.dataset.k)));
+}
+const costCache = new Map();
+function trajCost(k) {
+  const key = k + ":" + S.probe.join(",");
+  if (!costCache.has(key)) costCache.set(key, simulate(D.snaps[k], S.probe.map((i, a) => coord(a, i))).cost);
+  return costCache.get(key);
+}
+function renderStats() {
+  const s = D.snaps[S.k], x = S.probe.map((i, a) => coord(a, i)), N = D.N;
+  const Vp = s.V[idx(...S.probe)];
+  $("#stats").innerHTML = `
+    <dt>Grid</dt><dd>${D.n}⁴ = ${N.toLocaleString()} nodes</dd>
+    <dt>max |ΔV| this iteration</dt><dd>${isFinite(s.change) && S.k ? s.change.toExponential(2) : "—"}</dd>
+    <dt>Policy changed at</dt><dd>${s.changed == null ? "—" : s.changed.toLocaleString() + " nodes"}</dd>
+    <dt>Thrust saturated at</dt><dd>${(100 * s.saturated / N).toFixed(1)}%</dd>
+    <dt>V(probe), grid</dt><dd>${Vp.toFixed(3)}</dd>
+    <dt>Trajectory cost</dt><dd>${traj.cost.toFixed(3)}</dd>`;
+  const rows = D.snaps.map((t, k) => `<tr data-k="${k}" class="${k === S.k ? "current" : ""}"><td>${t.iteration}</td>
+    <td>${isFinite(t.change) && k ? t.change.toExponential(2) : "—"}</td><td>${t.changed == null ? "—" : t.changed.toLocaleString()}</td>
+    <td>${(100 * t.saturated / N).toFixed(1)}%</td><td>${t.V[idx(...S.probe)].toFixed(3)}</td><td>${trajCost(k).toFixed(3)}</td></tr>`);
+  $("#tbody").innerHTML = rows.join("");
+}
+
+// ---------- controls ----------
+function syncProbe() {
+  S.probe.forEach((i, a) => { $(`#p${a}`).value = i; $(`#pv${a}`).textContent = coord(a, i).toFixed(2); });
+}
+function setK(k) {
+  S.k = Math.max(0, Math.min(D.snaps.length - 1, k));
+  $("#k").value = S.k; renderAll();
+}
+function renderAll() {
+  traj = simulate(D.snaps[S.k], S.probe.map((i, a) => coord(a, i)));
+  $("#kread").textContent = `${D.snaps[S.k].iteration} / ${D.snaps[D.snaps.length - 1].iteration}`;
+  panels.forEach(renderPanel); renderTour(); renderConv(); renderStats(); renderLegend();
+}
+let playTimer = null;
+function setPlaying(on) {
+  clearInterval(playTimer); playTimer = null;
+  $("#play").textContent = on ? "❚❚" : "▶"; $("#play").setAttribute("aria-label", on ? "Pause" : "Play iterations");
+  if (!on) return;
+  if (S.k >= D.snaps.length - 1) setK(0);
+  playTimer = setInterval(() => { if (S.k >= D.snaps.length - 1) setPlaying(false); else setK(S.k + 1); }, 1100);
+}
+function wire() {
+  const host = $("#probe");
+  AX.forEach((name, a) => {
+    const l = document.createElement("label");
+    l.innerHTML = `<span>${name}</span><input type="range" id="p${a}" min="0" max="${D.n - 1}" step="1" aria-label="${name} of the probe"><span id="pv${a}"></span>`;
+    host.appendChild(l);
+    l.querySelector("input").addEventListener("input", e => { S.probe[a] = +e.target.value; syncProbe(); renderAll(); });
+  });
+  $("#k").max = D.snaps.length - 1;
+  $("#k").addEventListener("input", e => { setPlaying(false); setK(+e.target.value); });
+  $("#play").addEventListener("click", () => setPlaying(!playTimer));
+  document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+    S.mode = b.dataset.mode;
+    document.querySelectorAll(".seg button").forEach(c => c.setAttribute("aria-pressed", c === b));
+    renderAll();
+  }));
+  $("#level").addEventListener("input", e => { S.level = e.target.value / 100; renderTour(); });
+  $("#tourplay").addEventListener("click", () => { S.tour = !S.tour; $("#tourplay").textContent = S.tour ? "Pause" : "Rotate"; });
+  $("#tourplay").textContent = S.tour ? "Pause" : "Rotate";
+  $("#tbody").addEventListener("click", e => { const r = e.target.closest("tr"); if (r) setK(+r.dataset.k); });
+  const tc = $("#tour"); let drag = null;
+  tc.addEventListener("pointerdown", e => { tc.setPointerCapture(e.pointerId); drag = [e.clientX, e.clientY]; tc.style.cursor = "grabbing"; });
+  tc.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const dx = e.clientX - drag[0], dy = e.clientY - drag[1]; drag = [e.clientX, e.clientY];
+    // turn the projection frame: screen x toward the hidden 3rd direction, screen y toward the 4th
+    const R = tourState.R;
+    const mix = (p, q, th) => { const c = Math.cos(th), s = Math.sin(th); const a = R[p].slice(), b = R[q].slice(); R[p] = a.map((v, i) => c * v - s * b[i]); R[q] = a.map((v, i) => s * v + c * b[i]); };
+    mix(0, 2, dx * 0.01); mix(1, 3, -dy * 0.01);
+    renderTour();
+  });
+  const end = () => { drag = null; tc.style.cursor = "grab"; };
+  tc.addEventListener("pointerup", end); tc.addEventListener("pointercancel", end);
+  addEventListener("keydown", e => {
+    if (e.target.matches("input, button")) return;
+    if (e.key === "ArrowRight") setK(S.k + 1); else if (e.key === "ArrowLeft") setK(S.k - 1);
+  });
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 120); });
+  const retheme = () => { buildColours(); CHANGE = hexrgb(css("--change")); renderAll(); };
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", retheme);
+  new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+
+fetch("policy_iteration.bin").then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); }).then(buf => {
+  D = parse(buf); summarize();
+  // probe: a state left of the target, moving up and to the right
+  const near = v => Math.round((v - D.lower[0]) / D.h[0]);
+  S.probe = [near(-1.5), near(1.0), near(0.5), near(1.0)];
+  $("#nodes").textContent = `${D.n}⁴ = ${D.N.toLocaleString()}`;
+  CHANGE = hexrgb(css("--change")); buildColours();
+  makePanels(); tourPoints(); wire(); syncProbe();
+  S.k = Math.min(1, D.snaps.length - 1); $("#k").value = S.k;
+  renderAll();
+  $("#status").textContent = `Discount ρ = ${D.rho}, thrust bound ū = ${D.ubar}, weights w = ${D.w} (position), c = ${D.c} (velocity), r = ${D.r} (thrust); running cost ℓ = ½(w‖q‖² + c‖v‖² + r‖u‖²). Grid spacing ${D.h[0]} on [${D.lower[0]}, ${D.upper[0]}]⁴. Generated by docs/scripts/hjb_policy_iteration_demo.jl.`;
+  for (const [p, q, w] of SPEEDS) rotate(tourState.R, p, q, 2.2 * w);
+  renderTour();
+  requestAnimationFrame(tick);
+}).catch(err => { $("#status").textContent = "Could not load policy_iteration.bin: " + err.message; });
+</script>
