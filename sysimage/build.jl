@@ -16,11 +16,14 @@
 #   CS_CUDA_VERSION   CUDA toolkit version of the cluster module (default 12.9);
 #                     "artifact" lets CUDA.jl download its own runtime
 #   CS_CPU_TARGET     JULIA_CPU_TARGET of the image (default
-#                     "haswell,-rdrnd;skylake-avx512,-rdrnd,clone_all": AVX2 and
-#                     AES-NI everywhere, AVX-512 clones for CPUs that have it).
-#                     Not "x86-64-v3": that level lacks AES-NI, which a package
-#                     in the image calls through an LLVM intrinsic, and the build
-#                     aborts with "Cannot select: intrinsic %llvm.x86.aesni.aesenc"
+#                     "x86-64-v3,+aes,+pclmul": AVX2, FMA and AES-NI, which every
+#                     HiPerGator CPU has). Random123 (a CUDA.jl dependency) calls
+#                     AES-NI through llvmcall when the build machine has it, so
+#                     the target must enable AES explicitly: "x86-64-v3" and even
+#                     "haswell" abort with "Cannot select: intrinsic
+#                     %llvm.x86.aesni.aesenc", and so does any multi-target
+#                     string (the clones drop the extra features), which rules
+#                     out an AVX-512 clone.
 #
 # The image is written to $CS_SYSIMAGE_DIR/cellularsheaves-deps-<julia>-<hash>.so,
 # keyed by a hash of the environment's manifest, and linked as current.so. Run
@@ -45,7 +48,7 @@ const EXTRA = ["MPI", "MPIPreferences", "CUDA", "KernelAbstractions", "Adapt", "
                "SparseArrays"]
 const MPI_LIBRARY = get(ENV, "CS_MPI_LIBRARY", "/apps/mpi/gcc/14.2.0/openmpi/5.0.7_el97/lib/libmpi.so")
 const CUDA_VERSION = get(ENV, "CS_CUDA_VERSION", "12.9")
-const CPU_TARGET = get(ENV, "CS_CPU_TARGET", "haswell,-rdrnd;skylake-avx512,-rdrnd,clone_all")
+const CPU_TARGET = get(ENV, "CS_CPU_TARGET", "x86-64-v3,+aes,+pclmul")
 
 mkpath(ENVDIR)
 mkpath(BUILDER)
