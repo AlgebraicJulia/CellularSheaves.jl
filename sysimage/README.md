@@ -64,3 +64,21 @@ sysimage/julia.sh test/runtests.jl
 ```
 
 The image name is keyed by the manifest, the package list and the CPU target, so a CI cache can reuse it until the dependencies change.
+
+## Measured load times
+
+On a HiPerGator CPU node (October 2026), a fresh process each time:
+
+| | plain environment | image |
+|---|---|---|
+| `using CellularSheaves` | 6.2 s | 0.42 s |
+| `using CellularSheaves, MPI, CUDA` | 16.4 s | 0.45 s |
+| first load after building the image (compiles CellularSheaves for the image) | | 65 s |
+| after editing `src/` (recompiles CellularSheaves only) | | 16 s |
+
+On a busy `/blue` the plain environment has taken 40 s and more; the image is one file.
+
+## Pitfalls the build works around
+
+- **CPU target.** Random123 (a CUDA.jl dependency) calls AES-NI through `llvmcall`. The target must enable AES explicitly (`x86-64-v3,+aes,+pclmul`); `x86-64-v3`, `haswell` and every multi-target string abort with `Cannot select: intrinsic %llvm.x86.aesni.aesenc`.
+- **MPI binaries.** MPI.jl's binary JLLs stay out of the image, and PackageCompiler's `include_transitive_dependencies` is off so they don't come back: a JLL in the image runs its `__init__` at every start, and OpenMPI_jll's fails against the cluster's OpenMPI module (`undefined symbol: opal_single_threaded`).
