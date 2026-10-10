@@ -66,7 +66,7 @@ input[type=range] { accent-color: var(--accent); }
 .slices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 figure { margin: 0; display: grid; gap: 6px; }
 figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-figcaption .sub { color: var(--muted); font-size: 12px; }
+figcaption .sub { color: var(--muted); font-size: 12px; text-align: right; }
 .plot { position: relative; display: grid; grid-template-columns: 22px minmax(0,1fr); grid-template-rows: minmax(0,1fr) 18px; }
 .plot canvas { grid-column: 2; grid-row: 1; width: 100%; aspect-ratio: 1; max-width: 100%; display: block; border-radius: 4px; touch-action: none; cursor: crosshair; background: var(--line); }
 .ylab { grid-column: 1; grid-row: 1; writing-mode: vertical-rl; transform: rotate(180deg); display: flex; justify-content: space-between; font: 10.5px var(--mono); color: var(--faint); padding-block: 2px; }
@@ -105,11 +105,12 @@ tbody tr { cursor: pointer; }
 }
 @media (max-width: 760px) {
   .slices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  figcaption .sub { display: none; }
   .probe { grid-template-columns: repeat(2, auto); }
   .controls { position: static; }
   .wrap { padding-inline: 16px; }
 }
-@media (max-width: 440px) {
+@media (max-width: 340px) {
   .slices { grid-template-columns: minmax(0, 1fr); }
   .probe { grid-template-columns: minmax(0,1fr); }
   .probe label { grid-template-columns: 2ch minmax(0,1fr) 5.5ch; }
@@ -184,8 +185,8 @@ tbody tr { cursor: pointer; }
 
   <section class="notes">
     <div><h2>Iteration 0</h2><p>Iteration 0 starts from the Riccati solution of the unconstrained LQR problem, with value <span class="math">½xᵀPx</span> and a feedback clipped to the disc. Clipping makes the true cost of that policy higher than the LQR value, so V rises at iteration 1. From then on policy iteration only lowers it (monotone convergence for M-matrix schemes).</p></div>
-    <div><h2>What to look for</h2><p>Watch the <b>Policy u</b> view in the phase planes. Away from the origin the thrust saturates (full colour), and the switching curves where the thrust direction flips sharpen from iteration to iteration. In the <b>Policy change</b> view the edits start everywhere and then settle onto those curves.</p></div>
-    <div><h2>Check</h2><p>The trajectory's discounted running cost <span class="math">∫e^{−ρt}ℓ dt</span> is computed in your browser from the interpolated policy. At convergence it should match the grid's V at the probe, up to discretization error.</p></div>
+    <div><h2>What to look for</h2><p>Watch the <b>Policy u</b> view in the phase planes. Away from the origin the thrust saturates (full colour), and the switching curves where the thrust direction flips sharpen from iteration to iteration. In the <b>Policy change</b> view the edits start everywhere and then settle onto those curves. The bands along the panel edges are boundary nodes: their upwind stencils reach the Riccati Dirichlet data outside the grid.</p></div>
+    <div><h2>Check</h2><p>The trajectory's discounted running cost <span class="math">∫ e<sup>−ρt</sup> ℓ dt</span> is computed in your browser by RK4 under the interpolated policy. It should approach the grid's V at the probe as the grid is refined. The monotone upwind scheme is first-order accurate and overestimates the cost, so on a coarse grid the trajectory comes out a little cheaper than V.</p></div>
   </section>
   <p id="status">Loading policy_iteration.bin…</p>
 </div>
@@ -680,7 +681,18 @@ function wire() {
   new MutationObserver(retheme).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 }
 
-fetch("policy_iteration.bin").then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); }).then(buf => {
+// The data: policy_iteration.bin as written by the script, or (where binary files
+// can't be served) policy_iteration.txt, the same bytes gzipped and base64-encoded.
+async function load() {
+  const r = await fetch("policy_iteration.bin").catch(() => null);
+  if (r && r.ok) return r.arrayBuffer();
+  const t = await fetch("policy_iteration.txt");
+  if (!t.ok) throw new Error(`HTTP ${t.status}`);
+  const s = atob((await t.text()).trim()), z = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) z[i] = s.charCodeAt(i);
+  return new Response(new Blob([z]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+}
+load().then(buf => {
   D = parse(buf); summarize();
   // probe: a state left of the target, moving up and to the right
   const near = v => Math.round((v - D.lower[0]) / D.h[0]);
