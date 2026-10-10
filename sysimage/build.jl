@@ -26,7 +26,7 @@
 #                     out an AVX-512 clone.
 #
 # The image is written to $CS_SYSIMAGE_DIR/cellularsheaves-deps-<julia>-<hash>.so,
-# keyed by a hash of the environment's manifest, and linked as current.so. Run
+# keyed by a hash of the manifest, the package list and the CPU target, and linked as current.so. Run
 # Julia through sysimage/julia.sh, which uses the image, that environment, its
 # preferences and the matching CPU target.
 #
@@ -42,6 +42,12 @@ const DIR = get(ENV, "CS_SYSIMAGE_DIR", joinpath(homedir(), "sysimage"))
 const ENVDIR = joinpath(DIR, "env")
 const BUILDER = joinpath(DIR, "builder")
 const UNDER_DEVELOPMENT = Set(["CellularSheaves", "CliqueTrees", "Mumblebee"])
+# MPI.jl loads at most one MPI library, chosen by MPIPreferences when it starts.
+# These binary packages stay out of the image: every package in an image runs
+# its __init__ at startup, and OpenMPI_jll's opens its own libmpi, which fails
+# against the cluster's OpenMPI module ("undefined symbol: opal_single_threaded").
+# Leaving them out does not exclude MPI.jl, which only imports the one it uses.
+const NOT_IN_IMAGE = Set(["MPICH_jll", "OpenMPI_jll", "MPItrampoline_jll", "MicrosoftMPI_jll"])
 # Loaded alongside CellularSheaves: MPI and GPU support, and the test suite's dependencies.
 const EXTRA = ["MPI", "MPIPreferences", "CUDA", "KernelAbstractions", "Adapt", "Statistics", "Test", "Aqua",
                "JET", "Distributed", "Distributions", "Graphs", "BlockArrays", "Random", "LinearAlgebra",
@@ -92,12 +98,14 @@ function depends_on_development(uuid)
         any(depends_on_development, values(info.dependencies))
     end
 end
-packages = sort!([name_of[u] for u in keys(deps) if !depends_on_development(u)])
+packages = sort!([name_of[u] for u in keys(deps) if !depends_on_development(u) && !(name_of[u] in NOT_IN_IMAGE)])
 excluded = sort!([name_of[u] for u in keys(deps) if depends_on_development(u)])
 println("image: ", length(packages), " packages; loaded on top: ", join(excluded, ", "))
 
 manifest = joinpath(ENVDIR, "Manifest.toml")
-key = bytes2hex(sha1(read(manifest)))[1:12]
+# Keyed by everything that goes into the image: the manifest, the package list
+# (and so this script's exclusions) and the CPU target.
+key = bytes2hex(sha1(String(read(manifest)) * join(packages, ",") * CPU_TARGET))[1:12]
 image = joinpath(DIR, "cellularsheaves-deps-$(VERSION)-$key.so")
 if isfile(image)
     println("up to date: ", image)

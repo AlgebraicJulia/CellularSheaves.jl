@@ -21,7 +21,7 @@ This creates `$HOME/sysimage/`, or `$CS_SYSIMAGE_DIR` if set. It contains:
 
 - `env/`: the environment the image is built from and run with. It develops this checkout, adds MPI, CUDA and the test dependencies, and holds the MPI and CUDA preferences in `LocalPreferences.toml`.
 - `builder/`: PackageCompiler, kept outside the image.
-- `cellularsheaves-deps-<julia>-<manifest hash>.so`: the image, plus `current.so`, a link to the latest one.
+- `cellularsheaves-deps-<julia>-<hash>.so` (a hash of the manifest, the package list and the CPU target): the image, plus `current.so`, a link to the latest one.
 
 The build bakes in two compile-time choices, and other environments must not change them:
 
@@ -63,4 +63,4 @@ Build once per manifest, then run the tests on the image:
 sysimage/julia.sh test/runtests.jl
 ```
 
-The image name is keyed by the manifest hash, so a CI cache can reuse it until the dependencies change.
+The image name is keyed by the manifest, the package list and the CPU target, so a CI cache can reuse it until the dependencies change.
