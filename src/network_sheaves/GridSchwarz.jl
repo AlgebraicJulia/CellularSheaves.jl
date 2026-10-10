@@ -638,13 +638,13 @@ matrix and vectors are summed over all ranks, so every rank holds the whole
 coarse problem. That is meant for small coarse problems (up to a few thousand
 aggregates, factorized densely).
 """
-struct AggregateCoarseSpace{D,A<:AbstractArray,V<:AbstractVector}
+struct AggregateCoarseSpace{D,S<:AbstractArray,P<:AbstractArray,V<:AbstractVector}
     layout::BoxLayout{D}
     blocks::NTuple{D,Int}
     first::NTuple{D,Int}        # 0-based coordinates of the first aggregate meeting the owned box
     count::NTuple{D,Int}        # aggregates meeting the owned box, per dimension
-    sums::A                     # count...: the restriction of a vector, this box's share
-    parts::A                    # count..., 2D + 1: row sums and face couplings, this box's share
+    sums::S                     # count...: the restriction of a vector, this box's share
+    parts::P                    # count..., 2D + 1: row sums and face couplings, this box's share
     values::V                   # one value per aggregate, prolonged on the device
 end
 
@@ -665,7 +665,7 @@ function AggregateCoarseSpace(layout::BoxLayout{D}, blocks; backend=KernelAbstra
     sums = KernelAbstractions.zeros(backend, Float64, count...)
     parts = KernelAbstractions.zeros(backend, Float64, count..., 2D + 1)
     values = KernelAbstractions.zeros(backend, Float64, prod(blocks))
-    return AggregateCoarseSpace{D,typeof(sums),typeof(values)}(layout, blocks, afirst, count, sums, parts, values)
+    return AggregateCoarseSpace{D,typeof(sums),typeof(parts),typeof(values)}(layout, blocks, afirst, count, sums, parts, values)
 end
 
 # The global index ranges of local aggregate A, clipped to the owned box.
