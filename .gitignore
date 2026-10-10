@@ -49,3 +49,6 @@ bench/results/
 docs/*.png
 docs/*.gif
 
+
+# core dumps from crashed jobs
+core.*

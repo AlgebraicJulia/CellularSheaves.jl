@@ -1,0 +1,13 @@
+NVIDIA RTX PRO 6000 Blackwell Server Edition, 4 CPU threads for the CPU reference
+check (41, 41): max |V_gpu - V_cpu| / max|V| = 3.1e-11, policy iterations 9 vs 9, inner 241 vs 241
+check (13, 13, 13, 13): max |V_gpu - V_cpu| / max|V| = 5.6e-16, policy iterations 7 vs 7, inner 96 vs 96
+n=33 (  1185921 unknowns) GPU run 1     0.40 s  [assembly 0.00, linear 0.35, improvement 0.01]  PI 11  inner   298  conv true
+n=33 (  1185921 unknowns) GPU run 2     0.41 s  [assembly 0.00, linear 0.36, improvement 0.01]  PI 11  inner   298  conv true
+n=41 (  2825761 unknowns) GPU run 1     0.94 s  [assembly 0.01, linear 0.80, improvement 0.03]  PI 12  inner   359  conv true
+n=41 (  2825761 unknowns) GPU run 2     0.93 s  [assembly 0.01, linear 0.80, improvement 0.03]  PI 12  inner   359  conv true
+n=49 (  5764801 unknowns) GPU run 1     2.22 s  [assembly 0.02, linear 1.83, improvement 0.06]  PI 14  inner   422  conv true
+n=49 (  5764801 unknowns) GPU run 2     2.25 s  [assembly 0.02, linear 1.84, improvement 0.06]  PI 14  inner   422  conv true
+n=57 ( 10556001 unknowns) GPU run 1     4.50 s  [assembly 0.04, linear 3.85, improvement 0.12]  PI 15  inner   496  conv true
+n=57 ( 10556001 unknowns) GPU run 2     4.49 s  [assembly 0.04, linear 3.85, improvement 0.12]  PI 15  inner   496  conv true
+n=65 ( 17850625 unknowns) GPU run 1     8.88 s  [assembly 0.07, linear 7.65, improvement 0.21]  PI 16  inner   564  conv true
+n=65 ( 17850625 unknowns) GPU run 2     8.75 s  [assembly 0.07, linear 7.66, improvement 0.21]  PI 16  inner   564  conv true

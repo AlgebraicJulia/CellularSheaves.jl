@@ -169,7 +169,9 @@ end
             u1, u2 = z1, z2
         end
     end
-    return ntuple(k -> k == 1 ? u1 : u2, Val(d))
+    return let a = u1, b = u2                       # u1, u2 are reassigned above: bind them
+        ntuple(k -> k == 1 ? a : b, Val(d))
+    end
 end
 
 # The initial policy (clipped LQR feedback) and value (Riccati) on the box.
@@ -178,7 +180,9 @@ end
     d = D ÷ 2
     x = _coordinates(kp, I)
     V[I + _shift(g, Val(D))] = _riccati(kp, x)
-    u = ntuple(Val(D ÷ 2)) do k
+    # (No variable a closure captures is reassigned: GPUs can't run the boxed
+    # captures that would create.)
+    ulqr = ntuple(Val(D ÷ 2)) do k
         acc = 0.0
         for j in 1:D
             acc -= kp.riccati[(d + k) + D * (j - 1)] * x[j]
@@ -186,15 +190,19 @@ end
         acc / kp.control_weight
     end
     ū = kp.control_bound
-    if kp.disc && d == 2
-        nu = sqrt(u[1]^2 + u[2]^2)
-        scale = nu > ū ? ū / nu : 1.0
-        u = ntuple(k -> u[k] * scale, Val(D ÷ 2))
-    else
-        u = ntuple(k -> clamp(u[k], -ū, ū), Val(D ÷ 2))
+    disc = kp.disc && d == 2
+    scale = 1.0
+    if disc
+        nu = 0.0
+        for k in 1:d
+            nu += ulqr[k]^2
+        end
+        nu = sqrt(nu)
+        nu > ū && (scale = ū / nu)
     end
     for k in 1:d
-        U[I, k] = u[k]
+        uk = ulqr[k] * scale
+        U[I, k] = disc ? uk : clamp(uk, -ū, ū)
     end
 end
 
