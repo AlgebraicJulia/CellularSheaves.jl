@@ -1,0 +1,24 @@
+# docs/scripts/arm_swingup.jl: TwoLinkArm() (1 kg, 1 m uniform rods), torque bounds (6, 3) N m, discount 0.2,
+# GridPolicyIteration(forcing = 0.1), red-black SGS preconditioned BiCGStab. October 2026, HiPerGator.
+# 'upright to stay': |θ| < 0.15 rad and small momenta for the rest of a 15 s closed-loop run (dt = 2 ms).
+
+## CPU, 16 threads (hpg-default)
+grid: 32² angles × 33² momenta = 1115136 nodes, momentum bounds ±(17.4, 6.1)
+solve: 13 policy iterations, 1115 inner, 214.70 s (linear 211.68 s), converged true
+from θ = (3.14, 0.00): V = 7.836, simulated cost 7.788, not upright at t = 15 s, final θ = (-0.011, 0.470), peak |τ| = (6.00, 3.00)
+from θ = (2.84, 0.20): V = 7.664, simulated cost 5.674, not upright at t = 15 s, final θ = (-0.011, -0.408), peak |τ| = (6.00, 3.00)
+from θ = (1.57, 0.00): V = 6.871, simulated cost 2.600, not upright at t = 15 s, final θ = (-0.173, -0.031), peak |τ| = (6.00, 3.00)
+
+## GPU, one NVIDIA RTX PRO 6000 Blackwell
+grid: 48² angles × 41² momenta = 3873024 nodes, momentum bounds ±(17.4, 6.1)
+solve: 12 policy iterations, 3263 inner, 23.54 s (linear 22.93 s), converged true
+from θ = (3.14, 0.00): V = 6.831, simulated cost 4.766, not upright at t = 15 s, final θ = (0.207, -0.213), peak |τ| = (6.00, 3.00)
+from θ = (2.84, 0.20): V = 6.594, simulated cost 5.283, upright to stay from t = 3.63 s, final θ = (0.061, 0.078), peak |τ| = (6.00, 3.00)
+from θ = (1.57, 0.00): V = 5.570, simulated cost 2.200, upright to stay from t = 2.11 s, final θ = (-0.059, -0.076), peak |τ| = (6.00, 3.00)
+
+grid: 64² angles × 49² momenta = 9834496 nodes, momentum bounds ±(17.4, 6.1)
+solve: 13 policy iterations, 6603 inner, 116.79 s (linear 114.99 s), converged true
+from θ = (3.14, 0.00): V = 6.167, simulated cost 4.479, not upright at t = 15 s, final θ = (-0.185, 0.134), peak |τ| = (6.00, 3.00)
+from θ = (2.84, 0.20): V = 5.879, simulated cost 4.916, not upright at t = 15 s, final θ = (0.012, -0.253), peak |τ| = (6.00, 3.00)
+from θ = (1.57, 0.00): V = 4.682, simulated cost 2.131, upright to stay from t = 2.23 s, final θ = (-0.052, -0.065), peak |τ| = (6.00, 3.00)
+# (one inexact evaluation at 64^2 x 49^2 reached linear_maxiter = 2000 before the tight final ones)
