@@ -66,13 +66,13 @@ using ArgCheck
 using CommonSolve
 using CommonSolve: solve
 using LinearAlgebra
-using ..DoubleIntegratorHJB: StateGrid, HJBSolution, GridPolicyIteration
+using ..DoubleIntegratorHJB: StateGrid, HJBSolution, GridPolicyIteration, Multigrid
 import ..DoubleIntegratorHJB: value_at, control_at, _state_grid, _periodic, _control_count, _discount, _kernel_model,
     _drifts, _cost, _dirichlet, _boundary_value, _argmin_hamiltonian, _initial_value, _initial_control, _box_argmin,
-    _grid_solve
+    _grid_solve, _with_grid
 
 export TwoLinkArm, mass_matrix, potential_energy, hamiltonian, hamiltonian_vector_field, MechanicalHJBProblem,
-    closed_loop, value_at, control_at, GridPolicyIteration
+    closed_loop, value_at, control_at, GridPolicyIteration, Multigrid
 
 # ===========================================================================
 # the arm
@@ -297,6 +297,10 @@ _kernel_model(prob::MechanicalHJBProblem) =
         kinetic_weight = prob.kinetic_weight, control_weight = prob.control_weight, torque_bound = prob.torque_bound)
 
 CommonSolve.solve(prob::MechanicalHJBProblem, alg::GridPolicyIteration) = _grid_solve(prob, alg)
+
+_with_grid(prob::MechanicalHJBProblem, grid::StateGrid) =
+    MechanicalHJBProblem(prob.arm, grid, prob.target, prob.torque_bound, prob.configuration_weight,
+        prob.kinetic_weight, prob.control_weight, prob.discount)
 
 # ===========================================================================
 # the solution

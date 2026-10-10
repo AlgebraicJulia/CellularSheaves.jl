@@ -80,11 +80,13 @@ using CellularSheaves.NetworkSheaves: GridSchwarz
 using CellularSheaves.NetworkSheaves.GridSchwarz: AbstractStencil, GridOperator, grid_zeros, interior, red_black_sgs!,
     GridWorkspace, grid_bicgstab!, grid_reduce, apply!, _unit, _shift, BoxCommunicator, SerialBoxes, BoxLayout,
     balanced_ranks, box_operator, box_count, box_rank, box_allreduce, exchange!, gather_boxes, AggregateCoarseSpace,
-    coarse_matrix, coarse_restrict, coarse_prolong_add!, _lincomb!
+    coarse_matrix, coarse_restrict, coarse_prolong_add!, _lincomb!, CoefficientStencil
+using CellularSheaves.NetworkSheaves.GridMultigrid: coarse_layout, restrict_average!, prolong_add!, stencil_coefficients!,
+    galerkin_coefficients!, _child
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
     PolicyIteration, DirectPolicyEvaluation, KrylovPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,
-    grid_partition, grid_subdomains, value_at, control_at, GridPolicyIteration
+    grid_partition, grid_subdomains, value_at, control_at, GridPolicyIteration, Multigrid
 
 # ===========================================================================
 # grid
@@ -771,6 +773,7 @@ function control_at(sol::HJBSolution{<:HJBProblem}, x::AbstractVector)
     return _project!(u, prob)
 end
 
+include("HJBMultigrid.jl")
 include("DoubleIntegratorHJBGrid.jl")
 
 end # module DoubleIntegratorHJB

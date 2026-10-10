@@ -9,6 +9,7 @@ Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
+PATHPACK = "d9e183ce-d61f-4afe-9dc2-c05bd96bb422"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
@@ -21,4 +22,8 @@ Distributions = "0.25"
 ForwardDiff = "1.2.1"
 Graphs = "1.13.1"
 MPI = "0.20"
+PATHPACK = "0.0.1"
 SparseArrays = "1.10"
+
+[sources]
+PATHPACK = {rev = "50e7de2588eab9ad69895acd0a7728143cb3c6a5", url = "https://github.com/AlgebraicJulia/pathpack.jl"}

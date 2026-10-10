@@ -286,7 +286,7 @@ end
                         ranks = nothing, overlap = 1, preconditioner = :red_black_sgs,
                         tol = 1e-8, maxiter = 50, linear_tol = 1e-10, linear_maxiter = 2000,
                         forcing = 0, coarse_blocks = nothing, coarse_correction = :multiplicative,
-                        callback = nothing)
+                        multigrid = nothing, callback = nothing)
 
 Howard's policy iteration (as [`PolicyIteration`](@ref)) without assembling
 sparse matrices or storing stencil coefficients: the policy evaluation operator
@@ -322,6 +322,10 @@ one-level preconditioner ``M`` to the remaining residual,
 Julia threads spinning (`JULIA_THREAD_SLEEP_THRESHOLD=infinite`) run BLAS on
 one thread (`BLAS.set_num_threads(1)`), or the competing threads slow the
 small factorization down by orders of magnitude.
+
+With `multigrid = Multigrid(...)` ([`Multigrid`](@ref)) the preconditioner is
+instead one V-cycle over a hierarchy of cell-centred coarse grids, whose
+coarsest grid is solved directly (single box).
 
 Warm started from the previous value function. With `forcing = η > 0` the
 evaluations are inexact, as in an inexact Newton method (policy iteration is
@@ -361,6 +365,7 @@ Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator,F}
     forcing::Float64 = 0.0
     coarse_blocks::Union{Nothing,Vector{Int}} = nothing
     coarse_correction::Symbol = :multiplicative
+    multigrid::Union{Nothing,Multigrid} = nothing
     callback::F = nothing
 end
 
@@ -406,7 +411,17 @@ function _grid_solve(prob, alg::GridPolicyIteration)
     factor = Ref(lu(ones(1, 1)))
     z, Az = grid_zeros(op), grid_zeros(op)
     coarse_solve(v) = factor[] \ coarse_restrict(coarse, v, op, comm)
-    precondition! = if coarse === nothing
+    # Or a V-cycle over coarse grids (single box), in place of both.
+    hierarchy = if alg.multigrid === nothing
+        nothing
+    else
+        @argcheck box_count(comm) == 1 "multigrid is single-box: use SerialBoxes()"
+        @argcheck coarse === nothing "multigrid and coarse_blocks are alternatives"
+        _Hierarchy(alg.multigrid, prob, op, layout, U, backend)
+    end
+    precondition! = if hierarchy !== nothing
+        (y, v) -> _vcycle!(hierarchy, 1, y, v)
+    elseif coarse === nothing
         smoother!
     elseif alg.coarse_correction === :additive
         (y, v) -> (smoother!(y, v); coarse_prolong_add!(y, coarse, coarse_solve(v), op))
@@ -446,6 +461,7 @@ function _grid_solve(prob, alg::GridPolicyIteration)
         tolk = tight ? alg.linear_tol : clamp(alg.forcing * δ, alg.linear_tol, 0.1)
         t_assembly += @elapsed _launch!(_grid_rhs_kernel!, op, b, U, kp_owned, op.origin, ushift)
         coarse === nothing || (t_setup += @elapsed factor[] = lu(coarse_matrix(coarse, op, comm)))
+        hierarchy === nothing || (t_setup += @elapsed _update!(hierarchy))
         t_linear += @elapsed begin
             copyto!(Vnew, V)
             its, ok, _ = grid_bicgstab!(Vnew, op, precondition!, b, ws; tol=tolk,
