@@ -66,7 +66,7 @@ const DIH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
         # convergence for M-matrix schemes), and the target is the cheapest state.
         @test all(sol.values .<= snapshots[2].values .+ 1e-9)
         upright = value_at(sol, [0.0, 0.0, 0.0, 0.0])
-        @test upright ≈ minimum(sol.values)
+        @test abs(upright) < 1e-10 && minimum(sol.values) > -1e-10      # balanced upright costs nothing
         @test value_at(sol, [π, 0.0, 0.0, 0.0]) > upright
         # Angles wrap: θ and θ + 2π are the same state.
         x = [0.37, -2.9, 1.3, -0.4]

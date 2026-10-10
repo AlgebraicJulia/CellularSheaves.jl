@@ -105,7 +105,7 @@ println("image: ", length(packages), " packages; loaded on top: ", join(excluded
 manifest = joinpath(ENVDIR, "Manifest.toml")
 # Keyed by everything that goes into the image: the manifest, the package list
 # (and so this script's exclusions) and the CPU target.
-key = bytes2hex(sha1(String(read(manifest)) * join(packages, ",") * CPU_TARGET))[1:12]
+key = bytes2hex(sha1(String(read(manifest)) * join(packages, ",") * CPU_TARGET * "no-transitive"))[1:12]
 image = joinpath(DIR, "cellularsheaves-deps-$(VERSION)-$key.so")
 if isfile(image)
     println("up to date: ", image)
@@ -130,8 +130,11 @@ else
     Pkg.instantiate()
     pushfirst!(LOAD_PATH, BUILDER)
     @eval using PackageCompiler
+    # `packages` already lists every package that goes in; with the default
+    # include_transitive_dependencies = true PackageCompiler would add back the
+    # manifest dependencies of each, MPI.jl's binary JLLs included.
     PackageCompiler.create_sysimage(Symbol.(packages); sysimage_path=image, project=image_project,
-        precompile_execution_file=joinpath(@__DIR__, "precompile_workload.jl"), cpu_target=CPU_TARGET)
+        precompile_execution_file=joinpath(@__DIR__, "precompile_workload.jl"), cpu_target=CPU_TARGET, include_transitive_dependencies=false)
     Pkg.activate(ENVDIR)
 end
 current = joinpath(DIR, "current.so")
