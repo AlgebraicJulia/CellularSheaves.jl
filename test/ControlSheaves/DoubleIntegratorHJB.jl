@@ -221,6 +221,19 @@ end
             @test abs(grid_sol.iterations - sparse_sol.iterations) <= 1
             @test value_at(grid_sol, zeros(ndims(g))) ≈ value_at(sparse_sol, zeros(ndims(g))) rtol = 1e-7
         end
+        # The callback sees the initial guess and every iteration; its last
+        # snapshot is the solution.
+        cbprob = HJBProblem(grid1(21); control_bound = 1.0)
+        snapshots = []
+        recorded = solve(cbprob, GridPolicyIteration(callback = s -> push!(snapshots, s)))
+        @test length(snapshots) == recorded.iterations + 1
+        @test [s.iteration for s in snapshots] == 0:recorded.iterations
+        @test isnan(snapshots[1].change) && snapshots[end].change == recorded.value_changes[end]
+        @test snapshots[end].values == recorded.values && snapshots[end].controls == recorded.controls
+        xs = [[cbprob.grid.lower[j] + (I[j] - 1) * cbprob.grid.spacing[j] for j in 1:2]
+              for I in CartesianIndices(Tuple(cbprob.grid.points))]
+        @test snapshots[1].values ≈ vec([riccati_value(cbprob, x) for x in xs])
+        @test size(snapshots[1].controls) == (1, length(cbprob.grid))
         @test_throws ArgumentError solve(HJBProblem(grid1(11)), GridPolicyIteration(preconditioner = :ilu))
         unpreconditioned = solve(HJBProblem(grid1(21)), GridPolicyIteration(preconditioner = :none))
         @test unpreconditioned.converged

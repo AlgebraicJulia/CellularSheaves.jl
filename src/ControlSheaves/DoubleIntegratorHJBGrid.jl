@@ -215,7 +215,8 @@ end
 """
     GridPolicyIteration(; backend = KernelAbstractions.CPU(), communicator = SerialBoxes(),
                         ranks = nothing, overlap = 1, preconditioner = :red_black_sgs,
-                        tol = 1e-8, maxiter = 50, linear_tol = 1e-10, linear_maxiter = 2000)
+                        tol = 1e-8, maxiter = 50, linear_tol = 1e-10, linear_maxiter = 2000,
+                        callback = nothing)
 
 Howard's policy iteration (as [`PolicyIteration`](@ref)) without assembling
 sparse matrices or storing stencil coefficients: the policy evaluation operator
@@ -244,8 +245,17 @@ extended box after a halo exchange of the values. Every rank returns the whole
 solution. On one box this gives the same discrete solution as
 [`PolicyIteration`](@ref), whose `KrylovPolicyEvaluation(method = :bicgstab)`
 uses the identical preconditioner on the assembled matrices.
+
+`callback(snapshot)`, if given, is called on every rank with the state of the
+iteration as whole-grid host arrays: once with the initial guess
+(`iteration = 0`: the Riccati values and the clipped LQR policy), then after
+each policy iteration ``k`` with the values ``V^k`` of the policy just evaluated
+and the policy improved from them. `snapshot` is a named tuple
+`(iteration, values, controls, change)` with `values` a vector and `controls`
+a `d × N` matrix in the layout of [`HJBSolution`](@ref), and `change` the
+largest change of the values in that iteration (`NaN` at the start).
 """
-Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator}
+Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator,F}
     backend::B = KernelAbstractions.CPU()
     communicator::C = SerialBoxes()
     ranks::Union{Nothing,Vector{Int}} = nothing
@@ -255,6 +265,7 @@ Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator}
     maxiter::Int = 50
     linear_tol::Float64 = 1e-10
     linear_maxiter::Int = 2000
+    callback::F = nothing
 end
 
 function CommonSolve.solve(prob::HJBProblem, alg::GridPolicyIteration)
@@ -287,6 +298,20 @@ function CommonSolve.solve(prob::HJBProblem, alg::GridPolicyIteration)
         (y, v) -> red_black_sgs!(y, op, v; exchange)
     end
     _launch!(_grid_initialize_kernel!, op_extended, U, V, kp_extended, op_extended.origin)
+    # The whole grid's values and controls, on every rank (for the callback and the result).
+    function gathered(V)                 # V passed in: the loop swaps it, and a captured V would be boxed
+        values = vec(gather_boxes(comm, layout, V, op))
+        owned_controls = Array(copy(view(U, ntuple(k -> ushift[k] .+ (1:length(layout.owned[k])), D)..., :)))
+        controls = reduce(vcat, (permutedims(vec(gather_boxes(comm, layout, selectdim(owned_controls, D + 1, k))))
+                                 for k in 1:d))
+        return values, controls
+    end
+    function report(iteration, change, V)
+        alg.callback === nothing && return
+        values, controls = gathered(V)
+        alg.callback((; iteration, values, controls, change))
+    end
+    report(0, NaN, V)
     changes, linear_iterations = Float64[], Int[]
     converged = false
     t_assembly = t_linear = t_improvement = 0.0
@@ -305,16 +330,14 @@ function CommonSolve.solve(prob::HJBProblem, alg::GridPolicyIteration)
             exchange(V)
             _launch!(_grid_improve_kernel!, op_extended, U, V, kp_extended, op_extended.origin)
         end
+        report(length(changes), changes[end], V)
         scale = allreduce(grid_reduce((a, c) -> abs(a), max, V, V, op, ws.partial), max)
         if length(changes) > 1 && changes[end] <= alg.tol * max(1.0, scale)
             converged = true
             break
         end
     end
-    values = vec(gather_boxes(comm, layout, V, op))
-    owned_controls = Array(copy(view(U, ntuple(k -> ushift[k] .+ (1:length(layout.owned[k])), D)..., :)))
-    controls = reduce(vcat, (permutedims(vec(gather_boxes(comm, layout, selectdim(owned_controls, D + 1, k))))
-                             for k in 1:d))
+    values, controls = gathered(V)
     seconds = (assembly = t_assembly, setup = 0.0, linear = t_linear, improvement = t_improvement)
     return HJBSolution(prob, values, controls, length(changes), changes, linear_iterations, converged, seconds)
 end
