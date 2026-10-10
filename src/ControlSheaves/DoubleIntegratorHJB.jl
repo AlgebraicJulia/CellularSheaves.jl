@@ -79,7 +79,8 @@ using Adapt: Adapt
 using CellularSheaves.NetworkSheaves: GridSchwarz
 using CellularSheaves.NetworkSheaves.GridSchwarz: AbstractStencil, GridOperator, grid_zeros, interior, red_black_sgs!,
     GridWorkspace, grid_bicgstab!, grid_reduce, apply!, _unit, _shift, BoxCommunicator, SerialBoxes, BoxLayout,
-    balanced_ranks, box_operator, box_count, box_rank, box_allreduce, exchange!, gather_boxes
+    balanced_ranks, box_operator, box_count, box_rank, box_allreduce, exchange!, gather_boxes, AggregateCoarseSpace,
+    coarse_matrix, coarse_restrict, coarse_prolong_add!, _lincomb!
 
 export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
     PolicyIteration, DirectPolicyEvaluation, KrylovPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,

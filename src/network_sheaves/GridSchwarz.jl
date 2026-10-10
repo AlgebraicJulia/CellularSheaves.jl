@@ -19,7 +19,8 @@ module GridSchwarz
 
 export AbstractStencil, CoefficientStencil, GridOperator, grid_zeros, interior, apply!, red_black_sgs!,
     grid_dot, grid_reduce, GridWorkspace, grid_bicgstab!, BoxLayout, box_coordinates, balanced_ranks, box_operator,
-    BoxCommunicator, SerialBoxes, mpi_boxes, box_count, box_rank, box_allreduce, exchange!, box_allgather, gather_boxes
+    BoxCommunicator, SerialBoxes, mpi_boxes, box_count, box_rank, box_allreduce, exchange!, box_allgather, gather_boxes,
+    AggregateCoarseSpace, coarse_matrix, coarse_restrict, coarse_prolong_add!
 
 using Adapt: Adapt
 using ArgCheck: @argcheck
@@ -609,6 +610,201 @@ function gather_boxes(c::BoxCommunicator, layout::BoxLayout{D}, block::AbstractA
         out[other.owned...] .= reshape(block, length.(other.owned))
     end
     return out
+end
+
+
+# ===== Aggregation coarse space =====
+
+"""
+    AggregateCoarseSpace(layout, blocks; backend = KernelAbstractions.CPU())
+
+A coarse space for two-level Schwarz methods on the grid of `layout`. The
+global grid is cut into `blocks[1] × … × blocks[D]` aggregates: nearly equal
+index ranges, like the boxes of a [`BoxLayout`](@ref) but independent of
+them, so a single box can have many aggregates and an aggregate can span
+several boxes. The coarse functions are the indicator functions of the
+aggregates (Nicolaides, *SIAM J. Numer. Anal.* 24, 1987), with restriction
+``R_0`` summing a vector over each aggregate and prolongation ``R_0^\\mathsf{T}``.
+The coarse operator is the Galerkin product ``A_0 = R_0 A R_0^\\mathsf{T}``, a
+``(2D+1)``-point stencil on the grid of aggregates, wrapping around periodic
+dimensions like the fine grid. If ``A`` is an M-matrix with positive row sums
+(an upwind HJB operator), so is ``A_0``.
+
+[`coarse_matrix`](@ref) computes ``A_0`` from the stencil of the fine operator
+(never from an assembled matrix), and [`coarse_restrict`](@ref) and
+[`coarse_prolong_add!`](@ref) move vectors between the levels. On a
+distributed grid each box contributes the aggregates it meets, and the coarse
+matrix and vectors are summed over all ranks, so every rank holds the whole
+coarse problem. That is meant for small coarse problems (up to a few thousand
+aggregates, factorized densely).
+"""
+struct AggregateCoarseSpace{D,A<:AbstractArray,V<:AbstractVector}
+    layout::BoxLayout{D}
+    blocks::NTuple{D,Int}
+    first::NTuple{D,Int}        # 0-based coordinates of the first aggregate meeting the owned box
+    count::NTuple{D,Int}        # aggregates meeting the owned box, per dimension
+    sums::A                     # count...: the restriction of a vector, this box's share
+    parts::A                    # count..., 2D + 1: row sums and face couplings, this box's share
+    values::V                   # one value per aggregate, prolonged on the device
+end
+
+# The 0-based aggregate of the 1-based global index G among k aggregates of n
+# points (the inverse of _split), and the global indices of aggregate a.
+@inline _aggregate(G, n, k) = (G * k - 1) ÷ n
+@inline _aggregate_range(a, n, k) = (a * n ÷ k + 1):((a + 1) * n ÷ k)
+@inline _aggregate_index(c::NTuple{D,Int}, blocks::NTuple{D,Int}) where {D} =
+    1 + sum(ntuple(d -> c[d] * prod(ntuple(k -> k < d ? blocks[k] : 1, Val(D))), Val(D)))
+
+function AggregateCoarseSpace(layout::BoxLayout{D}, blocks; backend=KernelAbstractions.CPU()) where {D}
+    blocks = Tuple(Int.(blocks))
+    @argcheck length(blocks) == D "need one number of aggregates per dimension"
+    @argcheck all(1 .<= blocks .<= layout.points) "need between 1 and points[d] aggregates in dimension d"
+    afirst = ntuple(d -> _aggregate(first(layout.owned[d]), layout.points[d], blocks[d]), D)
+    alast = ntuple(d -> _aggregate(last(layout.owned[d]), layout.points[d], blocks[d]), D)
+    count = alast .- afirst .+ 1
+    sums = KernelAbstractions.zeros(backend, Float64, count...)
+    parts = KernelAbstractions.zeros(backend, Float64, count..., 2D + 1)
+    values = KernelAbstractions.zeros(backend, Float64, prod(blocks))
+    return AggregateCoarseSpace{D,typeof(sums),typeof(values)}(layout, blocks, afirst, count, sums, parts, values)
+end
+
+# The global index ranges of local aggregate A, clipped to the owned box.
+@inline function _aggregate_box(A, afirst, owned_first, owned_last, points, blocks, ::Val{D}) where {D}
+    full = ntuple(d -> _aggregate_range(afirst[d] + A[d] - 1, points[d], blocks[d]), Val(D))
+    clipped = ntuple(d -> max(first(full[d]), owned_first[d]):min(last(full[d]), owned_last[d]), Val(D))
+    return full, clipped
+end
+
+@kernel function _aggregate_sum_kernel!(sums, @Const(x), g, afirst, owned_first, owned_last, points, blocks, ::Val{D}) where {D}
+    A = @index(Global, Cartesian)
+    _, box = _aggregate_box(A, afirst, owned_first, owned_last, points, blocks, Val(D))
+    acc = zero(eltype(sums))
+    for G in CartesianIndices(box)
+        acc += x[CartesianIndex(ntuple(d -> G[d] - owned_first[d] + 1 + g[d], Val(D)))]
+    end
+    sums[A] = acc
+end
+
+# For each aggregate: Σ (c₀ − Σ_j (c⁻_j + c⁺_j)) over its points (the row sums of
+# A over the aggregate), and per face the couplings c⁻_j / c⁺_j of its boundary
+# points to the neighbouring aggregate.
+@kernel function _aggregate_matrix_kernel!(parts, stencil, afirst, owned_first, owned_last, points, blocks, ::Val{D}) where {D}
+    A = @index(Global, Cartesian)
+    full, box = _aggregate_box(A, afirst, owned_first, owned_last, points, blocks, Val(D))
+    rowsum = 0.0
+    low = ntuple(_ -> 0.0, Val(D))
+    high = ntuple(_ -> 0.0, Val(D))
+    for G in CartesianIndices(box)
+        I = CartesianIndex(ntuple(d -> G[d] - owned_first[d] + 1, Val(D)))
+        c0, cm, cp = _coefficients(stencil, I)
+        rowsum += c0
+        for j in 1:D
+            rowsum -= cm[j] + cp[j]
+            G[j] == first(full[j]) && (low = Base.setindex(low, low[j] + cm[j], j))
+            G[j] == last(full[j]) && (high = Base.setindex(high, high[j] + cp[j], j))
+        end
+    end
+    parts[A, 1] = rowsum
+    for j in 1:D
+        parts[A, 1 + j] = low[j]
+        parts[A, 1 + D + j] = high[j]
+    end
+end
+
+@kernel function _prolong_add_kernel!(y, @Const(values), g, owned_first, points, blocks, ::Val{D}) where {D}
+    I = @index(Global, Cartesian)
+    c = ntuple(d -> _aggregate(owned_first[d] + I[d] - 1, points[d], blocks[d]), Val(D))
+    y[I + _shift(g, Val(D))] += values[_aggregate_index(c, blocks)]
+end
+
+function _check_owned(cs::AggregateCoarseSpace{D}, op::GridOperator{T,D}) where {T,D}
+    @argcheck size(op) == length.(cs.layout.owned) "op must be the operator of the owned box"
+end
+
+# This box's local aggregate array, placed into a whole-grid array (rows: aggregates).
+function _place(cs::AggregateCoarseSpace{D}, local_values::AbstractArray, columns::Int) where {D}
+    out = zeros(prod(cs.blocks), columns)
+    for A in CartesianIndices(cs.count)
+        i = _aggregate_index(cs.first .+ Tuple(A) .- 1, cs.blocks)
+        for k in 1:columns
+            out[i, k] = local_values[A, k]
+        end
+    end
+    return out
+end
+
+"""
+    coarse_restrict(cs::AggregateCoarseSpace, v, op, comm) -> Vector
+
+``R_0 v``: the sums of the interior of the padded vector `v` (`op` the
+operator of the owned box) over every aggregate of the global grid, reduced
+over all ranks of `comm`.
+"""
+function coarse_restrict(cs::AggregateCoarseSpace{D}, v::AbstractArray, op::GridOperator{T,D},
+                         comm::BoxCommunicator) where {T,D}
+    _check_owned(cs, op)
+    backend = get_backend(op)
+    owned = cs.layout.owned
+    _aggregate_sum_kernel!(backend)(cs.sums, v, op.origin, cs.first, first.(owned), last.(owned), cs.layout.points,
+        cs.blocks, Val(D); ndrange=cs.count)
+    synchronize(backend)
+    return vec(box_allreduce(comm, _place(cs, Array(cs.sums), 1), +))
+end
+
+"""
+    coarse_matrix(cs::AggregateCoarseSpace, op, comm) -> Matrix
+
+The Galerkin coarse operator ``A_0 = R_0 A R_0^\\mathsf{T}`` of the stencil of
+`op` (the operator of the owned box), as a dense matrix on every rank.
+Couplings to points outside a non-periodic grid (zero Dirichlet data) are
+dropped, as in ``A``.
+"""
+function coarse_matrix(cs::AggregateCoarseSpace{D}, op::GridOperator{T,D}, comm::BoxCommunicator) where {T,D}
+    _check_owned(cs, op)
+    backend = get_backend(op)
+    owned = cs.layout.owned
+    _aggregate_matrix_kernel!(backend)(cs.parts, op.stencil, cs.first, first.(owned), last.(owned),
+        cs.layout.points, cs.blocks, Val(D); ndrange=cs.count)
+    synchronize(backend)
+    P = box_allreduce(comm, _place(cs, Array(cs.parts), 2D + 1), +)
+    blocks, periodic = cs.blocks, cs.layout.periodic
+    n = prod(blocks)
+    A0 = zeros(n, n)
+    for a in CartesianIndices(blocks)
+        c = Tuple(a) .- 1
+        i = _aggregate_index(c, blocks)
+        A0[i, i] += P[i, 1]
+        for j in 1:D, (side, column) in ((-1, 1 + j), (1, 1 + D + j))
+            coupling = P[i, column]
+            iszero(coupling) && continue
+            A0[i, i] += coupling                         # the row sum subtracted it; it leaves the aggregate
+            cj = c[j] + side
+            if !(0 <= cj < blocks[j])
+                periodic[j] || continue                  # outside the grid: zero Dirichlet data
+                cj = mod(cj, blocks[j])
+            end
+            A0[i, _aggregate_index(Base.setindex(c, cj, j), blocks)] -= coupling
+        end
+    end
+    return A0
+end
+
+"""
+    coarse_prolong_add!(y, cs::AggregateCoarseSpace, c, op) -> y
+
+``y \\mathrel{+}= R_0^\\mathsf{T} c`` on the interior of the padded vector `y`:
+add to every point the entry of `c` (one per aggregate of the global grid)
+of its aggregate.
+"""
+function coarse_prolong_add!(y::AbstractArray, cs::AggregateCoarseSpace{D}, c::AbstractVector,
+                             op::GridOperator{T,D}) where {T,D}
+    _check_owned(cs, op)
+    copyto!(cs.values, c)
+    backend = get_backend(op)
+    _prolong_add_kernel!(backend)(y, cs.values, op.origin, first.(cs.layout.owned), cs.layout.points, cs.blocks,
+        Val(D); ndrange=size(op))
+    synchronize(backend)
+    return y
 end
 
 end # module

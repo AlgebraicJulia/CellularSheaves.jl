@@ -64,4 +64,10 @@ nranks = box_count(boxes)
     ras = solve(arm, GridPolicyIteration(communicator = boxes, preconditioner = :ras))
     @test ras.converged
     @test ras.values ≈ serial.values rtol = 1e-7
+    # Two levels: aggregates that do not line up with the boxes.
+    for pc in (:red_black_sgs, :ras)
+        two = solve(arm, GridPolicyIteration(communicator = boxes, preconditioner = pc, coarse_blocks = [3, 3, 2, 2]))
+        @test two.converged
+        @test two.values ≈ serial.values rtol = 1e-7
+    end
 end

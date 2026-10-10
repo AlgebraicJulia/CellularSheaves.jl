@@ -83,6 +83,15 @@ const DIH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
         @test inexact.converged
         @test inexact.values ≈ sol.values rtol = 1e-7
         @test sum(inexact.linear_iterations) < sum(sol.linear_iterations)
+        # A second level (aggregation coarse space, dense LU) changes the
+        # preconditioner, not the solution.
+        for correction in (:multiplicative, :additive), pc in (:red_black_sgs, :ras)
+            two = solve(prob, GridPolicyIteration(preconditioner = pc, coarse_blocks = [4, 4, 3, 3],
+                coarse_correction = correction))
+            @test two.converged
+            @test two.values ≈ sol.values rtol = 1e-7
+        end
+        @test_throws ArgumentError solve(prob, GridPolicyIteration(coarse_blocks = [4, 4, 3, 3], coarse_correction = :other))
         # The discrete equation holds: the improved policy is the policy evaluated,
         # and (A_u V)(x) = ℓ(x, u) at every grid point.
         g = prob.grid

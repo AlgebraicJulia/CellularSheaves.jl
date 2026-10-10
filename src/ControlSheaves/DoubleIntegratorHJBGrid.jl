@@ -285,7 +285,8 @@ end
     GridPolicyIteration(; backend = KernelAbstractions.CPU(), communicator = SerialBoxes(),
                         ranks = nothing, overlap = 1, preconditioner = :red_black_sgs,
                         tol = 1e-8, maxiter = 50, linear_tol = 1e-10, linear_maxiter = 2000,
-                        forcing = 0, callback = nothing)
+                        forcing = 0, coarse_blocks = nothing, coarse_correction = :multiplicative,
+                        callback = nothing)
 
 Howard's policy iteration (as [`PolicyIteration`](@ref)) without assembling
 sparse matrices or storing stencil coefficients: the policy evaluation operator
@@ -308,6 +309,16 @@ inner products reduced over all ranks), right-preconditioned by
   application; the boxes are the vertices of the overlap sheaf and the
   exchanges run along its edges). Equal to `:red_black_sgs` on one box;
 - `:none`.
+
+With `coarse_blocks` (aggregates per dimension, e.g. `[4, 4, 2, 2]`) the
+preconditioner gets a second level: a piecewise-constant coarse space on that
+grid of aggregates ([`AggregateCoarseSpace`](@ref CellularSheaves.NetworkSheaves.GridSchwarz.AggregateCoarseSpace)),
+independent of the boxes, whose Galerkin operator ``A_0 = R_0 A R_0^\\mathsf{T}``
+is computed from the stencil, summed over all ranks and factorized by dense LU
+on every rank once per policy evaluation. `coarse_correction = :multiplicative`
+applies the coarse correction ``z = R_0^\\mathsf{T} A_0^{-1} R_0 v`` first and the
+one-level preconditioner ``M`` to the remaining residual,
+``z + M(v - Az)``; `:additive` returns ``M v + z``.
 
 Warm started from the previous value function. With `forcing = η > 0` the
 evaluations are inexact, as in an inexact Newton method (policy iteration is
@@ -345,6 +356,8 @@ Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator,F}
     linear_tol::Float64 = 1e-10
     linear_maxiter::Int = 2000
     forcing::Float64 = 0.0
+    coarse_blocks::Union{Nothing,Vector{Int}} = nothing
+    coarse_correction::Symbol = :multiplicative
     callback::F = nothing
 end
 
@@ -376,12 +389,34 @@ function _grid_solve(prob, alg::GridPolicyIteration)
     op_extended = box_operator(layout, _UpwindStencil(U, kp_extended), :extended)
     V, Vnew, b = grid_zeros(op), grid_zeros(op), grid_zeros(op)
     ws = GridWorkspace(op)
-    precondition! = if alg.preconditioner === :none
+    smoother! = if alg.preconditioner === :none
         copyto!
     elseif alg.preconditioner === :ras
         (y, v) -> (exchange(v); red_black_sgs!(y, op_extended, v))
     else
         (y, v) -> red_black_sgs!(y, op, v; exchange)
+    end
+    # The optional second level: an aggregation coarse space, its dense LU
+    # refreshed for each policy (factor[]).
+    @argcheck alg.coarse_correction in (:multiplicative, :additive) "coarse_correction must be :multiplicative or :additive"
+    coarse = alg.coarse_blocks === nothing ? nothing : AggregateCoarseSpace(layout, alg.coarse_blocks; backend)
+    factor = Ref(lu(ones(1, 1)))
+    z, Az = grid_zeros(op), grid_zeros(op)
+    coarse_solve(v) = factor[] \ coarse_restrict(coarse, v, op, comm)
+    precondition! = if coarse === nothing
+        smoother!
+    elseif alg.coarse_correction === :additive
+        (y, v) -> (smoother!(y, v); coarse_prolong_add!(y, coarse, coarse_solve(v), op))
+    else
+        function (y, v)
+            fill!(z, 0)
+            coarse_prolong_add!(z, coarse, coarse_solve(v), op)      # z = R₀ᵀ A₀⁻¹ R₀ v
+            exchange(z)
+            apply!(Az, op, z)
+            _lincomb!(Az, op, 1, v, -1, Az, 0, Az)                      # v - A z
+            smoother!(y, Az)
+            _lincomb!(y, op, 1, y, 1, z, 0, z)                          # z + M (v - A z)
+        end
     end
     _launch!(_grid_initialize_kernel!, op_extended, U, V, kp_extended, op_extended.origin)
     # The whole grid's values and controls, on every rank (for the callback and the result).
@@ -400,13 +435,14 @@ function _grid_solve(prob, alg::GridPolicyIteration)
     report(0, NaN, V)
     changes, linear_iterations = Float64[], Int[]
     converged = false
-    t_assembly = t_linear = t_improvement = 0.0
+    t_assembly = t_setup = t_linear = t_improvement = 0.0
     scale = 1.0
     tight = alg.forcing == 0                 # solve every evaluation to linear_tol
     for _ in 1:alg.maxiter
         δ = isempty(changes) ? 1.0 : changes[end] / max(1.0, scale)
         tolk = tight ? alg.linear_tol : clamp(alg.forcing * δ, alg.linear_tol, 0.1)
         t_assembly += @elapsed _launch!(_grid_rhs_kernel!, op, b, U, kp_owned, op.origin, ushift)
+        coarse === nothing || (t_setup += @elapsed factor[] = lu(coarse_matrix(coarse, op, comm)))
         t_linear += @elapsed begin
             copyto!(Vnew, V)
             its, ok, _ = grid_bicgstab!(Vnew, op, precondition!, b, ws; tol=tolk,
@@ -431,6 +467,6 @@ function _grid_solve(prob, alg::GridPolicyIteration)
         end
     end
     values, controls = gathered(V)
-    seconds = (assembly = t_assembly, setup = 0.0, linear = t_linear, improvement = t_improvement)
+    seconds = (assembly = t_assembly, setup = t_setup, linear = t_linear, improvement = t_improvement)
     return HJBSolution(prob, values, controls, length(changes), changes, linear_iterations, converged, seconds)
 end

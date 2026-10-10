@@ -139,6 +139,45 @@ end
     @test x[9:10, 3:7] == values[1:2, :]                      # above it: the first rows
     @test all(iszero, x[:, 1:2]) && all(iszero, x[:, 8:9])    # the other dimension is not periodic
 
+    # The aggregation coarse space: A₀ = R₀ A R₀ᵀ from the stencil, without
+    # assembling A, on periodic and non-periodic grids, aggregates of uneven
+    # size, one aggregate across a periodic dimension included.
+    rng = Random.MersenneTwister(11)
+    for (n, periodic, blocks) in (((8, 6), (true, false), (3, 2)), ((7, 5), (false, false), (2, 3)),
+                                  ((6, 4), (true, true), (1, 2)), ((6, 5, 4), (true, false, false), (2, 2, 2)))
+        D = length(n)
+        layout = BoxLayout(n, ntuple(_ -> 1, D), 0; overlap = 1, periodic)
+        coef = 0.1 .+ rand(rng, n..., 2D + 1)
+        coef[ntuple(_ -> Colon(), D)..., 1] .+= 2D
+        op = box_operator(layout, CoefficientStencil(coef))
+        N = prod(n)
+        A = zeros(N, N)                                       # the dense operator, column by column
+        e = grid_zeros(op)
+        y = grid_zeros(op)
+        for k in 1:N
+            fill!(e, 0)
+            interior(e, op)[k] = 1
+            exchange!(SerialBoxes(), layout, e)
+            apply!(y, op, e)
+            A[:, k] = vec(interior(y, op))
+        end
+        aggregate(I) = 1 + sum(((I[d] * blocks[d] - 1) ÷ n[d]) * prod(blocks[1:(d - 1)]; init = 1) for d in 1:D)
+        R = zeros(prod(blocks), N)
+        for (k, I) in enumerate(CartesianIndices(n))
+            R[aggregate(Tuple(I)), k] = 1
+        end
+        cs = AggregateCoarseSpace(layout, blocks)
+        @test coarse_matrix(cs, op, SerialBoxes()) ≈ R * A * R'
+        v = grid_zeros(op)
+        interior(v, op) .= reshape(randn(rng, N), n)
+        @test coarse_restrict(cs, v, op, SerialBoxes()) ≈ R * vec(interior(v, op))
+        c = randn(rng, prod(blocks))
+        w = grid_zeros(op)
+        coarse_prolong_add!(w, cs, c, op)
+        @test vec(interior(w, op)) ≈ R' * c
+    end
+    @test_throws ArgumentError AggregateCoarseSpace(BoxLayout((5, 4), (1, 1), 0), (6, 1))
+
     # The same tests under MPI on several ranks.
 
     script = joinpath(@__DIR__, "..", "mpi", "grid_boxes.jl")
