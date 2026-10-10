@@ -39,7 +39,6 @@ Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 
 [sources]
 Mumblebee = {rev = "9d308da2361cd7f7902356393b476463e0fa5773", url = "https://github.com/samuelsonric/mumblebee.jl"}
-PATHPACK = {rev = "50e7de2588eab9ad69895acd0a7728143cb3c6a5", url = "https://github.com/AlgebraicJulia/pathpack.jl"}
 
 [extensions]
 CellularSheavesMPIExt = "MPI"
