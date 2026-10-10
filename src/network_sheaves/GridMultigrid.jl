@@ -9,12 +9,14 @@ with the maps between levels written as a pushforward–pullback pair.
 ``r_k \\in \\{1, 2\\}`` ([`coarsening_factors`](@ref)): with ``r_k = 2`` the
 points ``2b - 1, 2b`` form block ``b`` (an odd count leaves a last block of one
 point), so the coarse grid has ``\\lceil n_k / 2 \\rceil`` points; with
-``r_k = 1`` the dimension is not coarsened. A non-periodic dimension is
-coarsened while it has more than two points: the coarse points are the block
+``r_k = 1`` the dimension is not coarsened. Every coarse dimension keeps at
+least three points. A non-periodic dimension is
+coarsened while it has at least five points: the coarse points are the block
 centres (spacing ``2h``, the first at ``\\mathrm{lower} + h/2``) for an even
 count, and every other point (same ends, spacing ``2h``) for an odd one, so
 every level is a uniform grid. A periodic dimension is coarsened only while
-its count is a multiple of 4, which keeps every coarse level's count even, as
+its count is a multiple of 4 (and at least 8), which keeps every coarse
+level's count even, as
 red–black Gauss–Seidel around the circle needs (otherwise it is left alone:
 semicoarsening). Halving the grid at every level gives ``O(\\log n)`` levels
 on grids of ``n`` points per dimension, whatever the counts. The map sending
@@ -76,11 +78,12 @@ using ..GraphHomomorphisms: GraphHomomorphism
 
 The factor ``r_k \\in \\{1, 2\\}`` by which each dimension of a grid of `points`
 is coarsened (see the module documentation): 2 for a non-periodic dimension
-of more than two points and for a periodic dimension whose count is a
-multiple of 4, 1 otherwise. All ones means the grid cannot be coarsened.
+of at least five points and for a periodic dimension whose count is a
+multiple of 4 and at least 8 (every coarse dimension keeps at least three
+points), 1 otherwise. All ones means the grid cannot be coarsened.
 """
 coarsening_factors(points::NTuple{D,Integer}, periodic::NTuple{D,Bool}) where {D} =
-    ntuple(k -> (periodic[k] ? points[k] % 4 == 0 : points[k] > 2) ? 2 : 1, D)
+    ntuple(k -> (periodic[k] ? points[k] % 4 == 0 && points[k] >= 8 : points[k] >= 5) ? 2 : 1, D)
 
 """
     coarse_points(points, factors) -> NTuple

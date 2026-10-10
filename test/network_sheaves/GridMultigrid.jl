@@ -41,12 +41,13 @@ end
     rng = Random.MersenneTwister(5)
     # Even counts (blocks of 2^D), odd counts (a last block of one point), a
     # periodic dimension not divisible by 4 (left alone: semicoarsening), and a
-    # non-periodic dimension of two points (left alone).
+    # non-periodic dimension of fewer than five points (left alone: a coarse
+    # dimension keeps at least three points).
     for (n, periodic) in (((8, 6), (true, false)), ((6, 4), (false, false)), ((4, 4, 6), (true, true, false)),
                           ((7, 5), (false, false)), ((6, 9), (true, false)), ((8, 2, 5), (true, false, false)))
         D = length(n)
         r = coarsening_factors(n, periodic)
-        @test r == ntuple(k -> (periodic[k] ? n[k] % 4 == 0 : n[k] > 2) ? 2 : 1, D)
+        @test r == ntuple(k -> (periodic[k] ? n[k] % 4 == 0 && n[k] >= 8 : n[k] >= 5) ? 2 : 1, D)
         nc = coarse_points(n, r)
         @test nc == ntuple(k -> r[k] == 2 ? cld(n[k], 2) : n[k], D)
         layout = BoxLayout(n, ntuple(_ -> 1, D), 0; overlap = 1, periodic)
@@ -132,5 +133,5 @@ end
         @test all(iszero, coefc[:, :, :, (a[j] > 0 ? 1 + j : 1 + D + j)])
     end
     @test_throws ArgumentError coarse_points((8, 7), (2, 3))
-    @test coarsening_factors((3, 2, 12, 6), (false, false, true, true)) == (2, 1, 2, 1)
+    @test coarsening_factors((5, 4, 12, 6, 4), (false, false, true, true, true)) == (2, 1, 2, 1, 1)
 end

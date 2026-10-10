@@ -50,7 +50,7 @@ const MGH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
     # Automatic depth: O(log n) levels down to coarsest_size points, on grids of
     # any counts; and solves on uneven hierarchies reach the one-level solution.
     @test MGH._plan_levels(Multigrid(), (64, 64, 64, 64), ntuple(_ -> false, 4)) == 4      # 64⁴ → 32⁴ → 16⁴ → 8⁴ = 4096
-    @test MGH._plan_levels(Multigrid(coarsest_size = 1), (63, 63), (false, false)) == 6    # 63 → 32 → … → 2
+    @test MGH._plan_levels(Multigrid(coarsest_size = 1), (63, 63), (false, false)) == 5    # 63 → 32 → 16 → 8 → 4
     @test MGH._plan_levels(Multigrid(), (48, 48, 40, 40), (true, true, false, false)) == 4  # → (24, 24, 20, 20) → (12, 12, 10, 10) → (6, 6, 5, 5)
     uneven = [
         ("double integrator 63²", HJBProblem(StateGrid([-2.0, -2.0], [2.0, 2.0], [63, 63]); control_bound = 1.0), 64),
