@@ -54,8 +54,8 @@ L = LinearIndices(points)
 stop = vmax + 1
 goal = [L[qx, qy, stop, stop] for qx in (n - 3):(n - 1) for qy in 2:4]
 println("double integrator lattice: $(n)² positions × $(2vmax + 1)² velocities = $(size(W, 1)) states, $(nnz(W)) edges")
-V, t = timed(() -> cost_to_go(W, goal))
-@printf("full value function (Dijkstra): %.3f s, %d states can reach the goal\n", t, count(isfinite, V))
+V, tfull = timed(() -> cost_to_go(W, goal))
+@printf("full value function (Dijkstra): %.3f s, %d states can reach the goal\n", tfull, count(isfinite, V))
 
 rng = Random.MersenneTwister(1)
 candidates = [L[qx, qy, stop, stop] for qx in 1:(m - 1) for qy in 1:n if isfinite(V[L[qx, qy, stop, stop]])]
@@ -115,16 +115,29 @@ open(joinpath(@__DIR__, "..", "figures", "tropical_abstraction.csv"), "w") do io
 end
 
 # ---- 2. coarse closures for many goals -------------------------------------------
+# Only the coarse closure Wc* ⊗ bc is timed (the pushforward of the terminal cost and
+# the pullback are the same for both methods). PathPack factorizes once; the fill-in
+# of the LU of a 4-D coarse lattice limits it to small coarse graphs.
+TA = CellularSheaves.NetworkSheaves.TropicalAbstraction
 println("\n2. the coarse closure for 20 goals (stopped at random free cells)")
 goals = [[L[qx, qy, stop, stop]] for (qx, qy) in zip(rand(rng, 2:(n - 1), 40), rand(rng, 2:(n - 1), 40)) if !walls(qx, qy)][1:20]
-println("abstraction  coarse states  dijkstra/goal  pathpack factor  pathpack/goal  same bound")
-for (kind, pos, k, ψ, steps) in abstractions[[2, 3, 6, 7]]
+println("abstraction          coarse states  coarse edges  dijkstra/goal  pathpack factor (once)  pathpack/goal  same")
+closure_rows = []
+for (kind, pos, k, ψ, steps) in abstractions[[3, 4, 5, 7, 8]]
     Ad = Abstraction(W, ψ; steps)
-    Ap, tf = timed(() -> Abstraction(W, ψ; steps, method = :pathpack))
-    td = sum(timed(() -> lower_bound(Ad, gl))[2] for gl in goals) / length(goals)
-    tp = sum(timed(() -> lower_bound(Ap, gl))[2] for gl in goals) / length(goals)
-    same = all(lower_bound(Ad, gl) == lower_bound(Ap, gl) for gl in goals)
-    @printf("%-12s %13d %12.4f s %14.3f s %12.4f s  %s\n", "$(kind) $(pos)", ψ.n_target, td, tf, tp, same)
+    tf = @elapsed Ap = Abstraction(W, ψ; steps, method = :pathpack)
+    bcs = [tropical_pushforward(ψ, TA._short_horizon(W, [x in gl ? 0.0 : Inf for x in 1:size(W, 1)], steps)) for gl in goals]
+    td = sum(timed(() -> TA._apply_closure(Ad.closure, Ad.quotient, bc))[2] for bc in bcs) / length(goals)
+    tp = sum(timed(() -> TA._apply_closure(Ap.closure, Ap.quotient, bc))[2] for bc in bcs) / length(goals)
+    same = all(TA._apply_closure(Ad.closure, Ad.quotient, bc) == TA._apply_closure(Ap.closure, Ap.quotient, bc) for bc in bcs)
+    @printf("%-20s %13d %13d %12.5f s %21.3f s %12.5f s  %s\n", "$(kind) $(pos)", ψ.n_target, nnz(Ad.quotient), td, tf, tp, same)
+    push!(closure_rows, (name = "$(kind) $(pos)", states = ψ.n_target, edges = nnz(Ad.quotient), dijkstra = td, factor = tf, pathpack = tp))
+end
+open(joinpath(@__DIR__, "..", "figures", "tropical_coarse_closure.csv"), "w") do io
+    println(io, "abstraction,coarse_states,coarse_edges,dijkstra_seconds_per_goal,pathpack_factor_seconds,pathpack_seconds_per_goal")
+    for r in closure_rows
+        println(io, join((r.name, r.states, r.edges, r.dijkstra, r.factor, r.pathpack), ","))
+    end
 end
 
 # ---- 3. reach-avoid ------------------------------------------------------------
@@ -133,8 +146,8 @@ wallcells = [(qx, qy) for qx in 1:n, qy in 1:n if walls(qx, qy)]
 clear = [walls(qx, qy) ? -1.0 : minimum(hypot(qx - a, qy - b) for (a, b) in wallcells) - 0.5 for qx in 1:n, qy in 1:n]
 l = [clear[I[1], I[2]] for I in CartesianIndices(points)][:]
 g = fill(-Inf, length(l)); g[goal] .= Inf
-R, t = timed(() -> reach_avoid(W, l, g))
-@printf("reach-avoid closure: %.3f s; reachable set agrees with min-plus: %s\n", t, (R .> -Inf) == isfinite.(V))
+R, tra = timed(() -> reach_avoid(W, l, g))
+@printf("reach-avoid closure: %.3f s; reachable set agrees with min-plus: %s\n", tra, (R .> -Inf) == isfinite.(V))
 println("source   min time  clearance of the fastest route  best clearance  time on the safest route (clearance ≥ best)")
 rows, cols = findnz(W)[1:2]
 for s in sources[1:5]

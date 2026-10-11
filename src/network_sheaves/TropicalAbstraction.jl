@@ -250,18 +250,22 @@ function cost_to_go(W::SparseMatrixCSC, targets)
     return minplus_closure(W, b)
 end
 
-# ``⊕_{r<k} W^{⊗r} ⊗ b``: the best cost to the targets in fewer than k steps.
+# ``⊕_{r<k} W^{⊗r} ⊗ b``: the best cost to the targets in fewer than k steps,
+# propagated from the frontier of exactly-r-step costs along in-edges (columns).
 function _short_horizon(W, b, k)
-    v = copy(b)
-    cur = copy(b)
-    rows, cols, vals = findnz(W)
+    v = float.(b)
+    frontier = Dict(x => v[x] for x in eachindex(v) if !isinf(v[x]))
+    rows, vals = rowvals(W), nonzeros(W)
     for _ in 1:(k - 1)
-        nxt = fill(Inf, length(b))
-        for (x, y, w) in zip(rows, cols, vals)
-            nxt[x] = min(nxt[x], w + cur[y])
+        next = Dict{Int,Float64}()
+        for (y, c) in frontier, p in nzrange(W, y)
+            x, d = rows[p], c + vals[p]
+            d < get(next, x, Inf) && (next[x] = d)
         end
-        cur = nxt
-        v .= min.(v, cur)
+        for (x, d) in next
+            v[x] = min(v[x], d)
+        end
+        frontier = next
     end
     return v
 end
