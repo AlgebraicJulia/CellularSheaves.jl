@@ -2,6 +2,7 @@ using Test
 using CellularSheaves
 using SparseArrays
 using Random
+using PATHPACK
 
 # The minimum-time double integrator on a lattice: states (qx, qy, vx, vy) with
 # positions 1:n and velocities -vmax:vmax; a step picks an acceleration in
@@ -29,10 +30,9 @@ function double_integrator_lattice(n, vmax, obstacle)
     return sparse(rows, cols, ones(length(rows)), N, N), points
 end
 
-# Bellman–Ford: the min-plus fixed point by value iteration.
-function bellman_ford(W, targets)
-    V = fill(Inf, size(W, 1))
-    V[targets] .= 0
+# Bellman–Ford: the min-plus closure by value iteration.
+function bellman_ford(W, b)
+    V = float.(copy(b))
     rows, cols, vals = findnz(W)
     for _ in 1:size(W, 1)
         changed = false
@@ -47,74 +47,141 @@ function bellman_ford(W, targets)
     return V
 end
 
+function dense_weights(W, zero)
+    D = fill(zero, size(W))
+    for (x, y, w) in zip(findnz(W)...)
+        D[x, y] = w
+    end
+    return D
+end
+minplus(A, B) = [minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 1), j in axes(B, 2)]
+
 @testset "TropicalAbstraction" begin
     rng = Random.MersenneTwister(3)
 
-    # Min-plus algebra of the pushforward on a random graph: Eᵀ ⊗ E = I, the
-    # quotient is Eᵀ ⊗ W ⊗ E, and Dijkstra solves the Bellman equation.
+    # ---- the semiring algebra on a random graph --------------------------------
     n = (6, 5)
     N = prod(n)
     W = sprand(rng, N, N, 0.15) .* 3
     ψ = aggregation_homomorphism(n, (2, 2))
     vc = rand(rng, ψ.n_target)
-    @test tropical_pushforward(ψ, tropical_pullback(ψ, vc)) == vc
-    Wd = fill(Inf, N, N)
-    for (x, y, w) in zip(findnz(W)...)
-        Wd[x, y] = w
-    end
-    Q = quotient_graph(W, ψ)
-    Qd = fill(Inf, ψ.n_target, ψ.n_target)
-    for (b, c, w) in zip(findnz(Q)...)
-        Qd[b, c] = w
-    end
+    @test tropical_pushforward(ψ, tropical_pullback(ψ, vc)) == vc                  # Eᵀ ⊗ E = I
+    @test tropical_pushforward(ψ, tropical_pullback(ψ, vc); combine = max) == vc
     fibre(b) = findall(==(b), ψ.vertex_map)
-    @test all(Qd[b, c] == minimum(Wd[fibre(b), fibre(c)]) for b in 1:ψ.n_target, c in 1:ψ.n_target if b != c)
-    @test all(isinf, Qd[b, b] for b in 1:ψ.n_target)
-    targets = [1, 17]
-    @test cost_to_go(W, targets).values == bellman_ford(W, targets)
+    Wd = dense_weights(W, Inf)
+    for steps in (1, 2, 3)
+        Q = dense_weights(quotient_graph(W, ψ; steps), Inf)
+        Wk = reduce(minplus, fill(Wd, steps))
+        @test all(Q[b, c] ≈ minimum(Wk[fibre(b), fibre(c)]) for b in 1:ψ.n_target, c in 1:ψ.n_target if b != c)
+        @test all(isinf, Q[b, b] for b in 1:ψ.n_target)
+    end
+    Qmax = dense_weights(quotient_graph(W, ψ; combine = max), -Inf)
+    Wdmax = dense_weights(W, -Inf)
+    @test all(Qmax[b, c] == maximum(Wdmax[fibre(b), fibre(c)]) for b in 1:ψ.n_target, c in 1:ψ.n_target if b != c)
+    b = fill(Inf, N); b[[1, 17]] .= 0; b[9] = 0.5
+    @test minplus_closure(W, b) ≈ bellman_ford(W, b)
+    @test cost_to_go(W, [1, 17]) == minplus_closure(W, [x in (1, 17) ? 0.0 : Inf for x in 1:N])
 
-    # Minimum-time double integrator around a wall with a gap.
+    # ---- minimum-time double integrator around a wall with a gap ---------------
     wall(qx, qy) = qx in 11:12 && !(qy in 3:5)
     W, points = double_integrator_lattice(24, 2, wall)
     L = LinearIndices(points)
     goal = [L[qx, qy, 3, 3] for qx in 20:22 for qy in 20:22]          # stopped in the goal box
-    sol = cost_to_go(W, goal)
-    V = sol.values
-    @test sol.expanded == count(isfinite, V)
-    @test V ≈ bellman_ford(W, goal)
-
-    # A hierarchy of position aggregations, ψ₁ (blocks of 2 × 2), ψ₂ = ψ₁' ∘ ψ₁ (4 × 4), ….
-    ψs = GraphHomomorphism[]
-    sizes = points
-    ψ = GraphHomomorphism(collect(1:prod(points)), prod(points))
-    for _ in 1:3
-        step = aggregation_homomorphism(sizes, (2, 2, 1, 1))
-        ψ = compose(ψ, step)
-        push!(ψs, ψ)
-        sizes = coarse_points(sizes, (2, 2, 1, 1))
-    end
-
+    V = cost_to_go(W, goal)
+    @test V == bellman_ford(W, [x in goal ? 0.0 : Inf for x in 1:size(W, 1)])
     sources = [L[qx, qy, 3, 3] for (qx, qy) in ((2, 2), (3, 22), (6, 12), (2, 14))]
     @test all(isfinite, V[sources])
-    for ψ in ψs
-        # The coarse cost-to-go, pulled back, is a lower bound on the fine one.
-        Vc = cost_to_go(quotient_graph(W, ψ), unique(ψ.vertex_map[goal])).values
-        @test all(tropical_pullback(ψ, Vc) .<= V .+ 1e-12)
-        for s in sources
-            h = abstraction_heuristic(W, ψ, s)
-            @test h[s] == 0
-            @test h == abstraction_heuristic(W, ψ, s; reversed_quotient = sparse(transpose(quotient_graph(W, ψ))))
-            # Consistent: h(y) ≤ h(x) + W[x, y] on every edge out of a reachable state.
-            @test all(isinf(h[x]) || h[y] <= h[x] + w for (x, y, w) in zip(findnz(W)...))
-            # A* is exact and expands fewer states than Dijkstra.
-            dijkstra = cost_to_go(W, goal; source = s)
-            astar = cost_to_go(W, goal; source = s, heuristic = h)
-            @test dijkstra.cost == astar.cost == V[s]
-            @test astar.expanded < dijkstra.expanded
-        end
+    Wout = sparse(transpose(W))
+    dijkstra = [shortest_path(W, s, goal; out_edges = Wout) for s in sources]
+    @test [r.cost for r in dijkstra] == V[sources]
+
+    # A path is a sequence of moves from the source into the goal whose costs add up.
+    valid(r, s) = first(r.path) == s && last(r.path) in goal &&
+        sum(W[r.path[i], r.path[i + 1]] for i in 1:(length(r.path) - 1); init = 0.0) == r.cost
+
+    # Abstractions: positions only (blocks 2^ℓ, one step), and space–time (velocity
+    # blocks k, position blocks k², k steps).
+    id = GraphHomomorphism(collect(1:prod(points)), prod(points))
+    function coarsen(ψ, sizes, factors)
+        step = aggregation_homomorphism(sizes, factors)
+        return compose(ψ, step), coarse_points(sizes, factors)
+    end
+    space = Tuple{GraphHomomorphism,Int}[]
+    ψ, sizes = id, points
+    for _ in 1:3
+        ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+        push!(space, (ψ, 1))
+    end
+    spacetime = Tuple{GraphHomomorphism,Int}[]
+    ψ, sizes = id, points
+    for k in (2, 4)
+        ψ, sizes = coarsen(ψ, sizes, (2, 2, 2, 2))
+        ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+        push!(spacetime, (ψ, k))
     end
 
+    for (ψ, steps) in vcat(space, spacetime)
+        A = Abstraction(W, ψ; steps)
+        h = lower_bound(A, goal)
+        @test all(h .<= V)                                            # a lower bound everywhere
+        @test all(h[goal] .== 0)
+        if steps == 1                                                 # consistent
+            @test all(isinf(h[y]) || h[x] <= w + h[y] for (x, y, w) in zip(findnz(W)...))
+        end
+        for (s, d) in zip(sources, dijkstra)
+            r = shortest_path(W, s, goal; heuristic = h, out_edges = Wout)
+            @test r.cost == V[s] && valid(r, s)                       # exact
+            steps == 1 && ψ === space[1][1] && @test r.expanded < d.expanded
+        end
+        # PathPack's chordal min-plus LU gives the same coarse closure.
+        @test lower_bound(Abstraction(W, ψ; steps, method = :pathpack), goal) == h
+    end
+    # Coarsening time with space keeps the bound tight where space alone loses it.
+    hs = lower_bound(Abstraction(W, space[2][1]), goal)                # positions 4 × 4, one step
+    hst = lower_bound(Abstraction(W, spacetime[1][1]; steps = spacetime[1][2]), goal)          # positions 4 × 4, velocities 2, two steps
+    @test sum(hst[sources]) > sum(hs[sources])
+
+    # ---- reach-avoid in the bottleneck semiring --------------------------------
+    walls = [(qx, qy) for qx in 1:24, qy in 1:24 if wall(qx, qy)]
+    clearance(qx, qy) = minimum(hypot(qx - a, qy - b) for (a, b) in walls) - 0.5
+    l = [wall(I[1], I[2]) ? -1.0 : clearance(I[1], I[2]) for I in CartesianIndices(points)][:]
+    g = fill(-Inf, length(l)); g[goal] .= Inf
+    R = reach_avoid(W, l, g)
+    # The Bellman equation, by value iteration in (max, min).
+    Rvi = min.(l, g)
+    rows, cols = findnz(W)[1:2]
+    for _ in 1:size(W, 1)
+        changed = false
+        for (x, y) in zip(rows, cols)
+            d = min(l[x], Rvi[y])
+            if d > Rvi[x]
+                Rvi[x] = d; changed = true
+            end
+        end
+        changed || break
+    end
+    @test R == Rvi
+    @test all(R .<= l)
+    # Reachable at all ⇔ finite minimum time.
+    @test (R .> -Inf) == isfinite.(V)
+    # R(x) ≥ c ⇔ x reaches the goal through states of clearance ≥ c: a min-plus
+    # question on the subgraph of those states.
+    for c in (0.5, 1.5, 2.5)
+        keep = [l[x] >= c for x in rows]
+        Wc = sparse(rows[keep], cols[keep], ones(count(keep)), size(W)...)
+        safe_goal = [t for t in goal if l[t] >= c]
+        reachable = isempty(safe_goal) ? falses(length(l)) : isfinite.(cost_to_go(Wc, safe_goal)) .& (l .>= c)
+        @test (R .>= c) == reachable
+    end
+    # The max pushforward over-approximates: an upper bound on the reach-avoid value.
+    Amax = sparse(rows, cols, l[rows], size(W)...)
+    ψ = space[1][1]
+    Rc = maxmin_closure(quotient_graph(Amax, ψ; combine = max), tropical_pushforward(ψ, min.(l, g); combine = max))
+    @test all(tropical_pullback(ψ, Rc) .>= R)
+
     @test_throws ArgumentError cost_to_go(-W, goal)
-    @test_throws ArgumentError cost_to_go(W, goal; heuristic = zeros(size(W, 1)))
     @test_throws ArgumentError quotient_graph(W, aggregation_homomorphism((6, 5), (2, 2)))
+    @test_throws ArgumentError quotient_graph(W, space[1][1]; steps = 2, combine = max)
+    @test_throws ArgumentError Abstraction(W, space[1][1]; method = :other)
+    @test_throws ArgumentError shortest_path(W, sources[1], goal; heuristic = zeros(3))
 end
