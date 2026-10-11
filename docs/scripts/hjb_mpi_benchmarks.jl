@@ -31,14 +31,15 @@ const RANK = MPI.Comm_rank(COMM)
 const NRANKS = MPI.Comm_size(COMM)
 const THREADS = Threads.nthreads()
 const SIZES = parse.(Int, split(get(ENV, "HJB_SIZES", "33"), ","))
-const PRECONDITIONERS = Symbol.(split(get(ENV, "HJB_PRECONDITIONERS", "red_black_sgs,ras"), ","))
+const SMOOTHERS = Dict("red_black_sgs" => SymmetricGaussSeidelSmoother(), "ras" => RestrictedAdditiveSchwarzSmoother())
+const PRECONDITIONERS = split(get(ENV, "HJB_PRECONDITIONERS", "red_black_sgs,ras"), ",")
 const REPEATS = parse(Int, get(ENV, "HJB_REPEATS", "3"))
 const OUT = get(ENV, "HJB_OUT", joinpath(@__DIR__, "..", "figures", "hjb"))
 
-problem(n) = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = :disc)
+problem(n) = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = DiscConstraint())
 
 for pre in PRECONDITIONERS                                     # compile everything
-    solve(problem(9), GridPolicyIteration(communicator = BOXES, preconditioner = pre))
+    solve(problem(9), GridPolicyIteration(communicator = BOXES, smoother = SMOOTHERS[pre]))
 end
 
 const HEADER = "n,unknowns,preconditioner,ranks,threads,boxes,seconds_min,seconds_median,seconds_max," *
@@ -47,7 +48,7 @@ io = RANK == 0 ? (mkpath(OUT); open(joinpath(OUT, "mpi_r$(NRANKS)_t$(THREADS).cs
 println(io, HEADER)
 for n in SIZES, pre in PRECONDITIONERS
     prob = problem(n)
-    alg = GridPolicyIteration(communicator = BOXES, preconditioner = pre)
+    alg = GridPolicyIteration(communicator = BOXES, smoother = SMOOTHERS[pre])
     times = Float64[]
     local sol
     for _ in 1:REPEATS

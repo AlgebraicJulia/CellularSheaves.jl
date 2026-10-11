@@ -343,7 +343,7 @@ end
 # al. 2011) and works without overlap. It needs an exact projection, though.
 # Replacing ``\Pi_{H^0}`` by a single sheaf-diffusion step (`projection_steps = 1`)
 # converged on strips but diverged on a box grid in our tests (32 × 32 grid,
-# `penalty = :shared`), where dofs have
+# `penalty = SharedPenalty()`), where dofs have
 # different numbers of copies.
 
 # ## Krylov acceleration

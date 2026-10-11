@@ -1,4 +1,4 @@
-# Does an aggregation coarse space (GridPolicyIteration(coarse_blocks = ...),
+# Does an aggregation coarse space (GridPolicyIteration(coarse = AggregateCoarseCorrection(...))),
 # dense LU on the coarse grid) cut the Krylov iterations of the policy
 # evaluations, and do they still grow with the resolution? One-level red–black
 # SGS against two levels, for the 4-D double integrator (disc thrust) and the
@@ -29,7 +29,7 @@ else
     KernelAbstractions.CPU()
 end
 
-integrator(n) = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = :disc)
+integrator(n) = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = DiscConstraint())
 arm(na, np) = MechanicalHJBProblem(TwoLinkArm(); angle_points = na, momentum_points = np, torque_bound = (6.0, 3.0))
 
 # (label, problem, list of coarse_blocks to try; nothing = one level)
@@ -51,10 +51,11 @@ open(out, "w") do io
     println(io, "problem,nodes,coarse_blocks,aggregates,policy_iterations,inner_total,inner_per_evaluation,seconds,setup_seconds,linear_seconds,max_value_difference")
     for (label, prob, choices) in cases
         warm = label |> contains("arm") ? arm(8, 5) : integrator(5)
-        solve(warm, GridPolicyIteration(backend = backend, coarse_blocks = [2, 2, 2, 2]))   # compile
+        solve(warm, GridPolicyIteration(backend = backend, coarse = AggregateCoarseCorrection([2, 2, 2, 2])))   # compile
         reference = nothing
         for blocks in choices
-            alg = GridPolicyIteration(backend = backend, maxiter = 100, coarse_blocks = blocks)
+            alg = GridPolicyIteration(backend = backend, maxiter = 100,
+                coarse = blocks === nothing ? nothing : AggregateCoarseCorrection(blocks))
             t = @elapsed sol = solve(prob, alg)
             reference === nothing && (reference = sol.values)
             agg = blocks === nothing ? 0 : prod(blocks)

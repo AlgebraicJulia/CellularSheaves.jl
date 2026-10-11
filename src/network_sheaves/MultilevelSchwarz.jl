@@ -86,6 +86,7 @@ using ArgCheck: @argcheck
 using LinearAlgebra
 using SparseArrays
 using ..GridMultigrid: aggregation_homomorphism, coarse_points, _block
+using ..SchwarzMethods: LevelComposition, AdditiveComposition, MultiplicativeComposition
 
 """
     prolongation_matrix(points, factors) -> SparseMatrixCSC
@@ -156,8 +157,9 @@ _exact(M) = inv(Matrix(M))
 # The preconditioner of the corrections Cₖ applied in order from x = 0,
 # x ← x + Cₖ (b - A x): the sum for additive composition, B ← B + Cₖ (I - A B)
 # for multiplicative.
-function _compose(A, corrections, composition)
-    composition === :additive && return sum(corrections)
+_compose(A, corrections, ::AdditiveComposition) = sum(corrections)
+
+function _compose(A, corrections, ::MultiplicativeComposition)
     B = zeros(size(A))
     for C in corrections
         B = B + C * (I - A * B)
@@ -182,18 +184,17 @@ function _multilevel(A, points, factors, level_solve, composition)
     end
     L = length(factors)
     C = [Matrix(P[ℓ + 1] * level_solve(ℓ, As[ℓ + 1]) * Q[ℓ + 1]) for ℓ in 0:L]
-    order = composition === :additive ? collect(0:L) : [0:L; (L - 1):-1:0]
+    order = composition isa AdditiveComposition ? collect(0:L) : [0:L; (L - 1):-1:0]
     return _compose(A, [C[ℓ + 1] for ℓ in order], composition)
 end
 
 function _check(A, points, boxes, composition)
     @argcheck size(A) == (prod(points), prod(points)) "A must act on the grid of $(points) points"
     @argcheck !isempty(boxes) "the cover needs at least one box"
-    @argcheck composition in (:additive, :multiplicative) "composition must be :additive or :multiplicative"
 end
 
 """
-    schwarz_of_multigrid(A, points, boxes, factors; composition = :additive,
+    schwarz_of_multigrid(A, points, boxes, factors; composition = AdditiveComposition(),
         smoother = Jacobi, coarsest_solve = exact) -> Matrix
 
 The preconditioner ``\\sum_i R_i^T \\mathrm{MG}_i R_i``: on every box ``U_i`` of
@@ -201,14 +202,14 @@ The preconditioner ``\\sum_i R_i^T \\mathrm{MG}_i R_i``: on every box ``U_i`` of
 grid, coarsened by each of `factors` in turn with Galerkin coarse operators, then
 summed over the cover. Each level's correction is `smoother(Aℓ)` (an approximate
 inverse, Jacobi by default), the coarsest `coarsest_solve(Aℓ)` (exact by default);
-`composition` combines the levels additively or as a V-cycle (`:multiplicative`).
+`composition` combines the levels additively or as a V-cycle ([`MultiplicativeComposition`](@ref)).
 
 For a cover aligned at every level ([`is_aligned`](@ref)) and additive composition
 this equals [`multigrid_of_schwarz`](@ref) (see the module documentation). A dense
 reference implementation for small grids.
 """
 function schwarz_of_multigrid(A::AbstractMatrix, points::NTuple{D,Integer}, boxes,
-        factors::AbstractVector{<:NTuple{D,Integer}}; composition::Symbol = :additive,
+        factors::AbstractVector{<:NTuple{D,Integer}}; composition::LevelComposition = AdditiveComposition(),
         smoother = _jacobi, coarsest_solve = _exact) where {D}
     _check(A, points, boxes, composition)
     L = length(factors)
@@ -222,7 +223,7 @@ function schwarz_of_multigrid(A::AbstractMatrix, points::NTuple{D,Integer}, boxe
 end
 
 """
-    multigrid_of_schwarz(A, points, boxes, factors; composition = :additive,
+    multigrid_of_schwarz(A, points, boxes, factors; composition = AdditiveComposition(),
         smoother = Jacobi, coarsest_solve = exact) -> Matrix
 
 The multigrid of `A` on the pushforward hierarchy (coarsened by each of `factors` in
@@ -230,14 +231,14 @@ turn, Galerkin coarse operators ``A_ℓ``) whose correction on level ``ℓ`` is 
 Schwarz over the pushed-forward cover ``\\{U_{i,ℓ}\\}`` (``U_{i,ℓ+1} = ψ_ℓ(U_{i,ℓ})``,
 [`coarse_box`](@ref)): ``\\sum_i R_{i,ℓ}^T S(R_{i,ℓ} A_ℓ R_{i,ℓ}^T) R_{i,ℓ}``, with
 ``S`` = `smoother` below the coarsest level and `coarsest_solve` on it.
-`composition` combines the levels additively or as a V-cycle (`:multiplicative`).
+`composition` combines the levels additively or as a V-cycle ([`MultiplicativeComposition`](@ref)).
 
 For a cover aligned at every level ([`is_aligned`](@ref)) and additive composition
 this equals [`schwarz_of_multigrid`](@ref) (see the module documentation). A dense
 reference implementation for small grids.
 """
 function multigrid_of_schwarz(A::AbstractMatrix, points::NTuple{D,Integer}, boxes,
-        factors::AbstractVector{<:NTuple{D,Integer}}; composition::Symbol = :additive,
+        factors::AbstractVector{<:NTuple{D,Integer}}; composition::LevelComposition = AdditiveComposition(),
         smoother = _jacobi, coarsest_solve = _exact) where {D}
     _check(A, points, boxes, composition)
     L = length(factors)

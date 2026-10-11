@@ -70,7 +70,7 @@ export coarsening_factors, coarse_points, coarse_layout, aggregation_homomorphis
 using ArgCheck: @argcheck
 using KernelAbstractions
 using KernelAbstractions: @kernel, @index, @Const, get_backend, synchronize
-using ..GridSchwarz: GridOperator, BoxLayout, _coefficients, _shift
+using ..GridSchwarz: GridOperator, gridsize, BoxLayout, _coefficients, _shift
 using ..GraphHomomorphisms: GraphHomomorphism
 
 """
@@ -164,9 +164,9 @@ The pushforward transfer ``T``: set the interior of the coarse vector `rc`
 the blocks.
 """
 function restrict_average!(rc::AbstractArray, opc::GridOperator{T,D}, rf::AbstractArray, opf::GridOperator) where {T,D}
-    r = _factors(size(opf), size(opc))
+    r = _factors(gridsize(opf), gridsize(opc))
     backend = get_backend(opc)
-    _restrict_average_kernel!(backend)(rc, rf, opc.origin, opf.origin, r, size(opf), Val(D); ndrange=size(opc))
+    _restrict_average_kernel!(backend)(rc, rf, opc.origin, opf.origin, r, gridsize(opf), Val(D); ndrange=gridsize(opc))
     synchronize(backend)
     return rc
 end
@@ -178,9 +178,9 @@ The pullback ``E = ψ^*``: add to every point of the interior of the fine
 vector `xf` the value of the coarse vector `xc` at its block.
 """
 function prolong_add!(xf::AbstractArray, opf::GridOperator{T,D}, xc::AbstractArray, opc::GridOperator) where {T,D}
-    r = _factors(size(opf), size(opc))
+    r = _factors(gridsize(opf), gridsize(opc))
     backend = get_backend(opf)
-    _prolong_add_kernel!(backend)(xf, xc, opf.origin, opc.origin, r, Val(D); ndrange=size(opf))
+    _prolong_add_kernel!(backend)(xf, xc, opf.origin, opc.origin, r, Val(D); ndrange=gridsize(opf))
     synchronize(backend)
     return xf
 end
@@ -203,9 +203,9 @@ of a [`CoefficientStencil`](@ref CellularSheaves.NetworkSheaves.GridSchwarz.Coef
 `coef[I, 1]` ``= c_0``, `coef[I, 1 + j]` ``= c^-_j``, `coef[I, 1 + D + j]` ``= c^+_j``.
 """
 function stencil_coefficients!(coef::AbstractArray, op::GridOperator{T,D}) where {T,D}
-    @argcheck size(coef) == (size(op)..., 2D + 1)
+    @argcheck size(coef) == (gridsize(op)..., 2D + 1)
     backend = get_backend(op)
-    _coefficients_kernel!(backend)(coef, op.stencil, Val(D); ndrange=size(op))
+    _coefficients_kernel!(backend)(coef, op.stencil, Val(D); ndrange=gridsize(op))
     synchronize(backend)
     return coef
 end
@@ -258,9 +258,9 @@ block to the coarse ghost, also zero.
 """
 function galerkin_coefficients!(coefc::AbstractArray, opf::GridOperator{T,D}) where {T,D}
     @argcheck ndims(coefc) == D + 1 && size(coefc, D + 1) == 2D + 1
-    r = _factors(size(opf), ntuple(k -> size(coefc, k), D))
+    r = _factors(gridsize(opf), ntuple(k -> size(coefc, k), D))
     backend = get_backend(opf)
-    _galerkin_kernel!(backend)(coefc, opf.stencil, r, size(opf), Val(D); ndrange=size(coefc)[1:D])
+    _galerkin_kernel!(backend)(coefc, opf.stencil, r, gridsize(opf), Val(D); ndrange=size(coefc)[1:D])
     synchronize(backend)
     return coefc
 end

@@ -66,13 +66,17 @@ using ArgCheck
 using CommonSolve
 using CommonSolve: solve
 using LinearAlgebra
-using ..DoubleIntegratorHJB: StateGrid, AbstractHJBProblem, HJBSolution, GridPolicyIteration, Multigrid
+using ..DoubleIntegratorHJB: StateGrid, AbstractHJBProblem, HJBSolution, GridPolicyIteration, Multigrid,
+    SymmetricGaussSeidelSmoother, RestrictedAdditiveSchwarzSmoother, AggregateCoarseCorrection, Rediscretization,
+    GalerkinOperator, PathPackCoarsest, DenseCoarsest
 import ..DoubleIntegratorHJB: value_at, control_at, _state_grid, _periodic, _control_count, _discount, _kernel_model,
     _drifts, _cost, _dirichlet, _boundary_value, _argmin_hamiltonian, _initial_value, _initial_control, _box_argmin,
-    _grid_solve, _with_grid
+    _with_grid
 
 export TwoLinkArm, mass_matrix, potential_energy, hamiltonian, hamiltonian_vector_field, MechanicalHJBProblem,
-    closed_loop, value_at, control_at, GridPolicyIteration, Multigrid
+    closed_loop, value_at, control_at, GridPolicyIteration, Multigrid,
+    SymmetricGaussSeidelSmoother, RestrictedAdditiveSchwarzSmoother, AggregateCoarseCorrection, Rediscretization,
+    GalerkinOperator, PathPackCoarsest, DenseCoarsest
 
 # ===========================================================================
 # the arm
@@ -255,7 +259,7 @@ Solve with `solve(problem, GridPolicyIteration(...))`; query the result with
 """
 struct MechanicalHJBProblem <: AbstractHJBProblem
     arm::TwoLinkArm
-    grid::StateGrid
+    grid::StateGrid{4}
     target::NTuple{2,Float64}
     torque_bound::NTuple{2,Float64}
     configuration_weight::Float64
@@ -277,8 +281,8 @@ function MechanicalHJBProblem(arm::TwoLinkArm; angle_points::Integer = 32, momen
     @argcheck length(P) == 2 "momentum_bound must be one bound for both joints or a pair (P₁, P₂)"
     @argcheck all(>(0), P) "momentum bounds must be positive"
     h = 2π / angle_points
-    grid = StateGrid([-π, -π, -P[1], -P[2]], [π - h, π - h, P[1], P[2]],
-        [angle_points, angle_points, momentum_points, momentum_points])
+    grid = StateGrid((-π, -π, -P[1], -P[2]), (π - h, π - h, P[1], P[2]),
+        (angle_points, angle_points, momentum_points, momentum_points))
     return MechanicalHJBProblem(arm, grid, Float64.(Tuple(target)), Float64.(Tuple(torque_bound)),
         Float64(configuration_weight), Float64(kinetic_weight), Float64(control_weight), Float64(discount))
 end

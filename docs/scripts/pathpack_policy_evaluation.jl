@@ -71,7 +71,7 @@ function check(label, prob, U)
 end
 
 for n in (9, 13, 17)
-    prob = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = :disc)
+    prob = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = DiscConstraint())
     U = reshape(permutedims(DIH._lqr_controls(prob)), n, n, n, n, 2)
     check("double integrator $(n)^4", prob, U)
 end

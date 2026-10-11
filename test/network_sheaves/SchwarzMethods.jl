@@ -596,13 +596,13 @@ end
 
         h = 1 / (m + 1)
         ρ = optimized_robin_parameter(5h) / h
-        for penalty in (:stalk, :shared)
+        for penalty in (StalkPenalty(), SharedPenalty())
             r = solve(prob, SheafADMM(rho=ρ, penalty=penalty, tol=1e-9, maxiter=5000))
             @test r.converged
             @test r.u ≈ u_exact rtol = 1e-7
         end
         @test_throws ArgumentError solve(prob, SheafADMM(rho=0.0))
-        @test_throws ArgumentError solve(prob, SheafADMM(rho=1.0, penalty=:edges))
+        @test_throws MethodError SheafADMM(rho=1.0, penalty=:edges)
 
         # On strips, sheaf diffusion can replace the exact projection; ADMM
         # converges but optimized Schwarz needs far fewer iterations.
@@ -615,7 +615,7 @@ end
         ps = optimized_robin_parameter(3hs) / hs
         dds = SchwarzDecomposition(As, sdoms; owner=strips)
         admm = solve(SchwarzProblem(dds, fs), SheafADMM(rho=ps, maxiter=5000))
-        diffused = solve(SchwarzProblem(dds, fs), SheafADMM(rho=ps, penalty=:shared, projection_steps=1, maxiter=5000))
+        diffused = solve(SchwarzProblem(dds, fs), SheafADMM(rho=ps, penalty=SharedPenalty(), projection_steps=1, maxiter=5000))
         robin = stationary(SchwarzDecomposition(As, sdoms; owner=strips, transmission=RobinTransmission(ps)), fs;
             sweep=ParallelSweep())
         @test admm.converged && diffused.converged && robin.converged
@@ -706,7 +706,7 @@ end
         @test_throws ArgumentError refactor!(ddi, Z; At=A)
 
         # Inexact local solves: symmetric Gauss–Seidel inside each subdomain.
-        M = SymmetricGaussSeidel(A; ordering=:natural)
+        M = SymmetricGaussSeidel(A; ordering=NaturalOrdering())
         D, Lo, Up = Diagonal(A), tril(A, -1), triu(A, 1)
         r = collect(range(-1.0, 1.0; length=m * m))
         @test ldiv!(similar(r), M, r) ≈ (Matrix(D + Up) \ (D * (Matrix(D + Lo) \ r))) rtol = 1e-12
@@ -718,12 +718,12 @@ end
         Dq, Lq, Uq = Diagonal(Aq), tril(Aq, -1), triu(Aq, 1)
         @test ldiv!(similar(r), Mc, r)[q] ≈ Matrix(Dq + Uq) \ (Dq * (Matrix(Dq + Lq) \ r[q])) rtol = 1e-12
         @test ldiv!(similar(r), SymmetricGaussSeidel(A; threaded=true), r) ≈ ldiv!(similar(r), Mc, r) rtol = 1e-14
-        @test ldiv!(similar(r), SymmetricGaussSeidel(A; colors=Mc.colors), r) ≈ ldiv!(similar(r), Mc, r)
-        @test_throws ArgumentError SymmetricGaussSeidel(A; colors=[collect(1:m * m)])         # coupled, same color
-        @test_throws ArgumentError SymmetricGaussSeidel(A; colors=[collect(2:m * m)])         # not a partition
-        @test_throws ArgumentError SymmetricGaussSeidel(A; ordering=:random)
+        @test ldiv!(similar(r), SymmetricGaussSeidel(A; ordering=MulticolorOrdering(Mc.colors)), r) ≈ ldiv!(similar(r), Mc, r)
+        @test_throws ArgumentError SymmetricGaussSeidel(A; ordering=MulticolorOrdering([collect(1:m * m)]))         # coupled, same color
+        @test_throws ArgumentError SymmetricGaussSeidel(A; ordering=MulticolorOrdering([collect(2:m * m)]))         # not a partition
+        @test_throws TypeError SymmetricGaussSeidel(A; ordering=:random)
         for MM in (M, Mc)
-            M3 = SymmetricGaussSeidel(A; sweeps=3, ordering=isempty(MM.colors) ? :natural : :multicolor)
+            M3 = SymmetricGaussSeidel(A; sweeps=3, ordering=isempty(MM.colors) ? NaturalOrdering() : MulticolorOrdering())
             y = zeros(m * m)
             for _ in 1:3
                 y += ldiv!(similar(r), MM, r - A * y)
@@ -732,7 +732,7 @@ end
         end
         @test_throws ArgumentError SymmetricGaussSeidel(A - Diagonal(A))
         @test_throws ArgumentError SymmetricGaussSeidelLocalSolve(sweeps=0)
-        for (sweeps, ordering) in ((1, :multicolor), (2, :multicolor), (1, :natural))
+        for (sweeps, ordering) in ((1, MulticolorOrdering()), (2, MulticolorOrdering()), (1, NaturalOrdering()))
             dds = SchwarzDecomposition(A, doms; owner=parts,
                 local_solver=SymmetricGaussSeidelLocalSolve(; sweeps, ordering))
             @test all(lp -> lp.factor isa SymmetricGaussSeidel, dds.locals)
@@ -805,7 +805,7 @@ end
         M = SymmetricGaussSeidel(A)
         @test !any(c -> 1 in c && 5 in c, M.colors)
         b = collect(1.0:n)
-        @test ldiv!(zeros(n), M, b) ≈ ldiv!(zeros(n), SymmetricGaussSeidel(A; colors = M.colors), b)
+        @test ldiv!(zeros(n), M, b) ≈ ldiv!(zeros(n), SymmetricGaussSeidel(A; ordering = MulticolorOrdering(M.colors)), b)
     end
 
     @testset "Interfaces" begin

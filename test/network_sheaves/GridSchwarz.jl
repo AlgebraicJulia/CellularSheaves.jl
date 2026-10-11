@@ -54,7 +54,7 @@ end
         coef = upwind_coefficients(rng, n)
         A = assembled(coef)
         op = GridOperator(coef; ghost=2)
-        @test size(op) == n && ndims(op) == length(n)
+        @test gridsize(op) == n && size(op) == (prod(n), prod(n)) && size(op, 3) == 1 && eltype(op) == Float64
         x = grid_zeros(op)
         interior(x, op) .= randn(rng, n...)
         y = grid_zeros(op)
@@ -112,9 +112,9 @@ end
     @test_throws ArgumentError BoxLayout((10, 7), (3, 7), 0; overlap = 1)  # boxes of one point < width 2
     s = CoefficientStencil(zeros(3, 4, 5))
     own = box_operator(layout, s)
-    @test own.origin == (2, 2) && own.padded == (7, 8) && size(own) == (3, 4)
+    @test own.origin == (2, 2) && own.padded == (7, 8) && gridsize(own) == (3, 4)
     ext = box_operator(layout, CoefficientStencil(zeros(5, 5, 5)), :extended)
-    @test ext.origin == (1, 1) && ext.padded == own.padded && size(ext) == (5, 5)
+    @test ext.origin == (1, 1) && ext.padded == own.padded && gridsize(ext) == (5, 5)
     @test own.parity == (4 + 4 - 2) & 1 && ext.parity == (3 + 3 - 2) & 1
     # One box: exchange is a no-op, gather returns the interior.
     single = BoxLayout((5, 4), (1, 1), 0)

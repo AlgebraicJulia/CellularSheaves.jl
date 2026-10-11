@@ -142,7 +142,7 @@ is a single exchange with the neighbours.
 | | Robin (optimized Schwarz) | Sheaf ADMM |
 |---|---|---|
 | local operator | ``A_{\Omega_i\Omega_i} - N_i``: full operator, Dirichlet coupling removed on interface rows | ``K_i``: the subdomain's share of the energy on its closed stalk |
-| penalty | ``p_{ij}`` on each interface face | ``\rho`` on the whole stalk (`penalty = :stalk`) or on shared dofs (`:shared`) |
+| penalty | ``p_{ij}`` on each interface face | ``\rho`` on the whole stalk (`penalty = StalkPenalty()`) or on shared dofs (`SharedPenalty()`) |
 | data | neighbour's current values on ``\Gamma_i`` and at the interface | ``z_i - y_i``: average of copies minus multiplier |
 | needs overlap | yes (one layer at least) | no |
 | convergence | not proven for every ``p``; fast at ``p^*`` | proven for every ``\rho > 0`` with an exact projection |
@@ -167,7 +167,7 @@ The difference is in what a local solve knows. A Robin subdomain has the true
 operator on its whole interior and reads its neighbours' values *and fluxes*
 directly. An ADMM subdomain holds only part of the stiffness on shared dofs
 and sees its neighbours only through averages. The flux has to be learned
-iteratively in ``y``. Penalizing only shared dofs (`penalty = :shared`) changes
+iteratively in ``y``. Penalizing only shared dofs (`penalty = SharedPenalty()`) changes
 little.
 
 Replacing the exact projection by a single diffusion step

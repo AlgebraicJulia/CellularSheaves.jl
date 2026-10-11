@@ -19,7 +19,7 @@ using Printf
 
 n = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 17
 out = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "..", "figures", "hjb", "policy_iteration.bin")
-prob = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = :disc)
+prob = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = DiscConstraint())
 
 snapshots = []
 t = @elapsed sol = solve(prob, GridPolicyIteration(callback = s -> push!(snapshots, s)))

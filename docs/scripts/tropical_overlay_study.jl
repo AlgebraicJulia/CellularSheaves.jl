@@ -89,7 +89,7 @@ for (name, ψ, steps) in (("space–time 16×16 k=4", spacetime_blocks(P.points,
                          ("space 16×16", position_blocks(P.points, 4), 1))
     A = Abstraction(P.W, ψ; steps)
     td = @elapsed Ad = Abstraction(P.W, ψ; steps, table = true)
-    tp = @elapsed Ap = Abstraction(P.W, ψ; steps, method = :pathpack, table = true)
+    tp = @elapsed Ap = Abstraction(P.W, ψ; steps, closure = PathPackClosure(), table = true)
     tb = @elapsed Abstraction(P.W, ψ; steps)                     # the quotient alone
     hs, ts = timed(() -> lower_bound(A, P.goal))
     ht, tt = timed(() -> lower_bound(Ad, P.goal))

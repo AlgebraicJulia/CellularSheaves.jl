@@ -203,7 +203,7 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
             steps == 1 && ψ === space[1][1] && @test r.expanded < d.expanded
         end
         # PathPack's chordal min-plus LU gives the same coarse closure.
-        @test lower_bound(Abstraction(W, ψ; steps, method = :pathpack), goal) == h
+        @test lower_bound(Abstraction(W, ψ; steps, closure = PathPackClosure()), goal) == h
     end
     # Coarsening time with space keeps the bound tight where space alone loses it.
     hs = lower_bound(Abstraction(W, space[2][1]), goal)                # positions 4 × 4, one step
@@ -252,7 +252,7 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     for (ψ, steps) in (space[1], spacetime[1])
         h = lower_bound(Abstraction(W, ψ; steps), goal)
         @test lower_bound(Abstraction(W, ψ; steps, table = true), goal) == h
-        @test lower_bound(Abstraction(W, ψ; steps, method = :pathpack, table = true), goal) == h
+        @test lower_bound(Abstraction(W, ψ; steps, closure = PathPackClosure(), table = true), goal) == h
     end
 
     # ---- option 2: exact elimination of cell interiors (overlay) ---------------
@@ -421,7 +421,7 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     @test_throws ArgumentError cost_to_go(-W, goal)
     @test_throws ArgumentError quotient_graph(W, aggregation_homomorphism((6, 5), (2, 2)))
     @test_throws ArgumentError quotient_graph(W, space[1][1]; steps = 2, combine = max)
-    @test_throws ArgumentError Abstraction(W, space[1][1]; method = :other)
+    @test_throws TypeError Abstraction(W, space[1][1]; closure = :other)
     @test_throws ArgumentError Abstraction(W, space[1][1]; steps = 0)
     @test_throws ArgumentError Abstraction(W, GraphHomomorphism([1, 2], 2))         # ψ must map the states of W
     @test_throws ArgumentError shortest_path(W, sources[1], goal; heuristic = zeros(3))

@@ -76,8 +76,8 @@ const DIH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
         @test value_at(sol, x) ≈ value_at(sol, x .+ [2π, -2π, 0, 0])
         @test control_at(sol, x) ≈ control_at(sol, x .+ [2π, 0, 0, 0])
         # Every preconditioner reaches the same discrete solution.
-        for pc in (:ras, :none)
-            other = solve(prob, GridPolicyIteration(preconditioner = pc))
+        for smoother in (RestrictedAdditiveSchwarzSmoother(), nothing)
+            other = solve(prob, GridPolicyIteration(; smoother))
             @test other.converged
             @test other.values ≈ sol.values rtol = 1e-7
         end
@@ -88,13 +88,13 @@ const DIH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
         @test sum(inexact.linear_iterations) < sum(sol.linear_iterations)
         # A second level (aggregation coarse space, dense LU) changes the
         # preconditioner, not the solution.
-        for correction in (:multiplicative, :additive), pc in (:red_black_sgs, :ras)
-            two = solve(prob, GridPolicyIteration(preconditioner = pc, coarse_blocks = [4, 4, 3, 3],
-                coarse_correction = correction))
+        for composition in (MultiplicativeComposition(), AdditiveComposition()),
+                smoother in (SymmetricGaussSeidelSmoother(), RestrictedAdditiveSchwarzSmoother())
+            two = solve(prob, GridPolicyIteration(; smoother, coarse = AggregateCoarseCorrection([4, 4, 3, 3]; composition)))
             @test two.converged
             @test two.values ≈ sol.values rtol = 1e-7
         end
-        @test_throws ArgumentError solve(prob, GridPolicyIteration(coarse_blocks = [4, 4, 3, 3], coarse_correction = :other))
+        @test_throws TypeError AggregateCoarseCorrection([4, 4, 3, 3]; composition = :other)
         # The discrete equation holds: the improved policy is the policy evaluated,
         # and (A_u V)(x) = ℓ(x, u) at every grid point.
         g = prob.grid

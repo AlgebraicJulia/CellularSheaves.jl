@@ -32,10 +32,10 @@ else
     KernelAbstractions.CPU()
 end
 
-integrator(n) = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = :disc)
+integrator(n) = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = DiscConstraint())
 arm(na, np) = MechanicalHJBProblem(TwoLinkArm(); angle_points = na, momentum_points = np, torque_bound = (6.0, 3.0))
 
-# The automatic hierarchy (Multigrid(levels = :auto)): its number of levels and coarsest grid.
+# The automatic hierarchy (Multigrid(levels = nothing)): its number of levels and coarsest grid.
 function hierarchy(prob, mg)
     points, periodic = Tuple(DIH._state_grid(prob).points), DIH._periodic(prob)
     levels = DIH._plan_levels(mg, points, periodic)
@@ -85,13 +85,13 @@ open(out, "w") do io
     println(io, "problem,nodes,method,levels,coarsest,policy_iterations,inner_total,inner_per_evaluation,seconds,setup_seconds,linear_seconds,max_value_difference,coarse_operator_difference")
     for (label, prob) in cases
         warm = occursin("arm", label) ? arm(8, 6) : integrator(8)
-        solve(warm, GridPolicyIteration(backend = backend, multigrid = Multigrid(levels = 2)))       # compile
+        solve(warm, GridPolicyIteration(backend = backend, coarse = Multigrid(levels = 2)))       # compile
         levels, coarsest = hierarchy(prob, Multigrid())
         reference, difference = nothing, NaN
         for (method, mg) in (("one level", nothing),
-                             ("rediscretize", Multigrid(coarse_operator = :rediscretize)),
-                             ("galerkin", Multigrid(coarse_operator = :galerkin)))
-            t = @elapsed sol = solve(prob, GridPolicyIteration(backend = backend, maxiter = 100, multigrid = mg))
+                             ("rediscretize", Multigrid(coarse_operator = Rediscretization())),
+                             ("galerkin", Multigrid(coarse_operator = GalerkinOperator())))
+            t = @elapsed sol = solve(prob, GridPolicyIteration(backend = backend, maxiter = 100, coarse = mg))
             if reference === nothing
                 reference = sol.values
                 U = reshape(permutedims(sol.controls), DIH._state_grid(prob).points..., size(sol.controls, 1))

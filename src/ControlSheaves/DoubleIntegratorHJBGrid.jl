@@ -53,7 +53,7 @@ function _KernelProblem(prob, offset::NTuple{D,Int}) where {D}
     g = _state_grid(prob)
     @argcheck ndims(g) == D
     m = _kernel_model(prob)
-    return _KernelProblem{D,typeof(m)}(Tuple(g.lower), Tuple(g.spacing), Tuple(1 ./ g.spacing), Tuple(g.points),
+    return _KernelProblem{D,typeof(m)}(g.lower, g.spacing, 1 ./ g.spacing, g.points,
         offset, _periodic(prob), _discount(prob), m)
 end
 
@@ -100,7 +100,7 @@ _control_count(prob::HJBProblem) = prob.axes
 _discount(prob::HJBProblem) = prob.discount
 _kernel_model(prob::HJBProblem) =
     _DoubleIntegratorModel{length(prob.riccati)}(prob.position_weight, prob.velocity_weight, prob.control_weight,
-        prob.control_bound, prob.constraint === :disc, Tuple(vec(prob.riccati)))
+        prob.control_bound, prob.constraint isa DiscConstraint, Tuple(vec(prob.riccati)))
 
 @inline function _riccati(m::_DoubleIntegratorModel, x::NTuple{D}) where {D}
     acc = 0.0
@@ -288,16 +288,15 @@ end
 
 function _launch!(kernel, op::GridOperator, args...)
     backend = get_backend(op)
-    kernel(backend)(args...; ndrange=size(op))
+    kernel(backend)(args...; ndrange=gridsize(op))
     KernelAbstractions.synchronize(backend)
 end
 
 """
     GridPolicyIteration(; backend = KernelAbstractions.CPU(), communicator = SerialBoxes(),
-                        ranks = nothing, overlap = 1, preconditioner = :red_black_sgs,
-                        tol = 1e-8, maxiter = 50, linear_tol = 1e-10, linear_maxiter = 2000,
-                        forcing = 0, coarse_blocks = nothing, coarse_correction = :multiplicative,
-                        multigrid = nothing, callback = nothing)
+                        ranks = nothing, overlap = 1, smoother = SymmetricGaussSeidelSmoother(),
+                        coarse = nothing, tol = 1e-8, maxiter = 50, linear_tol = 1e-10,
+                        linear_maxiter = 2000, forcing = 0, callback = nothing)
 
 Howard's policy iteration (as [`PolicyIteration`](@ref)) without assembling
 sparse matrices or storing stencil coefficients: the policy evaluation operator
@@ -311,32 +310,15 @@ The grid is split into one box per rank of `communicator` (`SerialBoxes()`: a
 single box; `mpi_boxes(comm)` with MPI.jl: one box per MPI rank), `ranks`
 boxes per dimension (default `balanced_ranks`), each storing its owned points
 plus ghost cells. Each evaluation is solved with BiCGStab (`grid_bicgstab!`,
-inner products reduced over all ranks), right-preconditioned by
+inner products reduced over all ranks), right-preconditioned by the
+[`Smoother`](@ref) `smoother`: [`SymmetricGaussSeidelSmoother`](@ref) (one global
+red–black sweep), [`RestrictedAdditiveSchwarzSmoother`](@ref) (on the boxes
+extended by `overlap` points) or `nothing`.
 
-- `:red_black_sgs`: one global red–black symmetric Gauss–Seidel sweep, the
-  same operator for any number of ranks (two halo exchanges per sweep);
-- `:ras`: restricted additive Schwarz on the boxes extended by `overlap`
-  points, with one local red–black sweep per box (one halo exchange per
-  application; the boxes are the vertices of the overlap sheaf and the
-  exchanges run along its edges). Equal to `:red_black_sgs` on one box;
-- `:none`.
-
-With `coarse_blocks` (aggregates per dimension, e.g. `[4, 4, 2, 2]`) the
-preconditioner gets a second level: a piecewise-constant coarse space on that
-grid of aggregates ([`AggregateCoarseSpace`](@ref CellularSheaves.NetworkSheaves.GridSchwarz.AggregateCoarseSpace)),
-independent of the boxes, whose Galerkin operator ``A_0 = R_0 A R_0^\\mathsf{T}``
-is computed from the stencil, summed over all ranks and factorized by dense LU
-on every rank once per policy evaluation. `coarse_correction = :multiplicative`
-applies the coarse correction ``z = R_0^\\mathsf{T} A_0^{-1} R_0 v`` first and the
-one-level preconditioner ``M`` to the remaining residual,
-``z + M(v - Az)``; `:additive` returns ``M v + z``. The coarse LU uses BLAS: with
-Julia threads spinning (`JULIA_THREAD_SLEEP_THRESHOLD=infinite`) run BLAS on
-one thread (`BLAS.set_num_threads(1)`), or the competing threads slow the
-small factorization down by orders of magnitude.
-
-With `multigrid = Multigrid(...)` ([`Multigrid`](@ref)) the preconditioner is
-instead one V-cycle over a hierarchy of cell-centred coarse grids, whose
-coarsest grid is solved directly (single box).
+`coarse`, a [`CoarseCorrection`](@ref), adds a second level:
+[`AggregateCoarseCorrection`](@ref) (a piecewise-constant coarse space on a grid
+of aggregates, any number of boxes) or [`Multigrid`](@ref) (one V-cycle over a
+hierarchy of cell-centred coarse grids, in place of the smoother; single box).
 
 Warm started from the previous value function. With `forcing = η > 0` the
 evaluations are inexact, as in an inexact Newton method (policy iteration is
@@ -350,7 +332,7 @@ only declared after an evaluation solved to `linear_tol`. With `forcing = 0`
 The policy is improved on each extended box after a halo exchange of the values. Every rank returns the whole
 solution. Also solves [`MechanicalHJBProblem`](@ref CellularSheaves.ControlSheaves.MechanicalHJB.MechanicalHJBProblem)s,
 whose joint angles are periodic dimensions of the grid. On one box this gives the same discrete solution as
-[`PolicyIteration`](@ref), whose `KrylovPolicyEvaluation(method = :bicgstab)`
+[`PolicyIteration`](@ref), whose `KrylovPolicyEvaluation(method = BiCGStab())`
 uses the identical preconditioner on the assembled matrices.
 
 `callback(snapshot)`, if given, is called on every rank with the state of the
@@ -363,36 +345,42 @@ and the policy improved from them. `snapshot` is a named tuple
 a `d × N` matrix in the layout of [`HJBSolution`](@ref), and `change` the
 largest change of the values in that iteration (`NaN` at the start).
 """
-Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator,F}
+Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator,S<:Union{Nothing,Smoother},K<:Union{Nothing,CoarseCorrection},F}
     backend::B = KernelAbstractions.CPU()
     communicator::C = SerialBoxes()
     ranks::Union{Nothing,Vector{Int}} = nothing
     overlap::Int = 1
-    preconditioner::Symbol = :red_black_sgs
+    smoother::S = SymmetricGaussSeidelSmoother()
+    coarse::K = nothing
     tol::Float64 = 1e-8
     maxiter::Int = 50
     linear_tol::Float64 = 1e-10
     linear_maxiter::Int = 2000
     forcing::Float64 = 0.0
-    coarse_blocks::Union{Nothing,Vector{Int}} = nothing
-    coarse_correction::Symbol = :multiplicative
-    multigrid::Union{Nothing,Multigrid} = nothing
     callback::F = nothing
 end
+
+# The one-level preconditioner y = M v of a smoother on the grid operator.
+_grid_smoother(::Nothing, op, op_extended, exchange) = copyto!
+_grid_smoother(::SymmetricGaussSeidelSmoother, op, op_extended, exchange) =
+    (y, v) -> red_black_sgs!(y, op, v; exchange)
+_grid_smoother(::RestrictedAdditiveSchwarzSmoother, op, op_extended, exchange) =
+    (y, v) -> (exchange(v); red_black_sgs!(y, op_extended, v))
+_grid_smoother(s::Smoother, op, op_extended, exchange) = throw(ArgumentError(
+    "GridPolicyIteration takes SymmetricGaussSeidelSmoother, RestrictedAdditiveSchwarzSmoother or nothing, not $(typeof(s))"))
 
 CommonSolve.solve(prob::AbstractHJBProblem, alg::GridPolicyIteration) = _grid_solve(prob, alg)
 
 # The solve for any problem type that implements the interface at the top of this file.
 function _grid_solve(prob, alg::GridPolicyIteration)
     @argcheck alg.maxiter >= 1 && alg.tol > 0
-    @argcheck alg.preconditioner in (:red_black_sgs, :ras, :none) "preconditioner must be :red_black_sgs, :ras or :none"
     g = _state_grid(prob)
     D, d = ndims(g), _control_count(prob)
     comm = alg.communicator
-    points = Tuple(g.points)
+    points = g.points
     periodic = _periodic(prob)
     # Red–black ordering around a periodic dimension needs an even number of points.
-    @argcheck alg.preconditioner === :none || all(k -> !periodic[k] || iseven(points[k]), 1:D) "red–black sweeps need an even number of points in periodic dimensions"
+    @argcheck alg.smoother === nothing || all(k -> !periodic[k] || iseven(points[k]), 1:D) "red–black sweeps need an even number of points in periodic dimensions"
     ranks = alg.ranks === nothing ? balanced_ranks(box_count(comm), points) : Tuple(alg.ranks)
     @argcheck length(ranks) == D && prod(ranks) == box_count(comm) "ranks must have one entry per dimension and multiply to the number of boxes"
     layout = BoxLayout(points, ranks, box_rank(comm); overlap=alg.overlap, periodic)
@@ -408,33 +396,25 @@ function _grid_solve(prob, alg::GridPolicyIteration)
     op_extended = box_operator(layout, _UpwindStencil(U, kp_extended), :extended)
     V, Vnew, b = grid_zeros(op), grid_zeros(op), grid_zeros(op)
     ws = GridWorkspace(op)
-    smoother! = if alg.preconditioner === :none
-        copyto!
-    elseif alg.preconditioner === :ras
-        (y, v) -> (exchange(v); red_black_sgs!(y, op_extended, v))
-    else
-        (y, v) -> red_black_sgs!(y, op, v; exchange)
-    end
+    smoother! = _grid_smoother(alg.smoother, op, op_extended, exchange)
     # The optional second level: an aggregation coarse space, its dense LU
     # refreshed for each policy (factor[]).
-    @argcheck alg.coarse_correction in (:multiplicative, :additive) "coarse_correction must be :multiplicative or :additive"
-    coarse = alg.coarse_blocks === nothing ? nothing : AggregateCoarseSpace(layout, alg.coarse_blocks; backend)
+    coarse = alg.coarse isa AggregateCoarseCorrection ? AggregateCoarseSpace(layout, alg.coarse.blocks; backend) : nothing
     factor = Ref(lu(ones(1, 1)))
     z, Az = grid_zeros(op), grid_zeros(op)
     coarse_solve(v) = factor[] \ coarse_restrict(coarse, v, op, comm)
     # Or a V-cycle over coarse grids (single box), in place of both.
-    hierarchy = if alg.multigrid === nothing
-        nothing
-    else
+    hierarchy = if alg.coarse isa Multigrid
         @argcheck box_count(comm) == 1 "multigrid is single-box: use SerialBoxes()"
-        @argcheck coarse === nothing "multigrid and coarse_blocks are alternatives"
-        _Hierarchy(alg.multigrid, prob, op, layout, U, backend)
+        _Hierarchy(alg.coarse, prob, op, layout, U, backend)
+    else
+        nothing
     end
     precondition! = if hierarchy !== nothing
         (y, v) -> _vcycle!(hierarchy, 1, y, v)
     elseif coarse === nothing
         smoother!
-    elseif alg.coarse_correction === :additive
+    elseif alg.coarse.composition isa AdditiveComposition
         (y, v) -> (smoother!(y, v); coarse_prolong_add!(y, coarse, coarse_solve(v), op))
     else
         function (y, v)

@@ -36,7 +36,7 @@ function coarse_operators(prob, U)
 end
 
 function compare(label, prob)
-    sol = solve(prob, GridPolicyIteration(multigrid = Multigrid(levels = 2)))
+    sol = solve(prob, GridPolicyIteration(coarse = Multigrid(levels = 2)))
     n = DIH._state_grid(prob).points
     D = length(n)
     U = reshape(permutedims(sol.controls), n..., size(sol.controls, 1))
@@ -56,7 +56,7 @@ end
 
 for n in (12, 24)
     compare("double integrator $(n)^4", HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0,
-        constraint = :disc))
+        constraint = DiscConstraint()))
 end
 for (na, np) in ((16, 12), (32, 24))
     compare("arm $(na)^2x$(np)^2", MechanicalHJBProblem(TwoLinkArm(); angle_points = na, momentum_points = np,

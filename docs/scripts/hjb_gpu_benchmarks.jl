@@ -22,7 +22,7 @@ const BACKEND = CUDABackend()
 println(CUDA.name(CUDA.device()), ", ", Threads.nthreads(), " CPU threads for the CPU reference")
 flush(stdout)
 
-disc(n) = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = :disc)
+disc(n) = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4)); control_bound = 1.0, constraint = DiscConstraint())
 
 for prob in (HJBProblem(StateGrid([-2.0, -2.0], [2.0, 2.0], [41, 41]); control_bound = 1.0), disc(13))
     cpu = solve(prob, GridPolicyIteration())

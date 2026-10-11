@@ -7,7 +7,7 @@ using Random
 # The dense matrix of the operator of `op` on the single box `layout` (periodic
 # dimensions wrap through the halo exchange), column by column.
 function dense_operator(op, layout)
-    n = size(op)
+    n = gridsize(op)
     N = prod(n)
     A = zeros(N, N)
     e, y = grid_zeros(op), grid_zeros(op)

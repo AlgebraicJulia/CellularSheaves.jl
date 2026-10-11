@@ -55,10 +55,10 @@ blocks(n) = fill(max(2, round(Int, n / 7)), 4)        # about 7 points per box p
 
 function method(name, n)
     name == "direct" && return DirectPolicyEvaluation()
-    name == "gmres-gs" && return KrylovPolicyEvaluation(preconditioner = :gauss_seidel)
-    name == "gmres-sgs" && return KrylovPolicyEvaluation(preconditioner = :symmetric_gauss_seidel)
-    name == "bicgstab-sgs" && return KrylovPolicyEvaluation(method = :bicgstab, preconditioner = :symmetric_gauss_seidel)
-    name == "gmres-bsgs" && return KrylovPolicyEvaluation(preconditioner = :block_symmetric_gauss_seidel, blocks = fill(4, 4))
+    name == "gmres-gs" && return KrylovPolicyEvaluation(preconditioner = GaussSeidelSmoother())
+    name == "gmres-sgs" && return KrylovPolicyEvaluation(preconditioner = SymmetricGaussSeidelSmoother())
+    name == "bicgstab-sgs" && return KrylovPolicyEvaluation(method = BiCGStab(), preconditioner = SymmetricGaussSeidelSmoother())
+    name == "gmres-bsgs" && return KrylovPolicyEvaluation(preconditioner = BlockSymmetricGaussSeidelSmoother(fill(4, 4)))
     name == "multicolor" && return SchwarzPolicyEvaluation(blocks(n))
     name == "ras-gmres" && return SchwarzPolicyEvaluation(blocks(n);
         algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))
@@ -84,7 +84,7 @@ end
 
 function run(n, name)
     grid = StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(n, 4))
-    prob = HJBProblem(grid; control_bound = 1.0, constraint = :disc)
+    prob = HJBProblem(grid; control_bound = 1.0, constraint = DiscConstraint())
     GC.gc()
     alg = name == "grid" ? GridPolicyIteration() : PolicyIteration(evaluation = method(name, n))
     t = @elapsed sol = solve(prob, alg)

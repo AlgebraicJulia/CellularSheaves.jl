@@ -73,7 +73,7 @@ end
         @test all(k -> k in doms[parts[k]], 1:length(g))
         @test sum(length, doms) > length(g)
         @test_throws ArgumentError HJBProblem(StateGrid([-1.0], [1.0], [5]))
-        @test_throws ArgumentError HJBProblem(g; constraint = :disc)
+        @test_throws ArgumentError HJBProblem(g; constraint = DiscConstraint())
     end
 
     grid1(n) = StateGrid([-2.0, -2.0], [2.0, 2.0], [n, n])
@@ -142,12 +142,12 @@ end
             algorithm = SchwarzGMRES(sweep = ParallelSweep(), tol = 1e-10, maxiter = 500))))
         @test krylov.values ≈ direct.values rtol = 1e-6
         # Threaded BiCGStab, globally and with the Schwarz preconditioner.
-        for preconditioner in (:symmetric_gauss_seidel, :none)
-            bicg = solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(; method = :bicgstab, preconditioner)))
+        for preconditioner in (SymmetricGaussSeidelSmoother(), nothing)
+            bicg = solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(; method = BiCGStab(), preconditioner)))
             @test bicg.converged
             @test bicg.values ≈ direct.values rtol = 1e-6
         end
-        @test_throws ArgumentError solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(method = :cg)))
+        @test_throws MethodError KrylovPolicyEvaluation(method = :cg)
         rasbicg = solve(small, PolicyIteration(evaluation = SchwarzPolicyEvaluation([4, 4];
             algorithm = SchwarzMethods.SchwarzBiCGStab(tol = 1e-10, maxiter = 500),
             local_solver = SchwarzMethods.SymmetricGaussSeidelLocalSolve())))
@@ -166,11 +166,12 @@ end
         # Block symmetric Gauss–Seidel: one block is the global smoother.
         for blocks in ([1, 1], [4, 4])
             blocked = solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(
-                preconditioner = :block_symmetric_gauss_seidel, blocks = blocks)))
+                preconditioner = BlockSymmetricGaussSeidelSmoother(blocks))))
             @test blocked.values ≈ direct.values rtol = 1e-6
         end
+        # The grid-only smoother needs the grid operator.
         @test_throws ArgumentError solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(
-            preconditioner = :block_symmetric_gauss_seidel)))
+            preconditioner = RestrictedAdditiveSchwarzSmoother())))
         # The parallel assembly into the fixed stencil matches a direct construction.
         U = DIH._lqr_controls(small)
         A, At, b = DIH._assemble(small, U, DIH._stencil(small.grid))
@@ -178,19 +179,20 @@ end
         @test all(sum(A; dims = 2) .>= small.discount - 1e-12)          # row diagonal dominance by ρ
         @test CellularSheaves.NetworkSheaves.SchwarzMethods._within_pattern(A, DIH._stencil_pattern(DIH._stencil(small.grid)))
         # The serial Newton baseline: global GMRES with a point smoother.
-        for preconditioner in (:gauss_seidel, :symmetric_gauss_seidel, :jacobi)
+        for preconditioner in (GaussSeidelSmoother(), SymmetricGaussSeidelSmoother(), JacobiSmoother())
             serial = solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(; preconditioner)))
             @test serial.converged
             @test serial.values ≈ direct.values rtol = 1e-6
         end
-        @test_throws ArgumentError solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(preconditioner = :ilu)))
+        @test_throws MethodError KrylovPolicyEvaluation(preconditioner = :ilu)
+        @test_throws ArgumentError HJBProblem(StateGrid([-1.0, -1.0], [1.0, 1.0], [5, 5]); constraint = DiscConstraint())
         @test all(>=(0), values(stationary.seconds)) && stationary.seconds.setup > 0
     end
 
     @testset "implicit grid policy iteration" begin
         for (prob, rtol) in ((HJBProblem(grid1(41); control_bound = 1.0), 1e-7),
                              (HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(9, 4)); control_bound = 1.0,
-                                 constraint = :disc), 1e-7))
+                                 constraint = DiscConstraint()), 1e-7))
             g = prob.grid
             n, d = Tuple(g.points), prob.axes
             # The implicit upwind stencil and right-hand side reproduce the assembled system.
@@ -212,7 +214,7 @@ end
             red_black_sgs!(z, op, x)
             @test vec(interior(z, op)) ≈ ldiv!(similar(b), SymmetricGaussSeidel(A), vec(interior(x, op))) rtol = 1e-12
             # Same discrete solution as the sparse policy iteration.
-            sparse_sol = solve(prob, PolicyIteration(evaluation = KrylovPolicyEvaluation(method = :bicgstab)))
+            sparse_sol = solve(prob, PolicyIteration(evaluation = KrylovPolicyEvaluation(method = BiCGStab())))
             grid_sol = solve(prob, GridPolicyIteration())
             @test grid_sol.converged
             @test grid_sol.values ≈ sparse_sol.values rtol = rtol
@@ -234,15 +236,15 @@ end
               for I in CartesianIndices(Tuple(cbprob.grid.points))]
         @test snapshots[1].values ≈ vec([riccati_value(cbprob, x) for x in xs])
         @test size(snapshots[1].controls) == (1, length(cbprob.grid))
-        @test_throws ArgumentError solve(HJBProblem(grid1(11)), GridPolicyIteration(preconditioner = :ilu))
-        unpreconditioned = solve(HJBProblem(grid1(21)), GridPolicyIteration(preconditioner = :none))
+        @test_throws ArgumentError solve(HJBProblem(grid1(11)), GridPolicyIteration(smoother = JacobiSmoother()))
+        unpreconditioned = solve(HJBProblem(grid1(21)), GridPolicyIteration(smoother = nothing))
         @test unpreconditioned.converged
     end
 
     @testset "planar problem" begin
         g4 = StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(9, 4))
         box = solve(HJBProblem(g4; control_bound = 1.0), PolicyIteration())
-        disc = solve(HJBProblem(g4; control_bound = 1.0, constraint = :disc), PolicyIteration())
+        disc = solve(HJBProblem(g4; control_bound = 1.0, constraint = DiscConstraint()), PolicyIteration())
         @test box.converged && disc.converged
         @test maximum(norm, eachcol(disc.controls)) <= 1.0 + 1e-12
         # The disc is inside the box: the disc problem costs more.

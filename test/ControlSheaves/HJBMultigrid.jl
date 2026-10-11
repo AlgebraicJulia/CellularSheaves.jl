@@ -11,16 +11,16 @@ const MGH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
     problems = [
         ("double integrator 64²", HJBProblem(StateGrid([-2.0, -2.0], [2.0, 2.0], [64, 64]); control_bound = 1.0), 4),
         ("double integrator 12⁴ disc", HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(12, 4)); control_bound = 1.0,
-            constraint = :disc), 3),
+            constraint = DiscConstraint()), 3),
         ("arm 16²×12²", MechanicalHJBProblem(TwoLinkArm(); angle_points = 16, momentum_points = 12,
             torque_bound = (6.0, 3.0)), 3)]
     for (label, prob, levels) in problems
         @testset "$label" begin
             one_level = solve(prob, GridPolicyIteration())
             @test one_level.converged
-            for coarse_operator in (:rediscretize, :galerkin), coarsest in (:pathpack, :dense)
+            for coarse_operator in (Rediscretization(), GalerkinOperator()), coarsest in (PathPackCoarsest(), DenseCoarsest())
                 mg = Multigrid(; levels, coarse_operator, coarsest)
-                sol = solve(prob, GridPolicyIteration(multigrid = mg))
+                sol = solve(prob, GridPolicyIteration(coarse = mg))
                 @test sol.converged
                 @test sol.values ≈ one_level.values rtol = 1e-7
                 @test sum(sol.linear_iterations) < sum(one_level.linear_iterations)
@@ -55,15 +55,15 @@ const MGH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
     uneven = [
         ("double integrator 63²", HJBProblem(StateGrid([-2.0, -2.0], [2.0, 2.0], [63, 63]); control_bound = 1.0), 64),
         ("double integrator 11⁴ disc", HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(11, 4)); control_bound = 1.0,
-            constraint = :disc), 100),
+            constraint = DiscConstraint()), 100),
         ("arm 12²×13²", MechanicalHJBProblem(TwoLinkArm(); angle_points = 12, momentum_points = 13,
             torque_bound = (6.0, 3.0)), 200)]
     for (label, problem, size) in uneven
         @testset "$label (automatic levels)" begin
             reference = solve(problem, GridPolicyIteration())
-            for coarse_operator in (:rediscretize, :galerkin)
+            for coarse_operator in (Rediscretization(), GalerkinOperator())
                 mg = Multigrid(; coarsest_size = size, coarse_operator)
-                sol = solve(problem, GridPolicyIteration(multigrid = mg))
+                sol = solve(problem, GridPolicyIteration(coarse = mg))
                 @test sol.converged
                 @test sol.values ≈ reference.values rtol = 1e-7
                 @test sum(sol.linear_iterations) < sum(reference.linear_iterations)
@@ -72,9 +72,9 @@ const MGH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
     end
 
     # Invalid hierarchies.
-    @test_throws ArgumentError solve(prob, GridPolicyIteration(multigrid = Multigrid(levels = 9)))
-    @test_throws ArgumentError solve(prob, GridPolicyIteration(multigrid = Multigrid(levels = 1)))
-    @test_throws ArgumentError solve(prob, GridPolicyIteration(multigrid = Multigrid(coarsest_size = 100)))   # 8² is already small
-    @test_throws ArgumentError solve(prob, GridPolicyIteration(multigrid = Multigrid(levels = 2, coarse_operator = :other)))
-    @test_throws ArgumentError solve(prob, GridPolicyIteration(multigrid = Multigrid(levels = 2), coarse_blocks = [2, 2]))
+    @test_throws ArgumentError solve(prob, GridPolicyIteration(coarse = Multigrid(levels = 9)))
+    @test_throws ArgumentError solve(prob, GridPolicyIteration(coarse = Multigrid(levels = 1)))
+    @test_throws ArgumentError solve(prob, GridPolicyIteration(coarse = Multigrid(coarsest_size = 100)))   # 8² is already small
+    @test_throws MethodError Multigrid(levels = 2, coarse_operator = :other)
+    @test_throws ArgumentError solve(prob, GridPolicyIteration(coarse = Multigrid(levels = 2), smoother = GaussSeidelSmoother()))
 end

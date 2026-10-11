@@ -71,13 +71,14 @@ using LinearAlgebra
 using SparseArrays
 using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, SchwarzProblem,
     SchwarzIteration, MulticolorSweep, refactor!, _stable_lu, _threaded_mul!,
-    LocalSolver, ExactLocalSolve, SymmetricGaussSeidel, _bicgstab!, _submatrix
+    LocalSolver, ExactLocalSolve, SymmetricGaussSeidel, _bicgstab!, _submatrix,
+    LevelComposition, AdditiveComposition, MultiplicativeComposition
 using Krylov: gmres
 using KernelAbstractions
 using KernelAbstractions: @kernel, @index, @Const, get_backend
 using Adapt: Adapt
 using CellularSheaves.NetworkSheaves: GridSchwarz
-using CellularSheaves.NetworkSheaves.GridSchwarz: AbstractStencil, GridOperator, grid_zeros, interior, red_black_sgs!,
+using CellularSheaves.NetworkSheaves.GridSchwarz: AbstractStencil, GridOperator, gridsize, grid_zeros, interior, red_black_sgs!,
     GridWorkspace, grid_bicgstab!, grid_reduce, apply!, _unit, _shift, BoxCommunicator, SerialBoxes, BoxLayout,
     balanced_ranks, box_operator, box_count, box_rank, box_allreduce, exchange!, gather_boxes, AggregateCoarseSpace,
     coarse_matrix, coarse_restrict, coarse_prolong_add!, _lincomb!, CoefficientStencil
@@ -85,8 +86,14 @@ using CellularSheaves.NetworkSheaves.GridMultigrid: coarse_layout, restrict_aver
     galerkin_coefficients!, coarsening_factors, coarse_points, _children
 
 export StateGrid, AbstractHJBProblem, HJBProblem, riccati_value_matrix, riccati_value,
+    ControlConstraint, BoxConstraint, DiscConstraint,
     PolicyIteration, DirectPolicyEvaluation, KrylovPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,
-    grid_partition, grid_subdomains, value_at, control_at, GridPolicyIteration, Multigrid
+    KrylovMethod, GMRES, BiCGStab,
+    Smoother, JacobiSmoother, GaussSeidelSmoother, SymmetricGaussSeidelSmoother,
+    BlockSymmetricGaussSeidelSmoother, RestrictedAdditiveSchwarzSmoother,
+    CoarseCorrection, AggregateCoarseCorrection, Multigrid, CoarseOperator, Rediscretization, GalerkinOperator,
+    CoarsestSolver, PathPackCoarsest, DenseCoarsest,
+    grid_partition, grid_subdomains, value_at, control_at, GridPolicyIteration
 
 # ===========================================================================
 # grid
@@ -98,28 +105,36 @@ export StateGrid, AbstractHJBProblem, HJBProblem, riccati_value_matrix, riccati_
 A tensor grid on the box ``\\prod_k [\\text{lower}_k, \\text{upper}_k]`` with
 `points[k]` equally spaced points in dimension `k`, numbered in column-major
 order (the first dimension varies fastest). For the double integrator the
-dimensions are ordered ``(q_1, \\dots, q_d, v_1, \\dots, v_d)``.
+dimensions are ordered ``(q_1, \\dots, q_d, v_1, \\dots, v_d)``. The bounds and
+counts may be given as vectors or tuples; the grid stores tuples, so its
+dimension `D` is part of its type.
 """
-struct StateGrid
-    lower::Vector{Float64}
-    upper::Vector{Float64}
-    points::Vector{Int}
-    spacing::Vector{Float64}
-    strides::Vector{Int}
+struct StateGrid{D}
+    lower::NTuple{D,Float64}
+    upper::NTuple{D,Float64}
+    points::NTuple{D,Int}
+    spacing::NTuple{D,Float64}
+    strides::NTuple{D,Int}
+
+    function StateGrid(lower::NTuple{D,Real}, upper::NTuple{D,Real}, points::NTuple{D,Integer}) where {D}
+        @argcheck D >= 1 "the grid needs at least one dimension"
+        @argcheck all(upper .> lower) "need lower < upper in every dimension"
+        @argcheck all(points .>= 3) "need at least 3 points per dimension"
+        lo, hi, n = Float64.(lower), Float64.(upper), Int.(points)
+        spacing = (hi .- lo) ./ (n .- 1)
+        strides = ntuple(k -> prod(n[1:(k - 1)]; init = 1), Val(D))
+        return new{D}(lo, hi, n, spacing, strides)
+    end
 end
 
 function StateGrid(lower::AbstractVector{<:Real}, upper::AbstractVector{<:Real}, points::AbstractVector{<:Integer})
-    @argcheck length(lower) == length(upper) == length(points)
-    @argcheck all(upper .> lower) "need lower < upper in every dimension"
-    @argcheck all(points .>= 3) "need at least 3 points per dimension"
-    spacing = (Float64.(upper) .- Float64.(lower)) ./ (points .- 1)
-    strides = [prod(points[1:(k - 1)]; init = 1) for k in eachindex(points)]
-    return StateGrid(Float64.(lower), Float64.(upper), Vector{Int}(points), spacing, strides)
+    @argcheck length(lower) == length(upper) == length(points) "lower, upper and points need one entry per dimension"
+    return StateGrid(Tuple(lower), Tuple(upper), Tuple(points))
 end
 
-Base.ndims(g::StateGrid) = length(g.points)
+Base.ndims(::StateGrid{D}) where {D} = D
 Base.length(g::StateGrid) = prod(g.points)
-_cartesian(g::StateGrid) = CartesianIndices(Tuple(g.points))
+_cartesian(g::StateGrid) = CartesianIndices(g.points)
 
 function _coordinates!(x, g::StateGrid, I::CartesianIndex)
     @inbounds for k in eachindex(x)
@@ -156,7 +171,7 @@ function grid_subdomains(g::StateGrid, blocks::AbstractVector{<:Integer}; overla
         last_ = cld(b * g.points[k], blocks[k])
         max(1, first_ - overlap):min(g.points[k], last_ + overlap)
     end
-    L = LinearIndices(Tuple(g.points))
+    L = LinearIndices(g.points)
     return vec([vec(collect(L[CartesianIndices(ntuple(k -> ranges(k, B[k]), ndims(g)))]))
             for B in CartesianIndices(Tuple(blocks))])
 end
@@ -205,36 +220,58 @@ double integrator) and `MechanicalHJBProblem` (the two-link arm).
 abstract type AbstractHJBProblem end
 
 """
+    ControlConstraint
+
+The set the thrust of [`HJBProblem`](@ref) is confined to: [`BoxConstraint`](@ref)
+or [`DiscConstraint`](@ref), with radius `control_bound` ``\\bar u``.
+"""
+abstract type ControlConstraint end
+
+"""
+    BoxConstraint()
+
+Each component bounded separately: ``|u_k| \\le \\bar u``.
+"""
+struct BoxConstraint <: ControlConstraint end
+
+"""
+    DiscConstraint()
+
+The thrust bounded in norm, ``\\|u\\| \\le \\bar u`` (planar problems only): the
+two axes no longer decouple.
+"""
+struct DiscConstraint <: ControlConstraint end
+
+"""
     HJBProblem(grid; position_weight = 1, velocity_weight = 0.1, control_weight = 0.1,
-               discount = 0.5, control_bound = Inf, constraint = :box)
+               discount = 0.5, control_bound = Inf, constraint = BoxConstraint())
 
 The discounted HJB problem of the module docstring on `grid`, which must have
 2 dimensions ``(q, v)`` or 4 dimensions ``(q_1, q_2, v_1, v_2)``.
-`constraint` is `:box` (``|u_k| \\le \\bar u``) or `:disc`
-(``\\|u\\| \\le \\bar u``, planar only). Outside the grid the value is taken
-from the unbounded LQR value [`riccati_value`](@ref).
+`constraint` is the [`ControlConstraint`](@ref) on the thrust. Outside the grid
+the value is taken from the unbounded LQR value [`riccati_value`](@ref).
 """
-struct HJBProblem <: AbstractHJBProblem
-    grid::StateGrid
+struct HJBProblem{D,C<:ControlConstraint} <: AbstractHJBProblem
+    grid::StateGrid{D}
     axes::Int
     position_weight::Float64
     velocity_weight::Float64
     control_weight::Float64
     discount::Float64
     control_bound::Float64
-    constraint::Symbol
+    constraint::C
     riccati::Matrix{Float64}
 end
 
 function HJBProblem(grid::StateGrid; position_weight::Real = 1.0, velocity_weight::Real = 0.1,
-        control_weight::Real = 0.1, discount::Real = 0.5, control_bound::Real = Inf, constraint::Symbol = :box)
+        control_weight::Real = 0.1, discount::Real = 0.5, control_bound::Real = Inf,
+        constraint::ControlConstraint = BoxConstraint())
     @argcheck ndims(grid) in (2, 4) "the grid must have 2 (one axis) or 4 (planar) dimensions"
     axes = ndims(grid) ÷ 2
     @argcheck position_weight > 0 && velocity_weight >= 0 && control_weight > 0
     @argcheck discount > 0 "the discount rate must be positive"
     @argcheck control_bound > 0
-    @argcheck constraint in (:box, :disc)
-    @argcheck constraint === :box || axes == 2 "the disc constraint needs the planar (4-dimensional) problem"
+    @argcheck constraint isa BoxConstraint || axes == 2 "the disc constraint needs the planar (4-dimensional) problem"
     P = riccati_value_matrix(axes, position_weight, velocity_weight, control_weight, discount)
     return HJBProblem(grid, axes, position_weight, velocity_weight, control_weight, discount,
         control_bound, constraint, P)
@@ -255,7 +292,7 @@ _running_cost(prob::HJBProblem, x, u) =
 function _project!(u, prob::HJBProblem)
     ū = prob.control_bound
     isfinite(ū) || return u
-    if prob.constraint === :box
+    if prob.constraint isa BoxConstraint
         u .= clamp.(u, -ū, ū)
     else
         nu = norm(u)
@@ -378,7 +415,7 @@ end
 # exactly Howard's improvement step for the discrete problem.
 function _minimize_hamiltonian!(u, prob::HJBProblem, Dp, Dm)
     r, ū = prob.control_weight, prob.control_bound
-    if prob.constraint === :box || prob.axes == 1
+    if prob.constraint isa BoxConstraint || prob.axes == 1
         @inbounds for k in eachindex(u)
             up = clamp(-Dp[k] / r, 0.0, ū)
             um = clamp(-Dm[k] / r, -ū, 0.0)
@@ -493,20 +530,97 @@ SchwarzPolicyEvaluation(blocks::AbstractVector{<:Integer}; overlap::Integer = 1,
     SchwarzPolicyEvaluation(Vector{Int}(blocks), Int(overlap), algorithm, local_solver)
 
 """
-    KrylovPolicyEvaluation(; method = :gmres, preconditioner = :symmetric_gauss_seidel,
-                           blocks = nothing, tol = 1e-10, maxiter = 5000, memory = 50)
+    KrylovMethod
 
-Solve each policy evaluation on the whole grid with restarted GMRES
-(`method = :gmres`, Krylov.jl) or with a BiCGStab whose vector operations are
-all threaded (`method = :bicgstab`, the solver of `SchwarzBiCGStab`), right
-preconditioned by a point smoother of ``A_u = D + L + U``: `:gauss_seidel`
-(``(D + L)^{-1}``, natural order), `:symmetric_gauss_seidel`
-(``(D + U)^{-1} D (D + L)^{-1}`` in red–black order, each color updated
-concurrently; `SymmetricGaussSeidel`), `:jacobi` (``D^{-1}``), `:none`, or
-`:block_symmetric_gauss_seidel`: block Jacobi over the boxes of
-[`grid_partition`](@ref)`(grid, blocks)` with a symmetric Gauss–Seidel sweep
-inside each box, the boxes swept concurrently. Warm started from the previous
-value function; matrix–vector products are threaded.
+The Krylov solver of a [`KrylovPolicyEvaluation`](@ref): [`GMRES`](@ref) or
+[`BiCGStab`](@ref).
+"""
+abstract type KrylovMethod end
+
+"""
+    GMRES(; memory = 50)
+
+Restarted GMRES (Krylov.jl), restarting after `memory` iterations.
+"""
+Base.@kwdef struct GMRES <: KrylovMethod
+    memory::Int = 50
+end
+
+"""
+    BiCGStab()
+
+BiCGStab with all vector operations threaded (the solver of `SchwarzBiCGStab`).
+"""
+struct BiCGStab <: KrylovMethod end
+
+"""
+    Smoother
+
+A point or block smoother of ``A_u = D + L + U``, used as the right
+preconditioner of a policy evaluation (or `nothing`, no preconditioner).
+[`KrylovPolicyEvaluation`](@ref) takes [`JacobiSmoother`](@ref),
+[`GaussSeidelSmoother`](@ref), [`SymmetricGaussSeidelSmoother`](@ref) and
+[`BlockSymmetricGaussSeidelSmoother`](@ref) on the assembled matrix;
+[`GridPolicyIteration`](@ref) takes [`SymmetricGaussSeidelSmoother`](@ref) and
+[`RestrictedAdditiveSchwarzSmoother`](@ref) on the implicit grid operator.
+"""
+abstract type Smoother end
+
+"""
+    JacobiSmoother()
+
+``D^{-1}``.
+"""
+struct JacobiSmoother <: Smoother end
+
+"""
+    GaussSeidelSmoother()
+
+``(D + L)^{-1}``, in natural order.
+"""
+struct GaussSeidelSmoother <: Smoother end
+
+"""
+    SymmetricGaussSeidelSmoother()
+
+One symmetric Gauss–Seidel sweep ``(D + U)^{-1} D (D + L)^{-1}`` in red–black
+order, each color updated concurrently (`SymmetricGaussSeidel` on an assembled
+matrix; `red_black_sgs!` on a grid operator, the same operator for any number of
+boxes, two halo exchanges per sweep).
+"""
+struct SymmetricGaussSeidelSmoother <: Smoother end
+
+"""
+    BlockSymmetricGaussSeidelSmoother(blocks)
+
+Block Jacobi over the boxes of [`grid_partition`](@ref)`(grid, blocks)` with a
+symmetric Gauss–Seidel sweep inside each box, the boxes swept concurrently.
+Equal to [`SymmetricGaussSeidelSmoother`](@ref) with one block.
+"""
+struct BlockSymmetricGaussSeidelSmoother <: Smoother
+    blocks::Vector{Int}
+end
+BlockSymmetricGaussSeidelSmoother(blocks::AbstractVector{<:Integer}) = BlockSymmetricGaussSeidelSmoother(Vector{Int}(blocks))
+
+"""
+    RestrictedAdditiveSchwarzSmoother()
+
+Restricted additive Schwarz on the boxes of a [`GridPolicyIteration`](@ref)
+extended by its `overlap`, with one local red–black sweep per box: one halo
+exchange per application; the boxes are the vertices of the overlap sheaf and
+the exchanges run along its edges. Equal to
+[`SymmetricGaussSeidelSmoother`](@ref) on one box.
+"""
+struct RestrictedAdditiveSchwarzSmoother <: Smoother end
+
+"""
+    KrylovPolicyEvaluation(; method = GMRES(), preconditioner = SymmetricGaussSeidelSmoother(),
+                           tol = 1e-10, maxiter = 5000)
+
+Solve each policy evaluation on the whole grid with the [`KrylovMethod`](@ref)
+`method`, right preconditioned by the [`Smoother`](@ref) `preconditioner` of
+``A_u = D + L + U`` (or `nothing`). Warm started from the previous value
+function; matrix–vector products are threaded.
 
 Policy iteration is a semismooth Newton method for the discrete HJB equation
 (Bokanowski, Maroso and Zidani 2009). With a point smoother this is the global
@@ -514,13 +628,11 @@ Newton–Krylov baseline; the block smoother is its block Jacobi counterpart, eq
 to it with one block, and the nonoverlapping, inexact relative of
 [`SchwarzPolicyEvaluation`](@ref).
 """
-Base.@kwdef struct KrylovPolicyEvaluation
-    method::Symbol = :gmres
-    preconditioner::Symbol = :symmetric_gauss_seidel
-    blocks::Union{Nothing, Vector{Int}} = nothing
+Base.@kwdef struct KrylovPolicyEvaluation{M<:KrylovMethod,P<:Union{Nothing,Smoother}}
+    method::M = GMRES()
+    preconditioner::P = SymmetricGaussSeidelSmoother()
     tol::Float64 = 1e-10
     maxiter::Int = 5000
-    memory::Int = 50
 end
 
 struct _Jacobi
@@ -565,17 +677,19 @@ function LinearAlgebra.ldiv!(y::AbstractVector, P::_BlockSymmetricGaussSeidel, x
     return y
 end
 
-function _preconditioner(A::SparseMatrixCSC, kind::Symbol, blocks)
-    kind === :none && return I
-    kind === :jacobi && return _Jacobi(1 ./ Vector(diag(A)))
-    kind === :gauss_seidel && return _GaussSeidel(LowerTriangular(tril(A)))
-    kind === :symmetric_gauss_seidel && return _symmetric_gauss_seidel(A)
-    if kind === :block_symmetric_gauss_seidel
-        @argcheck blocks !== nothing "the block preconditioner needs `blocks`"
-        return _block_symmetric_gauss_seidel(A, blocks)
-    end
-    throw(ArgumentError("unknown preconditioner $kind"))
-end
+# The preconditioner of a smoother on the assembled matrix A; `blocks` are the
+# index sets of a block smoother (from _smoother_data).
+_preconditioner(A::SparseMatrixCSC, ::Nothing, blocks) = I
+_preconditioner(A::SparseMatrixCSC, ::JacobiSmoother, blocks) = _Jacobi(1 ./ Vector(diag(A)))
+_preconditioner(A::SparseMatrixCSC, ::GaussSeidelSmoother, blocks) = _GaussSeidel(LowerTriangular(tril(A)))
+_preconditioner(A::SparseMatrixCSC, ::SymmetricGaussSeidelSmoother, blocks) = _symmetric_gauss_seidel(A)
+_preconditioner(A::SparseMatrixCSC, ::BlockSymmetricGaussSeidelSmoother, blocks) =
+    _block_symmetric_gauss_seidel(A, blocks)
+_preconditioner(A::SparseMatrixCSC, s::Smoother, blocks) =
+    throw(ArgumentError("$(typeof(s)) needs the grid operator: use it with GridPolicyIteration"))
+
+_smoother_data(grid, s) = nothing
+_smoother_data(grid, s::BlockSymmetricGaussSeidelSmoother) = _block_indices(grid_partition(grid, s.blocks))
 
 # A by rows (Aᵀ stored column-wise): a threaded matrix–vector product for GMRES.
 struct _RowMatrix
@@ -595,8 +709,7 @@ function _block_indices(labels::Vector{Int})
 end
 
 _evaluation_data(::HJBProblem, ::DirectPolicyEvaluation, st) = nothing
-_evaluation_data(prob::HJBProblem, e::KrylovPolicyEvaluation, st) =
-    e.blocks === nothing ? nothing : _block_indices(grid_partition(prob.grid, e.blocks))
+_evaluation_data(prob::HJBProblem, e::KrylovPolicyEvaluation, st) = _smoother_data(prob.grid, e.preconditioner)
 _evaluation_data(prob::HJBProblem, e::SchwarzPolicyEvaluation, st) =
     (grid_subdomains(prob.grid, e.blocks; overlap = e.overlap), grid_partition(prob.grid, e.blocks),
      _stencil_pattern(st), Ref{Union{Nothing,SchwarzDecomposition}}(nothing))
@@ -610,22 +723,27 @@ function _evaluate(::DirectPolicyEvaluation, data, A, At, b, V0)
 end
 
 function _evaluate(e::KrylovPolicyEvaluation, blocks, A, At, b, V0)
-    @argcheck e.method in (:gmres, :bicgstab) "unknown Krylov method $(e.method)"
     setup = @elapsed P = _preconditioner(A, e.preconditioner, blocks)
     op = _RowMatrix(At)
     r0 = b - mul!(similar(b), op, V0)
     iszero(norm(r0)) && return copy(V0), 0, true, setup
-    rtol = e.tol * max(norm(b), eps()) / norm(r0)
-    if e.method === :bicgstab
-        dV = zeros(length(b))
-        precondition! = P isa UniformScaling ? copyto! : (y, x) -> ldiv!(y, P, x)
-        its, ok, _ = _bicgstab!(dV, (y, x) -> _threaded_mul!(y, At, x), precondition!, r0;
-            tol = min(rtol, 0.5), maxiter = e.maxiter)
-        return V0 + dV, its, ok, setup
-    end
-    dV, stats = gmres(op, r0; N = P, ldiv = !(P isa UniformScaling), memory = e.memory, restart = true,
-        atol = 0.0, rtol = min(rtol, 0.5), itmax = e.maxiter)
-    return V0 + dV, stats.niter, stats.solved, setup
+    rtol = min(e.tol * max(norm(b), eps()) / norm(r0), 0.5)
+    dV, its, ok = _krylov_correction(e.method, op, At, P, r0, rtol, e.maxiter)
+    return V0 + dV, its, ok, setup
+end
+
+# The correction dV solving A dV = r0 to relative tolerance rtol: (dV, iterations, converged).
+function _krylov_correction(::BiCGStab, op, At, P, r0, rtol, maxiter)
+    dV = zeros(length(r0))
+    precondition! = P isa UniformScaling ? copyto! : (y, x) -> ldiv!(y, P, x)
+    its, ok, _ = _bicgstab!(dV, (y, x) -> _threaded_mul!(y, At, x), precondition!, r0; tol = rtol, maxiter)
+    return dV, its, ok
+end
+
+function _krylov_correction(m::GMRES, op, At, P, r0, rtol, maxiter)
+    dV, stats = gmres(op, r0; N = P, ldiv = !(P isa UniformScaling), memory = m.memory, restart = true,
+        atol = 0.0, rtol, itmax = maxiter)
+    return dV, stats.niter, stats.solved
 end
 
 # The cover, ownership and coloring are built once, from the full stencil (its

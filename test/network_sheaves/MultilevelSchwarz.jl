@@ -104,13 +104,13 @@ relative_difference(B1, B2) = norm(B1 - B2) / norm(B1)
         # V-cycles over the levels: a sum over boxes of products over levels
         # against a product over levels of sums over boxes. They differ through
         # the couplings between boxes, and agree for the cover by one box.
-        V1 = schwarz_of_multigrid(A, n, boxes, factors; composition = :multiplicative)
-        V2 = multigrid_of_schwarz(A, n, boxes, factors; composition = :multiplicative)
+        V1 = schwarz_of_multigrid(A, n, boxes, factors; composition = MultiplicativeComposition())
+        V2 = multigrid_of_schwarz(A, n, boxes, factors; composition = MultiplicativeComposition())
         @info "V-cycle orders on $(n): relative difference $(relative_difference(V1, V2))"
         @test !(V1 ≈ V2)
         whole = [ntuple(k -> 1:n[k], length(n))]
-        @test schwarz_of_multigrid(A, n, whole, factors; composition = :multiplicative) ≈
-              multigrid_of_schwarz(A, n, whole, factors; composition = :multiplicative)
+        @test schwarz_of_multigrid(A, n, whole, factors; composition = MultiplicativeComposition()) ≈
+              multigrid_of_schwarz(A, n, whole, factors; composition = MultiplicativeComposition())
     end
 
     # The V-cycle orders differ only by cross terms through the couplings Rᵢ A Rⱼᵀ
@@ -125,8 +125,8 @@ relative_difference(B1, B2) = norm(B1 - B2) / norm(B1)
     rows, cols, vals = findnz(random_stencil_matrix(rng, n, (false, false)))
     keep = owner[rows] .== owner[cols]
     A0 = sparse(rows[keep], cols[keep], vals[keep], prod(n), prod(n))
-    @test schwarz_of_multigrid(A0, n, disjoint, factors; composition = :multiplicative) ≈
-          multigrid_of_schwarz(A0, n, disjoint, factors; composition = :multiplicative)
+    @test schwarz_of_multigrid(A0, n, disjoint, factors; composition = MultiplicativeComposition()) ≈
+          multigrid_of_schwarz(A0, n, disjoint, factors; composition = MultiplicativeComposition())
 
     # A cover that cuts blocks: the square is not cartesian, and both the operator
     # identity and the additive equality fail.
@@ -139,7 +139,7 @@ relative_difference(B1, B2) = norm(B1 - B2) / norm(B1)
     @info "additive orders on a misaligned cover: relative difference $(relative_difference(B1, B2))"
     @test !(B1 ≈ B2)
 
-    @test_throws ArgumentError schwarz_of_multigrid(A, n, boxes, factors; composition = :other)
+    @test_throws TypeError schwarz_of_multigrid(A, n, boxes, factors; composition = :other)
     @test_throws ArgumentError multigrid_of_schwarz(A[1:10, 1:10], n, boxes, factors)
     @test_throws ArgumentError multigrid_of_schwarz(A, n, NTuple{2,UnitRange{Int}}[], factors)
 end

@@ -17,7 +17,7 @@
 # Gauss–Seidel within a color is fully parallel.
 module GridSchwarz
 
-export AbstractStencil, CoefficientStencil, GridOperator, grid_zeros, interior, apply!, red_black_sgs!,
+export AbstractStencil, CoefficientStencil, GridOperator, gridsize, grid_zeros, interior, apply!, red_black_sgs!,
     grid_dot, grid_reduce, GridWorkspace, grid_bicgstab!, BoxLayout, box_coordinates, balanced_ranks, box_operator,
     BoxCommunicator, SerialBoxes, mpi_boxes, box_count, box_rank, box_allreduce, exchange!, box_allgather, gather_boxes,
     AggregateCoarseSpace, coarse_matrix, coarse_restrict, coarse_prolong_add!
@@ -90,10 +90,14 @@ zero, with the boundary data moved into the right-hand side.
 
 `parity` is the parity of the global index of the first interior point, so
 boxes of one global grid agree on the red–black coloring.
+
+As a linear map the operator is square of order ``N = n_1 \cdots n_D``, the
+number of interior points: `size(op) == (N, N)`. The shape of the box is
+[`gridsize`](@ref)`(op) == n`.
 """
 struct GridOperator{T,D,S<:AbstractStencil{D}}
     stencil::S
-    size::NTuple{D,Int}
+    gridsize::NTuple{D,Int}
     origin::NTuple{D,Int}
     padded::NTuple{D,Int}
     parity::Int
@@ -114,10 +118,19 @@ function GridOperator(coef::AbstractArray{T}; ghost::Integer=1, parity::Integer=
     return GridOperator(s, ntuple(k -> size(coef, k), D); ghost, parity, eltype=T)
 end
 
-Base.size(op::GridOperator) = op.size
-Base.size(op::GridOperator, k::Integer) = op.size[k]
-Base.ndims(::GridOperator{T,D}) where {T,D} = D
-Base.eltype(::GridOperator{T}) where {T} = T
+"""
+    gridsize(op::GridOperator) -> NTuple{D,Int}
+    gridsize(op::GridOperator, k) -> Int
+
+The number of interior points of the box of `op` along each dimension (along
+dimension `k`). `size(op)` is the size of `op` as a matrix.
+"""
+gridsize(op::GridOperator) = op.gridsize
+gridsize(op::GridOperator, k::Integer) = op.gridsize[k]
+
+Base.size(op::GridOperator) = (N = prod(op.gridsize); (N, N))
+Base.size(op::GridOperator, d::Integer) = d <= 2 ? prod(op.gridsize) : 1
+Base.eltype(::Type{<:GridOperator{T}}) where {T} = T
 KernelAbstractions.get_backend(op::GridOperator) = get_backend(op.stencil)
 
 """
@@ -133,7 +146,7 @@ grid_zeros(op::GridOperator{T}) where {T} = KernelAbstractions.zeros(get_backend
 The view of the interior of the padded vector `x`.
 """
 interior(x::AbstractArray, op::GridOperator) =
-    view(x, ntuple(k -> (op.origin[k] + 1):(op.origin[k] + size(op, k)), ndims(op))...)
+    view(x, ntuple(k -> (op.origin[k] + 1):(op.origin[k] + gridsize(op, k)), length(gridsize(op)))...)
 
 @inline _unit(j, ::Val{D}) where {D} = CartesianIndex(ntuple(k -> k == j ? 1 : 0, Val(D)))
 @inline _shift(g::Integer, ::Val{D}) where {D} = CartesianIndex(ntuple(_ -> g, Val(D)))
@@ -144,7 +157,7 @@ interior(x::AbstractArray, op::GridOperator) =
 # dimension) per work item on the CPU backend, where decoding a Cartesian index
 # per point would cost more than the stencil itself.
 _rowwise(backend) = backend isa KernelAbstractions.CPU
-_rows(op::GridOperator{T,D}) where {T,D} = CartesianIndices(D == 1 ? (1,) : Base.tail(size(op)))
+_rows(op::GridOperator{T,D}) where {T,D} = CartesianIndices(D == 1 ? (1,) : Base.tail(gridsize(op)))
 @inline _point(i, K, ::Val{D}) where {D} = CartesianIndex(i, ntuple(k -> K[k], Val(D - 1))...)
 
 function _launch(kernel_points, kernel_rows, op::GridOperator, args...)
@@ -152,9 +165,9 @@ function _launch(kernel_points, kernel_rows, op::GridOperator, args...)
     if _rowwise(backend)
         rows = _rows(op)
         groups = cld(length(rows), 8 * Threads.nthreads())
-        kernel_rows(backend, groups)(args..., rows, size(op, 1); ndrange=length(rows))
+        kernel_rows(backend, groups)(args..., rows, gridsize(op, 1); ndrange=length(rows))
     else
-        kernel_points(backend)(args...; ndrange=size(op))
+        kernel_points(backend)(args...; ndrange=gridsize(op))
     end
     synchronize(backend)
 end
@@ -278,13 +291,13 @@ end
     partial[K] = acc
 end
 
-_reduction_shape(op::GridOperator{T,D}) where {T,D} = D == 1 ? (1,) : Base.tail(size(op))
+_reduction_shape(op::GridOperator{T,D}) where {T,D} = D == 1 ? (1,) : Base.tail(gridsize(op))
 
 """
     grid_dot(x, y, op, partial) -> number
 
 ``\\sum_I x_I y_I`` over the interior of `op`, with `partial` an array of
-size `size(op)[2:end]` on the backend of `op` for the partial sums.
+size `gridsize(op)[2:end]` on the backend of `op` for the partial sums.
 """
 grid_dot(x, y, op::GridOperator, partial) = grid_reduce(*, +, x, y, op, partial)
 
@@ -297,7 +310,7 @@ grid_dot(x, y, op::GridOperator, partial) = grid_reduce(*, +, x, y, op, partial)
 """
 function grid_reduce(f, ⊕, x, y, op::GridOperator{T,D}, partial) where {T,D}
     backend = get_backend(op)
-    _rowreduce_kernel!(backend)(partial, f, ⊕, x, y, op.origin, size(op, 1), Val(D); ndrange=_reduction_shape(op))
+    _rowreduce_kernel!(backend)(partial, f, ⊕, x, y, op.origin, gridsize(op, 1), Val(D); ndrange=_reduction_shape(op))
     synchronize(backend)
     return reduce(⊕, partial)
 end
@@ -718,7 +731,7 @@ end
 end
 
 function _check_owned(cs::AggregateCoarseSpace{D}, op::GridOperator{T,D}) where {T,D}
-    @argcheck size(op) == length.(cs.layout.owned) "op must be the operator of the owned box"
+    @argcheck gridsize(op) == length.(cs.layout.owned) "op must be the operator of the owned box"
 end
 
 # This box's local aggregate array, placed into a whole-grid array (rows: aggregates).
@@ -802,7 +815,7 @@ function coarse_prolong_add!(y::AbstractArray, cs::AggregateCoarseSpace{D}, c::A
     copyto!(cs.values, c)
     backend = get_backend(op)
     _prolong_add_kernel!(backend)(y, cs.values, op.origin, first.(cs.layout.owned), cs.layout.points, cs.blocks,
-        Val(D); ndrange=size(op))
+        Val(D); ndrange=gridsize(op))
     synchronize(backend)
     return y
 end

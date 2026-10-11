@@ -17,7 +17,9 @@ export OverlapCover, ghost_layer_cover, Ownership, LocalProblem, RobinFace, Schw
     coarse_dimension, coarse_correct!,
     SchwarzProblem, SchwarzIteration, SchwarzCG, SchwarzResult, SchwarzPreconditioner, solve,
     SheafADMM, LocalObjective, local_objectives, SchwarzGMRES, SchwarzSweepPreconditioner,
-    LocalSolver, ExactLocalSolve, SymmetricGaussSeidelLocalSolve, SymmetricGaussSeidel, SchwarzBiCGStab
+    LocalSolver, ExactLocalSolve, SymmetricGaussSeidelLocalSolve, SymmetricGaussSeidel, SchwarzBiCGStab,
+    SweepOrdering, NaturalOrdering, MulticolorOrdering, LevelComposition, AdditiveComposition,
+    MultiplicativeComposition, ADMMPenalty, StalkPenalty, SharedPenalty
 
 using ArgCheck: @argcheck
 using BlockArrays: BlockVector, mortar, blocks
@@ -105,6 +107,63 @@ end
 _stable_lu(A::SparseMatrixCSC) = lu(A)
 
 """
+    SweepOrdering
+
+The order in which a Gauss–Seidel sweep visits the unknowns:
+[`NaturalOrdering`](@ref) or [`MulticolorOrdering`](@ref).
+"""
+abstract type SweepOrdering end
+
+"""
+    NaturalOrdering()
+
+Sweep the unknowns in index order, column by column of the matrix: inherently
+sequential.
+"""
+struct NaturalOrdering <: SweepOrdering end
+
+"""
+    MulticolorOrdering(colors = nothing)
+
+Sweep the unknowns color by color for a coloring of the graph of
+``A + A^\\mathsf{T}``: `colors` is a vector of index vectors, or `nothing` for a
+greedy coloring in index order. Unknowns of one color are not coupled, so each
+color can be updated concurrently. On a grid whose stencil couples only axis
+neighbours the greedy coloring is the red–black (checkerboard) one.
+"""
+struct MulticolorOrdering <: SweepOrdering
+    colors::Union{Nothing,Vector{Vector{Int}}}
+end
+MulticolorOrdering() = MulticolorOrdering(nothing)
+MulticolorOrdering(colors::AbstractVector{<:AbstractVector{<:Integer}}) =
+    MulticolorOrdering([Vector{Int}(c) for c in colors])
+
+"""
+    LevelComposition
+
+How the corrections of several levels (or a one-level preconditioner and a
+coarse correction) combine: [`AdditiveComposition`](@ref) sums them,
+[`MultiplicativeComposition`](@ref) applies them in turn, each to the residual
+the previous ones leave (a V-cycle over levels).
+"""
+abstract type LevelComposition end
+
+"""
+    AdditiveComposition()
+
+Sum the corrections: ``B = \\sum_k C_k`` (BPX, additive Schwarz).
+"""
+struct AdditiveComposition <: LevelComposition end
+
+"""
+    MultiplicativeComposition()
+
+Apply the corrections in turn, each to the remaining residual:
+``B \\leftarrow B + C_k (I - A B)`` (V-cycles, multiplicative Schwarz).
+"""
+struct MultiplicativeComposition <: LevelComposition end
+
+"""
     LocalSolver
 
 How each subdomain problem ``\\tilde A_i x_i = b_i`` is solved:
@@ -138,7 +197,7 @@ Solve each local problem exactly with a sparse factorization computed at setup:
 struct ExactLocalSolve <: LocalSolver end
 
 """
-    SymmetricGaussSeidelLocalSolve(; sweeps = 1, ordering = :multicolor)
+    SymmetricGaussSeidelLocalSolve(; sweeps = 1, ordering = MulticolorOrdering())
 
 Solve each local problem inexactly with `sweeps` symmetric Gauss–Seidel sweeps
 of ``\\tilde A_i = D + L + U`` ([`SymmetricGaussSeidel`](@ref), in the given
@@ -151,16 +210,16 @@ solves still converge (Frommer and Szyld, *Weighted max norm estimates for
 additive Schwarz methods*, 1999). With `sweeps = 1` each subdomain does
 exactly the symmetric Gauss–Seidel pass a global point smoother would.
 """
-struct SymmetricGaussSeidelLocalSolve <: LocalSolver
+struct SymmetricGaussSeidelLocalSolve{O<:SweepOrdering} <: LocalSolver
     sweeps::Int
-    ordering::Symbol
-    function SymmetricGaussSeidelLocalSolve(sweeps::Integer, ordering::Symbol=:multicolor)
+    ordering::O
+    function SymmetricGaussSeidelLocalSolve(sweeps::Integer, ordering::O=MulticolorOrdering()) where {O<:SweepOrdering}
         @argcheck sweeps >= 1 "need at least one sweep"
-        @argcheck ordering in (:natural, :multicolor) "ordering must be :natural or :multicolor"
-        return new(Int(sweeps), ordering)
+        @argcheck !(ordering isa MulticolorOrdering) || ordering.colors === nothing "a local solver colors each local matrix itself"
+        return new{O}(Int(sweeps), ordering)
     end
 end
-SymmetricGaussSeidelLocalSolve(; sweeps::Integer=1, ordering::Symbol=:multicolor) =
+SymmetricGaussSeidelLocalSolve(; sweeps::Integer=1, ordering::SweepOrdering=MulticolorOrdering()) =
     SymmetricGaussSeidelLocalSolve(sweeps, ordering)
 
 # Local factorization: ChordalLDLt for symmetric matrices (with a positive
@@ -186,8 +245,8 @@ _factor_solve!(z::AbstractVector, M::SparseArrays.UMFPACK.UmfpackLU, b::Abstract
 _local_update(M, b::AbstractVector, x::AbstractVector) = _factor_solve(M, b)
 
 """
-    SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps = 1, ordering = :multicolor,
-                         colors = nothing, threaded = size(A, 1) >= 50_000)
+    SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps = 1, ordering = MulticolorOrdering(),
+                         threaded = size(A, 1) >= 50_000)
 
 The symmetric Gauss–Seidel preconditioner of ``A = D + L + U`` (``L``, ``U``
 strictly lower and upper in the chosen ordering of the unknowns):
@@ -196,14 +255,10 @@ strictly lower and upper in the chosen ordering of the unknowns):
 sweep applies ``(D + U)^{-1} D (D + L)^{-1}``, a forward Gauss–Seidel pass
 followed by a backward one. The diagonal must be stored and nonzero.
 
-- `ordering = :natural` sweeps the unknowns in index order, column by column
+- [`NaturalOrdering`](@ref) sweeps the unknowns in index order, column by column
   of `A`: inherently sequential.
-- `ordering = :multicolor` sweeps them color by color for a coloring of the
-  graph of ``A + A^\\mathsf{T}`` (`colors`, a vector of index vectors, or a
-  greedy coloring in index order). Unknowns of one color are not coupled, so
-  each color is updated concurrently (when `threaded`), on CPU threads or a
-  GPU alike. On a grid whose stencil couples only axis neighbours the greedy
-  coloring is the red–black (checkerboard) one.
+- [`MulticolorOrdering`](@ref) sweeps them color by color, each color updated
+  concurrently (when `threaded`), on CPU threads or a GPU alike.
 
 New values of `A` on the same pattern take effect after [`refactor!`](@ref)
 gathers them (or `nonzeros(M.A)` is overwritten followed by `_refresh!(M)`),
@@ -220,26 +275,29 @@ struct SymmetricGaussSeidel{T}
     threaded::Bool
 end
 
-function SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps::Integer=1, ordering::Symbol=:multicolor,
-                              colors::Union{Nothing,AbstractVector{<:AbstractVector{<:Integer}}}=nothing,
+function SymmetricGaussSeidel(A::SparseMatrixCSC; sweeps::Integer=1, ordering::SweepOrdering=MulticolorOrdering(),
                               threaded::Bool=size(A, 1) >= 50_000)
     @argcheck size(A, 1) == size(A, 2) "A must be square"
     @argcheck sweeps >= 1 "need at least one sweep"
-    @argcheck ordering in (:natural, :multicolor) "ordering must be :natural or :multicolor"
     S = _float_sparse(A)
-    n = size(S, 1)
     diagonal = _diagonal_positions(S)
-    if ordering === :natural
-        empty = SparseMatrixCSC(0, 0, [1], Int[], eltype(S)[])
-        return SymmetricGaussSeidel(S, diagonal, Int(sweeps), empty, Int[], Int[], Vector{Int}[], threaded)
-    end
-    groups = colors === nothing ? _matrix_coloring(S) : [Vector{Int}(c) for c in colors]
+    return _symmetric_gauss_seidel(S, diagonal, Int(sweeps), ordering, threaded)
+end
+
+function _symmetric_gauss_seidel(S, diagonal, sweeps, ::NaturalOrdering, threaded)
+    empty = SparseMatrixCSC(0, 0, [1], Int[], eltype(S)[])
+    return SymmetricGaussSeidel(S, diagonal, sweeps, empty, Int[], Int[], Vector{Int}[], threaded)
+end
+
+function _symmetric_gauss_seidel(S, diagonal, sweeps, ordering::MulticolorOrdering, threaded)
+    n = size(S, 1)
+    groups = ordering.colors === nothing ? _matrix_coloring(S) : ordering.colors
     _check_coloring(S, groups)
     index = SparseMatrixCSC(n, n, S.colptr, rowvals(S), collect(1:nnz(S)))
     transposed = copy(transpose(index))
     transpose_map = nonzeros(transposed)
     rows = SparseMatrixCSC(n, n, transposed.colptr, rowvals(transposed), nonzeros(S)[transpose_map])
-    return SymmetricGaussSeidel(S, diagonal, Int(sweeps), rows, transpose_map, _diagonal_positions(rows),
+    return SymmetricGaussSeidel(S, diagonal, sweeps, rows, transpose_map, _diagonal_positions(rows),
         groups, threaded)
 end
 
@@ -1026,7 +1084,7 @@ end
 _refactored(::SparseArrays.UMFPACK.UmfpackLU, solver, Ai, i) = _stable_lu(Ai)
 _refactored(::ChordalLDLt, solver, Ai, i) = _local_factor(solver, Ai, true, i)
 _refactored(old::SymmetricGaussSeidel, solver, Ai, i) = SymmetricGaussSeidel(Ai; sweeps=old.sweeps,
-    ordering=isempty(old.colors) ? :natural : :multicolor, threaded=old.threaded)
+    ordering=isempty(old.colors) ? NaturalOrdering() : MulticolorOrdering(old.colors), threaded=old.threaded)
 
 # New values (in the stored order of the local matrix) for local factor i.
 function _refactor_values!(dd, i, F::SparseArrays.UMFPACK.UmfpackLU, values)
@@ -2103,7 +2161,33 @@ function local_objectives(prob::SchwarzProblem{T}) where {T}
 end
 
 """
-    SheafADMM(; rho, penalty=:stalk, projection_steps=nothing, tol=1e-8, maxiter=1000)
+    ADMMPenalty
+
+Which dofs of each stalk the penalty ``\\tfrac{\\rho}{2}\\lVert x_i - z_i + y_i\\rVert_{P_i}^2``
+of [`SheafADMM`](@ref) acts on: [`StalkPenalty`](@ref) or [`SharedPenalty`](@ref).
+"""
+abstract type ADMMPenalty end
+
+"""
+    StalkPenalty()
+
+``P_i = I``: the penalty acts on the whole stalk (Hanks et al. 2025, Algorithm 1).
+"""
+struct StalkPenalty <: ADMMPenalty end
+
+"""
+    SharedPenalty()
+
+``P_i`` selects the dofs held by more than one stalk (the overlaps and ghost
+layers), where the consensus constraint binds.
+"""
+struct SharedPenalty <: ADMMPenalty end
+
+_penalty_mask(::StalkPenalty, cover, stalk) = trues(length(stalk))
+_penalty_mask(::SharedPenalty, cover, stalk) = BitVector(length(cover.members[k]) > 1 for k in stalk)
+
+"""
+    SheafADMM(; rho, penalty=StalkPenalty(), projection_steps=nothing, tol=1e-8, maxiter=1000)
 
 Sheaf ADMM (Hanks, Riess, Cohen, Gross, Hale, Fairbanks 2025, Algorithm 1) on
 the ghost-layer overlap sheaf. It solves the homological program
@@ -2125,8 +2209,8 @@ y_i &\\leftarrow y_i + x_i - z_i .
 \\end{aligned}
 ```
 
-- `penalty = :stalk` is the method of the paper: ``P_i = I``, the penalty acts on
-  the whole stalk. `penalty = :shared` penalizes only the dofs held by more than
+- `penalty = StalkPenalty()` is the method of the paper: ``P_i = I``, the penalty acts on
+  the whole stalk. [`SharedPenalty`](@ref)`()` penalizes only the dofs held by more than
   one stalk (the overlaps and ghost layers), which is where the consensus
   constraint actually binds. It is closer to a Robin transmission condition,
   whose penalty acts only on the interface (see the comparison in the feature
@@ -2143,9 +2227,9 @@ Convergence (Boyd et al. 2011, §3.2) needs convex ``f_i`` and an exact
 projection, so `A` should be diagonally dominant; the local matrices are
 checked for positive definiteness.
 """
-Base.@kwdef struct SheafADMM
+Base.@kwdef struct SheafADMM{P<:ADMMPenalty}
     rho::Float64
-    penalty::Symbol = :stalk
+    penalty::P = StalkPenalty()
     projection_steps::Union{Nothing,Int} = nothing
     tol::Float64 = 1e-8
     maxiter::Int = 1000
@@ -2185,17 +2269,15 @@ end
 function solve(prob::SchwarzProblem{T}, alg::SheafADMM) where {T}
     @argcheck issymmetric(prob.decomposition.A) "sheaf ADMM needs a symmetric A"
     @argcheck alg.rho > 0 "the ADMM penalty must be positive"
-    @argcheck alg.penalty in (:stalk, :shared) "penalty must be :stalk or :shared"
     @argcheck alg.projection_steps === nothing || alg.projection_steps >= 1
     dd = prob.decomposition
     cover = dd.cover
     objectives = local_objectives(prob)
-    masks = [alg.penalty === :stalk ? trues(length(s)) : BitVector(length(cover.members[k]) > 1 for k in s)
-             for s in cover.stalks]
+    masks = [_penalty_mask(alg.penalty, cover, s) for s in cover.stalks]
     factors = map(enumerate(objectives)) do (i, obj)
         Ki = obj.matrix + alg.rho * spdiagm(T.(masks[i]))
         F = ldlt!(ChordalLDLt(Ki), RowMaximum(); check=false)
-        @argcheck all(>(0), F.D.diag) "the ADMM local matrix of subdomain $i is not positive definite; increase rho or use penalty=:stalk"
+        @argcheck all(>(0), F.D.diag) "the ADMM local matrix of subdomain $i is not positive definite; increase rho or use penalty=StalkPenalty()"
         F
     end
 

@@ -79,8 +79,8 @@ for (name, ω) in (("Jacobi", 1.0), ("Jacobi, ω = 1/4", 0.25))
     sm = M -> ω * Diagonal(1 ./ diag(M))
     co = M -> ω * inv(Matrix(M))
     C = lifted_corrections(A, n, overlapping, factors, sm, co)
-    V1 = schwarz_of_multigrid(A, n, overlapping, factors; composition = :multiplicative, smoother = sm, coarsest_solve = co)
-    V2 = multigrid_of_schwarz(A, n, overlapping, factors; composition = :multiplicative, smoother = sm, coarsest_solve = co)
+    V1 = schwarz_of_multigrid(A, n, overlapping, factors; composition = MultiplicativeComposition(), smoother = sm, coarsest_solve = co)
+    V2 = multigrid_of_schwarz(A, n, overlapping, factors; composition = MultiplicativeComposition(), smoother = sm, coarsest_solve = co)
     p_each = sum(compose(A, [C[i][ℓ + 1] for ℓ in vorder(L)]) for i in eachindex(C))
     p_sum = compose(A, [sum(C[i][ℓ + 1] for i in eachindex(C)) for ℓ in vorder(L)])
     @printf("   %-16s Σᵢ p(Cᵢ) vs schwarz_of_multigrid %.1e, p(Σᵢ Cᵢ) vs multigrid_of_schwarz %.1e, orders differ by %.3f\n",
@@ -96,8 +96,8 @@ rows, cols, vals = findnz(A)
 inside = box_of[rows] .== box_of[cols]
 for ε in (1.0, 0.1, 0.01, 0.0)
     Aε = sparse(rows, cols, ifelse.(inside, vals, ε .* vals), size(A)...)
-    V1 = schwarz_of_multigrid(Aε, n, disjoint, factors; composition = :multiplicative)
-    V2 = multigrid_of_schwarz(Aε, n, disjoint, factors; composition = :multiplicative)
+    V1 = schwarz_of_multigrid(Aε, n, disjoint, factors; composition = MultiplicativeComposition())
+    V2 = multigrid_of_schwarz(Aε, n, disjoint, factors; composition = MultiplicativeComposition())
     @printf("   ε = %-5g difference %.2e\n", ε, reldiff(V1, V2))
 end
 
@@ -113,7 +113,7 @@ println("\n4. As preconditioners: spectral radius of I − B A (overlapping boxe
 for ω in (1.0, 0.5, 0.25)
     sm = M -> ω * Diagonal(1 ./ diag(M))
     co = M -> ω * inv(Matrix(M))
-    ρ = map((:additive, :multiplicative)) do comp
+    ρ = map((AdditiveComposition(), MultiplicativeComposition())) do comp
         (contraction(schwarz_of_multigrid(A, n, overlapping, factors; composition = comp, smoother = sm, coarsest_solve = co), A),
          contraction(multigrid_of_schwarz(A, n, overlapping, factors; composition = comp, smoother = sm, coarsest_solve = co), A))
     end

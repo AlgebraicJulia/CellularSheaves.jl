@@ -125,7 +125,7 @@ println("abstraction          coarse states  coarse edges  dijkstra/goal  pathpa
 closure_rows = []
 for (kind, pos, k, ψ, steps) in abstractions[[3, 4, 5, 7, 8]]
     Ad = Abstraction(W, ψ; steps)
-    tf = @elapsed Ap = Abstraction(W, ψ; steps, method = :pathpack)
+    tf = @elapsed Ap = Abstraction(W, ψ; steps, closure = PathPackClosure())
     bcs = [tropical_pushforward(ψ, TA._short_horizon(W, [x in gl ? 0.0 : Inf for x in 1:size(W, 1)], steps)) for gl in goals]
     td = sum(timed(() -> TA._apply_closure(Ad.closure, Ad.quotient, bc))[2] for bc in bcs) / length(goals)
     tp = sum(timed(() -> TA._apply_closure(Ap.closure, Ap.quotient, bc))[2] for bc in bcs) / length(goals)

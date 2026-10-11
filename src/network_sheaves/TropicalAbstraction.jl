@@ -58,7 +58,7 @@ blocks of ``k^2``.
 [`quotient_graph`](@ref) with `combine = max`).
 
 The coarse closure can be computed once per abstraction for all targets by
-PathPack's chordal semiring LU (`method = :pathpack` in [`Abstraction`](@ref),
+PathPack's chordal semiring LU (`closure = PathPackClosure()` in [`Abstraction`](@ref),
 with PATHPACK loaded). The same pushforward is the Galerkin coarse operator of
 the multigrid solvers in the real semiring (see
 [`GridMultigrid`](@ref CellularSheaves.NetworkSheaves.GridMultigrid)), where the
@@ -67,7 +67,7 @@ coarse solution is a correction rather than a bound.
 module TropicalAbstraction
 
 export tropical_pullback, tropical_pushforward, quotient_graph, minplus_closure, cost_to_go,
-    Abstraction, lower_bound, shortest_path, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid,
+    Abstraction, ClosureMethod, DijkstraClosure, PathPackClosure, lower_bound, shortest_path, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid,
     projection_homomorphism, LayeredPlanner, plan_route, corridor, layered_path,
     intertwines, TruncatedPushforward, coarsen, refine, coarsening_matrix, refinement_matrix,
     robust_quotient, upper_bound, is_control_lyapunov, greedy_policy, is_lyapunov, corridor_certificate, certified_path
@@ -276,19 +276,40 @@ function _short_horizon(W, b, k)
 end
 
 """
-    MinPlusClosure
+    ClosureMethod
 
-A solver for the coarse min-plus closure ``W_c^*`` of an [`Abstraction`](@ref). A
-subtype implements
+How an [`Abstraction`](@ref) computes the coarse min-plus closure ``W_c^*``:
+[`DijkstraClosure`](@ref) or [`PathPackClosure`](@ref).
+
+A new method `M <: ClosureMethod` implements `_closure(m::M, Wc)`, which sets up
+a solver `c <: MinPlusClosure` for the coarse graph `Wc` (once per
+abstraction), and for that solver
 
 - `_apply_closure(c, Wc, bc) -> Vector`: the least solution of ``V = W_c ⊗ V ⊕ b_c``;
 - `_full_closure(c, Wc) -> Matrix`: all of ``W_c^*`` (column ``C`` is the cost
-  from every block to ``C``);
-
-and a backend named `method` provides `_closure(::Val{method}, Wc) -> MinPlusClosure`.
-Dijkstra's algorithm (`:dijkstra`) is built in; PathPack's chordal semiring LU
-(`:pathpack`) comes with the PATHPACK extension.
+  from every block to ``C``).
 """
+abstract type ClosureMethod end
+
+"""
+    DijkstraClosure()
+
+Solve each coarse problem by Dijkstra's algorithm on the quotient graph; the
+all-pairs table is one Dijkstra per column, run concurrently.
+"""
+struct DijkstraClosure <: ClosureMethod end
+
+"""
+    PathPackClosure()
+
+Factorize the coarse closure ``W_c^* = U^* L^*`` once with PathPack's chordal
+semiring LU over the min-plus semiring, so that each target set costs two
+triangular solves and the all-pairs table is the product of the factors.
+Needs `using PATHPACK` (a package extension).
+"""
+struct PathPackClosure <: ClosureMethod end
+
+# The solver set up by a ClosureMethod.
 abstract type MinPlusClosure end
 
 function _closure end
@@ -297,9 +318,11 @@ function _full_closure end
 
 struct _DijkstraClosure <: MinPlusClosure end
 
-_closure(::Val{:dijkstra}, Wc) = _DijkstraClosure()
-_closure(::Val{M}, Wc) where {M} = throw(ArgumentError("coarse closure method $(M) is not available" *
-    (M === :pathpack ? " (load PATHPACK)" : "")))
+_closure(::DijkstraClosure, Wc) = _DijkstraClosure()
+_closure(::PathPackClosure, Wc::AbstractMatrix) =
+    throw(ArgumentError("PathPackClosure needs PathPack: run `using PATHPACK` first"))
+_closure(m::ClosureMethod, Wc) =
+    throw(ArgumentError("$(typeof(m)) does not implement _closure; see the ClosureMethod docstring"))
 _apply_closure(::_DijkstraClosure, Wc, bc) = minplus_closure(Wc, bc)
 
 # The whole closure Wc*: column C is the cost from every block to C.
@@ -315,16 +338,17 @@ function _full_closure(::_DijkstraClosure, Wc)
 end
 
 """
-    Abstraction(W, ψ; steps = 1, method = :dijkstra, table = false)
+    Abstraction(W, ψ; steps = 1, closure = DijkstraClosure(), table = false)
 
 The coarse problem of the edge costs `W` along the aggregation `ψ` with time
 coarsened by `steps`: the quotient graph of the `steps`-step graph
 ([`quotient_graph`](@ref)), built once and reused for every target set by
 [`lower_bound`](@ref).
 
-`method = :pathpack` factorizes the coarse min-plus closure ``W_c^* = U^* L^*``
-once with PathPack's chordal semiring LU (requires PATHPACK), so that each target
-set costs two triangular solves. `table = true` stores the whole closure ``W_c^*``,
+`closure` is the [`ClosureMethod`](@ref) of the coarse problems:
+[`PathPackClosure`](@ref)`()` factorizes the coarse min-plus closure
+``W_c^* = U^* L^*`` once with PathPack's chordal semiring LU (requires PATHPACK),
+so that each target set costs two triangular solves. `table = true` stores the whole closure ``W_c^*``,
 the cost between every pair of coarse states (all-pairs shortest paths on the
 quotient, by PathPack's closure or by one Dijkstra per column; ``n_c^2`` entries):
 each target set's coarse cost-to-go is then the min-plus product of the table with
@@ -352,11 +376,11 @@ struct Abstraction{G<:SparseMatrixCSC,C<:MinPlusClosure}
     end
 end
 
-function Abstraction(W::SparseMatrixCSC, ψ::GraphHomomorphism; steps::Integer = 1, method::Symbol = :dijkstra,
-        table::Bool = false)
+function Abstraction(W::SparseMatrixCSC, ψ::GraphHomomorphism; steps::Integer = 1,
+        closure::ClosureMethod = DijkstraClosure(), table::Bool = false)
     Wc = SparseMatrixCSC{Float64,Int}(quotient_graph(W, ψ; steps))
-    closure = _closure(Val(method), Wc)
-    return Abstraction(W, ψ, Int(steps), Wc, closure, table ? _full_closure(closure, Wc) : nothing)
+    solver = _closure(closure, Wc)
+    return Abstraction(W, ψ, Int(steps), Wc, solver, table ? _full_closure(solver, Wc) : nothing)
 end
 
 """

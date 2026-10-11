@@ -5,11 +5,95 @@
 # PATHPACK package extension). Included in DoubleIntegratorHJB.
 
 """
-    Multigrid(; levels = :auto, coarsest_size = 4096, coarse_operator = :rediscretize,
-              coarsest = :pathpack, presmooth = 1, postsmooth = 1)
+    CoarseCorrection
+
+A second level for the preconditioner of [`GridPolicyIteration`](@ref) (its
+`coarse` option): [`AggregateCoarseCorrection`](@ref) or [`Multigrid`](@ref).
+"""
+abstract type CoarseCorrection end
+
+"""
+    AggregateCoarseCorrection(blocks; composition = MultiplicativeComposition())
+
+A piecewise-constant coarse space on a grid of `blocks` aggregates per dimension
+(e.g. `[4, 4, 2, 2]`;
+[`AggregateCoarseSpace`](@ref CellularSheaves.NetworkSheaves.GridSchwarz.AggregateCoarseSpace)),
+independent of the boxes, whose Galerkin operator ``A_0 = R_0 A R_0^\\mathsf{T}``
+is computed from the stencil, summed over all ranks and factorized by dense LU
+on every rank once per policy evaluation. With `MultiplicativeComposition()`
+the coarse correction ``z = R_0^\\mathsf{T} A_0^{-1} R_0 v`` comes first and the
+one-level smoother ``M`` acts on the remaining residual, ``z + M(v - Az)``;
+with `AdditiveComposition()` the preconditioner is ``M v + z``.
+
+The coarse LU uses BLAS: with Julia threads spinning
+(`JULIA_THREAD_SLEEP_THRESHOLD=infinite`) run BLAS on one thread
+(`BLAS.set_num_threads(1)`), or the competing threads slow the small
+factorization down by orders of magnitude.
+"""
+struct AggregateCoarseCorrection{C<:LevelComposition} <: CoarseCorrection
+    blocks::Vector{Int}
+    composition::C
+end
+AggregateCoarseCorrection(blocks::AbstractVector{<:Integer}; composition::LevelComposition = MultiplicativeComposition()) =
+    AggregateCoarseCorrection(Vector{Int}(blocks), composition)
+
+"""
+    CoarseOperator
+
+The operator of each coarse level of a [`Multigrid`](@ref):
+[`Rediscretization`](@ref) or [`GalerkinOperator`](@ref).
+"""
+abstract type CoarseOperator end
+
+"""
+    Rediscretization()
+
+Each coarse level is the same HJB problem discretized on the coarse grid, under
+the policy pushed forward to it (the block average of the controls, which stays
+in the convex control set).
+"""
+struct Rediscretization <: CoarseOperator end
+
+"""
+    GalerkinOperator()
+
+Each coarse level is the composite ``T A E`` of the next finer level's operator.
+"""
+struct GalerkinOperator <: CoarseOperator end
+
+"""
+    CoarsestSolver
+
+How a [`Multigrid`](@ref) solves its coarsest grid: [`PathPackCoarsest`](@ref) or
+[`DenseCoarsest`](@ref). A new solver `S` implements `_coarsest_solver(::S, P)`,
+returning a solver of ``V = P V + c`` for matrices with the pattern of `P`,
+refactored by `_refactor!(solver, P)` and applied by `_solve!(solver, x, c)`.
+"""
+abstract type CoarsestSolver end
+
+"""
+    PathPackCoarsest()
+
+The closure ``V = P^* (D^{-1} b)`` of the coarsest grid's discounted transition
+matrix ``P = D^{-1} N`` over the (+, ×) semiring, with PathPack's chordal LU
+(`using PATHPACK`: the symbolic analysis is done once and every policy
+refactorizes numerically).
+"""
+struct PathPackCoarsest <: CoarsestSolver end
+
+"""
+    DenseCoarsest()
+
+LAPACK's LU of the dense matrix ``I - P`` (small coarsest grids).
+"""
+struct DenseCoarsest <: CoarsestSolver end
+
+"""
+    Multigrid(; levels = nothing, coarsest_size = 4096, coarse_operator = Rediscretization(),
+              coarsest = PathPackCoarsest(), presmooth = 1, postsmooth = 1)
 
 A V-cycle preconditioner for [`GridPolicyIteration`](@ref): pass it as
-`GridPolicyIteration(multigrid = Multigrid(...))`. Each coarse grid halves
+`GridPolicyIteration(coarse = Multigrid(...))`. Each coarse grid halves
 the points of every dimension that can be coarsened (an odd count leaves one
 block of one point; a periodic dimension is halved while its count is a
 multiple of 4; see [`GridMultigrid`](@ref CellularSheaves.NetworkSheaves.GridMultigrid)),
@@ -17,24 +101,16 @@ and the levels are linked by the pullback ``E`` (copy each coarse value onto
 its block) and the pushforward transfer ``T`` (block average) of the constant
 sheaf along the aggregation homomorphism.
 
-- `levels = :auto` coarsens until the coarsest grid has at most
+- `levels = nothing` coarsens until the coarsest grid has at most
   `coarsest_size` points, or cannot be coarsened further: ``O(\\log n)``
   levels on a grid of ``n`` points per dimension. An integer asks for exactly
   that many levels, fine grid included.
-- `coarse_operator = :rediscretize`: each coarse level is the same HJB problem
-  discretized on the coarse grid, under the policy pushed forward to it (the
-  block average of the controls, which stays in the convex control set);
-  `:galerkin`: the composite ``T A E`` of the next finer level's operator.
+- `coarse_operator`: [`Rediscretization`](@ref) or [`GalerkinOperator`](@ref).
   The two coincide where each drift component is constant along its own axis
   within a block, and otherwise differ at first order in the grid spacing
   (Galerkin takes the drift on the outflow face, rediscretization at the block
   centre).
-- `coarsest`: `:pathpack` factorizes the coarsest grid's evaluation, as the
-  closure ``V = P^* (D^{-1} b)`` of its discounted transition matrix
-  ``P = D^{-1} N`` over the (+, ×) semiring, with PathPack's chordal LU
-  (`using PATHPACK`: the symbolic analysis is done once and every policy
-  refactorizes numerically); `:dense` uses LAPACK on a dense matrix (small
-  coarsest grids).
+- `coarsest`: the [`CoarsestSolver`](@ref) of the coarsest grid's evaluation.
 - `presmooth`, `postsmooth`: red–black SGS sweeps before and after each
   coarse-grid correction.
 
@@ -42,11 +118,11 @@ Each application of the preconditioner is one V-cycle from a zero initial
 guess. All work arrays are allocated once per solve. Single box only
 (`SerialBoxes()`; CPU threads or one GPU, whose coarsest solve runs on the host).
 """
-Base.@kwdef struct Multigrid
-    levels::Union{Int,Symbol} = :auto
+Base.@kwdef struct Multigrid{O<:CoarseOperator,S<:CoarsestSolver} <: CoarseCorrection
+    levels::Union{Nothing,Int} = nothing
     coarsest_size::Int = 4096
-    coarse_operator::Symbol = :rediscretize
-    coarsest::Symbol = :pathpack
+    coarse_operator::O = Rediscretization()
+    coarsest::S = PathPackCoarsest()
     presmooth::Int = 1
     postsmooth::Int = 1
 end
@@ -65,12 +141,11 @@ _with_grid(prob::HJBProblem, grid::StateGrid) =
 # coarse grid is uniform, so it is again a StateGrid.
 function _coarsen(prob)
     g = _state_grid(prob)
-    D = ndims(g)
-    r = coarsening_factors(Tuple(g.points), _periodic(prob))
-    h = g.spacing
-    lower = [r[k] == 2 && iseven(g.points[k]) ? g.lower[k] + h[k] / 2 : g.lower[k] for k in 1:D]
-    upper = [r[k] == 2 && iseven(g.points[k]) ? g.upper[k] - h[k] / 2 : g.upper[k] for k in 1:D]
-    return _with_grid(prob, StateGrid(lower, upper, collect(coarse_points(Tuple(g.points), r))))
+    r = coarsening_factors(g.points, _periodic(prob))
+    halved = map((rk, n) -> rk == 2 && iseven(n), r, g.points)
+    lower = map((c, lo, h) -> c ? lo + h / 2 : lo, halved, g.lower, g.spacing)
+    upper = map((c, hi, h) -> c ? hi - h / 2 : hi, halved, g.upper, g.spacing)
+    return _with_grid(prob, StateGrid(lower, upper, coarse_points(g.points, r)))
 end
 
 # The policy pushed forward to the coarse grid: the average over each block.
@@ -131,11 +206,11 @@ function _coarsest_pattern(points::NTuple{D,Int}, periodic::NTuple{D,Bool}) wher
 end
 
 """
-    _coarsest_solver(Val(kind), P::SparseMatrixCSC) -> solver
+    _coarsest_solver(s::CoarsestSolver, P::SparseMatrixCSC) -> solver
 
 A solver of ``V = P V + c`` for matrices with the pattern of `P`, refactored by
-`_refactor!(solver, P)` and applied by `_solve!(solver, x, c)`. `:dense`
-here; `:pathpack` in the PATHPACK package extension.
+`_refactor!(solver, P)` and applied by `_solve!(solver, x, c)`. `DenseCoarsest`
+here; `PathPackCoarsest` in the PATHPACK package extension.
 """
 function _coarsest_solver end
 
@@ -144,7 +219,7 @@ mutable struct _DenseCoarsest
     matrix::Matrix{Float64}
 end
 
-_coarsest_solver(::Val{:dense}, P::SparseMatrixCSC) =
+_coarsest_solver(::DenseCoarsest, P::SparseMatrixCSC) =
     _DenseCoarsest(lu(Matrix{Float64}(I, size(P)...)), zeros(size(P)))
 
 function _refactor!(s::_DenseCoarsest, P::SparseMatrixCSC)
@@ -158,15 +233,15 @@ end
 
 _solve!(s::_DenseCoarsest, x::Vector{Float64}, c::Vector{Float64}) = ldiv!(x, s.factor, c)
 
-function _coarsest_solver(::Val{kind}, ::SparseMatrixCSC) where {kind}
-    kind === :pathpack && error("Multigrid(coarsest = :pathpack) needs PathPack: run `using PATHPACK` first")
-    throw(ArgumentError("unknown coarsest solver $kind; use :pathpack or :dense"))
-end
+_coarsest_solver(::PathPackCoarsest, ::AbstractMatrix) =
+    throw(ArgumentError("PathPackCoarsest needs PathPack: run `using PATHPACK` first"))
+_coarsest_solver(s::CoarsestSolver, ::AbstractMatrix) =
+    throw(ArgumentError("$(typeof(s)) does not implement _coarsest_solver; see the CoarsestSolver docstring"))
 
-function _CoarsestSystem(kind::Symbol, points::NTuple{D,Int}, periodic::NTuple{D,Bool}) where {D}
+function _CoarsestSystem(kind::CoarsestSolver, points::NTuple{D,Int}, periodic::NTuple{D,Bool}) where {D}
     P, slot = _coarsest_pattern(points, periodic)
     N = prod(points)
-    solver = _coarsest_solver(Val(kind), P)
+    solver = _coarsest_solver(kind, P)
     return _CoarsestSystem{D,typeof(solver),D + 1}(points, P, slot, zeros(N), zeros(points..., 2D + 1), zeros(N), zeros(N),
         solver)
 end
@@ -216,21 +291,19 @@ struct _Hierarchy{F<:_Level,L<:_Level,S,B,C}
 end
 
 # The number of levels of the hierarchy of a grid of `points` (fine grid
-# included): `mg.levels`, checked, or with :auto as many as it takes to bring
+# included): `mg.levels`, checked, or with `nothing` as many as it takes to bring
 # the coarsest grid down to mg.coarsest_size points or to a grid that cannot
 # be coarsened.
 function _plan_levels(mg::Multigrid, points::NTuple{D,Int}, periodic::NTuple{D,Bool}) where {D}
-    @argcheck mg.coarse_operator in (:rediscretize, :galerkin) "coarse_operator must be :rediscretize or :galerkin"
-    @argcheck mg.coarsest in (:pathpack, :dense) "coarsest must be :pathpack or :dense"
     @argcheck mg.presmooth >= 1 && mg.postsmooth >= 0
-    @argcheck mg.levels === :auto || (mg.levels isa Int && mg.levels >= 2) "levels must be :auto or an integer ≥ 2"
+    @argcheck mg.levels === nothing || mg.levels >= 2 "levels must be nothing (automatic) or an integer ≥ 2"
     @argcheck mg.coarsest_size >= 1
     levels, n = 1, points
     while true
         r = coarsening_factors(n, periodic)
-        done = mg.levels === :auto ? (prod(n) <= mg.coarsest_size || all(==(1), r)) : levels == mg.levels
+        done = mg.levels === nothing ? (prod(n) <= mg.coarsest_size || all(==(1), r)) : levels == mg.levels
         done && break
-        @argcheck any(==(2), r) "level $levels ($(n) points) cannot be coarsened: ask for fewer levels or use levels = :auto"
+        @argcheck any(==(2), r) "level $levels ($(n) points) cannot be coarsened: ask for fewer levels or use levels = nothing"
         n = coarse_points(n, r)
         levels += 1
     end
@@ -239,10 +312,10 @@ function _plan_levels(mg::Multigrid, points::NTuple{D,Int}, periodic::NTuple{D,B
 end
 
 function _Hierarchy(mg::Multigrid, prob, op, layout, U, backend)
-    D = ndims(op)
+    D = length(gridsize(op))
     d = size(U, D + 1)
-    nlevels = _plan_levels(mg, size(op), layout.periodic)
-    galerkin = mg.coarse_operator === :galerkin
+    nlevels = _plan_levels(mg, gridsize(op), layout.periodic)
+    galerkin = mg.coarse_operator isa GalerkinOperator
     first_level = _Level(op, layout, nothing, nothing, grid_zeros(op), grid_zeros(op), U, nothing)
     levels = _Level[]
     problem = prob
@@ -285,15 +358,15 @@ end
 
 # The operator of `coarse` from that of the next finer level.
 function _update_level!(H::_Hierarchy, fine::_Level, coarse::_Level)
-    D = ndims(fine.op)
+    D = length(gridsize(fine.op))
     if H.galerkin
         galerkin_coefficients!(coarse.coef, fine.op)
     else
         backend = get_backend(coarse.op)
         d = size(coarse.controls, D + 1)
         _restrict_controls_kernel!(backend)(coarse.controls, fine.controls,
-            ntuple(k -> size(coarse.op, k) == size(fine.op, k) ? 1 : 2, D), size(fine.op), Val(D), Val(d);
-            ndrange=size(coarse.op))
+            ntuple(k -> gridsize(coarse.op, k) == gridsize(fine.op, k) ? 1 : 2, D), gridsize(fine.op), Val(D), Val(d);
+            ndrange=gridsize(coarse.op))
         KernelAbstractions.synchronize(backend)
     end
     return coarse
@@ -320,13 +393,13 @@ end
 
 function _coarsest_solve!(H::_Hierarchy, level::_Level)
     sys = H.coarsest
-    reshape(H.coarsest_buffer, size(level.op)) .= interior(level.b, level.op)
+    reshape(H.coarsest_buffer, gridsize(level.op)) .= interior(level.b, level.op)
     copyto!(sys.rhs, H.coarsest_buffer)
     sys.rhs ./= sys.diagonal
     _solve!(sys.solver, sys.solution, sys.rhs)
     copyto!(H.coarsest_buffer, sys.solution)
     fill!(level.x, 0)
-    interior(level.x, level.op) .= reshape(H.coarsest_buffer, size(level.op))
+    interior(level.x, level.op) .= reshape(H.coarsest_buffer, gridsize(level.op))
     return level.x
 end
 
