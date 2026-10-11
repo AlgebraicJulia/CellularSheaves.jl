@@ -1,0 +1,8 @@
+3. reach-avoid: the route to the goal that keeps the most clearance from the walls
+reach-avoid closure: 1.677 s; reachable set agrees with min-plus: true
+source   min time  clearance of the fastest route  best clearance  time on the safest route (clearance ≥ best)
+1390106        24                            0.50            9.70              72
+1386395        23                            0.50            9.70              67
+1390248        29                            0.50            1.50              66
+1383838        24                            0.50            9.70              63
+1384338        24                            0.50            9.70              64
