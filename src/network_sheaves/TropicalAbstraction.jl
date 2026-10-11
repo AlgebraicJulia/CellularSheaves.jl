@@ -67,7 +67,7 @@ coarse solution is a correction rather than a bound.
 module TropicalAbstraction
 
 export tropical_pullback, tropical_pushforward, quotient_graph, minplus_closure, cost_to_go,
-    Abstraction, lower_bound, shortest_path, maxmin_closure, reach_avoid
+    Abstraction, lower_bound, shortest_path, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid
 
 using ArgCheck: @argcheck
 using SparseArrays
@@ -271,14 +271,23 @@ function _short_horizon(W, b, k)
 end
 
 """
-    Abstraction(W, ψ; steps = 1, method = :dijkstra)
+    Abstraction(W, ψ; steps = 1, method = :dijkstra, table = false)
 
 The coarse problem of the edge costs `W` along the aggregation `ψ` with time
 coarsened by `steps`: the quotient graph of the `steps`-step graph
 ([`quotient_graph`](@ref)), built once and reused for every target set by
-[`lower_bound`](@ref). `method = :pathpack` also factorizes the coarse min-plus
-closure ``W_c^*`` once with PathPack's chordal semiring LU (requires PATHPACK),
-so that each target set costs two triangular solves on the coarse graph.
+[`lower_bound`](@ref).
+
+`method = :pathpack` factorizes the coarse min-plus closure ``W_c^* = U^* L^*``
+once with PathPack's chordal semiring LU (requires PATHPACK), so that each target
+set costs two triangular solves. `table = true` stores the whole closure ``W_c^*``,
+the cost between every pair of coarse states (all-pairs shortest paths on the
+quotient, by PathPack's closure or by one Dijkstra per column; ``n_c^2`` entries):
+each target set's coarse cost-to-go is then the min-plus product of the table with
+the coarse terminal cost, a lookup of the columns of the target blocks. This is a
+pattern database (Culberson & Schaeffer 1998) and, in control terms, the min-plus
+fundamental solution of the coarse Bellman equation: the value for any terminal
+cost ``φ`` is the Hopf–Lax formula ``V(B) = \\min_C W_c^*(B, C) + φ(C)``.
 """
 struct Abstraction{G,C}
     W::G
@@ -286,6 +295,7 @@ struct Abstraction{G,C}
     steps::Int
     quotient::SparseMatrixCSC{Float64,Int}
     closure::C
+    table::Union{Nothing,Matrix{Float64}}
 end
 
 struct _DijkstraClosure end
@@ -295,9 +305,23 @@ _closure(::Val{M}, Wc) where {M} = throw(ArgumentError("coarse closure method $(
     (M === :pathpack ? " (load PATHPACK)" : "")))
 _apply_closure(::_DijkstraClosure, Wc, bc) = minplus_closure(Wc, bc)
 
-function Abstraction(W::SparseMatrixCSC, ψ::GraphHomomorphism; steps::Integer = 1, method::Symbol = :dijkstra)
+# The whole closure Wc*: column C is the cost from every block to C.
+function _full_closure(::_DijkstraClosure, Wc)
+    nc = size(Wc, 1)
+    table = Matrix{Float64}(undef, nc, nc)
+    Threads.@threads for c in 1:nc
+        e = fill(Inf, nc)
+        e[c] = 0.0
+        table[:, c] = minplus_closure(Wc, e)
+    end
+    return table
+end
+
+function Abstraction(W::SparseMatrixCSC, ψ::GraphHomomorphism; steps::Integer = 1, method::Symbol = :dijkstra,
+        table::Bool = false)
     Wc = SparseMatrixCSC{Float64,Int}(quotient_graph(W, ψ; steps))
-    return Abstraction(W, ψ, Int(steps), Wc, _closure(Val(method), Wc))
+    closure = _closure(Val(method), Wc)
+    return Abstraction(W, ψ, Int(steps), Wc, closure, table ? _full_closure(closure, Wc) : nothing)
 end
 
 """
@@ -305,8 +329,8 @@ end
 
 A lower bound on the cost-to-go of every state to `targets`: the coarse
 cost-to-go of its block, with terminal cost the best fewer-than-`steps` move into
-the targets from each block. For `steps = 1` it is a consistent heuristic; for
-more steps an admissible one.
+the targets from each block (from the stored all-pairs table if there is one).
+For `steps = 1` it is a consistent heuristic; for more steps an admissible one.
 """
 function lower_bound(A::Abstraction, targets)
     N = size(A.W, 1)
@@ -314,7 +338,59 @@ function lower_bound(A::Abstraction, targets)
     b = fill(Inf, N)
     b[targets] .= 0
     bc = tropical_pushforward(A.ψ, _short_horizon(A.W, b, A.steps))
-    return tropical_pullback(A.ψ, _apply_closure(A.closure, A.quotient, bc))
+    if isnothing(A.table)
+        vc = _apply_closure(A.closure, A.quotient, bc)
+    else
+        vc = fill(Inf, length(bc))
+        for c in eachindex(bc)
+            isinf(bc[c]) || (vc .= min.(vc, view(A.table, :, c) .+ bc[c]))
+        end
+    end
+    return tropical_pullback(A.ψ, vc)
+end
+
+# A* from `source` with the out-edges given by `each_out(f, x)` (calling f(y, w) for
+# every edge x → y of cost w), reopening states when a cheaper path is found.
+function _astar(each_out, N, source, targets, heuristic, ::Type{S}) where {S}
+    h(x) = isnothing(heuristic) ? zero(S) : S(heuristic[x])
+    is_target = falses(N)
+    is_target[collect(targets)] .= true
+    g = fill(typemax(S), N)
+    parent = zeros(Int, N)
+    closed = falses(N)
+    g[source] = 0
+    heap = Tuple{S,Int}[]
+    isinf(h(source)) || _push!(heap, (h(source), source))
+    expanded = 0
+    while !isempty(heap)
+        key, x = _pop!(heap)
+        (closed[x] || key > g[x] + h(x)) && continue
+        closed[x] = true
+        expanded += 1
+        if is_target[x]
+            path = [x]
+            while path[end] != source
+                push!(path, parent[path[end]])
+            end
+            return (cost = g[x], path = reverse!(path), expanded = expanded)
+        end
+        each_out(x) do y, w
+            d = g[x] + w
+            if d < g[y]
+                g[y] = d
+                parent[y] = x
+                closed[y] = false                                   # reopen
+                isinf(h(y)) || _push!(heap, (d + h(y), y))
+            end
+        end
+    end
+    return (cost = typemax(S), path = Int[], expanded = expanded)
+end
+
+function _check_query(N, source, targets, heuristic)
+    @argcheck 1 <= source <= N "source must be a state of W"
+    @argcheck !isempty(targets) && all(t -> 1 <= t <= N, targets) "targets must be states of W"
+    @argcheck isnothing(heuristic) || length(heuristic) == N "one heuristic value per state"
 end
 
 """
@@ -333,46 +409,138 @@ function shortest_path(W::SparseMatrixCSC{T}, source::Integer, targets; heuristi
         out_edges::SparseMatrixCSC = sparse(transpose(W))) where {T<:Real}
     _check_costs(W)
     N = size(W, 1)
-    @argcheck 1 <= source <= N "source must be a state of W"
-    @argcheck !isempty(targets) && all(t -> 1 <= t <= N, targets) "targets must be states of W"
-    @argcheck isnothing(heuristic) || length(heuristic) == N "one heuristic value per state"
+    _check_query(N, source, targets, heuristic)
     @argcheck size(out_edges) == size(W) "out_edges must be the transpose of W"
-    S = float(T)
-    h(x) = isnothing(heuristic) ? zero(S) : S(heuristic[x])
-    is_target = falses(N)
-    is_target[collect(targets)] .= true
-    g = fill(typemax(S), N)
-    parent = zeros(Int, N)
-    closed = falses(N)
-    g[source] = 0
-    heap = Tuple{S,Int}[]
-    isinf(h(source)) || _push!(heap, (h(source), source))
     rows, vals = rowvals(out_edges), nonzeros(out_edges)
-    expanded = 0
-    while !isempty(heap)
-        key, x = _pop!(heap)
-        (closed[x] || key > g[x] + h(x)) && continue
-        closed[x] = true
-        expanded += 1
-        if is_target[x]
-            path = [x]
-            while path[end] != source
-                push!(path, parent[path[end]])
-            end
-            return (cost = g[x], path = reverse!(path), expanded = expanded)
+    each_out(f, x) = for k in nzrange(out_edges, x)
+        f(rows[k], vals[k])
+    end
+    return _astar(each_out, N, source, targets, heuristic, float(T))
+end
+
+"""
+    schur_complement(W, S) -> SparseMatrixCSC
+
+Exact elimination of the states outside `S` in min-plus: the matrix on `S` (rows
+and columns in the order of `S`)
+
+```math
+W_S = W_{SS} ⊕ W_{SI} ⊗ W_{II}^* ⊗ W_{IS},
+```
+
+whose entry ``(s, t)`` is the cheapest path from ``s`` to ``t`` through states of
+``I``, the complement of `S` (or the direct edge). In any closed semiring the
+closure of the Schur complement is the restriction of the closure,
+``(W_S)^* = (W^*)_{SS}`` (Lehmann 1977): eliminating the interior loses nothing on
+`S`. One backward search through the interior per state of `S`, threaded.
+"""
+function schur_complement(W::SparseMatrixCSC{T}, S::AbstractVector{<:Integer}) where {T<:Real}
+    _check_costs(W)
+    N = size(W, 1)
+    @argcheck allunique(S) && all(s -> 1 <= s <= N, S) "S must be distinct states of W"
+    local_index = zeros(Int, N)
+    local_index[S] .= eachindex(S)
+    rows, vals = rowvals(W), nonzeros(W)
+    F = float(T)
+    columns = Vector{Vector{Tuple{Int,F}}}(undef, length(S))
+    Threads.@threads for b in eachindex(S)
+        g = Dict{Int,F}()                  # interior labels
+        best = Dict{Int,F}()               # entries (a, b) of the column
+        heap = Tuple{F,Int}[]
+        relax(x, d) = if local_index[x] > 0
+            d < get(best, x, typemax(F)) && (best[x] = d)
+        elseif d < get(g, x, typemax(F))
+            g[x] = d
+            _push!(heap, (d, x))
         end
-        for k in nzrange(out_edges, x)
-            y = rows[k]
-            d = g[x] + vals[k]
-            if d < g[y]
-                g[y] = d
-                parent[y] = x
-                closed[y] = false                                   # reopen
-                isinf(h(y)) || _push!(heap, (d + h(y), y))
+        for k in nzrange(W, S[b])
+            relax(rows[k], vals[k])
+        end
+        settled = Set{Int}()
+        while !isempty(heap)
+            d, y = _pop!(heap)
+            (y in settled || d > g[y]) && continue
+            push!(settled, y)
+            for k in nzrange(W, y)
+                relax(rows[k], d + vals[k])
+            end
+        end
+        columns[b] = [(local_index[x], d) for (x, d) in best]
+    end
+    I_, J_, V_ = Int[], Int[], F[]
+    for b in eachindex(columns), (a, d) in columns[b]
+        push!(I_, a); push!(J_, b); push!(V_, d)
+    end
+    return sparse(I_, J_, V_, length(S), length(S))
+end
+
+"""
+    Overlay(W, cell)
+
+Exact elimination of the cell interiors (customizable route planning, Delling,
+Goldberg, Pajor & Werneck 2011): `cell[x]` assigns each state to a cell, the
+*portals* are the endpoints of the edges between cells, and the overlay is the
+[`schur_complement`](@ref) of `W` on the portals, a shortcut for the cheapest
+path between two portals through a cell's interior (plus the edges between
+cells). A query searches the fine graph only inside the cells of the source and
+the targets and the overlay everywhere else ([`overlay_path`](@ref)); the cells
+are the cover, and the Schur complement is the min-plus harmonic extension of
+the boundary data through each cell.
+"""
+struct Overlay{G}
+    W::G
+    W_out::SparseMatrixCSC{Float64,Int}
+    cell::Vector{Int}
+    portals::Vector{Int}
+    shortcuts_out::SparseMatrixCSC{Float64,Int}    # transpose of the overlay, on all states
+end
+
+function Overlay(W::SparseMatrixCSC, cell::AbstractVector{<:Integer})
+    N = size(W, 1)
+    @argcheck length(cell) == N "one cell per state"
+    rows, cols, _ = findnz(W)
+    portal = falses(N)
+    for (x, y) in zip(rows, cols)
+        if cell[x] != cell[y]
+            portal[x] = true
+            portal[y] = true
+        end
+    end
+    portals = findall(portal)
+    WS = schur_complement(W, portals)
+    a, b, v = findnz(WS)
+    keep = a .!= b
+    shortcuts = sparse(portals[a[keep]], portals[b[keep]], v[keep], N, N)
+    return Overlay(W, SparseMatrixCSC{Float64,Int}(sparse(transpose(W))), collect(Int, cell), portals,
+        sparse(transpose(shortcuts)))
+end
+
+"""
+    overlay_path(O::Overlay, source, targets; heuristic = nothing) -> (cost, path, expanded)
+
+The exact cheapest cost from `source` to `targets` on the overlay `O`: A* over the
+fine edges of the cells containing the source or a target and the overlay
+shortcuts between portals. The `path` lists the states visited, with a shortcut
+standing for a path through a cell interior. Any admissible `heuristic` for the
+fine graph, such as [`lower_bound`](@ref), is admissible here.
+"""
+function overlay_path(O::Overlay, source::Integer, targets; heuristic::Union{Nothing,AbstractVector} = nothing)
+    N = size(O.W, 1)
+    _check_query(N, source, targets, heuristic)
+    active = Set(O.cell[[source; collect(targets)]])
+    fr, fv = rowvals(O.W_out), nonzeros(O.W_out)
+    sr, sv = rowvals(O.shortcuts_out), nonzeros(O.shortcuts_out)
+    function each_out(f, x)
+        for k in nzrange(O.shortcuts_out, x)
+            f(sr[k], sv[k])
+        end
+        if O.cell[x] in active
+            for k in nzrange(O.W_out, x)
+                f(fr[k], fv[k])
             end
         end
     end
-    return (cost = typemax(S), path = Int[], expanded = expanded)
+    return _astar(each_out, N, source, targets, heuristic, Float64)
 end
 
 """

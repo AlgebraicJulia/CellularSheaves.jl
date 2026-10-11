@@ -53,4 +53,7 @@ TA._closure(::Val{:pathpack}, Wc::SparseMatrixCSC) = PathPackMinPlusClosure(PATH
 
 TA._apply_closure(s::PathPackMinPlusClosure, Wc, bc) = lmul!(s.factor, Vector{Float64}(bc))
 
+# All pairs (Abstraction(...; table = true)): the closure Wc* itself, U* L* multiplied out.
+TA._full_closure(s::PathPackMinPlusClosure, Wc) = Matrix(s.factor)
+
 end # module

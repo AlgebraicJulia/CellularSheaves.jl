@@ -54,7 +54,20 @@ function dense_weights(W, zero)
     end
     return D
 end
-minplus(A, B) = [minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 1), j in axes(B, 2)]
+# The min-plus closure by Floyd–Warshall (costs ≥ 0).
+function minplus_star(D)
+    C = copy(D)
+    n = size(C, 1)
+    for k in 1:n, i in 1:n, j in 1:n
+        C[i, j] = min(C[i, j], C[i, k] + C[k, j])
+    end
+    for i in 1:n
+        C[i, i] = min(C[i, i], 0.0)
+    end
+    return C
+end
+
+minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 1), j in axes(B, 2)]
 
 @testset "TropicalAbstraction" begin
     rng = Random.MersenneTwister(3)
@@ -81,6 +94,45 @@ minplus(A, B) = [minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A,
     b = fill(Inf, N); b[[1, 17]] .= 0; b[9] = 0.5
     @test minplus_closure(W, b) ≈ bellman_ford(W, b)
     @test cost_to_go(W, [1, 17]) == minplus_closure(W, [x in (1, 17) ? 0.0 : Inf for x in 1:N])
+
+    # ---- elimination (Schur complement) and its commutation with aggregation ----
+    n = (6, 6)
+    N = prod(n)
+    W = sprand(rng, N, N, 0.12) .* 3
+    D = dense_weights(W, Inf)
+    Dstar = minplus_star(D)
+    ψ = aggregation_homomorphism(n, (2, 2))
+    Sc = sort(randperm(rng, ψ.n_target)[1:4])                  # separator blocks
+    S = findall(in(Sc), ψ.vertex_map)                            # saturated: a union of blocks
+    I = setdiff(1:N, S)
+    WS = schur_complement(W, S)
+    @test dense_weights(WS, Inf) ≈ min.(D[S, S], minplus(minplus(D[S, I], minplus_star(D[I, I])), D[I, S]))
+    @test minplus_star(dense_weights(WS, Inf)) ≈ Dstar[S, S]     # elimination is exact on S
+
+    # ψ restricted to S, onto the separator blocks.
+    position = Dict(b => k for (k, b) in enumerate(Sc))
+    ψS = GraphHomomorphism([position[b] for b in ψ.vertex_map[S]], length(Sc))
+    offdiag(M) = [M[a, b] for a in axes(M, 1), b in axes(M, 2) if a != b]
+    Wq = quotient_graph(W, ψ)
+    # Restriction (dropping I) commutes with aggregation exactly: base change.
+    @test offdiag(dense_weights(quotient_graph(W[S, S], ψS), Inf)) == offdiag(dense_weights(Wq, Inf)[Sc, Sc])
+    # Elimination commutes laxly: aggregate-then-eliminate ≤ eliminate-then-aggregate,
+    # both as operators and as closures, and both bound the aggregated exact closure.
+    AE = dense_weights(schur_complement(Wq, Sc), Inf)            # aggregate, then eliminate
+    EA = dense_weights(quotient_graph(WS, ψS), Inf)              # eliminate, then aggregate
+    @test all(offdiag(AE) .<= offdiag(EA) .+ 1e-12)
+    exact = [minimum(Dstar[S, S][findall(==(a), ψS.vertex_map), findall(==(b), ψS.vertex_map)])
+             for a in 1:length(Sc), b in 1:length(Sc)]
+    @test all(minplus_star(AE) .<= minplus_star(EA) .+ 1e-12)
+    @test all(minplus_star(EA) .<= exact .+ 1e-12)
+    @test any(minplus_star(AE) .< minplus_star(EA) .- 1e-9)     # strictly lax here
+    # … and strictly commutes when the aggregation is one-to-one on the eliminated interior.
+    ids = [b in Sc ? position[b] : 0 for b in 1:ψ.n_target]
+    vmap = [ids[ψ.vertex_map[x]] for x in 1:N]
+    vmap[I] .= length(Sc) .+ (1:length(I))
+    ψ1 = GraphHomomorphism(vmap, length(Sc) + length(I))
+    AE1 = dense_weights(schur_complement(quotient_graph(W, ψ1), collect(1:length(Sc))), Inf)
+    @test offdiag(AE1) ≈ offdiag(EA)
 
     # ---- minimum-time double integrator around a wall with a gap ---------------
     wall(qx, qy) = qx in 11:12 && !(qy in 3:5)
@@ -178,6 +230,25 @@ minplus(A, B) = [minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A,
     ψ = space[1][1]
     Rc = maxmin_closure(quotient_graph(Amax, ψ; combine = max), tropical_pushforward(ψ, min.(l, g); combine = max))
     @test all(tropical_pullback(ψ, Rc) .>= R)
+
+    # ---- option 1: the coarse all-pairs table (pattern database) ---------------
+    for (ψ, steps) in (space[1], spacetime[1])
+        h = lower_bound(Abstraction(W, ψ; steps), goal)
+        @test lower_bound(Abstraction(W, ψ; steps, table = true), goal) == h
+        @test lower_bound(Abstraction(W, ψ; steps, method = :pathpack, table = true), goal) == h
+    end
+
+    # ---- option 2: exact elimination of cell interiors (overlay) ---------------
+    cell = [((I[1] - 1) ÷ 8) * 3 + (I[2] - 1) ÷ 8 + 1 for I in CartesianIndices(points)][:]
+    O = Overlay(W, cell)
+    @test length(O.portals) < size(W, 1)
+    hfine = lower_bound(Abstraction(W, space[1][1]), goal)
+    for s in sources
+        r = overlay_path(O, s, goal)
+        @test r.cost == V[s] && first(r.path) == s && last(r.path) in goal
+        ra = overlay_path(O, s, goal; heuristic = hfine)
+        @test ra.cost == V[s]
+    end
 
     @test_throws ArgumentError cost_to_go(-W, goal)
     @test_throws ArgumentError quotient_graph(W, aggregation_homomorphism((6, 5), (2, 2)))
