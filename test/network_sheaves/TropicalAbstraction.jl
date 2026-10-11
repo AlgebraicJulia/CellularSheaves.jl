@@ -377,6 +377,18 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
         @test cc.positive_definite && cc.strict && cc.closed
     end
 
+    # The certified layered controller: stability from the corridor value (lax side),
+    # a suboptimality bound from the optimistic refinement (oplax side).
+    for s in sources, (width, mode_width) in ((0, 0), (2, 1), (4, 1))
+        c = certified_path(PM, s, goal; width, mode_width, lower = hm)
+        l = layered_path(PM, s, goal; width = c.width, mode_width = c.mode_width, widen = false, heuristic = hm)
+        @test c.cost == l.cost >= V[s]                                                # the same controller cost
+        @test c.certificate.positive_definite && c.certificate.strict && c.certificate.closed
+        @test first(c.path) == s && last(c.path) in goal && valid(c, s)              # its closed-loop trajectory
+        @test c.suboptimality_bound >= c.cost / V[s] - 1e-12                          # a guaranteed bound on cost / optimum
+    end
+    @test !isfinite(certified_path(PM, L[11, 10, 3, 3], goal).cost)
+
     @test_throws ArgumentError cost_to_go(-W, goal)
     @test_throws ArgumentError quotient_graph(W, aggregation_homomorphism((6, 5), (2, 2)))
     @test_throws ArgumentError quotient_graph(W, space[1][1]; steps = 2, combine = max)

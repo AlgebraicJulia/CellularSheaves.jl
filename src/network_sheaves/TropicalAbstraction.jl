@@ -70,7 +70,7 @@ export tropical_pullback, tropical_pushforward, quotient_graph, minplus_closure,
     Abstraction, lower_bound, shortest_path, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid,
     projection_homomorphism, LayeredPlanner, plan_route, corridor, layered_path,
     intertwines, TruncatedPushforward, coarsen, refine, coarsening_matrix, refinement_matrix,
-    robust_quotient, upper_bound, is_control_lyapunov, greedy_policy, is_lyapunov, corridor_certificate
+    robust_quotient, upper_bound, is_control_lyapunov, greedy_policy, is_lyapunov, corridor_certificate, certified_path
 
 using ArgCheck: @argcheck
 using SparseArrays
@@ -1001,6 +1001,56 @@ function is_lyapunov(next::AbstractVector{<:Integer}, V::AbstractVector, equilib
     return (positive_definite = positive, decrescent = decrescent, strict = strict, closed = closed, domain = length(dom))
 end
 
+# The min-plus closure of W restricted to the `allowed` states (backward Dijkstra
+# over in-edges, never entering a state outside), and the greedy feedback on it.
+function _restricted_closure(W::SparseMatrixCSC, allowed::AbstractVector{Bool}, b::AbstractVector)
+    g = fill(Inf, size(W, 1))
+    heap = Tuple{Float64,Int}[]
+    for x in eachindex(b)
+        if allowed[x] && isfinite(b[x])
+            g[x] = b[x]
+            _push!(heap, (g[x], x))
+        end
+    end
+    rows, vals = rowvals(W), nonzeros(W)
+    settled = falses(length(g))
+    while !isempty(heap)
+        _, y = _pop!(heap)
+        settled[y] && continue
+        settled[y] = true
+        for k in nzrange(W, y)
+            x = rows[k]
+            allowed[x] || continue
+            d = g[y] + vals[k]
+            if d < g[x]
+                g[x] = d
+                _push!(heap, (d, x))
+            end
+        end
+    end
+    return g
+end
+
+function _restricted_greedy(W_out::SparseMatrixCSC, allowed::AbstractVector{Bool}, V::AbstractVector)
+    rows, vals = rowvals(W_out), nonzeros(W_out)
+    next = zeros(Int, length(V))
+    for x in eachindex(V)
+        (allowed[x] && isfinite(V[x])) || continue
+        best = Inf
+        for k in nzrange(W_out, x)
+            y = rows[k]
+            allowed[y] || continue
+            d = vals[k] + V[y]
+            if d < best
+                best, next[x] = d, y
+            end
+        end
+    end
+    return next
+end
+
+_above(P::LayeredPlanner, U) = BitVector(U[P.μ.vertex_map[x]] for x in 1:size(P.W, 1))
+
 """
     corridor_certificate(P::LayeredPlanner, source, targets; width, mode_width) -> (V, next)
 
@@ -1011,16 +1061,65 @@ loop [`is_lyapunov`](@ref) certifies on ``\\{V_U < ∞\\}``. The search of
 [`layered_path`](@ref) with the same corridor finds a path of cost ``V_U(\\text{source})``.
 """
 function corridor_certificate(P::LayeredPlanner, source::Integer, targets; width::Integer, mode_width::Integer = 0)
-    route = plan_route(P, source, targets)
-    U = corridor(P, route, width, mode_width)
-    inside = [U[P.μ.vertex_map[x]] for x in 1:size(P.W, 1)]
-    r, c, v = findnz(P.W)
-    keep = inside[r] .& inside[c]
-    WU = sparse(r[keep], c[keep], v[keep], size(P.W)...)
+    inside = _above(P, corridor(P, plan_route(P, source, targets), width, mode_width))
     b = fill(Inf, size(P.W, 1))
     b[[t for t in targets if inside[t]]] .= 0
-    VU = minplus_closure(WU, b)
-    return (V = VU, next = greedy_policy(WU, VU))
+    VU = _restricted_closure(P.W, inside, b)
+    return (V = VU, next = _restricted_greedy(P.W_out, inside, VU))
+end
+
+"""
+    certified_path(P::LayeredPlanner, source, targets; width = 2, mode_width = 0,
+        lower = nothing, widen = true)
+        -> (cost, path, route, width, mode_width, first_try, certificate, lower, suboptimality_bound)
+
+The layered controller with its certificates, sandwiched between the two
+pushforwards. The low level is the greedy feedback on the cost-to-go ``V_U``
+within the corridor around the planned route (widened as in [`layered_path`](@ref)
+until the source reaches the targets in it), and `path` is its closed-loop
+trajectory from `source`, of cost ``V_U(\\text{source})``.
+
+- *Stability* (the lax side): `certificate` is [`is_lyapunov`](@ref) for that
+  closed loop with ``V_U``, a Lyapunov morphism into ``(ℝ_{≥0}, r ↦ \\{r\\})``
+  with strict decrease, so every state above the corridor that can reach the
+  targets does, within ``V_U`` steps.
+- *Performance* (the oplax side): with `lower` a lower bound on the optimal
+  cost-to-go, such as [`lower_bound`](@ref) of an optimistic abstraction (the
+  refinement along an oplax morphism), `suboptimality_bound` ``= V_U(x) / \\text{lower}(x)``
+  is a guaranteed bound on the ratio of the controller's cost to the optimum,
+  computed without the optimum.
+"""
+function certified_path(P::LayeredPlanner, source::Integer, targets; width::Integer = 2, mode_width::Integer = 0,
+        lower::Union{Nothing,AbstractVector} = nothing, widen::Bool = true)
+    N = size(P.W, 1)
+    _check_query(N, source, targets, lower)
+    route = plan_route(P, source, targets)
+    w, mw = Int(width), Int(mode_width)
+    first_try = true
+    while true
+        U = isempty(route) ? trues(P.μ.n_target) : corridor(P, route, w, mw)
+        inside = _above(P, U)
+        goal_inside = [t for t in targets if inside[t]]
+        b = fill(Inf, N)
+        b[goal_inside] .= 0
+        VU = _restricted_closure(P.W, inside, b)
+        if isfinite(VU[source]) || !widen || all(U)
+            next = _restricted_greedy(P.W_out, inside, VU)
+            path = [source]
+            while isfinite(VU[path[end]]) && VU[path[end]] > 0
+                push!(path, next[path[end]])
+            end
+            certificate = is_lyapunov(next, VU, goal_inside)
+            lb = isnothing(lower) ? NaN : Float64(lower[source])
+            bound = isnothing(lower) ? NaN : VU[source] == 0 ? 1.0 : VU[source] / lb
+            return (cost = VU[source], path = isfinite(VU[source]) ? path : Int[], route = route, width = w, mode_width = mw,
+                first_try = first_try && isfinite(VU[source]), certificate = certificate, lower = lb,
+                suboptimality_bound = bound)
+        end
+        first_try = false
+        w = max(1, 2w)
+        mw = min(mw + 1, P.K)
+    end
 end
 
 """

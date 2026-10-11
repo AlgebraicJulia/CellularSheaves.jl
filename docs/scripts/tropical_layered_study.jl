@@ -121,3 +121,30 @@ open(joinpath(@__DIR__, "..", "figures", "tropical_layered.csv"), "w") do io
         println(io, join((r.name, r.first_try, r.mean_ratio, r.max_ratio, r.optimal, r.states, r.expanded, r.seconds), ","))
     end
 end
+
+# ---- certified layered control ----------------------------------------------------
+# Each query returns the closed-loop trajectory, a Lyapunov certificate for the corridor
+# controller (lax side), and a suboptimality bound from the optimistic refinement
+# (oplax side), computed without the optimum; here the optimum is known, so the bound
+# can be compared with the true ratio.
+println("\ncertified layered control: Lyapunov certificate and guaranteed cost/optimum bound")
+println("planner                       corridor   certified  first try  cost/opt (true)  bound (mean, worst)  time/query")
+cert_rows = []
+for (name, Pl, _) in planners, (width, mode_width) in ((4, 1), (16, 1))
+    rs = [certified_path(Pl, s, goal; width, mode_width, lower = h[name]) for s in sources]
+    ts = [timed(() -> certified_path(Pl, s, goal; width, mode_width, lower = h[name]))[2] for s in sources]
+    ok = mean(r.certificate.positive_definite && r.certificate.strict && r.certificate.closed for r in rs)
+    truth = [r.cost for r in rs] ./ V[sources]
+    bound = [r.suboptimality_bound for r in rs]
+    all(bound .>= truth .- 1e-12) || error("a bound below the true ratio")
+    @printf("%-29s w=%2d m=%d %8.0f%% %9.0f%% %12.3f %12.3f %8.3f %10.4f s\n", split(name, " (")[1], width, mode_width,
+        100 * ok, 100 * mean(r.first_try for r in rs), mean(truth), mean(bound), maximum(bound), mean(ts))
+    push!(cert_rows, (split(name, " (")[1], width, mode_width, ok, mean(r.first_try for r in rs), mean(truth), mean(bound),
+        maximum(bound), mean(ts)))
+end
+open(joinpath(@__DIR__, "..", "figures", "tropical_certified.csv"), "w") do io
+    println(io, "planner,width,mode_width,certified_fraction,first_try,mean_cost_over_optimal,mean_bound,max_bound,seconds_per_query")
+    for r in cert_rows
+        println(io, join(r, ","))
+    end
+end
