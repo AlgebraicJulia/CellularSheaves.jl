@@ -1,0 +1,6 @@
+truncation,modes,refinement_lax,certified_states,certified_fraction,mean_upper_over_optimal,max_upper_over_optimal,certified,seconds
+1 mode (velocity-blind),1,true,0,0.0,NaN,NaN,true,5.964168237
+8 headings × 3 speeds,25,true,9,3.7401913481893734e-6,NaN,NaN,true,8.473329793
+16 headings × 3 speeds,49,true,9,3.7401913481893734e-6,NaN,NaN,true,9.628746485
+8 headings × 6 speeds,49,true,1418938,0.5896777368019037,2.736738289365493,6.166666666666667,true,9.813994617
+every velocity (isomorphism),169,true,2406294,1.0,1.0,1.0,true,18.043262854

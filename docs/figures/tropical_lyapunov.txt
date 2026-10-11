@@ -1,0 +1,9 @@
+lattice 128² × 13², 2768896 states, 2406294 can reach the goal
+optimal value: control Lyapunov true; greedy closed loop (positive_definite = true, decrescent = true, strict = true, closed = true, domain = 2406294)
+
+truncation                     modes  lax E  certified states (of reachable)  E·Vc / V (mean, worst)  closed loop  build+solve
+1 mode (velocity-blind)            1  true           0 (  0.0%)                  NaN      NaN      (empty)       6.0 s
+8 headings × 3 speeds             25  true           9 (  0.0%)                  NaN      NaN    certified       8.5 s
+16 headings × 3 speeds            49  true           9 (  0.0%)                  NaN      NaN    certified       9.6 s
+8 headings × 6 speeds             49  true     1418938 ( 59.0%)                2.737    6.167    certified       9.8 s
+every velocity (isomorphism)     169  true     2406294 (100.0%)                1.000    1.000    certified      18.0 s

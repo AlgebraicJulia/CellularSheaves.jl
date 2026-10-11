@@ -68,7 +68,7 @@ nv = 2vmax + 1
 truncations = [("1 mode (velocity-blind)", ones(Int, nv, nv)),
                ("8 headings × 3 speeds", heading_speed_modes(vmax, 8, [2, 4, vmax])),
                ("16 headings × 3 speeds", heading_speed_modes(vmax, 16, [2, 4, vmax])),
-               ("16 headings × 6 speeds", heading_speed_modes(vmax, 16, collect(1:vmax))),
+               ("8 headings × $(vmax) speeds", heading_speed_modes(vmax, 8, collect(1:vmax))),
                ("every velocity (isomorphism)", reshape(1:(nv * nv), nv, nv))]
 println("\ntruncation                     modes  lax E  certified states (of reachable)  E·Vc / V (mean, worst)  closed loop  build+solve")
 rows = []
@@ -84,10 +84,11 @@ for (name, modes) in truncations
     nxt = greedy_policy(W, Vup)
     cert = is_lyapunov(nxt, Vup, [x for x in goal if Vup[x] == 0])
     clf = is_control_lyapunov(W, Vup, b)
-    ratio = Vup[cov] ./ V[cov]
+    off = [x for x in cov if V[x] > 0]                                 # off the goal (0/0 there)
+    ratio = isempty(off) ? [NaN] : Vup[off] ./ V[off]
     ok = clf && cert.positive_definite && cert.strict && cert.closed
     @printf("%-30s %5d  %-5s %10d (%5.1f%%) %20.3f %8.3f %12s %9.1f s\n", name, T.K, lax, length(cov),
-        100 * length(cov) / length(reach), mean(ratio), maximum(ratio), ok ? "certified" : "FAILED", t)
+        100 * length(cov) / length(reach), mean(ratio), maximum(ratio), isempty(cov) ? "(empty)" : ok ? "certified" : "FAILED", t)
     push!(rows, (name, T.K, lax, length(cov), length(cov) / length(reach), mean(ratio), maximum(ratio), ok, t))
 end
 
