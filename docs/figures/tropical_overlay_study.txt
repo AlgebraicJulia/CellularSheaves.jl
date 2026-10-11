@@ -1,0 +1,22 @@
+threads: 8
+
+1. all-pairs coarse closure (pattern database), lattice 128² × 13²
+abstraction              coarse states  dijkstra table  pathpack table  bound/goal: solve   table   same
+space–time 16×16 k=4              1024         0.145 s         1.354 s           0.0215 s  0.0215 s  true
+space 32×32                       2704         0.175 s         0.149 s           0.0636 s  0.0120 s  true
+space 16×16                      10816         1.976 s         1.791 s           0.0136 s  0.0118 s  true
+
+2. overlay: cell interiors (16 × 16 positions × all velocities) eliminated onto portals
+lattice        states  portals   shortcuts  build     query: dijkstra   A* (2×2)   overlay   overlay+A*  (states expanded)
+128² ×  3²     147456    29956     2716024    0.89 s     139465     131706      32856      30874
+                                                           0.0117 s   0.0157 s   0.0115 s   0.0191 s  (seconds)
+ 64² ×  5²     102400    26784     7025593    1.66 s      85666      15406      32823       6662
+                                                           0.0080 s   0.0025 s   0.0177 s   0.0051 s  (seconds)
+ 64² ×  7²     200704    67194    34327284    8.09 s     153561      77997      69302      36816
+                                                           0.0159 s   0.0139 s   0.0671 s   0.0439 s  (seconds)
+
+3. commutation of aggregation (2 × 2 positions) and elimination (cell interiors), lattice 64² × 5²
+separator: 8394 of 25600 blocks (33576 states); operators: eliminate→aggregate 766346 entries (1.50 s), aggregate→eliminate 766346 entries (0.14 s)
+lax square AE ≤ EA on every entry of EA: true; equal on 349689 of 766346 entries
+cost-to-go / exact over 7999 separator blocks: aggregate→eliminate 0.961 (mean), eliminate→aggregate 0.987 (mean); EA exact on 67.1%, AE exact on 30.4%
+order checks: AE ≤ EA ≤ exact everywhere: true
