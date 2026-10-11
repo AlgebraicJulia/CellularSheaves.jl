@@ -52,13 +52,43 @@ sources = candidates[randperm(rng, length(candidates))[1:nq]]
 println("lattice $(n)² positions × $(2vmax + 1)² velocities = $(size(W, 1)) states; $(nq) queries from random states")
 @printf("exact optimal costs: mean %.1f, range %d–%d\n", mean(V[sources]), minimum(V[sources]), maximum(V[sources]))
 
+# Velocity modes: rest, then `headings` direction sectors for each speed band
+# (Chebyshev speed ≤ speed_edges[k]).
+function heading_speed_modes(vmax, headings, speed_edges)
+    M = zeros(Int, 2vmax + 1, 2vmax + 1)
+    for ix in 1:(2vmax + 1), iy in 1:(2vmax + 1)
+        vx, vy = ix - vmax - 1, iy - vmax - 1
+        if vx == 0 && vy == 0
+            M[ix, iy] = 1
+            continue
+        end
+        band = findfirst(>=(max(abs(vx), abs(vy))), speed_edges)
+        h = mod(round(Int, atan(vy, vx) / (2π / headings)), headings)
+        M[ix, iy] = 1 + (band - 1) * headings + h + 1
+    end
+    return M
+end
+
+# Planners: the velocity-blind projection (one mode per stalk) and truncated
+# pushforwards keeping heading × speed modes in the stalk over each cell.
 ψ = projection_homomorphism(points, (1, 2))
-P, tbuild = timed(() -> LayeredPlanner(W, ψ, (n, n)))
-h, tbound = timed(() -> lower_bound(P.abstraction, goal))
-@printf("planner: %d cells, %d quotient moves, built in %.2f s; 2-D bound for the goal in %.3f s (bound/cost %.2f)\n",
-    ψ.n_target, nnz(P.abstraction.quotient), tbuild, tbound, mean(h[sources] ./ V[sources]))
-troute = mean(timed(() -> plan_route(P, s, goal))[2] for s in sources)
-@printf("route planning: %.4f s per query (2-D)\n", troute)
+planners = Any[]
+P0, t0 = timed(() -> LayeredPlanner(W, ψ, (n, n)))
+push!(planners, ("velocity-blind (1 mode)", P0, t0))
+for (headings, speeds) in ((8, [2, 4, vmax]), (16, [2, 4, vmax]))
+    modes = heading_speed_modes(vmax, headings, speeds)
+    T = TruncatedPushforward(W, points, (1, 2), modes)
+    Pm, tm = timed(() -> LayeredPlanner(T))
+    push!(planners, ("$(headings) headings × $(length(speeds)) speeds ($(T.K) modes)", Pm, tm))
+end
+h = Dict{String,Vector{Float64}}()
+for (name, Pl, tb) in planners
+    hb, tbound = timed(() -> lower_bound(Pl.abstraction, goal))
+    h[name] = hb
+    troute = mean(timed(() -> plan_route(Pl, s, goal))[2] for s in sources)
+    @printf("planner %-34s %8d coarse states, built in %5.2f s; bound for the goal %.3f s (bound/cost %.2f); route %.4f s\n",
+        name, Pl.μ.n_target, tb, tbound, mean(hb[sources] ./ V[sources]), troute)
+end
 
 Wout = sparse(transpose(W))
 function summarize(name, rs, ts)
@@ -66,19 +96,23 @@ function summarize(name, rs, ts)
     ratio = costs ./ V[sources]
     first = [hasproperty(r, :first_try) ? r.first_try : true for r in rs]
     states = [hasproperty(r, :corridor_states) ? r.corridor_states : count(isfinite, V) for r in rs]
-    @printf("%-26s %6.0f%% %10.3f %8.3f %8.0f%% %12.0f %12.0f %9.4f s\n", name, 100 * mean(first), mean(ratio), maximum(ratio),
+    @printf("%-52s %6.0f%% %9.3f %7.3f %8.0f%% %12.0f %11.0f %9.4f s\n", name, 100 * mean(first), mean(ratio), maximum(ratio),
         100 * mean(ratio .== 1), mean(states), mean(r.expanded for r in rs), mean(ts))
     return (name = name, first_try = mean(first), mean_ratio = mean(ratio), max_ratio = maximum(ratio),
         optimal = mean(ratio .== 1), states = mean(states), expanded = mean(r.expanded for r in rs), seconds = mean(ts))
 end
 
-println("\nmethod                     first try  cost/opt  worst  optimal  search states  expansions   time/query")
+println("\nmethod                                               first try  cost/opt   worst  optimal  search states  expansions  time/query")
 rows = []
 q(f) = (rs = [f(s) for s in sources]; ts = [timed(() -> f(s))[2] for s in sources]; (rs, ts))
 push!(rows, summarize("4-D Dijkstra (exact)", q(s -> shortest_path(W, s, goal; out_edges = Wout))...))
-push!(rows, summarize("4-D A*, 2-D bound (exact)", q(s -> shortest_path(W, s, goal; heuristic = h, out_edges = Wout))...))
-for width in (0, 1, 2, 4, 8, 16)
-    push!(rows, summarize("layered, width $(width)", q(s -> layered_path(P, s, goal; width, heuristic = h))...))
+for (name, Pl, _) in planners
+    push!(rows, summarize("4-D A*, bound of $(name)", q(s -> shortest_path(W, s, goal; heuristic = h[name], out_edges = Wout))...))
+end
+for (name, Pl, _) in planners, (width, mode_width) in ((0, 0), (1, 0), (2, 0), (2, 1), (4, 1), (8, 1), (16, 1))
+    Pl.K == 1 && (width, mode_width) == (2, 1) && continue          # one mode: m is moot
+    label = "$(split(name, " (")[1]): w=$(width)" * (Pl.K > 1 ? ", m=$(mode_width)" : "")
+    push!(rows, summarize(label, q(s -> layered_path(Pl, s, goal; width, mode_width, heuristic = h[name]))...))
 end
 
 open(joinpath(@__DIR__, "..", "figures", "tropical_layered.csv"), "w") do io

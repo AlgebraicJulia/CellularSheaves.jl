@@ -68,7 +68,8 @@ module TropicalAbstraction
 
 export tropical_pullback, tropical_pushforward, quotient_graph, minplus_closure, cost_to_go,
     Abstraction, lower_bound, shortest_path, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid,
-    projection_homomorphism, LayeredPlanner, plan_route, corridor, layered_path
+    projection_homomorphism, LayeredPlanner, plan_route, corridor, layered_path,
+    intertwines, TruncatedPushforward, coarsen, refine, coarsening_matrix, refinement_matrix
 
 using ArgCheck: @argcheck
 using SparseArrays
@@ -560,108 +561,288 @@ function projection_homomorphism(points::NTuple{D,Integer}, dims::NTuple{K,Integ
     return GraphHomomorphism(vec(vmap), prod(cells))
 end
 
+# ---- min-plus sheaves over a base graph, and morphisms between them ----------
+
+# Entrywise A ≤ B for min-plus sparse matrices (absent entries are ∞): every entry
+# stored in B is stored in A with a value no larger. Rows are sorted in each column.
+function _minplus_le(A::SparseMatrixCSC, B::SparseMatrixCSC; tol = 1e-12)
+    size(A) == size(B) || return false
+    Ar, Av, Br, Bv = rowvals(A), nonzeros(A), rowvals(B), nonzeros(B)
+    for j in 1:size(B, 2)
+        p, pend = first(nzrange(A, j)), last(nzrange(A, j))
+        for q in nzrange(B, j)
+            while p <= pend && Ar[p] < Br[q]
+                p += 1
+            end
+            (p <= pend && Ar[p] == Br[q] && Av[p] <= Bv[q] + tol) || return false
+        end
+    end
+    return true
+end
+
+# The sparsity pattern sorted (sparse() sorts; _minplus_mul sorts) and, for equality,
+# the same stored entries with the same values.
+_minplus_eq(A, B; tol = 1e-12) = _minplus_le(A, B; tol) && _minplus_le(B, A; tol)
+
 """
+    intertwines(W_source, W_target, Φ) -> (lax, oplax, strict)
+
+How the cochain map `Φ` (a min-plus matrix from the states of the source system to
+those of the target, absent entries ``∞``) commutes with the two systems' Bellman
+operators ``V ↦ W ⊗ V``: `lax` when ``W_t ⊗ Φ ≤ Φ ⊗ W_s`` entrywise (the target's
+moves are no more expensive: a relaxation), `oplax` when ``Φ ⊗ W_s ≤ W_t ⊗ Φ``,
+and `strict` when both hold, ``W_t ⊗ Φ = Φ ⊗ W_s``: a morphism of min-plus sheaves
+in the ordinary sense. Over a base graph, with ``Φ`` acting stalk by stalk, the
+intertwining relation is the commuting square of the restriction maps of every
+edge; lax and oplax morphisms commute up to the order of the min-plus semiring.
+"""
+function intertwines(Ws::SparseMatrixCSC, Wt::SparseMatrixCSC, Φ::SparseMatrixCSC)
+    @argcheck size(Φ) == (size(Wt, 1), size(Ws, 1)) "Φ maps the source states to the target states"
+    left = _minplus_mul(SparseMatrixCSC{Float64,Int}(Wt), SparseMatrixCSC{Float64,Int}(Φ))     # W_t ⊗ Φ
+    right = _minplus_mul(SparseMatrixCSC{Float64,Int}(Φ), SparseMatrixCSC{Float64,Int}(Ws))    # Φ ⊗ W_s
+    lax = _minplus_le(left, right)
+    oplax = _minplus_le(right, left)
+    return (lax = lax, oplax = oplax, strict = lax && oplax)
+end
+
+"""
+    TruncatedPushforward(W, points, cell_dims, fibre_modes)
+
+The min-plus pushforward of a state graph over a grid of `points` onto the cells of
+the dimensions `cell_dims`, keeping a *partition of each stalk into modes*.
+
+**The fine sheaf.** Pushing the state graph `W` forward along the projection
+``ψ`` onto the cells ([`projection_homomorphism`](@ref)) gives a min-plus sheaf
+``F`` on the cell graph: its stalk over a cell ``q`` holds the values on the fibre
+``ψ^{-1}(q)`` (for ``(q, v) ↦ q``, a function of the velocity), and the edge
+``q → q'`` carries the block of `W` from the fibre over ``q`` to the fibre over
+``q'``, moves inside a cell being loops. The value function is the greatest *lax
+section* of ``F`` below the terminal cost: ``V(q) ≤ W_{q q'} ⊗ V(q')`` on every
+edge. Keeping one value per stalk (its minimum) is [`quotient_graph`](@ref) along
+``ψ``, which forgets the velocity.
+
+**The coarse sheaf.** `fibre_modes` (an array over the other dimensions, the same
+for every cell) partitions each stalk into ``K`` modes, e.g. heading × speed bins
+of the velocity. The coarse sheaf ``G`` has stalk ``ℝ_{\\min}^K`` over every cell,
+and the two maps between them are stalkwise (over the identity of the cell graph):
+
+- *refinement* ``E : G → F`` ([`refine`](@ref)), copying each mode's value to its
+  states (the pullback along the mode map ``μ``);
+- *coarsening* ``P : F → G`` ([`coarsen`](@ref)), the minimum over each mode.
+
+They form a Galois connection, ``E g ≤ f ⟺ g ≤ P f`` (``P`` is the residual of
+``E``), with ``P E = I`` and ``E P ≤ I``. The coarse edge maps are the residuated
+Galerkin products ``W_c = P ⊗ W ⊗ E``, so ``P`` is a *lax* morphism of min-plus
+sheaves (``W_c ⊗ P ≤ P ⊗ W``) and ``E`` an *oplax* one (``E ⊗ W_c ≤ W ⊗ E``),
+both checked by [`intertwines`](@ref). Neither square commutes strictly unless the
+moves are constant on modes. The oplax square is what makes the coarse solution a
+bound: ``E`` maps lax sections of ``G`` to lax sections of ``F``, so ``E V_c ≤ V``.
+With one mode per stalk this is the velocity-blind quotient; with one mode per
+state it is an isomorphism.
+"""
+struct TruncatedPushforward
+    W::SparseMatrixCSC{Float64,Int}
+    ψ::GraphHomomorphism                  # state → cell
+    μ::GraphHomomorphism                  # state → coarse state (cell, mode)
+    π::GraphHomomorphism                  # coarse state → cell
+    K::Int                                # modes per stalk
+    quotient::SparseMatrixCSC{Float64,Int}    # W_c = P ⊗ W ⊗ E, loops included
+    cell_points::Tuple
+    mode_neighbors::Vector{Vector{Int}}   # modes containing adjacent fibre points
+end
+
+function TruncatedPushforward(W::SparseMatrixCSC, points::NTuple{D,Integer}, cell_dims::NTuple{C,Integer},
+        fibre_modes::AbstractArray{<:Integer}) where {D,C}
+    _check_costs(W)
+    @argcheck size(W, 1) == prod(points) "W must act on the grid of points"
+    fdims = Tuple(d for d in 1:D if !(d in cell_dims))
+    @argcheck size(fibre_modes) == ntuple(k -> Int(points[fdims[k]]), length(fdims)) "fibre_modes must cover the other dimensions"
+    K = maximum(fibre_modes)
+    @argcheck sort(unique(vec(fibre_modes))) == collect(1:K) "fibre_modes must use the modes 1:K"
+    ψ = projection_homomorphism(points, cell_dims)
+    LF = LinearIndices(size(fibre_modes))
+    mode = [fibre_modes[LF[CartesianIndex(ntuple(k -> I[fdims[k]], length(fdims)))]] for I in CartesianIndices(Tuple(points))]
+    μ = GraphHomomorphism(vec((ψ.vertex_map .- 1) .* K .+ vec(mode)), ψ.n_target * K)
+    π = GraphHomomorphism([(c - 1) ÷ K + 1 for c in 1:(ψ.n_target * K)], ψ.n_target)
+    rows, cols, vals = findnz(W)
+    Wc = sparse(μ.vertex_map[rows], μ.vertex_map[cols], Float64.(vals), μ.n_target, μ.n_target, min)
+    # Modes are adjacent when they hold Chebyshev-adjacent points of the fibre grid.
+    nbrs = [Set{Int}() for _ in 1:K]
+    CF = CartesianIndices(size(fibre_modes))
+    for I in CF, J in CF
+        if maximum(abs.(Tuple(I) .- Tuple(J))) == 1 && fibre_modes[I] != fibre_modes[J]
+            push!(nbrs[fibre_modes[I]], fibre_modes[J])
+        end
+    end
+    cells = ntuple(k -> Int(points[cell_dims[k]]), C)
+    return TruncatedPushforward(SparseMatrixCSC{Float64,Int}(W), ψ, μ, π, K, Wc, cells, [sort!(collect(s)) for s in nbrs])
+end
+
+"""
+    coarsen(T::TruncatedPushforward, v) -> Vector
+
+The coarsening ``P``: each mode of each stalk takes the minimum of `v` over its
+states.
+"""
+coarsen(T::TruncatedPushforward, v::AbstractVector) = tropical_pushforward(T.μ, v)
+
+"""
+    refine(T::TruncatedPushforward, vc) -> Vector
+
+The refinement ``E``: each state takes the value of its mode.
+"""
+refine(T::TruncatedPushforward, vc::AbstractVector) = tropical_pullback(T.μ, vc)
+
+"""
+    coarsening_matrix(T) -> SparseMatrixCSC
+    refinement_matrix(T) -> SparseMatrixCSC
+
+``P`` and ``E`` as min-plus matrices (stored entries 0, the semiring one; absent
+entries ``∞``), for [`intertwines`](@ref).
+"""
+function refinement_matrix(T::TruncatedPushforward)
+    N = length(T.μ.vertex_map)
+    return sparse(1:N, T.μ.vertex_map, zeros(N), N, T.μ.n_target)
+end
+coarsening_matrix(T::TruncatedPushforward) = sparse(transpose(refinement_matrix(T)))
+
+"""
+    LayeredPlanner(T::TruncatedPushforward)
     LayeredPlanner(W, ψ, cell_points)
 
-A two-layer controller for the state graph `W`: a *planner* on the cells of the
-grid `cell_points` (the image of the projection `ψ`, e.g.
-[`projection_homomorphism`](@ref) onto positions) and a *low-level controller* on
-the full state graph.
+A two-layer controller: a *planner* on the coarse sheaf of `T` (routes are
+sequences of cells, each with a mode of its stalk) and a *low-level controller*
+on the full state graph. The second form keeps one mode per stalk (the
+velocity-blind projection along `ψ` onto the grid `cell_points`).
 
-In sheaf terms, the planner works on the pushforward along ``ψ``: its graph is
-the [`quotient_graph`](@ref) of `W`, whose shortest path is a *route*, a sequence
-of cells. The low-level controller works on the pullback of a neighbourhood of
-the route: the states ``ψ^{-1}(U)`` over the *corridor* ``U`` of cells within
-Chebyshev distance `width` of the route (with the segments between consecutive
-route cells filled in), where it runs an exact search. Restricting to
-``ψ^{-1}(U)`` (a union of fibres) commutes with the pushforward (base change),
-so the projection's lower bound still holds inside the corridor and serves as
-the low-level heuristic.
-
-The corridor is a *commitment*, not a bound: the best path inside it can cost
-more than the global optimum, or not exist when the route asks for a manoeuvre
-the dynamics cannot make (a turn too sharp at speed). [`layered_path`](@ref)
-reports both and can widen the corridor until the low level succeeds.
+The low-level controller searches exactly over the pullback ``μ^{-1}(U)`` of a
+*corridor* ``U`` of coarse states around the route: cells within Chebyshev
+distance `width` of the route (with the segments between consecutive route cells
+filled in), with modes within `mode_width` steps of the route's modes. ``U`` is a
+union of fibres of ``μ``, so restriction to it commutes with the pushforward
+(base change) and the coarse bound ([`lower_bound`](@ref) of `abstraction`) stays
+admissible inside it. The corridor is a commitment: the best path inside it can
+cost more than the optimum, or not exist; [`layered_path`](@ref) reports both and
+can widen it.
 """
 struct LayeredPlanner{G}
     abstraction::Abstraction
-    W_out::SparseMatrixCSC{Float64,Int}
+    μ::GraphHomomorphism
+    π::GraphHomomorphism
+    K::Int
     cell_points::Tuple
+    mode_neighbors::Vector{Vector{Int}}
+    W_out::SparseMatrixCSC{Float64,Int}
     quotient_out::SparseMatrixCSC{Float64,Int}
     W::G
+end
+
+function LayeredPlanner(T::TruncatedPushforward)
+    A = Abstraction(T.W, T.μ)
+    return LayeredPlanner(A, T.μ, T.π, T.K, T.cell_points, T.mode_neighbors, SparseMatrixCSC{Float64,Int}(sparse(transpose(T.W))),
+        sparse(transpose(A.quotient)), T.W)
 end
 
 function LayeredPlanner(W::SparseMatrixCSC, ψ::GraphHomomorphism, cell_points::Tuple)
     @argcheck prod(cell_points) == ψ.n_target "cell_points must have one cell per block of ψ"
     A = Abstraction(W, ψ)
-    return LayeredPlanner(A, SparseMatrixCSC{Float64,Int}(sparse(transpose(W))), Tuple(Int.(cell_points)),
-        sparse(transpose(A.quotient)), W)
+    return LayeredPlanner(A, ψ, GraphHomomorphism(collect(1:ψ.n_target), ψ.n_target), 1, Tuple(Int.(cell_points)),
+        [Int[]], SparseMatrixCSC{Float64,Int}(sparse(transpose(W))), sparse(transpose(A.quotient)), W)
 end
 
 """
     plan_route(P::LayeredPlanner, source, targets) -> Vector{Int}
 
-The planner's route: the cheapest sequence of cells on the quotient graph from
-the cell of `source` to the cells of `targets` (empty if there is none).
+The planner's route: the cheapest sequence of coarse states (cells with a mode)
+from that of `source` to those of `targets` on the coarse graph (empty if there is
+none).
 """
 function plan_route(P::LayeredPlanner, source::Integer, targets)
-    ψ = P.abstraction.ψ
-    return shortest_path(P.abstraction.quotient, ψ.vertex_map[source], unique(ψ.vertex_map[collect(targets)]);
+    μ = P.μ
+    return shortest_path(P.abstraction.quotient, μ.vertex_map[source], unique(μ.vertex_map[collect(targets)]);
         out_edges = P.quotient_out).path
+end
+
+# The cells of the segment from cell a to cell b, rasterized.
+function _segment(C, a, b)
+    ca, cb = Tuple(C[a]), Tuple(C[b])
+    steps = maximum(abs.(cb .- ca))
+    return [ca; [round.(Int, ca .+ (cb .- ca) .* (s / steps)) for s in 1:steps]]
 end
 
 """
     corridor(cell_points, route, width) -> BitVector
+    corridor(P::LayeredPlanner, route, width, mode_width) -> BitVector
 
 The cells within Chebyshev distance `width` of the polyline through the cells of
-`route` (each segment rasterized cell by cell), on the grid `cell_points`.
+`route` on the grid `cell_points`; with a planner, the coarse states over those
+cells whose mode is within `mode_width` steps (in the mode adjacency) of a mode
+of the route at either end of the nearby segment.
 """
 function corridor(cell_points::Tuple, route::AbstractVector{<:Integer}, width::Integer)
     @argcheck width >= 0 "width must be nonnegative"
     C = CartesianIndices(cell_points)
     Lc = LinearIndices(cell_points)
     inside = falses(prod(cell_points))
-    mark(c) = for J in CartesianIndices(ntuple(k -> max(1, c[k] - width):min(cell_points[k], c[k] + width), length(cell_points)))
+    isempty(route) && return inside
+    pts = length(route) == 1 ? [Tuple(C[route[1]])] :
+        reduce(vcat, [_segment(C, a, b) for (a, b) in zip(route[1:(end - 1)], route[2:end])])
+    for c in pts, J in CartesianIndices(ntuple(k -> max(1, c[k] - width):min(cell_points[k], c[k] + width), length(cell_points)))
         inside[Lc[J]] = true
     end
+    return inside
+end
+
+function corridor(P::LayeredPlanner, route::AbstractVector{<:Integer}, width::Integer, mode_width::Integer)
+    @argcheck width >= 0 && mode_width >= 0 "widths must be nonnegative"
+    K = P.K
+    cellof(c) = P.π.vertex_map[c]
+    modeof(c) = (c - 1) % K + 1
+    function dilate(modes)
+        S = Set(modes)
+        for _ in 1:mode_width
+            S = union(S, (n for m in S for n in P.mode_neighbors[m])...)
+        end
+        return S
+    end
+    inside = falses(P.μ.n_target)
     isempty(route) && return inside
-    mark(Tuple(C[route[1]]))
-    for (a, b) in zip(route[1:(end - 1)], route[2:end])
-        ca, cb = Tuple(C[a]), Tuple(C[b])
-        steps = maximum(abs.(cb .- ca))
-        for s in 1:steps
-            mark(round.(Int, ca .+ (cb .- ca) .* (s / steps)))
+    pieces = length(route) == 1 ? [(route[1], route[1])] : collect(zip(route[1:(end - 1)], route[2:end]))
+    for (a, b) in pieces
+        cells = findall(corridor(P.cell_points, [cellof(a), cellof(b)], width))
+        for m in dilate([modeof(a), modeof(b)]), c in cells
+            inside[(c - 1) * K + m] = true
         end
     end
     return inside
 end
 
 """
-    layered_path(P::LayeredPlanner, source, targets; width = 2, heuristic = nothing, widen = true)
-        -> (cost, path, expanded, route, width, corridor_states, first_try)
+    layered_path(P::LayeredPlanner, source, targets; width = 2, mode_width = 0,
+        heuristic = nothing, widen = true)
+        -> (cost, path, expanded, route, width, mode_width, corridor_states, first_try)
 
-Plan a route on the cells, then search exactly (A* with `heuristic`, e.g.
-[`lower_bound`](@ref) of the planner's abstraction) over the states above the
-corridor of `width` around it. If the corridor holds no path and `widen` is set,
-the width doubles until it does (at worst the corridor is every cell and the
-search is the exact one). `first_try` reports whether the requested width
-sufficed; `cost` is the cost of the path found, at least the optimum.
+Plan a route on the coarse sheaf, then search exactly (A* with `heuristic`, e.g.
+[`lower_bound`](@ref) of `P.abstraction`) over the states above the corridor
+around it. If the corridor holds no path and `widen` is set, the width doubles and
+the mode width grows by one until it does (at worst the corridor is everything
+and the search is exact). `first_try` reports whether the requested corridor
+sufficed; `cost` is that of the path found, at least the optimum.
 """
-function layered_path(P::LayeredPlanner, source::Integer, targets; width::Integer = 2,
+function layered_path(P::LayeredPlanner, source::Integer, targets; width::Integer = 2, mode_width::Integer = 0,
         heuristic::Union{Nothing,AbstractVector} = nothing, widen::Bool = true)
     N = size(P.W, 1)
     _check_query(N, source, targets, heuristic)
-    ψ = P.abstraction.ψ
     route = plan_route(P, source, targets)
     # No route on the relaxation: no path at all.
     isempty(route) && return (cost = Inf, path = Int[], expanded = 0, route = route, width = Int(width),
-        corridor_states = 0, first_try = false)
+        mode_width = Int(mode_width), corridor_states = 0, first_try = false)
     rows, vals = rowvals(P.W_out), nonzeros(P.W_out)
-    w = Int(width)
+    w, mw = Int(width), Int(mode_width)
     first_try = true
     while true
-        cells = corridor(P.cell_points, route, w)
-        allowed(x) = cells[ψ.vertex_map[x]]
+        U = corridor(P, route, w, mw)
+        allowed(x) = U[P.μ.vertex_map[x]]
         each_out(f, x) = for k in nzrange(P.W_out, x)
             y = rows[k]
             allowed(y) && f(y, vals[k])
@@ -669,13 +850,13 @@ function layered_path(P::LayeredPlanner, source::Integer, targets; width::Intege
         reachable_targets = [t for t in targets if allowed(t)]
         r = isempty(reachable_targets) || !allowed(source) ? (cost = Inf, path = Int[], expanded = 0) :
             _astar(each_out, N, source, reachable_targets, heuristic, Float64)
-        states = count(x -> cells[x], ψ.vertex_map)
-        if isfinite(r.cost) || !widen || all(cells)
-            return (cost = r.cost, path = r.path, expanded = r.expanded, route = route, width = w,
-                corridor_states = states, first_try = first_try && isfinite(r.cost))
+        if isfinite(r.cost) || !widen || all(U)
+            return (cost = r.cost, path = r.path, expanded = r.expanded, route = route, width = w, mode_width = mw,
+                corridor_states = count(x -> U[x], P.μ.vertex_map), first_try = first_try && isfinite(r.cost))
         end
         first_try = false
         w = max(1, 2w)
+        mw = min(mw + 1, P.K)
     end
 end
 

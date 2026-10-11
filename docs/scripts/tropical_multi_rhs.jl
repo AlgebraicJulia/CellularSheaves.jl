@@ -55,20 +55,20 @@ walls(qx, qy) = (qx in m3:(m3 + 1) && !(qy in 2:(n ÷ 6))) || (qx in (2m3):(2m3 
 W, points = double_integrator_lattice(n, vmax, walls)
 println("lattice $(n)² × $(2vmax + 1)², $(size(W, 1)) states; $(nthreads()) threads")
 
-function coarsen(ψ, sizes, factors)
+function coarsen_grid(ψ, sizes, factors)
     return compose(ψ, aggregation_homomorphism(sizes, factors)), coarse_points(sizes, factors)
 end
 id = GraphHomomorphism(collect(1:prod(points)), prod(points))
 cases = Any[]
 ψ, sizes = id, points
 for ℓ in 1:5
-    global ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+    global ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 1, 1))
     ℓ >= 3 && push!(cases, ("space $(2^ℓ)×$(2^ℓ)", ψ, 1))
 end
 ψ, sizes = id, points
 for k in (2, 4)
-    global ψ, sizes = coarsen(ψ, sizes, (2, 2, 2, 2))
-    global ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+    global ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 2, 2))
+    global ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 1, 1))
     k == 4 && push!(cases, ("space–time 16×16 k=4", ψ, k))
 end
 

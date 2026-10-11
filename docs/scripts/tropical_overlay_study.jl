@@ -54,22 +54,22 @@ function problem(n, vmax)
     return (; W, points, L, goal, V, sources, walls)
 end
 
-function coarsen(ψ, sizes, factors)
+function coarsen_grid(ψ, sizes, factors)
     return compose(ψ, aggregation_homomorphism(sizes, factors)), coarse_points(sizes, factors)
 end
 identity_hom(N) = GraphHomomorphism(collect(1:N), N)
 function position_blocks(points, levels)
     ψ, sizes = identity_hom(prod(points)), points
     for _ in 1:levels
-        ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+        ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 1, 1))
     end
     return ψ
 end
 function spacetime_blocks(points, ks)
     ψ, sizes = identity_hom(prod(points)), points
     for _ in ks
-        ψ, sizes = coarsen(ψ, sizes, (2, 2, 2, 2))
-        ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+        ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 2, 2))
+        ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 1, 1))
     end
     return ψ
 end

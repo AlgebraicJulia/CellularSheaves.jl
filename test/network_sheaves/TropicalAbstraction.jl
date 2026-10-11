@@ -54,6 +54,23 @@ function dense_weights(W, zero)
     end
     return D
 end
+# Velocity modes: rest, then `headings` direction sectors for each speed band
+# (Chebyshev speed ≤ speed_edges[k]).
+function heading_speed_modes(vmax, headings, speed_edges)
+    M = zeros(Int, 2vmax + 1, 2vmax + 1)
+    for ix in 1:(2vmax + 1), iy in 1:(2vmax + 1)
+        vx, vy = ix - vmax - 1, iy - vmax - 1
+        if vx == 0 && vy == 0
+            M[ix, iy] = 1
+            continue
+        end
+        band = findfirst(>=(max(abs(vx), abs(vy))), speed_edges)
+        h = mod(round(Int, atan(vy, vx) / (2π / headings)), headings)
+        M[ix, iy] = 1 + (band - 1) * headings + h + 1
+    end
+    return M
+end
+
 # The min-plus closure by Floyd–Warshall (costs ≥ 0).
 function minplus_star(D)
     C = copy(D)
@@ -154,21 +171,21 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     # Abstractions: positions only (blocks 2^ℓ, one step), and space–time (velocity
     # blocks k, position blocks k², k steps).
     id = GraphHomomorphism(collect(1:prod(points)), prod(points))
-    function coarsen(ψ, sizes, factors)
+    function coarsen_grid(ψ, sizes, factors)
         step = aggregation_homomorphism(sizes, factors)
         return compose(ψ, step), coarse_points(sizes, factors)
     end
     space = Tuple{GraphHomomorphism,Int}[]
     ψ, sizes = id, points
     for _ in 1:3
-        ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+        ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 1, 1))
         push!(space, (ψ, 1))
     end
     spacetime = Tuple{GraphHomomorphism,Int}[]
     ψ, sizes = id, points
     for k in (2, 4)
-        ψ, sizes = coarsen(ψ, sizes, (2, 2, 2, 2))
-        ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+        ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 2, 2))
+        ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 1, 1))
         push!(spacetime, (ψ, k))
     end
 
@@ -274,6 +291,49 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
         @test full.cost == V[s] && full.first_try                                    # the whole grid: exact
     end
     @test !isfinite(layered_path(P, L[11, 10, 3, 3], goal).cost)                     # a state inside the wall
+
+    # ---- truncated pushforward: velocity modes in the stalks over positions ----
+    modes = heading_speed_modes(2, 8, [1, 2])                                         # rest, 8 headings × 2 speeds
+    T = TruncatedPushforward(W, points, (1, 2), modes)
+    @test T.K == 17
+    @test T.π.vertex_map[T.μ.vertex_map] == ψp.vertex_map                           # stalkwise: over the identity of the cell graph
+    E, Pm = refinement_matrix(T), coarsening_matrix(T)
+    vc = rand(rng, T.μ.n_target)
+    @test coarsen(T, refine(T, vc)) == vc                                            # P E = I
+    f = rand(rng, size(W, 1))
+    @test all(refine(T, coarsen(T, f)) .<= f)                                         # E P ≤ I
+    for _ in 1:20                                                                     # Galois connection E g ≤ f ⟺ g ≤ P f
+        g = coarsen(T, f) .+ (rand(rng, T.μ.n_target) .- 0.9) .* 0.1
+        @test all(refine(T, g) .<= f) == all(g .<= coarsen(T, f))
+    end
+    @test intertwines(W, T.quotient, Pm) == (lax = true, oplax = false, strict = false)   # P: lax morphism F → G
+    @test intertwines(T.quotient, W, E) == (lax = false, oplax = true, strict = false)    # E: oplax morphism G → F
+    # One mode per state: an isomorphism, strict both ways. One mode per stalk: the
+    # velocity-blind quotient.
+    Tiso = TruncatedPushforward(W, points, (1, 2), reshape(1:25, 5, 5))
+    @test intertwines(W, Tiso.quotient, coarsening_matrix(Tiso)).strict
+    @test intertwines(Tiso.quotient, W, refinement_matrix(Tiso)).strict
+    T1 = TruncatedPushforward(W, points, (1, 2), ones(Int, 5, 5))
+    @test offdiag(dense_weights(T1.quotient, Inf)) == offdiag(dense_weights(quotient_graph(W, ψp), Inf))
+    # The oplax square makes the refined coarse solution a lower bound, tighter than
+    # the velocity-blind one.
+    bterm = [x in goal ? 0.0 : Inf for x in 1:size(W, 1)]
+    hm = refine(T, minplus_closure(T.quotient, coarsen(T, bterm)))
+    @test all(hm .<= V)
+    @test all(hm .>= hp)
+    @test lower_bound(Abstraction(W, T.μ), goal) == hm
+    # The moded planner: routes carry modes; the corridor restricts positions and modes.
+    PM = LayeredPlanner(T)
+    for s in sources
+        route = plan_route(PM, s, goal)
+        @test first(route) == T.μ.vertex_map[s] && last(route) in T.μ.vertex_map[goal]
+        for (width, mode_width) in ((0, 0), (2, 1), (4, 2))
+            r = layered_path(PM, s, goal; width, mode_width, heuristic = hm)
+            U = corridor(PM, route, r.width, r.mode_width)
+            @test isfinite(r.cost) && r.cost >= V[s] && valid(r, s) && all(U[T.μ.vertex_map[r.path]])
+        end
+        @test layered_path(PM, s, goal; width = 24, mode_width = 17, heuristic = hm).cost == V[s]
+    end
 
     @test_throws ArgumentError cost_to_go(-W, goal)
     @test_throws ArgumentError quotient_graph(W, aggregation_homomorphism((6, 5), (2, 2)))

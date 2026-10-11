@@ -63,20 +63,20 @@ sources = candidates[randperm(rng, length(candidates))[1:10]]
 println("10 queries from the left third, stopped; exact costs $(Int.(V[sources]))")
 
 # ---- 1. abstractions ------------------------------------------------------------
-function coarsen(ψ, sizes, factors)
+function coarsen_grid(ψ, sizes, factors)
     return compose(ψ, aggregation_homomorphism(sizes, factors)), coarse_points(sizes, factors)
 end
 id = GraphHomomorphism(collect(1:prod(points)), prod(points))
 abstractions = Any[]
 ψ, sizes = id, points
 for ℓ in 1:5
-    global ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+    global ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 1, 1))
     push!(abstractions, ("space", "$(2^ℓ)×$(2^ℓ)", "1", ψ, 1))
 end
 ψ, sizes = id, points
 for k in (2, 4, 8)
-    global ψ, sizes = coarsen(ψ, sizes, (2, 2, 2, 2))
-    global ψ, sizes = coarsen(ψ, sizes, (2, 2, 1, 1))
+    global ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 2, 2))
+    global ψ, sizes = coarsen_grid(ψ, sizes, (2, 2, 1, 1))
     push!(abstractions, ("space–time", "$(k^2)×$(k^2)", "$(k)", ψ, k))
 end
 
