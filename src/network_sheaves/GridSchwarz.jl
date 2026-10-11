@@ -91,7 +91,7 @@ zero, with the boundary data moved into the right-hand side.
 `parity` is the parity of the global index of the first interior point, so
 boxes of one global grid agree on the red–black coloring.
 
-As a linear map the operator is square of order ``N = n_1 \cdots n_D``, the
+As a linear map the operator is square of order ``N = n_1 \\cdots n_D``, the
 number of interior points: `size(op) == (N, N)`. The shape of the box is
 [`gridsize`](@ref)`(op) == n`.
 """

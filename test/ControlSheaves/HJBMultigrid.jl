@@ -32,20 +32,20 @@ const MGH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
     prob = HJBProblem(StateGrid([-2.0, -2.0], [2.0, 2.0], [8, 8]); control_bound = 1.0)
     coarse = MGH._coarsen(prob)
     g, gc = prob.grid, coarse.grid
-    @test gc.points == [4, 4] && gc.spacing ≈ 2 .* g.spacing && gc.lower ≈ g.lower .+ g.spacing ./ 2
+    @test gc.points == (4, 4) && collect(gc.spacing) ≈ collect(2 .* g.spacing) && collect(gc.lower) ≈ collect(g.lower .+ g.spacing ./ 2)
     @test coarse.riccati == prob.riccati && coarse.control_bound == prob.control_bound
     arm = MechanicalHJBProblem(TwoLinkArm(); angle_points = 8, momentum_points = 6)
     armc = MGH._coarsen(arm)
-    @test armc.grid.points == [4, 4, 3, 3] && armc.grid.lower[1] + 4 * armc.grid.spacing[1] ≈ π + arm.grid.spacing[1] / 2
+    @test armc.grid.points == (4, 4, 3, 3) && armc.grid.lower[1] + 4 * armc.grid.spacing[1] ≈ π + arm.grid.spacing[1] / 2
 
     # Odd counts: a vertex-centred coarse grid (same ends, spacing 2h).
     odd = HJBProblem(StateGrid([-2.0, -2.0], [2.0, 2.0], [9, 9]); control_bound = 1.0)
     oddc = MGH._coarsen(odd)
-    @test oddc.grid.points == [5, 5] && oddc.grid.lower ≈ odd.grid.lower && oddc.grid.upper ≈ odd.grid.upper &&
-          oddc.grid.spacing ≈ 2 .* odd.grid.spacing
+    @test oddc.grid.points == (5, 5) && collect(oddc.grid.lower) ≈ collect(odd.grid.lower) && collect(oddc.grid.upper) ≈ collect(odd.grid.upper) &&
+          collect(oddc.grid.spacing) ≈ collect(2 .* odd.grid.spacing)
     # A periodic dimension not divisible by 4 is left alone.
     arm6 = MechanicalHJBProblem(TwoLinkArm(); angle_points = 6, momentum_points = 7)
-    @test MGH._coarsen(arm6).grid.points == [6, 6, 4, 4]
+    @test MGH._coarsen(arm6).grid.points == (6, 6, 4, 4)
 
     # Automatic depth: O(log n) levels down to coarsest_size points, on grids of
     # any counts; and solves on uneven hierarchies reach the one-level solution.
