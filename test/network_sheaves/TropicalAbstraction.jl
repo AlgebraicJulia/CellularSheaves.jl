@@ -250,6 +250,31 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
         @test ra.cost == V[s]
     end
 
+    # ---- layered control: a 2-D route, a 4-D search in its corridor ------------
+    ψp = projection_homomorphism(points, (1, 2))
+    @test ψp.vertex_map == [LinearIndices((24, 24))[I[1], I[2]] for I in CartesianIndices(points)][:]
+    P = LayeredPlanner(W, ψp, (24, 24))
+    hp = lower_bound(P.abstraction, goal)
+    @test all(hp .<= V)
+    Wq = P.abstraction.quotient
+    for s in sources
+        route = plan_route(P, s, goal)
+        @test first(route) == ψp.vertex_map[s] && last(route) in ψp.vertex_map[goal]
+        @test all(Wq[a, b] > 0 for (a, b) in zip(route[1:(end - 1)], route[2:end]))   # moves of the quotient
+        @test all(corridor((24, 24), route, 0)[route])
+        @test all(corridor((24, 24), route, 1) .>= corridor((24, 24), route, 0))
+        for width in (0, 2, 4)
+            r = layered_path(P, s, goal; width, heuristic = hp)
+            cells = corridor((24, 24), route, r.width)
+            @test isfinite(r.cost) && r.cost >= V[s]                                 # a feasible path, never better than optimal
+            @test valid(r, s) && all(cells[ψp.vertex_map[r.path]])                   # made of moves, inside its corridor
+            @test r.width == width || !r.first_try
+        end
+        full = layered_path(P, s, goal; width = 24, heuristic = hp)
+        @test full.cost == V[s] && full.first_try                                    # the whole grid: exact
+    end
+    @test !isfinite(layered_path(P, L[11, 10, 3, 3], goal).cost)                     # a state inside the wall
+
     @test_throws ArgumentError cost_to_go(-W, goal)
     @test_throws ArgumentError quotient_graph(W, aggregation_homomorphism((6, 5), (2, 2)))
     @test_throws ArgumentError quotient_graph(W, space[1][1]; steps = 2, combine = max)

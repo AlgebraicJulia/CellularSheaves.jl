@@ -67,7 +67,8 @@ coarse solution is a correction rather than a bound.
 module TropicalAbstraction
 
 export tropical_pullback, tropical_pushforward, quotient_graph, minplus_closure, cost_to_go,
-    Abstraction, lower_bound, shortest_path, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid
+    Abstraction, lower_bound, shortest_path, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid,
+    projection_homomorphism, LayeredPlanner, plan_route, corridor, layered_path
 
 using ArgCheck: @argcheck
 using SparseArrays
@@ -541,6 +542,141 @@ function overlay_path(O::Overlay, source::Integer, targets; heuristic::Union{Not
         end
     end
     return _astar(each_out, N, source, targets, heuristic, Float64)
+end
+
+"""
+    projection_homomorphism(points, dims) -> GraphHomomorphism
+
+The projection of a grid of `points` (column-major) onto the dimensions `dims`,
+e.g. ``(q, v) ↦ q`` for `dims = (1, 2)` of a ``(q_x, q_y, v_x, v_y)`` grid: each
+state goes to the cell of its coordinates in `dims`. Its fibres are the full
+ranges of the other dimensions.
+"""
+function projection_homomorphism(points::NTuple{D,Integer}, dims::NTuple{K,Integer}) where {D,K}
+    @argcheck allunique(dims) && all(d -> 1 <= d <= D, dims) "dims must be distinct dimensions of the grid"
+    cells = ntuple(k -> Int(points[dims[k]]), K)
+    Lc = LinearIndices(cells)
+    vmap = [Lc[CartesianIndex(ntuple(k -> I[dims[k]], K))] for I in CartesianIndices(Tuple(points))]
+    return GraphHomomorphism(vec(vmap), prod(cells))
+end
+
+"""
+    LayeredPlanner(W, ψ, cell_points)
+
+A two-layer controller for the state graph `W`: a *planner* on the cells of the
+grid `cell_points` (the image of the projection `ψ`, e.g.
+[`projection_homomorphism`](@ref) onto positions) and a *low-level controller* on
+the full state graph.
+
+In sheaf terms, the planner works on the pushforward along ``ψ``: its graph is
+the [`quotient_graph`](@ref) of `W`, whose shortest path is a *route*, a sequence
+of cells. The low-level controller works on the pullback of a neighbourhood of
+the route: the states ``ψ^{-1}(U)`` over the *corridor* ``U`` of cells within
+Chebyshev distance `width` of the route (with the segments between consecutive
+route cells filled in), where it runs an exact search. Restricting to
+``ψ^{-1}(U)`` (a union of fibres) commutes with the pushforward (base change),
+so the projection's lower bound still holds inside the corridor and serves as
+the low-level heuristic.
+
+The corridor is a *commitment*, not a bound: the best path inside it can cost
+more than the global optimum, or not exist when the route asks for a manoeuvre
+the dynamics cannot make (a turn too sharp at speed). [`layered_path`](@ref)
+reports both and can widen the corridor until the low level succeeds.
+"""
+struct LayeredPlanner{G}
+    abstraction::Abstraction
+    W_out::SparseMatrixCSC{Float64,Int}
+    cell_points::Tuple
+    quotient_out::SparseMatrixCSC{Float64,Int}
+    W::G
+end
+
+function LayeredPlanner(W::SparseMatrixCSC, ψ::GraphHomomorphism, cell_points::Tuple)
+    @argcheck prod(cell_points) == ψ.n_target "cell_points must have one cell per block of ψ"
+    A = Abstraction(W, ψ)
+    return LayeredPlanner(A, SparseMatrixCSC{Float64,Int}(sparse(transpose(W))), Tuple(Int.(cell_points)),
+        sparse(transpose(A.quotient)), W)
+end
+
+"""
+    plan_route(P::LayeredPlanner, source, targets) -> Vector{Int}
+
+The planner's route: the cheapest sequence of cells on the quotient graph from
+the cell of `source` to the cells of `targets` (empty if there is none).
+"""
+function plan_route(P::LayeredPlanner, source::Integer, targets)
+    ψ = P.abstraction.ψ
+    return shortest_path(P.abstraction.quotient, ψ.vertex_map[source], unique(ψ.vertex_map[collect(targets)]);
+        out_edges = P.quotient_out).path
+end
+
+"""
+    corridor(cell_points, route, width) -> BitVector
+
+The cells within Chebyshev distance `width` of the polyline through the cells of
+`route` (each segment rasterized cell by cell), on the grid `cell_points`.
+"""
+function corridor(cell_points::Tuple, route::AbstractVector{<:Integer}, width::Integer)
+    @argcheck width >= 0 "width must be nonnegative"
+    C = CartesianIndices(cell_points)
+    Lc = LinearIndices(cell_points)
+    inside = falses(prod(cell_points))
+    mark(c) = for J in CartesianIndices(ntuple(k -> max(1, c[k] - width):min(cell_points[k], c[k] + width), length(cell_points)))
+        inside[Lc[J]] = true
+    end
+    isempty(route) && return inside
+    mark(Tuple(C[route[1]]))
+    for (a, b) in zip(route[1:(end - 1)], route[2:end])
+        ca, cb = Tuple(C[a]), Tuple(C[b])
+        steps = maximum(abs.(cb .- ca))
+        for s in 1:steps
+            mark(round.(Int, ca .+ (cb .- ca) .* (s / steps)))
+        end
+    end
+    return inside
+end
+
+"""
+    layered_path(P::LayeredPlanner, source, targets; width = 2, heuristic = nothing, widen = true)
+        -> (cost, path, expanded, route, width, corridor_states, first_try)
+
+Plan a route on the cells, then search exactly (A* with `heuristic`, e.g.
+[`lower_bound`](@ref) of the planner's abstraction) over the states above the
+corridor of `width` around it. If the corridor holds no path and `widen` is set,
+the width doubles until it does (at worst the corridor is every cell and the
+search is the exact one). `first_try` reports whether the requested width
+sufficed; `cost` is the cost of the path found, at least the optimum.
+"""
+function layered_path(P::LayeredPlanner, source::Integer, targets; width::Integer = 2,
+        heuristic::Union{Nothing,AbstractVector} = nothing, widen::Bool = true)
+    N = size(P.W, 1)
+    _check_query(N, source, targets, heuristic)
+    ψ = P.abstraction.ψ
+    route = plan_route(P, source, targets)
+    # No route on the relaxation: no path at all.
+    isempty(route) && return (cost = Inf, path = Int[], expanded = 0, route = route, width = Int(width),
+        corridor_states = 0, first_try = false)
+    rows, vals = rowvals(P.W_out), nonzeros(P.W_out)
+    w = Int(width)
+    first_try = true
+    while true
+        cells = corridor(P.cell_points, route, w)
+        allowed(x) = cells[ψ.vertex_map[x]]
+        each_out(f, x) = for k in nzrange(P.W_out, x)
+            y = rows[k]
+            allowed(y) && f(y, vals[k])
+        end
+        reachable_targets = [t for t in targets if allowed(t)]
+        r = isempty(reachable_targets) || !allowed(source) ? (cost = Inf, path = Int[], expanded = 0) :
+            _astar(each_out, N, source, reachable_targets, heuristic, Float64)
+        states = count(x -> cells[x], ψ.vertex_map)
+        if isfinite(r.cost) || !widen || all(cells)
+            return (cost = r.cost, path = r.path, expanded = r.expanded, route = route, width = w,
+                corridor_states = states, first_try = first_try && isfinite(r.cost))
+        end
+        first_try = false
+        w = max(1, 2w)
+    end
 end
 
 """
