@@ -1,0 +1,14 @@
+lattice 128² positions × 13² velocities = 2768896 states; 30 queries from random states
+exact optimal costs: mean 20.9, range 9–31
+planner: 16384 cells, 2444752 quotient moves, built in 1.63 s; 2-D bound for the goal in 0.027 s (bound/cost 0.59)
+route planning: 0.0037 s per query (2-D)
+
+method                     first try  cost/opt  worst  optimal  search states  expansions   time/query
+4-D Dijkstra (exact)          100%      1.000    1.000      100%      2406294      1188243    0.2325 s
+4-D A*, 2-D bound (exact)     100%      1.000    1.000      100%      2406294       142415    0.0424 s
+layered, width 0                7%      1.111    1.778       57%       322948        45562    0.0472 s
+layered, width 1               27%      1.101    1.778       57%       324767        45782    0.0415 s
+layered, width 2               37%      1.084    1.556       67%       334451        47153    0.0314 s
+layered, width 4               57%      1.062    1.545       70%       360945        51663    0.0328 s
+layered, width 8               73%      1.017    1.208       90%       450075        65047    0.0334 s
+layered, width 16              97%      1.011    1.208       93%       678580        95084    0.0301 s
