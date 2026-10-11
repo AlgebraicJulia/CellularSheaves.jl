@@ -125,7 +125,7 @@ for (qi, s) in enumerate(picked)
             q = CartesianIndices((n, n))[P.π.vertex_map[r]]
             mode = (r - 1) % P.K + 1
             ang, band = P.K == 1 ? (0.0, -1) : mode_info(mode)
-            (q[1], q[2], ang, band)
+            (q[1], q[2], ang, band, P.K == 1 ? 1 : mode)
         end
         push!(runs, (planner = string(pname), width = w, mode_width = mw, used_width = c.width, used_mode_width = c.mode_width,
             first_try = c.first_try, cost = c.cost, bound = c.suboptimality_bound, lower = c.lower,
@@ -173,6 +173,25 @@ layered = readcsv(joinpath(fig, "tropical_layered.csv"))
 certified = readcsv(joinpath(fig, "tropical_certified.csv"))
 num(s) = (x = tryparse(Float64, s); isnothing(x) ? s : x)
 
+# ---- stalks: full state fields as raw bytes (gzipped and inlined by docs/viz/build.sh) --
+# Native (column-major) state order: index = qx + n (qy - 1) + n² (ix - 1) + n² nv (iy - 1).
+cert_modes = heading_speed_modes(vmax, 8, collect(1:vmax))
+Tcert = TruncatedPushforward(W, points, (1, 2), cert_modes)
+Vup = upper_bound(Tcert, goal)
+lower_coarse = tropical_pushforward(T.μ, bounds.modes)                  # the coarse value E·V_c lives on (cell, mode)
+as_bytes(v) = (finite = filter(isfinite, v); maximum(finite; init = 0) <= 254 || error("values above 254");
+    UInt8[isfinite(x) ? UInt8(x) : 0xff for x in v])
+viz = joinpath(@__DIR__, "..", "viz")
+mkpath(viz)
+write(joinpath(viz, "vstar.bin"), as_bytes(V))
+write(joinpath(viz, "vup.bin"), as_bytes(Vup))
+write(joinpath(viz, "lower16.bin"), as_bytes(lower_coarse))
+stalk_meta = (modes16 = [modes[ix, iy] for iy in 1:nv for ix in 1:nv], K16 = T.K,
+    neighbors16 = T.mode_neighbors, modes_cert = [cert_modes[ix, iy] for iy in 1:nv for ix in 1:nv], Kcert = Tcert.K,
+    certified_fraction = count(isfinite, Vup) / count(isfinite, V),
+    Vup_rest = bytes64([isfinite(v) ? Int(v) : 255 for v in at_rest(Vup)]))
+println("certificate covers $(round(100 * stalk_meta.certified_fraction; digits = 1))% of reachable states")
+
 data = (n = n, vmax = vmax, headings = H, goal = [(state(g)[1], state(g)[2]) for g in goal],
     walls = bits64([walls(qx, qy) for qy in 1:n for qx in 1:n]),
     V_rest = bytes64([isfinite(v) ? Int(v) : 255 for v in at_rest(V)]),
@@ -183,7 +202,8 @@ data = (n = n, vmax = vmax, headings = H, goal = [(state(g)[1], state(g)[2]) for
     phase = (nq = nq, goal = gq, value = [isfinite(v) ? Int(v) : -1 for v in [V1[Lp[q, iv]] for iv in 1:nv for q in 1:nq]],
              accel = accel, trajectories = phase_traj),
     layered = [Dict(k => num(v) for (k, v) in r) for r in layered],
-    certified = [Dict(k => num(v) for (k, v) in r) for r in certified])
+    certified = [Dict(k => num(v) for (k, v) in r) for r in certified],
+    stalk = stalk_meta)
 
 out = joinpath(@__DIR__, "..", "viz", "data.json")
 mkpath(dirname(out))

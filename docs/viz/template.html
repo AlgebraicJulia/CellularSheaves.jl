@@ -123,6 +123,11 @@ details summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
     <div class="eyebrow">CellularSheaves.jl · TropicalAbstraction · min-plus semiring</div>
     <h1>Certified Corridor Planner</h1>
     <p>A double integrator on a 128 × 128 grid with 13 × 13 velocities (2.77 M states) steers to a stopped goal in minimum time around two walls. The planner routes on the pushforward of the dynamics to positions, with heading × speed modes in each stalk; the low level drives inside a corridor around the route. Each run comes with a Lyapunov certificate for its closed loop and a guaranteed bound on how far it is from optimal.</p>
+    <ol class="howto">
+      <li><b>Pick a start and a planner.</b> The route (violet) is planned on the coarse sheaf; the corridor (green) is where the low level may go.</li>
+      <li><b>Play the closed loop.</b> The map, the Lyapunov sandwich, the stalk and the phase plot follow the same step.</li>
+      <li><b>Click a cell</b> to open its velocity stalk and see coarsening, refinement and the certificate state by state.</li>
+    </ol>
   </header>
 
   <section class="panel" aria-label="Query controls">
@@ -145,6 +150,7 @@ details summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
           <option value="exp-dijkstra">States expanded: Dijkstra</option>
           <option value="exp-blind">States expanded: A*, velocity-blind bound</option>
           <option value="exp-modes">States expanded: A*, velocity-mode bound</option>
+          <option value="cert">Certified by the coarse Lyapunov function (∀∃)</option>
         </select></div>
     </div>
     <div class="toggles">
@@ -153,6 +159,7 @@ details summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
       <label><input type="checkbox" id="t-ctl" checked> certified controller</label>
       <label><input type="checkbox" id="t-opt" checked> optimal trajectory</label>
       <label><input type="checkbox" id="t-iso" checked> isochrones</label>
+      <label><input type="checkbox" id="t-cmp"> compare with the other planner</label>
     </div>
   </section>
 
@@ -160,6 +167,11 @@ details summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
     <div class="panel">
       <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
         <h2>Workspace</h2><span class="note" id="layer-note"></span>
+      </div>
+      <div class="player">
+        <button id="play" type="button" aria-label="Play the closed loop">Play</button>
+        <input id="step" type="range" min="0" max="1" value="0" aria-label="Step of the closed loop">
+        <span class="num" id="step-label">step 0</span>
       </div>
       <div class="map-box" id="map-box">
         <canvas id="map" width="768" height="768" aria-label="Workspace map with walls, goal, corridor, route and trajectories"></canvas>
@@ -183,6 +195,38 @@ details summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
           <span class="key"><span class="swatch" style="background:var(--s-opt)"></span>V*, optimal</span>
           <span class="key"><span class="swatch" style="background:var(--s-low)"></span>lower bound (oplax side)</span>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="two">
+    <div class="panel" style="position:relative">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
+        <h2 id="stalk-title">Velocity stalk</h2>
+        <button id="follow" type="button">Follow the run</button>
+      </div>
+      <p class="note">The stalk of the 4-D system over one cell: its 13 × 13 velocities (v<sub>x</sub> right, v<sub>y</sub> up). Outlines are the modes of the coarse sheaf. Coarsening P takes the minimum over each mode; refinement E copies it back, so E·P·V* ≤ V* (compare the first two fields). Hatched velocities are outside the corridor.</p>
+      <div class="controls">
+        <div class="field"><label for="field">Field</label>
+          <select id="field">
+            <option value="vstar">V*, the optimal time-to-goal</option>
+            <option value="ep">E·P·V*, coarsened then refined</option>
+            <option value="lower">E·Vc, the planner's coarse value (oplax)</option>
+            <option value="cert">∀∃ certificate (lax), 8 headings × 6 speeds</option>
+          </select></div>
+      </div>
+      <div class="map-box" style="max-width:420px"><canvas id="stalk" width="520" height="520" aria-label="Velocity stalk of the selected cell"></canvas><div class="tip" id="stalk-tip" hidden></div></div>
+      <div class="legend" id="stalk-legend"></div>
+    </div>
+    <div class="panel chart" style="position:relative">
+      <h2>The run in phase space</h2>
+      <p class="note">Each axis of the certified trajectory as position relative to the goal against velocity, with the lattice switching curve, the states from which full braking stops exactly on the goal.</p>
+      <div id="runphase"></div>
+      <div class="tip" id="runphase-tip" hidden></div>
+      <div class="legend">
+        <span class="key"><span class="swatch" style="background:var(--s-ctl)"></span>x axis (q<sub>x</sub>, v<sub>x</sub>)</span>
+        <span class="key"><span class="swatch" style="background:var(--s-route)"></span>y axis (q<sub>y</sub>, v<sub>y</sub>)</span>
+        <span class="key"><span class="swatch" style="background:var(--ink-3)"></span>switching curve</span>
       </div>
     </div>
   </section>
@@ -231,5 +275,15 @@ details summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --acc-plus: #1f3248; --acc-minus: #4a2626; --acc-zero: #2a2a28; } }
 :root[data-theme="dark"] { --acc-plus: #1f3248; --acc-minus: #4a2626; --acc-zero: #2a2a28; }
 </style>
+<style>
+.howto { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 4px; font-size: 14px; color: var(--ink-2); max-width: 80ch; }
+.howto b { color: var(--ink); font-weight: 600; }
+.player { display: flex; gap: 10px; align-items: center; }
+.player input[type=range] { flex: 1; min-width: 0; accent-color: var(--s-ctl); }
+button { font: 500 13px var(--font-body); color: var(--ink); background: var(--bg); border: 1px solid var(--rule); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--ink-3); }
+button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+</style>
 <script id="demo-data" type="application/json">/*DATA*/</script>
+/*BLOBS*/
 <script>/*APP*/</script>
