@@ -354,7 +354,7 @@ end
 
 # A* from `source` with the out-edges given by `each_out(f, x)` (calling f(y, w) for
 # every edge x → y of cost w), reopening states when a cheaper path is found.
-function _astar(each_out, N, source, targets, heuristic, ::Type{S}) where {S}
+function _astar(each_out, N, source, targets, heuristic, ::Type{S}; on_expand = nothing) where {S}
     h(x) = isnothing(heuristic) ? zero(S) : S(heuristic[x])
     is_target = falses(N)
     is_target[collect(targets)] .= true
@@ -370,6 +370,7 @@ function _astar(each_out, N, source, targets, heuristic, ::Type{S}) where {S}
         (closed[x] || key > g[x] + h(x)) && continue
         closed[x] = true
         expanded += 1
+        isnothing(on_expand) || on_expand(x)
         if is_target[x]
             path = [x]
             while path[end] != source
@@ -397,7 +398,7 @@ function _check_query(N, source, targets, heuristic)
 end
 
 """
-    shortest_path(W, source, targets; heuristic = nothing, out_edges = sparse(transpose(W)))
+    shortest_path(W, source, targets; heuristic = nothing, out_edges = sparse(transpose(W)), on_expand = nothing)
         -> (cost, path, expanded)
 
 The cheapest path from `source` to `targets` by A* (Dijkstra's algorithm without
@@ -406,10 +407,10 @@ of `W`, can be built once for many queries). The `heuristic` must be an
 admissible lower bound on the cost-to-go to the targets, such as
 [`lower_bound`](@ref); states are reopened when a cheaper path is found, so an
 inconsistent heuristic still gives the exact `cost`. `expanded` counts state
-expansions, reopenings included.
+expansions, reopenings included; `on_expand(x)`, if given, is called on each.
 """
 function shortest_path(W::SparseMatrixCSC{T}, source::Integer, targets; heuristic::Union{Nothing,AbstractVector} = nothing,
-        out_edges::SparseMatrixCSC = sparse(transpose(W))) where {T<:Real}
+        out_edges::SparseMatrixCSC = sparse(transpose(W)), on_expand = nothing) where {T<:Real}
     _check_costs(W)
     N = size(W, 1)
     _check_query(N, source, targets, heuristic)
@@ -418,7 +419,7 @@ function shortest_path(W::SparseMatrixCSC{T}, source::Integer, targets; heuristi
     each_out(f, x) = for k in nzrange(out_edges, x)
         f(rows[k], vals[k])
     end
-    return _astar(each_out, N, source, targets, heuristic, float(T))
+    return _astar(each_out, N, source, targets, heuristic, float(T); on_expand)
 end
 
 """
