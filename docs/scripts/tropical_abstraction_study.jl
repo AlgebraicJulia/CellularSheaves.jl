@@ -65,7 +65,7 @@ for s in sources
     push!(dijkstra_expanded, r.expanded)
     global dijkstra_time += measure(() -> cost_to_go(W, goal; source = s))
 end
-push!(rows, (level = 0, blocks = size(W, 1), coarse_seconds = 0.0, expanded = sum(dijkstra_expanded) / length(sources),
+push!(rows, (level = 0, blocks = size(W, 1), setup_seconds = 0.0, coarse_seconds = 0.0, expanded = sum(dijkstra_expanded) / length(sources),
     fine_seconds = dijkstra_time / length(sources), bound = 1.0))
 
 ψ = GraphHomomorphism(collect(1:size(W, 1)), size(W, 1))
@@ -76,12 +76,14 @@ while sizes[1] > 2
     step = aggregation_homomorphism(sizes, (2, 2, 1, 1))
     global ψ = compose(ψ, step)
     global sizes = coarse_points(sizes, (2, 2, 1, 1))
+    setup = measure(() -> sparse(transpose(quotient_graph(W, ψ))))   # once per abstraction, any number of queries
+    Wr = sparse(transpose(quotient_graph(W, ψ)))
     # How much of the cost the coarse bound sees: the coarse cost-to-go at the source.
-    Vc = cost_to_go(quotient_graph(W, ψ), unique(ψ.vertex_map[goal])).values
+    Vc = cost_to_go(sparse(transpose(Wr)), unique(ψ.vertex_map[goal])).values
     expanded, coarse_t, fine_t, ratio = 0, 0.0, 0.0, 0.0
     for s in sources
-        h = abstraction_heuristic(W, ψ, s)
-        coarse_t += measure(() -> abstraction_heuristic(W, ψ, s))
+        h = abstraction_heuristic(W, ψ, s; reversed_quotient = Wr)
+        coarse_t += measure(() -> abstraction_heuristic(W, ψ, s; reversed_quotient = Wr))
         r = cost_to_go(W, goal; source = s, heuristic = h)
         r.cost == full.values[s] || error("A* is not exact")
         expanded += r.expanded
@@ -89,24 +91,24 @@ while sizes[1] > 2
         ratio += Vc[ψ.vertex_map[s]] / full.values[s]
     end
     k = length(sources)
-    push!(rows, (level = level, blocks = ψ.n_target, coarse_seconds = coarse_t / k, expanded = expanded / k,
+    push!(rows, (level = level, blocks = ψ.n_target, setup_seconds = setup, coarse_seconds = coarse_t / k, expanded = expanded / k,
         fine_seconds = fine_t / k, bound = ratio / k))
 end
 
 println("\nper query, averaged over $(length(sources)) sources (exact costs $(Int.(full.values[sources])))")
-println("level  blocks of positions   coarse states  coarse solve  bound/cost  fine expansions  fine search   total")
+println("level  blocks of positions   coarse states  quotient (once)  coarse solve  bound/cost  fine expansions  fine search  per query")
 for r in rows
     b = 2^r.level
-    @printf("%5d  %-20s %13d %11.4f s %11.2f %16.0f %10.4f s %8.4f s\n", r.level,
-        r.level == 0 ? "none (Dijkstra)" : "$(b) × $(b)", r.blocks, r.coarse_seconds, r.bound, r.expanded,
+    @printf("%5d  %-20s %13d %14.4f s %11.4f s %11.2f %16.0f %10.4f s %8.4f s\n", r.level,
+        r.level == 0 ? "none (Dijkstra)" : "$(b) × $(b)", r.blocks, r.setup_seconds, r.coarse_seconds, r.bound, r.expanded,
         r.fine_seconds, r.coarse_seconds + r.fine_seconds)
 end
 
 out = joinpath(@__DIR__, "..", "figures", "tropical_abstraction.csv")
 open(out, "w") do io
-    println(io, "level,block_side,coarse_states,coarse_seconds,bound_over_cost,fine_expansions,fine_seconds")
+    println(io, "level,block_side,coarse_states,quotient_seconds,coarse_seconds,bound_over_cost,fine_expansions,fine_seconds")
     for r in rows
-        println(io, join((r.level, 2^r.level, r.blocks, r.coarse_seconds, r.bound, r.expanded, r.fine_seconds), ","))
+        println(io, join((r.level, 2^r.level, r.blocks, r.setup_seconds, r.coarse_seconds, r.bound, r.expanded, r.fine_seconds), ","))
     end
 end
 println("wrote $out")

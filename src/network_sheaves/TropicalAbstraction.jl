@@ -189,17 +189,23 @@ function cost_to_go(W::SparseMatrixCSC{T}, targets; source::Union{Nothing,Intege
 end
 
 """
-    abstraction_heuristic(W, ψ, source) -> Vector
+    abstraction_heuristic(W, ψ, source; reversed_quotient = transpose of quotient_graph(W, ψ)) -> Vector
 
 The A* heuristic of the abstraction `ψ` for searches from `source`: the cost in
 the quotient graph ([`quotient_graph`](@ref)) from ``ψ(\\text{source})`` to each
 block, pulled back to the states. It is a consistent lower bound on the cost from
 `source` to each state, so [`cost_to_go`](@ref) with it is exact; states whose
 block the source cannot reach get ``∞`` and are never expanded.
+
+The quotient does not depend on the source: for many queries build its transpose
+once, `sparse(transpose(quotient_graph(W, ψ)))`, and pass it as
+`reversed_quotient`; each query then costs one coarse Dijkstra and the pullback.
 """
-function abstraction_heuristic(W::SparseMatrixCSC, ψ::GraphHomomorphism, source::Integer)
-    Wc = quotient_graph(W, ψ)
-    from_source = cost_to_go(sparse(transpose(Wc)), [ψ.vertex_map[source]]).values
+function abstraction_heuristic(W::SparseMatrixCSC, ψ::GraphHomomorphism, source::Integer;
+        reversed_quotient::SparseMatrixCSC = sparse(transpose(quotient_graph(W, ψ))))
+    @argcheck size(reversed_quotient) == (ψ.n_target, ψ.n_target) "the reversed quotient has one vertex per block"
+    @argcheck 1 <= source <= length(ψ.vertex_map) "source must be a state of W"
+    from_source = cost_to_go(reversed_quotient, [ψ.vertex_map[source]]).values
     return tropical_pullback(ψ, from_source)
 end
 

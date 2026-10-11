@@ -103,6 +103,7 @@ end
         for s in sources
             h = abstraction_heuristic(W, ψ, s)
             @test h[s] == 0
+            @test h == abstraction_heuristic(W, ψ, s; reversed_quotient = sparse(transpose(quotient_graph(W, ψ))))
             # Consistent: h(y) ≤ h(x) + W[x, y] on every edge out of a reachable state.
             @test all(isinf(h[x]) || h[y] <= h[x] + w for (x, y, w) in zip(findnz(W)...))
             # A* is exact and expands fewer states than Dijkstra.
