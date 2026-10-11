@@ -114,6 +114,7 @@ end
 function _minplus_mul(A::SparseMatrixCSC{T}, B::SparseMatrixCSC{T}) where {T}
     m, n = size(A, 1), size(B, 2)
     acc = fill(typemax(T), m)
+    seen = falses(m)                         # a stored ∞ cost must not read as "untouched"
     touched = Int[]
     colptr = [1]
     rows, vals = Int[], T[]
@@ -123,7 +124,7 @@ function _minplus_mul(A::SparseMatrixCSC{T}, B::SparseMatrixCSC{T}) where {T}
             k, b = Br[q], Bv[q]
             for p in nzrange(A, k)
                 i = Ar[p]
-                isinf(acc[i]) && push!(touched, i)
+                seen[i] || (seen[i] = true; push!(touched, i))
                 acc[i] = min(acc[i], Av[p] + b)
             end
         end
@@ -131,6 +132,7 @@ function _minplus_mul(A::SparseMatrixCSC{T}, B::SparseMatrixCSC{T}) where {T}
         for i in touched
             push!(rows, i); push!(vals, acc[i])
             acc[i] = typemax(T)
+            seen[i] = false
         end
         empty!(touched)
         push!(colptr, length(rows) + 1)
@@ -952,7 +954,9 @@ end
 
 The feedback that moves each state to the successor minimizing ``W_{xy} + V(y)``
 (0 where no successor has finite value): the closed loop as a deterministic
-transition system, a coalgebra ``X → \\mathcal P(X)`` with singleton successors.
+transition system, a coalgebra ``X → \\mathcal P(X)`` with singleton successors. Ties go to the
+first successor; with zero-cost moves a tie can close a cycle, and a strict Lyapunov check
+([`is_lyapunov`](@ref)) then fails, as it should.
 """
 function greedy_policy(W::SparseMatrixCSC, V::AbstractVector; out_edges::SparseMatrixCSC = sparse(transpose(W)))
     @argcheck size(W, 1) == length(V) "one value per state"
@@ -1003,9 +1007,16 @@ function is_lyapunov(next::AbstractVector{<:Integer}, V::AbstractVector, equilib
 end
 
 # The min-plus closure of W restricted to the `allowed` states (backward Dijkstra
-# over in-edges, never entering a state outside), and the greedy feedback on it.
+# over in-edges, never entering a state outside).
+#
+# The closure also returns its shortest-path tree as a feedback: `next[x]` is the
+# successor through which x was last improved (0 on the targets and where V = ∞).
+# Every successor was settled before x, so the tree has no cycles and following it
+# reaches a target, even when zero-cost moves tie with others (where the greedy
+# feedback on V alone can cycle).
 function _restricted_closure(W::SparseMatrixCSC, allowed::AbstractVector{Bool}, b::AbstractVector)
     g = fill(Inf, size(W, 1))
+    next = zeros(Int, size(W, 1))
     heap = Tuple{Float64,Int}[]
     for x in eachindex(b)
         if allowed[x] && isfinite(b[x])
@@ -1025,29 +1036,12 @@ function _restricted_closure(W::SparseMatrixCSC, allowed::AbstractVector{Bool}, 
             d = g[y] + vals[k]
             if d < g[x]
                 g[x] = d
+                next[x] = y
                 _push!(heap, (d, x))
             end
         end
     end
-    return g
-end
-
-function _restricted_greedy(W_out::SparseMatrixCSC, allowed::AbstractVector{Bool}, V::AbstractVector)
-    rows, vals = rowvals(W_out), nonzeros(W_out)
-    next = zeros(Int, length(V))
-    for x in eachindex(V)
-        (allowed[x] && isfinite(V[x])) || continue
-        best = Inf
-        for k in nzrange(W_out, x)
-            y = rows[k]
-            allowed[y] || continue
-            d = vals[k] + V[y]
-            if d < best
-                best, next[x] = d, y
-            end
-        end
-    end
-    return next
+    return g, next
 end
 
 _above(P::LayeredPlanner, U) = BitVector(U[P.μ.vertex_map[x]] for x in 1:size(P.W, 1))
@@ -1057,7 +1051,7 @@ _above(P::LayeredPlanner, U) = BitVector(U[P.μ.vertex_map[x]] for x in 1:size(P
 
 The Lyapunov certificate of the layered controller's low level: the cost-to-go
 ``V_U`` to the targets *within* the corridor (the min-plus closure of `W`
-restricted to the states above it), and the greedy feedback on it, whose closed
+restricted to the states above it), and the feedback along its shortest-path tree, whose closed
 loop [`is_lyapunov`](@ref) certifies on ``\\{V_U < ∞\\}``. The search of
 [`layered_path`](@ref) with the same corridor finds a path of cost ``V_U(\\text{source})``.
 """
@@ -1065,8 +1059,8 @@ function corridor_certificate(P::LayeredPlanner, source::Integer, targets; width
     inside = _above(P, corridor(P, plan_route(P, source, targets), width, mode_width))
     b = fill(Inf, size(P.W, 1))
     b[[t for t in targets if inside[t]]] .= 0
-    VU = _restricted_closure(P.W, inside, b)
-    return (V = VU, next = _restricted_greedy(P.W_out, inside, VU))
+    VU, next = _restricted_closure(P.W, inside, b)
+    return (V = VU, next = next)
 end
 
 """
@@ -1075,7 +1069,7 @@ end
         -> (cost, path, route, width, mode_width, first_try, certificate, lower, suboptimality_bound)
 
 The layered controller with its certificates, sandwiched between the two
-pushforwards. The low level is the greedy feedback on the cost-to-go ``V_U``
+pushforwards. The low level follows the shortest-path tree of the cost-to-go ``V_U``
 within the corridor around the planned route (widened as in [`layered_path`](@ref)
 until the source reaches the targets in it), and `path` is its closed-loop
 trajectory from `source`, of cost ``V_U(\\text{source})``.
@@ -1088,7 +1082,7 @@ trajectory from `source`, of cost ``V_U(\\text{source})``.
   cost-to-go, such as [`lower_bound`](@ref) of an optimistic abstraction (the
   refinement along an oplax morphism), `suboptimality_bound` ``= V_U(x) / \\text{lower}(x)``
   is a guaranteed bound on the ratio of the controller's cost to the optimum,
-  computed without the optimum.
+  computed without the optimum (``∞`` when there is no path or the lower bound is 0).
 """
 function certified_path(P::LayeredPlanner, source::Integer, targets; width::Integer = 2, mode_width::Integer = 0,
         lower::Union{Nothing,AbstractVector} = nothing, widen::Bool = true)
@@ -1103,16 +1097,20 @@ function certified_path(P::LayeredPlanner, source::Integer, targets; width::Inte
         goal_inside = [t for t in targets if inside[t]]
         b = fill(Inf, N)
         b[goal_inside] .= 0
-        VU = _restricted_closure(P.W, inside, b)
+        VU, next = _restricted_closure(P.W, inside, b)
         if isfinite(VU[source]) || !widen || all(U)
-            next = _restricted_greedy(P.W_out, inside, VU)
+            # Follow the shortest-path tree into a target (acyclic, so this ends).
+            is_goal = falses(N)
+            is_goal[goal_inside] .= true
             path = [source]
-            while isfinite(VU[path[end]]) && VU[path[end]] > 0
+            while isfinite(VU[source]) && !is_goal[path[end]]
                 push!(path, next[path[end]])
             end
             certificate = is_lyapunov(next, VU, goal_inside)
             lb = isnothing(lower) ? NaN : Float64(lower[source])
-            bound = isnothing(lower) ? NaN : VU[source] == 0 ? 1.0 : VU[source] / lb
+            # No path: no bound (∞); a zero lower bound bounds nothing either.
+            bound = isnothing(lower) ? NaN : !isfinite(VU[source]) ? Inf : VU[source] == 0 ? 1.0 :
+                lb > 0 ? VU[source] / lb : Inf
             return (cost = VU[source], path = isfinite(VU[source]) ? path : Int[], route = route, width = w, mode_width = mw,
                 first_try = first_try && isfinite(VU[source]), certificate = certificate, lower = lb,
                 suboptimality_bound = bound)

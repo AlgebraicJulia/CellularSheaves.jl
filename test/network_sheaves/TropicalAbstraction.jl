@@ -389,6 +389,26 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     end
     @test !isfinite(certified_path(PM, L[11, 10, 3, 3], goal).cost)
 
+    # ---- edge cases: zero-cost moves, stored ∞ costs, unreachable sources ------
+    # A zero-cost cycle that ties with the way out, and a zero-cost last move: the
+    # certified closed loop still ends in the target.
+    Z = sparse([1, 2, 1], [2, 1, 3], [0.0, 0.0, 1.0], 3, 3)
+    PZ = LayeredPlanner(Z, GraphHomomorphism([1, 2, 3], 3), (3,))
+    cz = certified_path(PZ, 1, [3]; width = 3)
+    @test cz.cost == 1 && cz.path[1] == 1 && last(cz.path) == 3
+    Z2 = sparse([1, 2], [2, 3], [1.0, 0.0], 3, 3)
+    cz2 = certified_path(LayeredPlanner(Z2, GraphHomomorphism([1, 2, 3], 3), (3,)), 1, [3]; width = 3)
+    @test cz2.path == [1, 2, 3] && cz2.cost == 1
+    # No path: the bound is ∞, not NaN.
+    cu = certified_path(PZ, 3, [1]; width = 3, lower = fill(Inf, 3), widen = false)
+    @test !isfinite(cu.cost) && cu.suboptimality_bound == Inf
+    # A stored ∞ cost (a forbidden move) leaves the k-step quotient a valid sparse matrix.
+    WI = sparse([1, 1, 2, 3], [2, 3, 4, 4], [Inf, 1.0, 1.0, 1.0], 4, 4)
+    ψI = GraphHomomorphism([1, 2, 2, 3], 3)
+    QI = quotient_graph(WI, ψI; steps = 2)
+    @test all(allunique(rowvals(QI)[nzrange(QI, j)]) for j in 1:size(QI, 2))
+    @test QI[1, 3] == 2.0
+
     @test_throws ArgumentError cost_to_go(-W, goal)
     @test_throws ArgumentError quotient_graph(W, aggregation_homomorphism((6, 5), (2, 2)))
     @test_throws ArgumentError quotient_graph(W, space[1][1]; steps = 2, combine = max)

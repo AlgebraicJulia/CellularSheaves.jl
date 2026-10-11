@@ -272,7 +272,9 @@ function MechanicalHJBProblem(arm::TwoLinkArm; angle_points::Integer = 32, momen
     @argcheck all(>=(0), torque_bound) "torque bounds must be nonnegative"
     @argcheck configuration_weight >= 0 && kinetic_weight >= 0 && control_weight > 0
     @argcheck discount > 0 "the discount rate must be positive"
-    P = momentum_bound === nothing ? _default_momentum_bound(arm) : Float64.(Tuple(momentum_bound))
+    P = momentum_bound === nothing ? _default_momentum_bound(arm) :
+        momentum_bound isa Real ? (Float64(momentum_bound), Float64(momentum_bound)) : Float64.(Tuple(momentum_bound))
+    @argcheck length(P) == 2 "momentum_bound must be one bound for both joints or a pair (P₁, P₂)"
     @argcheck all(>(0), P) "momentum bounds must be positive"
     h = 2π / angle_points
     grid = StateGrid([-π, -π, -P[1], -P[2]], [π - h, π - h, P[1], P[2]],

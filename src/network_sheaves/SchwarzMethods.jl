@@ -78,7 +78,13 @@ end
 # cover only depend on which dofs are coupled, so for a nonsymmetric matrix they
 # are computed from this symmetrized pattern.
 _pattern(S::SparseMatrixCSC) = SparseMatrixCSC(size(S)..., copy(S.colptr), copy(rowvals(S)), ones(nnz(S)))
-_structure(S::SparseMatrixCSC) = issymmetric(S) ? S : _pattern(S) + _pattern(sparse(transpose(S)))
+# The test is on the stored pattern, not the values: a value-symmetric matrix can
+# store an explicit zero at (a, b) but not at (b, a).
+function _structure(S::SparseMatrixCSC)
+    P = _pattern(S)
+    Pt = _pattern(sparse(transpose(S)))
+    return P == Pt ? S : P + Pt
+end
 
 # A as a SparseMatrixCSC{<:AbstractFloat,Int} with its stored pattern intact
 # (broadcasting `float.` over a sparse matrix drops explicit zeros).
@@ -898,7 +904,7 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
     else
         @argcheck size(structure) == size(S) "the structure must have the size of A"
         Q = _pattern(sparse(structure))
-        Q = issymmetric(Q) ? Q : _structure(Q)
+        Q = _structure(Q)
         @argcheck _within_pattern(S, Q) "A has entries outside the given structure"
         Q
     end
@@ -1517,9 +1523,10 @@ end
     coarse_dimension(coarse::AbstractCoarseSpace) -> Int
 
 Number of unknowns the coarse level solves for in each correction: the
-dimension of the truncated coarse space, or the total size of the aggregates
-(the sum of the vertex stalk dimensions of the pushforward sheaf) for the
-exact pushforward.
+dimension of the truncated coarse space, or for the exact pushforward the total
+size of the aggregates ``\\widehat\\Omega_h``, the unknowns of its local solves. The
+vertex stalks of the pushforward sheaf are larger by the ghost layers, which enter
+those solves as boundary data rather than unknowns.
 """
 coarse_dimension(c::TruncatedPushforwardCoarseSpace) = size(c.basis, 2)
 coarse_dimension(c::ExactPushforwardCoarseSpace) = sum(length, c.decomposition.cover.subdomains)

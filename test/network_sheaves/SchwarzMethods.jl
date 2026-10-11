@@ -789,4 +789,19 @@ end
         robin = SchwarzDecomposition(L, doms; owner=parts, transmission=RobinTransmission(10.0))
         @test_throws ArgumentError refactor!(robin, 2L)
     end
+
+    @testset "coloring sees explicitly stored zeros" begin
+        # Symmetric in value, but (5, 1) stores an explicit zero and (1, 5) does not:
+        # the coloring must still separate 1 and 5.
+        n = 6
+        rows = [1:n; 1:(n - 1); 2:n; 5]
+        cols = [1:n; 2:n; 1:(n - 1); 1]
+        vals = [fill(4.0, n); fill(-1.0, 2(n - 1)); 0.0]
+        A = sparse(rows, cols, vals, n, n)
+        @test issymmetric(A) && nnz(A) == 3n - 1
+        M = SymmetricGaussSeidel(A)
+        @test !any(c -> 1 in c && 5 in c, M.colors)
+        b = collect(1.0:n)
+        @test ldiv!(zeros(n), M, b) ≈ ldiv!(zeros(n), SymmetricGaussSeidel(A; colors = M.colors), b)
+    end
 end

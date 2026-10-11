@@ -56,6 +56,9 @@ const DIH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
         @test prob.grid.points == [12, 12, 9, 9]
         @test prob.grid.lower[1] ≈ -π && prob.grid.lower[1] + 12 * prob.grid.spacing[1] ≈ π
         @test_throws ArgumentError MechanicalHJBProblem(arm; angle_points = 11)
+        scalar = MechanicalHJBProblem(arm; angle_points = 12, momentum_points = 9, momentum_bound = 10.0)  # one bound for both joints
+        @test scalar.grid.lower[3:4] == [-10.0, -10.0] && scalar.grid.upper[3:4] == [10.0, 10.0]
+        @test_throws ArgumentError MechanicalHJBProblem(arm; momentum_bound = (1.0, 2.0, 3.0))
         snapshots = []
         sol = solve(prob, GridPolicyIteration(callback = s -> push!(snapshots, s)))
         @test sol.converged

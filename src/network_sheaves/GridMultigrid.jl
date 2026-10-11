@@ -101,12 +101,14 @@ end
 
 The single-box layout of the coarse grid of the single-box `layout`
 (factors from [`coarsening_factors`](@ref)), with the same periodic dimensions
-and overlap.
+and overlap (capped so that the coarse box holds overlap + 1 points).
 """
 function coarse_layout(layout::BoxLayout{D}) where {D}
     @argcheck all(==(1), layout.ranks) "grid hierarchies are single-box"
     factors = coarsening_factors(layout.points, layout.periodic)
-    return BoxLayout(coarse_points(layout.points, factors), ntuple(_ -> 1, D), 0; overlap=layout.overlap,
+    nc = coarse_points(layout.points, factors)
+    # One box: the overlap only sizes the ghost layers, and a coarse box must hold overlap + 1 points.
+    return BoxLayout(nc, ntuple(_ -> 1, D), 0; overlap=min(layout.overlap, minimum(nc) - 1),
         periodic=layout.periodic)
 end
 

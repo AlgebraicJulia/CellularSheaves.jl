@@ -178,6 +178,19 @@ end
     end
     @test_throws ArgumentError AggregateCoarseSpace(BoxLayout((5, 4), (1, 1), 0), (6, 1))
 
+    # One dimension: the row-wise CPU sweep colors like the point kernel (red =
+    # even index sum first), so it equals the multicolor sparse SGS.
+    coef1 = upwind_coefficients(rng, (23,))
+    A1 = assembled(coef1)
+    op1 = GridOperator(coef1; ghost=2)
+    r1 = grid_zeros(op1)
+    interior(r1, op1) .= randn(rng, 23)
+    z1 = grid_zeros(op1)
+    red_black_sgs!(z1, op1, r1)
+    M1 = SymmetricGaussSeidel(A1)
+    @test 1 in M1.colors[1]
+    @test vec(interior(z1, op1)) ≈ ldiv!(zeros(23), M1, vec(interior(r1, op1))) rtol = 1e-12
+
     # The same tests under MPI on several ranks.
 
     script = joinpath(@__DIR__, "..", "mpi", "grid_boxes.jl")

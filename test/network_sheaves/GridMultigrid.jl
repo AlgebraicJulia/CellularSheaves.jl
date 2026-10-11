@@ -134,4 +134,9 @@ end
     end
     @test_throws ArgumentError coarse_points((8, 7), (2, 3))
     @test coarsening_factors((5, 4, 12, 6, 4), (false, false, true, true, true)) == (2, 1, 2, 1, 1)
+    # The overlap is capped on small coarse levels (a box needs overlap + 1 points).
+    l9 = BoxLayout((9, 9), (1, 1), 0; overlap = 3)
+    l5 = coarse_layout(l9)
+    l3 = coarse_layout(l5)
+    @test l5.points == (5, 5) && l5.overlap == 3 && l3.points == (3, 3) && l3.overlap == 2
 end

@@ -223,7 +223,7 @@ end
 @kernel function _color_rows_kernel!(y, stencil, @Const(r), g, shift::Int, color::Int, ::Val{D}, rows, n1) where {D}
     row = @index(Global, Linear)
     K = rows[row]
-    first_i = 1 + ((color - (1 + sum(Tuple(K)) + shift)) & 1)
+    first_i = 1 + ((color - (1 + (D == 1 ? 0 : sum(Tuple(K))) + shift)) & 1)   # in 1-D the row index K is a placeholder
     for i in first_i:2:n1
         _color_point!(y, stencil, r, g, _point(i, K, Val(D)), Val(D))
     end
