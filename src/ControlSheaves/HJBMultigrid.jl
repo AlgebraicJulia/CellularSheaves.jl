@@ -94,12 +94,12 @@ end
 # (D the diagonal of the stencil, N its couplings), c = D⁻¹b. The pattern of P
 # is the grid graph with every neighbour stored, zero or not, so it is the same
 # for every policy (and strongly connected, as PathPack's GPU solver needs).
-struct _CoarsestSystem{D,S}
+struct _CoarsestSystem{D,S,R}
     points::NTuple{D,Int}
     P::SparseMatrixCSC{Float64,Int}
     slot::Matrix{Int}                  # N × 2D: index into P.nzval of each coupling, 0 if none
     diagonal::Vector{Float64}
-    coef::Array{Float64}               # the stencil coefficients on the host, (points..., 2D + 1)
+    coef::Array{Float64,R}             # the stencil coefficients on the host, (points..., 2D + 1)
     rhs::Vector{Float64}
     solution::Vector{Float64}
     solver::S
@@ -167,7 +167,7 @@ function _CoarsestSystem(kind::Symbol, points::NTuple{D,Int}, periodic::NTuple{D
     P, slot = _coarsest_pattern(points, periodic)
     N = prod(points)
     solver = _coarsest_solver(Val(kind), P)
-    return _CoarsestSystem{D,typeof(solver)}(points, P, slot, zeros(N), zeros(points..., 2D + 1), zeros(N), zeros(N),
+    return _CoarsestSystem{D,typeof(solver),D + 1}(points, P, slot, zeros(N), zeros(points..., 2D + 1), zeros(N), zeros(N),
         solver)
 end
 
@@ -202,8 +202,11 @@ struct _Level{O,L,X,A,U,C}
     coef::C                             # Galerkin: this level's stored coefficients
 end
 
-struct _Hierarchy{V,S,B,C}
-    levels::V
+# The fine level (which borrows BiCGStab's vectors) and the coarse levels, which
+# share one concrete type, so that a V-cycle is type-stable at every depth.
+struct _Hierarchy{F<:_Level,L<:_Level,S,B,C}
+    fine::F
+    coarse::Vector{L}                   # levels 2, 3, …; never empty
     coarsest::S
     coarsest_buffer::B                  # contiguous device copy of the coarsest interior
     coarsest_coef::C                    # the coarsest stencil coefficients on the device
@@ -241,7 +244,7 @@ function _Hierarchy(mg::Multigrid, prob, op, layout, U, backend)
     nlevels = _plan_levels(mg, size(op), layout.periodic)
     galerkin = mg.coarse_operator === :galerkin
     first_level = _Level(op, layout, nothing, nothing, grid_zeros(op), grid_zeros(op), U, nothing)
-    levels = Any[first_level]
+    levels = _Level[]
     problem = prob
     for _ in 2:nlevels
         problem = _coarsen(problem)
@@ -255,40 +258,45 @@ function _Hierarchy(mg::Multigrid, prob, op, layout, U, backend)
         push!(levels, _Level(opc, layout, grid_zeros(opc), grid_zeros(opc), grid_zeros(opc), grid_zeros(opc),
             controls, coef))
     end
-    coarsest_layout = levels[end].layout
+    coarse = [level for level in levels]                # narrowed to the coarse levels' common type
+    coarsest_layout = coarse[end].layout
     system = _CoarsestSystem(mg.coarsest, coarsest_layout.points, coarsest_layout.periodic)
     buffer = KernelAbstractions.zeros(backend, Float64, prod(coarsest_layout.points))
     coarsest_coef = KernelAbstractions.zeros(backend, Float64, coarsest_layout.points..., 2D + 1)
-    return _Hierarchy(Tuple(levels), system, buffer, coarsest_coef, galerkin, mg.presmooth, mg.postsmooth)
+    return _Hierarchy(first_level, coarse, system, buffer, coarsest_coef, galerkin, mg.presmooth, mg.postsmooth)
 end
 
 # For a new policy (the fine controls changed): the coarse operators, then the
 # coarsest factorization (symbolic analysis kept).
 function _update!(H::_Hierarchy)
-    levels = H.levels
-    D = ndims(levels[1].op)
-    for ℓ in 2:length(levels)
-        fine, coarse = levels[ℓ - 1], levels[ℓ]
-        if H.galerkin
-            galerkin_coefficients!(coarse.coef, fine.op)
-        else
-            backend = get_backend(coarse.op)
-            d = size(coarse.controls, D + 1)
-            _restrict_controls_kernel!(backend)(coarse.controls, fine.controls,
-                ntuple(k -> size(coarse.op, k) == size(fine.op, k) ? 1 : 2, D), size(fine.op), Val(D), Val(d);
-                ndrange=size(coarse.op))
-            KernelAbstractions.synchronize(backend)
-        end
+    _update_level!(H, H.fine, H.coarse[1])
+    for k in 2:length(H.coarse)
+        _update_level!(H, H.coarse[k - 1], H.coarse[k])
     end
-    last = levels[end]
+    last = H.coarse[end]
     if H.galerkin
         copyto!(H.coarsest.coef, last.coef)
     else
-
         copyto!(H.coarsest.coef, stencil_coefficients!(H.coarsest_coef, last.op))
     end
     _refactor!(H.coarsest)
     return H
+end
+
+# The operator of `coarse` from that of the next finer level.
+function _update_level!(H::_Hierarchy, fine::_Level, coarse::_Level)
+    D = ndims(fine.op)
+    if H.galerkin
+        galerkin_coefficients!(coarse.coef, fine.op)
+    else
+        backend = get_backend(coarse.op)
+        d = size(coarse.controls, D + 1)
+        _restrict_controls_kernel!(backend)(coarse.controls, fine.controls,
+            ntuple(k -> size(coarse.op, k) == size(fine.op, k) ? 1 : 2, D), size(fine.op), Val(D), Val(d);
+            ndrange=size(coarse.op))
+        KernelAbstractions.synchronize(backend)
+    end
+    return coarse
 end
 
 _exchange!(level::_Level, x) = exchange!(SerialBoxes(), level.layout, x)
@@ -323,16 +331,17 @@ function _coarsest_solve!(H::_Hierarchy, level::_Level)
 end
 
 # One V-cycle for A_ℓ x = b from x = 0, x and b padded arrays of level ℓ.
-function _vcycle!(H::_Hierarchy, ℓ::Int, x, b)
-    levels = H.levels
-    level = levels[ℓ]
-    ℓ == length(levels) && return _coarsest_solve!(H, level)
+_vcycle!(H::_Hierarchy, ℓ::Int, x, b) =
+    ℓ == 1 ? _vcycle!(H, H.fine, 1, x, b) : _vcycle!(H, H.coarse[ℓ - 1], ℓ, x, b)
+
+function _vcycle!(H::_Hierarchy, level::_Level, ℓ::Int, x, b)
+    ℓ == length(H.coarse) + 1 && return _coarsest_solve!(H, level)
     red_black_sgs!(x, level.op, b; exchange=y -> _exchange!(level, y))            # x = S b
     _smooth!(level, x, b, H.presmooth - 1)
     _residual!(level.r, level, b, x)
-    coarse = levels[ℓ + 1]
+    coarse = H.coarse[ℓ]                                                          # level ℓ + 1
     restrict_average!(coarse.b, coarse.op, level.r, level.op)                     # pushforward T
-    _vcycle!(H, ℓ + 1, coarse.x, coarse.b)
+    _vcycle!(H, coarse, ℓ + 1, coarse.x, coarse.b)
     prolong_add!(x, level.op, coarse.x, coarse.op)                                # pullback E
     _smooth!(level, x, b, H.postsmooth)
     return x

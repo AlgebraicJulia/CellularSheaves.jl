@@ -45,7 +45,7 @@ end
 # :pathpack)): Wc* = U* L* factorized once by the chordal semiring LU, so that each
 # target set's coarse cost-to-go V = Wc* bc (the least solution of V = Wc V ⊕ bc)
 # is two triangular solves.
-struct PathPackMinPlusClosure{F}
+struct PathPackMinPlusClosure{F} <: TA.MinPlusClosure
     factor::F
 end
 

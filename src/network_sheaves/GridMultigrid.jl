@@ -218,9 +218,9 @@ end
     children = _children(Ic, r, nf, Val(D))
     lo = first(children)
     hi = last(children)
-    diag = 0.0
-    low = ntuple(_ -> 0.0, Val(D))
-    high = ntuple(_ -> 0.0, Val(D))
+    diag = zero(eltype(coefc))
+    low = ntuple(_ -> zero(eltype(coefc)), Val(D))
+    high = ntuple(_ -> zero(eltype(coefc)), Val(D))
     count = 0
     for I in children
         count += 1

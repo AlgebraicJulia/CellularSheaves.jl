@@ -6,6 +6,9 @@ using Graphs
 using BlockArrays
 using Random
 
+# A local solver that implements nothing of the LocalSolver interface.
+struct _IncompleteLocalSolver <: LocalSolver end
+
 # 5-point finite-difference Laplacian for -Δu = f on an m×m interior grid of
 # the unit square with homogeneous Dirichlet boundary conditions.
 function poisson2d(m)
@@ -803,5 +806,28 @@ end
         @test !any(c -> 1 in c && 5 in c, M.colors)
         b = collect(1.0:n)
         @test ldiv!(zeros(n), M, b) ≈ ldiv!(zeros(n), SymmetricGaussSeidel(A; colors = M.colors), b)
+    end
+
+    @testset "Interfaces" begin
+        # The preconditioner's ldiv! family: out of place, in place, and no aliasing.
+        n = 8
+        A = sparse(SymTridiagonal(fill(4.0, n), fill(-1.0, n - 1)))
+        M = SymmetricGaussSeidel(A; sweeps = 2)
+        b = collect(1.0:n)
+        y = ldiv!(zeros(n), M, b)
+        @test M \ b == y
+        @test ldiv!(M, copy(b)) == y
+        @test_throws ArgumentError ldiv!(b, M, b)
+        @test_throws ArgumentError ldiv!(zeros(n - 1), M, b)
+        # Concrete fields, and a clear error for an incomplete extension.
+        dd = SchwarzDecomposition(A, [1:5, 4:8])
+        @test all(isconcretetype, fieldtypes(typeof(dd)))
+        @test isconcretetype(typeof(solve(SchwarzProblem(dd, b), SchwarzIteration(sweep = MultiplicativeSweep()))))
+        err = try
+            SchwarzDecomposition(A, [1:5, 4:8]; local_solver = _IncompleteLocalSolver())
+        catch e
+            e
+        end
+        @test err isa ArgumentError && occursin("_local_factor", err.msg)
     end
 end

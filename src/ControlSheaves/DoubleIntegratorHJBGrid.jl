@@ -24,6 +24,17 @@
 #                                           Hamiltonian, given the forward and backward
 #                                           differences of V along the d momenta
 #   _initial_value(m, x), _initial_control(m, x)   the starting guess
+#
+# and, for Multigrid, _with_grid(prob, grid), the same problem on a coarser grid.
+# A problem type subtypes AbstractHJBProblem; the methods below on the abstract
+# type say which of these it is missing.
+
+for hook in (:_state_grid, :_periodic, :_control_count, :_discount, :_kernel_model)
+    @eval $hook(prob::AbstractHJBProblem) = throw(ArgumentError(
+        string(typeof(prob), " does not implement ", $(QuoteNode(hook)), "; see AbstractHJBProblem")))
+end
+_with_grid(prob::AbstractHJBProblem, grid) = throw(ArgumentError(
+    string(typeof(prob), " does not implement _with_grid, which Multigrid needs; see AbstractHJBProblem")))
 
 # Everything a kernel needs to know about the problem and the box, as plain
 # bits. Point I of the box (1-based) is the grid point offset .+ I.
@@ -369,7 +380,7 @@ Base.@kwdef struct GridPolicyIteration{B,C<:BoxCommunicator,F}
     callback::F = nothing
 end
 
-CommonSolve.solve(prob::HJBProblem, alg::GridPolicyIteration) = _grid_solve(prob, alg)
+CommonSolve.solve(prob::AbstractHJBProblem, alg::GridPolicyIteration) = _grid_solve(prob, alg)
 
 # The solve for any problem type that implements the interface at the top of this file.
 function _grid_solve(prob, alg::GridPolicyIteration)

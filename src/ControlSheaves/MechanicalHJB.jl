@@ -66,7 +66,7 @@ using ArgCheck
 using CommonSolve
 using CommonSolve: solve
 using LinearAlgebra
-using ..DoubleIntegratorHJB: StateGrid, HJBSolution, GridPolicyIteration, Multigrid
+using ..DoubleIntegratorHJB: StateGrid, AbstractHJBProblem, HJBSolution, GridPolicyIteration, Multigrid
 import ..DoubleIntegratorHJB: value_at, control_at, _state_grid, _periodic, _control_count, _discount, _kernel_model,
     _drifts, _cost, _dirichlet, _boundary_value, _argmin_hamiltonian, _initial_value, _initial_control, _box_argmin,
     _grid_solve, _with_grid
@@ -253,7 +253,7 @@ With a much larger ``ρ`` the optimal policy from hanging down is to stay there.
 Solve with `solve(problem, GridPolicyIteration(...))`; query the result with
 [`value_at`](@ref), [`control_at`](@ref) and [`closed_loop`](@ref).
 """
-struct MechanicalHJBProblem
+struct MechanicalHJBProblem <: AbstractHJBProblem
     arm::TwoLinkArm
     grid::StateGrid
     target::NTuple{2,Float64}
@@ -297,8 +297,6 @@ _discount(prob::MechanicalHJBProblem) = prob.discount
 _kernel_model(prob::MechanicalHJBProblem) =
     _ArmModel(prob.arm; target = prob.target, configuration_weight = prob.configuration_weight,
         kinetic_weight = prob.kinetic_weight, control_weight = prob.control_weight, torque_bound = prob.torque_bound)
-
-CommonSolve.solve(prob::MechanicalHJBProblem, alg::GridPolicyIteration) = _grid_solve(prob, alg)
 
 _with_grid(prob::MechanicalHJBProblem, grid::StateGrid) =
     MechanicalHJBProblem(prob.arm, grid, prob.target, prob.torque_bound, prob.configuration_weight,
@@ -391,8 +389,9 @@ function closed_loop(sol::HJBSolution{MechanicalHJBProblem}, x0::AbstractVector;
     f(x, τ) = _flow(m, x, τ)
     cost = 0.0
     for i in 1:steps
-        x = Tuple(states[:, i])
-        τ = Tuple(control_at(sol, collect(x)))
+        x = ntuple(k -> states[k, i], Val(4))
+        τc = control_at(sol, collect(x))
+        τ = (τc[1], τc[2])
         torques[:, i] .= τ
         k1 = f(x, τ)
         k2 = f(x .+ dt / 2 .* k1, τ)

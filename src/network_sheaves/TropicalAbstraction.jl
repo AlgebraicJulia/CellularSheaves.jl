@@ -74,7 +74,7 @@ export tropical_pullback, tropical_pushforward, quotient_graph, minplus_closure,
 
 using ArgCheck: @argcheck
 using SparseArrays
-using ..GraphHomomorphisms: GraphHomomorphism
+using ..GraphHomomorphisms: GraphHomomorphisms, GraphHomomorphism
 
 """
     tropical_pullback(ψ, vc) -> Vector
@@ -276,6 +276,45 @@ function _short_horizon(W, b, k)
 end
 
 """
+    MinPlusClosure
+
+A solver for the coarse min-plus closure ``W_c^*`` of an [`Abstraction`](@ref). A
+subtype implements
+
+- `_apply_closure(c, Wc, bc) -> Vector`: the least solution of ``V = W_c ⊗ V ⊕ b_c``;
+- `_full_closure(c, Wc) -> Matrix`: all of ``W_c^*`` (column ``C`` is the cost
+  from every block to ``C``);
+
+and a backend named `method` provides `_closure(::Val{method}, Wc) -> MinPlusClosure`.
+Dijkstra's algorithm (`:dijkstra`) is built in; PathPack's chordal semiring LU
+(`:pathpack`) comes with the PATHPACK extension.
+"""
+abstract type MinPlusClosure end
+
+function _closure end
+function _apply_closure end
+function _full_closure end
+
+struct _DijkstraClosure <: MinPlusClosure end
+
+_closure(::Val{:dijkstra}, Wc) = _DijkstraClosure()
+_closure(::Val{M}, Wc) where {M} = throw(ArgumentError("coarse closure method $(M) is not available" *
+    (M === :pathpack ? " (load PATHPACK)" : "")))
+_apply_closure(::_DijkstraClosure, Wc, bc) = minplus_closure(Wc, bc)
+
+# The whole closure Wc*: column C is the cost from every block to C.
+function _full_closure(::_DijkstraClosure, Wc)
+    nc = size(Wc, 1)
+    table = Matrix{Float64}(undef, nc, nc)
+    Threads.@threads for c in 1:nc
+        e = fill(Inf, nc)
+        e[c] = 0.0
+        table[:, c] = minplus_closure(Wc, e)
+    end
+    return table
+end
+
+"""
     Abstraction(W, ψ; steps = 1, method = :dijkstra, table = false)
 
 The coarse problem of the edge costs `W` along the aggregation `ψ` with time
@@ -294,32 +333,23 @@ pattern database (Culberson & Schaeffer 1998) and, in control terms, the min-plu
 fundamental solution of the coarse Bellman equation: the value for any terminal
 cost ``φ`` is the Hopf–Lax formula ``V(B) = \\min_C W_c^*(B, C) + φ(C)``.
 """
-struct Abstraction{G,C}
+struct Abstraction{G<:SparseMatrixCSC,C<:MinPlusClosure}
     W::G
     ψ::GraphHomomorphism
     steps::Int
     quotient::SparseMatrixCSC{Float64,Int}
     closure::C
     table::Union{Nothing,Matrix{Float64}}
-end
 
-struct _DijkstraClosure end
-
-_closure(::Val{:dijkstra}, Wc) = _DijkstraClosure()
-_closure(::Val{M}, Wc) where {M} = throw(ArgumentError("coarse closure method $(M) is not available" *
-    (M === :pathpack ? " (load PATHPACK)" : "")))
-_apply_closure(::_DijkstraClosure, Wc, bc) = minplus_closure(Wc, bc)
-
-# The whole closure Wc*: column C is the cost from every block to C.
-function _full_closure(::_DijkstraClosure, Wc)
-    nc = size(Wc, 1)
-    table = Matrix{Float64}(undef, nc, nc)
-    Threads.@threads for c in 1:nc
-        e = fill(Inf, nc)
-        e[c] = 0.0
-        table[:, c] = minplus_closure(Wc, e)
+    function Abstraction(W::G, ψ::GraphHomomorphism, steps::Integer, quotient::SparseMatrixCSC{Float64,Int}, closure::C,
+            table::Union{Nothing,Matrix{Float64}}) where {G<:SparseMatrixCSC,C<:MinPlusClosure}
+        nc = ψ.n_target
+        @argcheck size(W, 1) == size(W, 2) == length(ψ.vertex_map) "ψ must map the states of W"
+        @argcheck size(quotient) == (nc, nc) "the quotient has one vertex per block of ψ"
+        @argcheck steps >= 1 "steps must be positive"
+        @argcheck isnothing(table) || size(table) == (nc, nc) "the table has one entry per pair of blocks"
+        return new{G,C}(W, ψ, Int(steps), quotient, closure, table)
     end
-    return table
 end
 
 function Abstraction(W::SparseMatrixCSC, ψ::GraphHomomorphism; steps::Integer = 1, method::Symbol = :dijkstra,
@@ -493,12 +523,21 @@ the targets and the overlay everywhere else ([`overlay_path`](@ref)); the cells
 are the cover, and the Schur complement is the min-plus harmonic extension of
 the boundary data through each cell.
 """
-struct Overlay{G}
+struct Overlay{G<:SparseMatrixCSC}
     W::G
     W_out::SparseMatrixCSC{Float64,Int}
     cell::Vector{Int}
     portals::Vector{Int}
     shortcuts_out::SparseMatrixCSC{Float64,Int}    # transpose of the overlay, on all states
+
+    function Overlay(W::G, W_out::SparseMatrixCSC{Float64,Int}, cell::Vector{Int}, portals::Vector{Int},
+            shortcuts_out::SparseMatrixCSC{Float64,Int}) where {G<:SparseMatrixCSC}
+        N = size(W, 1)
+        @argcheck size(W) == size(W_out) == size(shortcuts_out) == (N, N) "the overlay acts on the states of W"
+        @argcheck length(cell) == N "one cell per state"
+        @argcheck all(p -> 1 <= p <= N, portals) "portals must be states of W"
+        return new{G}(W, W_out, cell, portals, shortcuts_out)
+    end
 end
 
 function Overlay(W::SparseMatrixCSC, cell::AbstractVector{<:Integer})
@@ -516,7 +555,7 @@ function Overlay(W::SparseMatrixCSC, cell::AbstractVector{<:Integer})
     WS = schur_complement(W, portals)
     a, b, v = findnz(WS)
     keep = a .!= b
-    shortcuts = sparse(portals[a[keep]], portals[b[keep]], v[keep], N, N)
+    shortcuts = sparse(portals[a[keep]], portals[b[keep]], Float64.(v[keep]), N, N)
     return Overlay(W, SparseMatrixCSC{Float64,Int}(sparse(transpose(W))), collect(Int, cell), portals,
         sparse(transpose(shortcuts)))
 end
@@ -644,15 +683,28 @@ bound: ``E`` maps lax sections of ``G`` to lax sections of ``F``, so ``E V_c ≤
 With one mode per stalk this is the velocity-blind quotient; with one mode per
 state it is an isomorphism.
 """
-struct TruncatedPushforward
+struct TruncatedPushforward{C}
     W::SparseMatrixCSC{Float64,Int}
     ψ::GraphHomomorphism                  # state → cell
     μ::GraphHomomorphism                  # state → coarse state (cell, mode)
     π::GraphHomomorphism                  # coarse state → cell
     K::Int                                # modes per stalk
     quotient::SparseMatrixCSC{Float64,Int}    # W_c = P ⊗ W ⊗ E, loops included
-    cell_points::Tuple
+    cell_points::NTuple{C,Int}
     mode_neighbors::Vector{Vector{Int}}   # modes containing adjacent fibre points
+
+    function TruncatedPushforward(W::SparseMatrixCSC{Float64,Int}, ψ::GraphHomomorphism, μ::GraphHomomorphism,
+            π::GraphHomomorphism, K::Integer, quotient::SparseMatrixCSC{Float64,Int}, cell_points::NTuple{C,Int},
+            mode_neighbors::Vector{Vector{Int}}) where {C}
+        N = length(ψ.vertex_map)
+        @argcheck size(W) == (N, N) "ψ must map the states of W"
+        @argcheck prod(cell_points) == ψ.n_target "cell_points must have one cell per block of ψ"
+        @argcheck length(μ.vertex_map) == N && μ.n_target == ψ.n_target * K "μ must map each state to one of K modes of its cell"
+        @argcheck GraphHomomorphisms.compose(μ, π) == ψ "the modes must refine the cells: π ∘ μ = ψ"
+        @argcheck size(quotient) == (μ.n_target, μ.n_target) "the quotient acts on the coarse states"
+        @argcheck length(mode_neighbors) == K "one neighbour list per mode"
+        return new{C}(W, ψ, μ, π, Int(K), quotient, cell_points, mode_neighbors)
+    end
 end
 
 function TruncatedPushforward(W::SparseMatrixCSC, points::NTuple{D,Integer}, cell_dims::NTuple{C,Integer},
@@ -729,29 +781,33 @@ admissible inside it. The corridor is a commitment: the best path inside it can
 cost more than the optimum, or not exist; [`layered_path`](@ref) reports both and
 can widen it.
 """
-struct LayeredPlanner{G}
-    abstraction::Abstraction
+struct LayeredPlanner{A<:Abstraction,C}
+    abstraction::A                        # over μ; its W is the full state graph
     μ::GraphHomomorphism
     π::GraphHomomorphism
     K::Int
-    cell_points::Tuple
+    cell_points::NTuple{C,Int}
     mode_neighbors::Vector{Vector{Int}}
     W_out::SparseMatrixCSC{Float64,Int}
     quotient_out::SparseMatrixCSC{Float64,Int}
-    W::G
+
+    function LayeredPlanner(abstraction::A, π::GraphHomomorphism, K::Integer, cell_points::NTuple{C,Int},
+            mode_neighbors::Vector{Vector{Int}}) where {A<:Abstraction,C}
+        μ = abstraction.ψ
+        @argcheck abstraction.steps == 1 "the planner routes one step at a time"
+        @argcheck μ.n_target == π.n_target * K && length(π.vertex_map) == μ.n_target "π must map each coarse state to its cell"
+        @argcheck prod(cell_points) == π.n_target "cell_points must have one cell per block of π"
+        @argcheck length(mode_neighbors) == K "one neighbour list per mode"
+        W_out = SparseMatrixCSC{Float64,Int}(sparse(transpose(abstraction.W)))
+        return new{A,C}(abstraction, μ, π, Int(K), cell_points, mode_neighbors, W_out, sparse(transpose(abstraction.quotient)))
+    end
 end
 
-function LayeredPlanner(T::TruncatedPushforward)
-    A = Abstraction(T.W, T.μ)
-    return LayeredPlanner(A, T.μ, T.π, T.K, T.cell_points, T.mode_neighbors, SparseMatrixCSC{Float64,Int}(sparse(transpose(T.W))),
-        sparse(transpose(A.quotient)), T.W)
-end
+LayeredPlanner(T::TruncatedPushforward) = LayeredPlanner(Abstraction(T.W, T.μ), T.π, T.K, T.cell_points, T.mode_neighbors)
 
-function LayeredPlanner(W::SparseMatrixCSC, ψ::GraphHomomorphism, cell_points::Tuple)
-    @argcheck prod(cell_points) == ψ.n_target "cell_points must have one cell per block of ψ"
-    A = Abstraction(W, ψ)
-    return LayeredPlanner(A, ψ, GraphHomomorphism(collect(1:ψ.n_target), ψ.n_target), 1, Tuple(Int.(cell_points)),
-        [Int[]], SparseMatrixCSC{Float64,Int}(sparse(transpose(W))), sparse(transpose(A.quotient)), W)
+function LayeredPlanner(W::SparseMatrixCSC, ψ::GraphHomomorphism, cell_points::Tuple{Vararg{Integer}})
+    return LayeredPlanner(Abstraction(W, ψ), GraphHomomorphism(collect(1:ψ.n_target), ψ.n_target), 1,
+        map(Int, cell_points), [Int[]])
 end
 
 """
@@ -835,7 +891,7 @@ sufficed; `cost` is that of the path found, at least the optimum.
 """
 function layered_path(P::LayeredPlanner, source::Integer, targets; width::Integer = 2, mode_width::Integer = 0,
         heuristic::Union{Nothing,AbstractVector} = nothing, widen::Bool = true)
-    N = size(P.W, 1)
+    N = size(P.abstraction.W, 1)
     _check_query(N, source, targets, heuristic)
     route = plan_route(P, source, targets)
     # No route on the relaxation: no path at all.
@@ -1044,7 +1100,7 @@ function _restricted_closure(W::SparseMatrixCSC, allowed::AbstractVector{Bool}, 
     return g, next
 end
 
-_above(P::LayeredPlanner, U) = BitVector(U[P.μ.vertex_map[x]] for x in 1:size(P.W, 1))
+_above(P::LayeredPlanner, U) = BitVector(U[P.μ.vertex_map[x]] for x in 1:size(P.abstraction.W, 1))
 
 """
     corridor_certificate(P::LayeredPlanner, source, targets; width, mode_width) -> (V, next)
@@ -1057,9 +1113,9 @@ loop [`is_lyapunov`](@ref) certifies on ``\\{V_U < ∞\\}``. The search of
 """
 function corridor_certificate(P::LayeredPlanner, source::Integer, targets; width::Integer, mode_width::Integer = 0)
     inside = _above(P, corridor(P, plan_route(P, source, targets), width, mode_width))
-    b = fill(Inf, size(P.W, 1))
+    b = fill(Inf, size(P.abstraction.W, 1))
     b[[t for t in targets if inside[t]]] .= 0
-    VU, next = _restricted_closure(P.W, inside, b)
+    VU, next = _restricted_closure(P.abstraction.W, inside, b)
     return (V = VU, next = next)
 end
 
@@ -1086,7 +1142,7 @@ trajectory from `source`, of cost ``V_U(\\text{source})``.
 """
 function certified_path(P::LayeredPlanner, source::Integer, targets; width::Integer = 2, mode_width::Integer = 0,
         lower::Union{Nothing,AbstractVector} = nothing, widen::Bool = true)
-    N = size(P.W, 1)
+    N = size(P.abstraction.W, 1)
     _check_query(N, source, targets, lower)
     route = plan_route(P, source, targets)
     w, mw = Int(width), Int(mode_width)
@@ -1097,7 +1153,7 @@ function certified_path(P::LayeredPlanner, source::Integer, targets; width::Inte
         goal_inside = [t for t in targets if inside[t]]
         b = fill(Inf, N)
         b[goal_inside] .= 0
-        VU, next = _restricted_closure(P.W, inside, b)
+        VU, next = _restricted_closure(P.abstraction.W, inside, b)
         if isfinite(VU[source]) || !widen || all(U)
             # Follow the shortest-path tree into a target (acyclic, so this ends).
             is_goal = falses(N)

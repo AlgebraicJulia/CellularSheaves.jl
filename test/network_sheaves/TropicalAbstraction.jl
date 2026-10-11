@@ -259,6 +259,7 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     cell = [((I[1] - 1) ÷ 8) * 3 + (I[2] - 1) ÷ 8 + 1 for I in CartesianIndices(points)][:]
     O = Overlay(W, cell)
     @test length(O.portals) < size(W, 1)
+    @test all(isconcretetype, fieldtypes(typeof(O)))
     hfine = lower_bound(Abstraction(W, space[1][1]), goal)
     for s in sources
         r = overlay_path(O, s, goal)
@@ -296,6 +297,11 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     modes = heading_speed_modes(2, 8, [1, 2])                                         # rest, 8 headings × 2 speeds
     T = TruncatedPushforward(W, points, (1, 2), modes)
     @test T.K == 17
+    @test T isa TruncatedPushforward{2} && all(isconcretetype, fieldtypes(typeof(T)))
+    # The inner constructor keeps the modes a refinement of the cells (π ∘ μ = ψ).
+    πbad = GraphHomomorphism(circshift(T.π.vertex_map, 1), T.π.n_target)
+    @test_throws ArgumentError TruncatedPushforward(T.W, T.ψ, T.μ, πbad, T.K, T.quotient, T.cell_points, T.mode_neighbors)
+    @test_throws ArgumentError TruncatedPushforward(T.W, T.ψ, T.μ, T.π, T.K, T.quotient, T.cell_points, T.mode_neighbors[1:2])
     @test T.π.vertex_map[T.μ.vertex_map] == ψp.vertex_map                           # stalkwise: over the identity of the cell graph
     E, Pm = refinement_matrix(T), coarsening_matrix(T)
     vc = rand(rng, T.μ.n_target)
@@ -324,6 +330,9 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     @test lower_bound(Abstraction(W, T.μ), goal) == hm
     # The moded planner: routes carry modes; the corridor restricts positions and modes.
     PM = LayeredPlanner(T)
+    @test all(isconcretetype, fieldtypes(typeof(PM)))
+    @test PM.abstraction.W === T.W
+    @test_throws ArgumentError LayeredPlanner(W, ψp, (24, 23))                         # cells ≠ blocks of ψ
     for s in sources
         route = plan_route(PM, s, goal)
         @test first(route) == T.μ.vertex_map[s] && last(route) in T.μ.vertex_map[goal]
@@ -413,5 +422,7 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     @test_throws ArgumentError quotient_graph(W, aggregation_homomorphism((6, 5), (2, 2)))
     @test_throws ArgumentError quotient_graph(W, space[1][1]; steps = 2, combine = max)
     @test_throws ArgumentError Abstraction(W, space[1][1]; method = :other)
+    @test_throws ArgumentError Abstraction(W, space[1][1]; steps = 0)
+    @test_throws ArgumentError Abstraction(W, GraphHomomorphism([1, 2], 2))         # ψ must map the states of W
     @test_throws ArgumentError shortest_path(W, sources[1], goal; heuristic = zeros(3))
 end

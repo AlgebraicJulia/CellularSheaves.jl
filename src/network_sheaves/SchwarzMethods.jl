@@ -109,8 +109,25 @@ _stable_lu(A::SparseMatrixCSC) = lu(A)
 
 How each subdomain problem ``\\tilde A_i x_i = b_i`` is solved:
 [`ExactLocalSolve`](@ref) or [`SymmetricGaussSeidelLocalSolve`](@ref).
+
+A new local solver `S <: LocalSolver` implements
+
+- `_local_factor(s::S, Ai, symmetric, i)`: the setup for subdomain `i`'s local
+  matrix `Ai` (a "factor" `M`, of any type);
+
+and its factor type implements
+
+- `_factor_solve(M, b)` (default `M \\ b`) and optionally the in-place
+  `_factor_solve!(z, M, b)`;
+- `_local_update(M, b, x)`: the new local values from the current ones `x`
+  (default: an exact solve, ignoring `x`);
+- for [`refactor!`](@ref): `_refactored(M, s, Ai, i)`, a fresh factor of the same
+  kind, and `_refactor_values!(dd, i, M, values)`, new values on the same pattern.
 """
 abstract type LocalSolver end
+
+_local_factor(s::LocalSolver, Ai, symmetric, i) =
+    throw(ArgumentError("$(typeof(s)) does not implement _local_factor; see the LocalSolver docstring"))
 
 """
     ExactLocalSolve()
@@ -359,10 +376,15 @@ function _sgs_correct!(y::AbstractVector, M::SymmetricGaussSeidel, b::AbstractVe
 end
 
 function LinearAlgebra.ldiv!(y::AbstractVector, M::SymmetricGaussSeidel, r::AbstractVector)
+    @argcheck length(y) == length(r) == size(M, 1) "y and r must have one entry per unknown"
+    @argcheck !Base.mightalias(y, r) "y and r must not alias; use ldiv!(M, r) in place"
     _sgs_sweep!(y, M, r)
     M.sweeps == 1 && return y
     return _sgs_correct!(y, _with_sweeps(M, M.sweeps - 1), r)
 end
+
+LinearAlgebra.ldiv!(M::SymmetricGaussSeidel, r::AbstractVector) = copyto!(r, ldiv!(similar(r), M, r))
+Base.:\(M::SymmetricGaussSeidel, r::AbstractVector) = ldiv!(similar(r, promote_type(eltype(M), eltype(r))), M, r)
 
 _factor_solve(M::SymmetricGaussSeidel, b::AbstractVector) = ldiv!(similar(b, eltype(M)), M, b)
 _factor_solve!(z::AbstractVector, M::SymmetricGaussSeidel, b::AbstractVector) = ldiv!(z, M, b)
@@ -622,8 +644,16 @@ end
 How neighbouring subdomains pass data to each other in a local solve:
 [`DirichletTransmission`](@ref) (classical Schwarz) or
 [`RobinTransmission`](@ref) (optimized Schwarz).
+
+A new condition `C <: TransmissionCondition` implements
+`_robin_faces(asm::_Assembly{T,C}, i, boundary)`, the [`RobinFace`](@ref)s that
+modify subdomain `i`'s local matrix (none for Dirichlet data), and
+`_publish!(xs, ::C, cover, i)`, what a sweep does with subdomain `i`'s new values.
 """
 abstract type TransmissionCondition end
+
+_publish!(xs, t::TransmissionCondition, cover, i) =
+    throw(ArgumentError("$(typeof(t)) does not implement _publish!; see the TransmissionCondition docstring"))
 
 """
     DirichletTransmission()
@@ -777,12 +807,12 @@ struct LocalProblem{T,F}
 end
 
 # The global data every local problem is assembled from.
-struct _Assembly{T,C<:TransmissionCondition}
+struct _Assembly{T,C<:TransmissionCondition,L<:LocalSolver}
     A::SparseMatrixCSC{T,Int}
     cover::OverlapCover
     ownership::Ownership
     transmission::C
-    local_solver::LocalSolver
+    local_solver::L
 end
 
 function LocalProblem(asm::_Assembly, i::Int)
@@ -824,6 +854,10 @@ function _robin_faces(asm::_Assembly{T,<:RobinTransmission}, i, boundary) where 
 end
 
 # ===== Decomposition =====
+
+# The index maps refactor! gathers new values through: the transposition of the
+# stored values and, per subdomain, the positions of its local matrix and coupling.
+const _GatherMaps = Tuple{Vector{Int},Vector{NTuple{2,Vector{Int}}}}
 
 """
     SchwarzDecomposition(A, subdomains; owner=nothing, transmission=DirichletTransmission(),
@@ -870,7 +904,7 @@ ghost layer meets the other's interior. Subdomains of one color neither read
 nor write each other's data, so they can be solved concurrently. The coloring
 is greedy, largest conflict degree first.
 """
-struct SchwarzDecomposition{T,F}
+struct SchwarzDecomposition{T,F,C<:TransmissionCondition,L<:LocalSolver}
     A::SparseMatrixCSC{T,Int}
     At::SparseMatrixCSC{T,Int}              # Aᵀ, i.e. A by rows, for threaded residuals
     structure::SparseMatrixCSC{Float64,Int} # symmetric pattern the cover was built from
@@ -878,9 +912,9 @@ struct SchwarzDecomposition{T,F}
     ownership::Ownership
     locals::Vector{LocalProblem{T,F}}
     colors::Vector{Vector{Int}}
-    transmission::TransmissionCondition
-    local_solver::LocalSolver
-    gather::Base.RefValue{Any}              # value maps for refactor!, built on first use
+    transmission::C
+    local_solver::L
+    gather::Base.RefValue{Union{Nothing,_GatherMaps}}   # built on the first refactor!
 end
 
 function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}};
@@ -917,7 +951,7 @@ function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:Ab
     locals = _build_locals(_Assembly(S, cover, ownership, transmission, local_solver))
     colors = _greedy_coloring(_conflict_graph(cover))
     return SchwarzDecomposition(S, copy(transpose(S)), P, cover, ownership, locals, colors, transmission,
-        local_solver, Ref{Any}(nothing))
+        local_solver, Ref{Union{Nothing,_GatherMaps}}(nothing))
 end
 
 """
@@ -937,7 +971,7 @@ function refactor(dd::SchwarzDecomposition, A::AbstractMatrix)
     @argcheck issymmetric(S) || dd.transmission isa DirichletTransmission "Robin transmission needs a symmetric A"
     locals = _build_locals(_Assembly(S, dd.cover, dd.ownership, dd.transmission, dd.local_solver))
     return SchwarzDecomposition(S, copy(transpose(S)), dd.structure, dd.cover, dd.ownership, locals,
-        dd.colors, dd.transmission, dd.local_solver, Ref{Any}(nothing))
+        dd.colors, dd.transmission, dd.local_solver, Ref{Union{Nothing,_GatherMaps}}(nothing))
 end
 
 """
@@ -1207,7 +1241,8 @@ end
 
 One sweep of local solves over all subdomains, applied by
 [`schwarz_step!`](@ref): [`MultiplicativeSweep`](@ref),
-[`MulticolorSweep`](@ref) or [`ParallelSweep`](@ref).
+[`MulticolorSweep`](@ref) or [`ParallelSweep`](@ref). A new sweep implements
+`schwarz_step!(x, prob::SchwarzProblem, sweep)`.
 """
 abstract type SchwarzSweep end
 
@@ -1397,8 +1432,18 @@ over the fiber ``\\varphi^{-1}(h)``, i.e. functions on the aggregate
 - [`ExactPushforwardCoarseSpace`](@ref) keeps the whole stalk, i.e. it solves
   on the aggregates themselves. It is more accurate per sweep while there are
   few aggregates, but its cost grows with the aggregate size.
+
+A new coarse space `c` implements [`coarse_dimension`](@ref)`(c)`,
+`_coarse_correction(c, prob, u)` (the correction added to the iterate `u` after
+the sweeps of [`SchwarzIteration`](@ref)) and `_add_coarse!(y, c, r)` (adds the
+coarse solve of the residual `r` to `y`, for the preconditioners).
 """
 abstract type AbstractCoarseSpace end
+
+_coarse_correction(c::AbstractCoarseSpace, prob, u) =
+    throw(ArgumentError("$(typeof(c)) does not implement _coarse_correction; see the AbstractCoarseSpace docstring"))
+_add_coarse!(y, c::AbstractCoarseSpace, r) =
+    throw(ArgumentError("$(typeof(c)) does not implement _add_coarse!; see the AbstractCoarseSpace docstring"))
 
 function _check_hom(dd::SchwarzDecomposition, hom::GraphHomomorphism)
     @argcheck length(hom.vertex_map) == length(dd.locals) "the graph homomorphism must have one source vertex per subdomain"
@@ -1582,9 +1627,9 @@ Output of [`solve`](@ref) for a [`SchwarzProblem`](@ref).
   these are all zero.
 - `iterations`, `converged`.
 """
-struct SchwarzResult{T}
+struct SchwarzResult{T,X<:BlockVector{T}}
     u::Vector{T}
-    x::BlockVector{T}
+    x::X
     residuals::Vector{T}
     disagreements::Vector{T}
     iterations::Int

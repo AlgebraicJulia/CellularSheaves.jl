@@ -84,7 +84,7 @@ using CellularSheaves.NetworkSheaves.GridSchwarz: AbstractStencil, GridOperator,
 using CellularSheaves.NetworkSheaves.GridMultigrid: coarse_layout, restrict_average!, prolong_add!, stencil_coefficients!,
     galerkin_coefficients!, coarsening_factors, coarse_points, _children
 
-export StateGrid, HJBProblem, riccati_value_matrix, riccati_value,
+export StateGrid, AbstractHJBProblem, HJBProblem, riccati_value_matrix, riccati_value,
     PolicyIteration, DirectPolicyEvaluation, KrylovPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,
     grid_partition, grid_subdomains, value_at, control_at, GridPolicyIteration, Multigrid
 
@@ -193,6 +193,18 @@ function riccati_value_matrix(axes::Integer, w::Real, c::Real, r::Real, ρ::Real
 end
 
 """
+    AbstractHJBProblem
+
+A discounted infinite-horizon HJB problem on a [`StateGrid`](@ref), solved by
+`solve(problem, GridPolicyIteration(...))`. A subtype plugs into the grid solver
+by implementing the interface listed at the top of `DoubleIntegratorHJBGrid.jl`
+(the state grid, periodicity, control count, discount, a plain-bits kernel model
+and, for [`Multigrid`](@ref), `_with_grid`). Subtypes: [`HJBProblem`](@ref) (the
+double integrator) and `MechanicalHJBProblem` (the two-link arm).
+"""
+abstract type AbstractHJBProblem end
+
+"""
     HJBProblem(grid; position_weight = 1, velocity_weight = 0.1, control_weight = 0.1,
                discount = 0.5, control_bound = Inf, constraint = :box)
 
@@ -202,7 +214,7 @@ The discounted HJB problem of the module docstring on `grid`, which must have
 (``\\|u\\| \\le \\bar u``, planar only). Outside the grid the value is taken
 from the unbounded LQR value [`riccati_value`](@ref).
 """
-struct HJBProblem
+struct HJBProblem <: AbstractHJBProblem
     grid::StateGrid
     axes::Int
     position_weight::Float64
@@ -468,11 +480,11 @@ subdomain does the same symmetric Gauss–Seidel pass as the
 [`KrylovPolicyEvaluation`](@ref) smoothers (one shared kernel) instead of an
 exact sparse LU, so setup only gathers the new matrix values.
 """
-struct SchwarzPolicyEvaluation{A}
+struct SchwarzPolicyEvaluation{A,L<:LocalSolver}
     blocks::Vector{Int}
     overlap::Int
     algorithm::A
-    local_solver::LocalSolver
+    local_solver::L
 end
 
 SchwarzPolicyEvaluation(blocks::AbstractVector{<:Integer}; overlap::Integer = 1,
@@ -570,8 +582,8 @@ struct _RowMatrix
     At::SparseMatrixCSC{Float64, Int}
 end
 Base.size(M::_RowMatrix) = (size(M.At, 2), size(M.At, 1))
-Base.size(M::_RowMatrix, d::Integer) = size(M)[d]
-Base.eltype(::_RowMatrix) = Float64
+Base.size(M::_RowMatrix, d::Integer) = d <= 2 ? size(M)[d] : 1
+Base.eltype(::Type{_RowMatrix}) = Float64
 LinearAlgebra.mul!(y::AbstractVector, M::_RowMatrix, x::AbstractVector) = _threaded_mul!(y, M.At, x)
 
 function _block_indices(labels::Vector{Int})
@@ -587,7 +599,7 @@ _evaluation_data(prob::HJBProblem, e::KrylovPolicyEvaluation, st) =
     e.blocks === nothing ? nothing : _block_indices(grid_partition(prob.grid, e.blocks))
 _evaluation_data(prob::HJBProblem, e::SchwarzPolicyEvaluation, st) =
     (grid_subdomains(prob.grid, e.blocks; overlap = e.overlap), grid_partition(prob.grid, e.blocks),
-     _stencil_pattern(st), Ref{Any}(nothing))
+     _stencil_pattern(st), Ref{Union{Nothing,SchwarzDecomposition}}(nothing))
 
 # Each evaluation returns (V, iterations, converged, setup seconds).
 function _evaluate(::DirectPolicyEvaluation, data, A, At, b, V0)
@@ -619,6 +631,8 @@ end
 # The cover, ownership and coloring are built once, from the full stencil (its
 # explicit zeros kept), at the first Newton step; later steps gather the new
 # values into the local problems and refactor their LUs numerically in place.
+# The cached type depends on the local factors, so `solve` dispatches once per
+# step on it (a function barrier); everything inside is type-stable.
 function _evaluate(e::SchwarzPolicyEvaluation, (subdomains, parts, structure, cached), A, At, b, V0)
     setup = @elapsed dd = cached[] === nothing ?
         SchwarzDecomposition(A, subdomains; owner = parts, structure, dropzeros = false,
@@ -669,7 +683,7 @@ The result of `solve(problem, PolicyIteration(...))`.
   its local factorizations, or preconditioner), the `linear` solve itself, and
   policy `improvement`.
 """
-struct HJBSolution{P}
+struct HJBSolution{P<:AbstractHJBProblem}
     problem::P
     values::Vector{Float64}
     controls::Matrix{Float64}
