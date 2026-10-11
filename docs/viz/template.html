@@ -189,10 +189,11 @@ details summary { cursor: pointer; font-size: 13px; color: var(--ink-2); }
         <h3>Lyapunov sandwich along the closed loop</h3>
         <p class="note">Cost-to-go at each step of the certified trajectory. The controller's value V<sub>U</sub> drops by at least one step per step (its Lyapunov certificate); the optimum V* lies below it, and the planner's optimistic bound below that.</p>
         <div id="sandwich"></div>
+        <p class="note" id="sandwich-note"></p>
         <div class="tip" id="sand-tip" hidden></div>
         <div class="legend">
           <span class="key"><span class="swatch" style="background:var(--s-ctl)"></span>V<sub>U</sub>, controller (lax side)</span>
-          <span class="key"><span class="swatch" style="background:var(--s-opt)"></span>V*, optimal</span>
+          <span class="key"><span class="swatch" style="background:repeating-linear-gradient(90deg,var(--s-opt) 0 5px,transparent 5px 8px)"></span>V*, optimal (dashed)</span>
           <span class="key"><span class="swatch" style="background:var(--s-low)"></span>lower bound (oplax side)</span>
         </div>
       </div>

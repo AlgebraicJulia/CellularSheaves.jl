@@ -447,18 +447,23 @@ function drawSandwich(): void {
   r.V_U.forEach((v, k) => { band += `${k === 0 ? "M" : "L"}${x(k)},${y(v)}`; });
   for (let k = KR; k >= 0; k--) band += `L${x(k)},${y(lower[k])}`;
   el("path", { d: band + "Z", fill: css("--s-ctl"), "fill-opacity": 0.08, stroke: "none" }, svg);
-  const line = (vals: number[], color: string, dash = "", dots = true) => {
+  const line = (vals: number[], color: string, dash = "", dots = true, width = 2, r0 = 3) => {
     let d = "";
     vals.forEach((v, k) => { d += `${k === 0 ? "M" : "L"}${x(k)},${y(v)}`; });
-    el("path", { d, fill: "none", stroke: color, "stroke-width": 2, "stroke-dasharray": dash, "stroke-linejoin": "round" }, svg);
-    if (dots) vals.forEach((v, k) => el("circle", { cx: x(k), cy: y(v), r: 3, fill: color, stroke: css("--surface"), "stroke-width": 1.5 }, svg));
+    el("path", { d, fill: "none", stroke: color, "stroke-width": width, "stroke-dasharray": dash, "stroke-linejoin": "round" }, svg);
+    if (dots) vals.forEach((v, k) => el("circle", { cx: x(k), cy: y(v), r: r0, fill: color, stroke: css("--surface"), "stroke-width": 1.5 }, svg));
   };
   el("path", { d: `M${x(0)},${y(r.V_U[0])}L${x(Math.min(KR, r.V_U[0]))},${y(Math.max(0, r.V_U[0] - Math.min(KR, r.V_U[0])))}`,
     stroke: css("--ink-3"), "stroke-dasharray": "3 4", "stroke-width": 1, fill: "none" }, svg);
   if (o) line(o.V_U, css("--ink-2"), "5 4", false);
   line(lower, css("--s-low"));
-  line(r.V_opt, css("--s-opt"));
-  line(r.V_U, css("--s-ctl"));
+  // V_U is drawn wide and V* dashed on top: where the controller is optimal the two coincide.
+  line(r.V_U, css("--s-ctl"), "", true, 5, 4.5);
+  line(r.V_opt, css("--s-opt"), "6 4", true, 2, 2.5);
+  const same = r.V_U.every((v, k) => v === r.V_opt[k]);
+  $("sandwich-note").textContent = same
+    ? "On this run V_U = V* at every step: the corridor controller is optimal, so the dashed blue line lies on the orange one."
+    : `V_U exceeds V* on this run: the corridor costs ${r.cost - query().cost} extra steps from the start.`;
   el("text", { x: x(0) + 8, y: y(r.V_U[0]) - 6, fill: css("--ink") }, svg).textContent = "V_U";
   // the current step
   const k0 = Math.min(step, KR);
