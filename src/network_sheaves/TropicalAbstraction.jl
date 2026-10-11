@@ -69,7 +69,8 @@ module TropicalAbstraction
 export tropical_pullback, tropical_pushforward, quotient_graph, minplus_closure, cost_to_go,
     Abstraction, lower_bound, shortest_path, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid,
     projection_homomorphism, LayeredPlanner, plan_route, corridor, layered_path,
-    intertwines, TruncatedPushforward, coarsen, refine, coarsening_matrix, refinement_matrix
+    intertwines, TruncatedPushforward, coarsen, refine, coarsening_matrix, refinement_matrix,
+    robust_quotient, upper_bound, is_control_lyapunov, greedy_policy, is_lyapunov, corridor_certificate
 
 using ArgCheck: @argcheck
 using SparseArrays
@@ -858,6 +859,168 @@ function layered_path(P::LayeredPlanner, source::Integer, targets; width::Intege
         w = max(1, 2w)
         mw = min(mw + 1, P.K)
     end
+end
+
+# ---- Lyapunov certificates ----------------------------------------------------
+
+"""
+    robust_quotient(W, μ) -> SparseMatrixCSC
+
+The *pessimistic* (∀∃, "must") pushforward of the costs `W` along `μ`: an edge
+``B → C`` exists when *every* state of ``B`` has a move into ``C``, and costs the
+worst of their cheapest such moves,
+
+```math
+W_c^{∀∃}(B, C) = \\max_{x ∈ B} \\min_{y ∈ C} W_{xy}.
+```
+
+Against the optimistic [`quotient_graph`](@ref) (``\\min`` over both ends), which
+makes the refinement ``E`` an *oplax* morphism and the coarse value a lower bound,
+the pessimistic pushforward makes ``E`` a *lax* morphism of min-plus sheaves,
+``W ⊗ E ≤ E ⊗ W_c^{∀∃}`` ([`intertwines`](@ref)): every coarse move can be
+realized from every state of its block. Lax morphisms transport control
+Lyapunov functions from the coarse system to the fine one
+([`upper_bound`](@ref)). This is the "must" abstraction of modal transition
+systems (Larsen & Thomsen 1988) and of abstraction-based controller synthesis
+(Tabuada 2009).
+"""
+function robust_quotient(W::SparseMatrixCSC{T}, μ::GraphHomomorphism) where {T<:Real}
+    _check_costs(W)
+    @argcheck size(W, 1) == length(μ.vertex_map) "μ must map the states of W"
+    N, nc = size(W, 1), μ.n_target
+    r, c, v = findnz(W)
+    M = sparse(r, μ.vertex_map[c], Float64.(v), N, nc, min)          # W ⊗ E: the cheapest move from x into C
+    blocksize = zeros(Int, nc)
+    for b in μ.vertex_map
+        blocksize[b] += 1
+    end
+    count = Dict{Tuple{Int,Int},Int}()
+    worst = Dict{Tuple{Int,Int},Float64}()
+    for (x, C, w) in zip(findnz(M)...)
+        B = μ.vertex_map[x]
+        B == C && continue
+        count[(B, C)] = get(count, (B, C), 0) + 1
+        worst[(B, C)] = max(get(worst, (B, C), -Inf), w)
+    end
+    keys_ = [k for (k, n) in count if n == blocksize[k[1]]]
+    return sparse(first.(keys_), last.(keys_), [worst[k] for k in keys_], nc, nc)
+end
+
+"""
+    upper_bound(T::TruncatedPushforward, targets) -> Vector
+
+The refinement ``E V_c`` of the coarse cost-to-go on the pessimistic quotient
+([`robust_quotient`](@ref) along the mode map), with coarse terminal cost the
+*largest* fine terminal cost in each mode (zero only on modes inside the
+targets). Because ``E`` is a lax morphism, ``E V_c`` is a control Lyapunov
+function of the fine system wherever it is finite ([`is_control_lyapunov`](@ref)):
+from every such state some move lowers it by at least the move's cost. So it is
+an upper bound on the cost-to-go, and the greedy feedback on it
+([`greedy_policy`](@ref)) reaches the targets with total cost at most ``E V_c``
+([`is_lyapunov`](@ref) certifies the closed loop).
+"""
+function upper_bound(T::TruncatedPushforward, targets)
+    N = size(T.W, 1)
+    @argcheck !isempty(targets) && all(t -> 1 <= t <= N, targets) "targets must be states of W"
+    b = fill(Inf, N)
+    b[targets] .= 0
+    bc = tropical_pushforward(T.μ, b; combine = max)
+    return refine(T, minplus_closure(robust_quotient(T.W, T.μ), bc))
+end
+
+"""
+    is_control_lyapunov(W, V, b) -> Bool
+
+Whether `V` is a control Lyapunov function of the state graph `W` for the
+terminal cost `b`: wherever ``V`` is finite, ``\\min\\big(b(x), \\min_y W_{xy} + V(y)\\big) ≤ V(x)``,
+i.e. ``W ⊗ V ⊕ b ≤ V``: `V` is a lax fixed point (a supersolution) of the min-plus
+Bellman operator. Some move from every state off the targets lowers ``V`` by at
+least its cost.
+"""
+function is_control_lyapunov(W::SparseMatrixCSC, V::AbstractVector, b::AbstractVector; tol = 1e-9)
+    @argcheck size(W, 1) == length(V) == length(b) "one value per state"
+    best = float.(b)
+    for (x, y, w) in zip(findnz(W)...)
+        best[x] = min(best[x], w + V[y])
+    end
+    return all(!isfinite(V[x]) || best[x] <= V[x] + tol for x in eachindex(V))
+end
+
+"""
+    greedy_policy(W, V; out_edges = sparse(transpose(W))) -> Vector{Int}
+
+The feedback that moves each state to the successor minimizing ``W_{xy} + V(y)``
+(0 where no successor has finite value): the closed loop as a deterministic
+transition system, a coalgebra ``X → \\mathcal P(X)`` with singleton successors.
+"""
+function greedy_policy(W::SparseMatrixCSC, V::AbstractVector; out_edges::SparseMatrixCSC = sparse(transpose(W)))
+    @argcheck size(W, 1) == length(V) "one value per state"
+    rows, vals = rowvals(out_edges), nonzeros(out_edges)
+    next = zeros(Int, length(V))
+    for x in eachindex(V)
+        best = Inf
+        for k in nzrange(out_edges, x)
+            d = vals[k] + V[rows[k]]
+            if d < best
+                best, next[x] = d, rows[k]
+            end
+        end
+    end
+    return next
+end
+
+"""
+    is_lyapunov(next, V, equilibria; decrease = 1) -> (positive_definite, decrescent, strict, closed, domain)
+
+Check that `V` is a Lyapunov morphism for the closed loop `next` (a deterministic
+transition system, as from [`greedy_policy`](@ref)) relative to the set
+`equilibria`, on the domain where ``V`` is finite, in the discrete setting of
+categorical Lyapunov theory (Ames, Moeller & Tabuada 2025; Ames, Mattenet & Moeller
+2025): the stability object is ``ℝ_{≥0}`` with the stationary system
+``r ↦ \\{r\\}`` and the order ``U ≤ V`` iff every element of ``U`` is at most every
+element of ``V``.
+
+- `positive_definite`: ``V = 0`` on the equilibria and ``V > 0`` elsewhere;
+- `decrescent`: the square ``\\mathcal P V ∘ \\text{next} ≤ σ ∘ V`` lax commutes,
+  ``V(\\text{next}(x)) ≤ V(x)``;
+- `strict`: ``V(\\text{next}(x)) ≤ V(x) - `` `decrease` off the equilibria, so every
+  trajectory reaches an equilibrium within ``V(x_0) /`` `decrease` steps
+  (finite-time stability);
+- `closed`: the domain is invariant.
+"""
+function is_lyapunov(next::AbstractVector{<:Integer}, V::AbstractVector, equilibria; decrease::Real = 1)
+    @argcheck length(next) == length(V) "one successor per state"
+    eq = falses(length(V))
+    eq[collect(equilibria)] .= true
+    dom = findall(isfinite, V)
+    off = [x for x in dom if !eq[x]]
+    positive = all(V[x] == 0 for x in dom if eq[x]) && all(V[x] > 0 for x in off)
+    closed = all(next[x] != 0 && isfinite(V[next[x]]) for x in off)
+    decrescent = closed && all(V[next[x]] <= V[x] for x in off)
+    strict = decrescent && all(V[next[x]] <= V[x] - decrease for x in off)
+    return (positive_definite = positive, decrescent = decrescent, strict = strict, closed = closed, domain = length(dom))
+end
+
+"""
+    corridor_certificate(P::LayeredPlanner, source, targets; width, mode_width) -> (V, next)
+
+The Lyapunov certificate of the layered controller's low level: the cost-to-go
+``V_U`` to the targets *within* the corridor (the min-plus closure of `W`
+restricted to the states above it), and the greedy feedback on it, whose closed
+loop [`is_lyapunov`](@ref) certifies on ``\\{V_U < ∞\\}``. The search of
+[`layered_path`](@ref) with the same corridor finds a path of cost ``V_U(\\text{source})``.
+"""
+function corridor_certificate(P::LayeredPlanner, source::Integer, targets; width::Integer, mode_width::Integer = 0)
+    route = plan_route(P, source, targets)
+    U = corridor(P, route, width, mode_width)
+    inside = [U[P.μ.vertex_map[x]] for x in 1:size(P.W, 1)]
+    r, c, v = findnz(P.W)
+    keep = inside[r] .& inside[c]
+    WU = sparse(r[keep], c[keep], v[keep], size(P.W)...)
+    b = fill(Inf, size(P.W, 1))
+    b[[t for t in targets if inside[t]]] .= 0
+    VU = minplus_closure(WU, b)
+    return (V = VU, next = greedy_policy(WU, VU))
 end
 
 """

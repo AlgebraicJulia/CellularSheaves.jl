@@ -335,6 +335,48 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
         @test layered_path(PM, s, goal; width = 24, mode_width = 17, heuristic = hm).cost == V[s]
     end
 
+    # ---- Lyapunov certificates from lax morphisms of sheaves ---------------------
+    # The optimal value is a control Lyapunov function, and the greedy closed loop
+    # on it is a Lyapunov morphism into (ℝ≥0, r ↦ {r}) with strict decrease.
+    @test is_control_lyapunov(W, V, bterm)
+    next = greedy_policy(W, V)
+    @test is_lyapunov(next, V, goal) == (positive_definite = true, decrescent = true, strict = true, closed = true,
+        domain = count(isfinite, V))
+    # The optimistic pushforward's refinement is only oplax: its value is a lower
+    # bound, not a control Lyapunov function.
+    @test !is_control_lyapunov(W, hm, bterm)
+    # The pessimistic (∀∃) pushforward makes refinement a lax morphism, which carries
+    # the coarse value to a control Lyapunov function of the fine system.
+    Wr = robust_quotient(W, T.μ)
+    @test intertwines(Wr, W, E).lax
+    Vup = upper_bound(T, goal)
+    covered = findall(isfinite, Vup)
+    @test length(covered) > length(goal)                                             # certifies more than the goal
+    @test all(V[covered] .<= Vup[covered])                                           # an upper bound on the cost
+    @test is_control_lyapunov(W, Vup, bterm)
+    nup = greedy_policy(W, Vup)
+    cert = is_lyapunov(nup, Vup, [x for x in goal if Vup[x] == 0])
+    @test cert.positive_definite && cert.decrescent && cert.strict && cert.closed
+    for x in covered[1:max(1, length(covered) ÷ 50):end]                             # the closed loop reaches the goal
+        cost, y, steps = 0.0, x, 0
+        while Vup[y] > 0
+            cost += W[y, nup[y]]; y = nup[y]; steps += 1
+        end
+        @test y in goal && cost <= Vup[x] && steps <= Vup[x]
+    end
+    # One mode per state: the pessimistic quotient is exact, and so is the certificate.
+    @test upper_bound(Tiso, goal) == V
+    # The layered controller's low level is certified by the corridor value.
+    for s in sources[1:2]
+        r = layered_path(PM, s, goal; width = 4, mode_width = 1, widen = false, heuristic = hm)
+        isfinite(r.cost) || continue
+        c = corridor_certificate(PM, s, goal; width = 4, mode_width = 1)
+        @test c.V[s] == r.cost
+        inside_goal = [t for t in goal if isfinite(c.V[t])]
+        cc = is_lyapunov(c.next, c.V, inside_goal)
+        @test cc.positive_definite && cc.strict && cc.closed
+    end
+
     @test_throws ArgumentError cost_to_go(-W, goal)
     @test_throws ArgumentError quotient_graph(W, aggregation_homomorphism((6, 5), (2, 2)))
     @test_throws ArgumentError quotient_graph(W, space[1][1]; steps = 2, combine = max)
