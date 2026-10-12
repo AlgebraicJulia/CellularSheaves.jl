@@ -71,7 +71,7 @@ module TropicalCovers
 
 export SimplicialComplex, clique_complex, simplices, faces, ProductStalk, coarse_state, restrict,
     stalk_successors, StalkGraph, stalk_graph, stalk_value, CoverSheaf, section_value, cover_bound,
-    simplicial_cover, stable_refinement, is_stable
+    simplicial_cover, stable_refinement, is_stable, future_refinement
 
 using ArgCheck: @argcheck
 using Graphs
@@ -223,6 +223,42 @@ function stable_refinement(W::SparseMatrixCSC, ψ::GraphHomomorphism; arcs = (s,
         length(ids) == count && return GraphHomomorphism(next, length(ids))
         label, count = next, length(ids)
     end
+end
+
+"""
+    future_refinement(W, ψ, φ; arcs = (s, s2, c) -> true) -> GraphHomomorphism
+
+Refine the summary `ψ` so that the states of a fibre share their *future seen
+through `φ`*: the set of fibres of `φ` they can reach along the selected arcs of `W`
+(any number of them, none included).
+
+A weaker condition than [`is_stable`](@ref), which asks for the same next fibres
+at every step and on a grid splits a summary down to single states. Here the
+states of a fibre need only agree on which fibres of the coarser `φ` lie ahead. So
+along any walk of the quotient by the selected arcs, every fibre of `φ` it visits
+can be reached from every state of its first fibre: a summarized agent cannot
+reach, for free, a part of its future (a route through another bottleneck, say,
+with `φ` the Reeb arcs of its cost-to-go) that its actual state could not.
+"""
+function future_refinement(W::SparseMatrixCSC, ψ::GraphHomomorphism, φ::GraphHomomorphism; arcs = (s, s2, c) -> true)
+    n = size(W, 1)
+    @argcheck size(W, 2) == n && length(ψ.vertex_map) == n && length(φ.vertex_map) == n
+    out = sparse(transpose(W))
+    ahead = [BitSet(φ.vertex_map[s]) for s in 1:n]
+    changed = true
+    while changed                                 # least fixed point of ahead(s) = {φ(s)} ∪ ⋃ ahead(s2)
+        changed = false
+        for s in 1:n, k in nzrange(out, s)
+            s2 = rowvals(out)[k]
+            arcs(s, s2, nonzeros(out)[k]) || continue
+            if !issubset(ahead[s2], ahead[s])
+                union!(ahead[s], ahead[s2])
+                changed = true
+            end
+        end
+    end
+    ids = Dict{Tuple{Int,Vector{Int}},Int}()
+    return GraphHomomorphism([get!(ids, (ψ.vertex_map[s], collect(ahead[s])), length(ids) + 1) for s in 1:n], length(ids))
 end
 
 # ---------------------------------------------------------------------------

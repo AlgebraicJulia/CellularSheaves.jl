@@ -205,6 +205,38 @@ end
             @test is_stable(Wr, ρr)
             @test all(ψr.vertex_map[s] == ψr.vertex_map[t] for s in 1:m for t in 1:m if ρr.vertex_map[s] == ρr.vertex_map[t])
         end
+        # Futures seen through a coarser map: the two routes end in different fibres of
+        # φ, so their starts are separated; states with the same future are not.
+        φ = GraphHomomorphism([1, 1, 1, 1, 2, 3], 3)
+        ϕ = future_refinement(W, ψ, φ)
+        @test ϕ.vertex_map[1] != ϕ.vertex_map[2] && ϕ.vertex_map[3] != ϕ.vertex_map[4]
+        @test ϕ.n_target == 6
+        φ1 = GraphHomomorphism([1, 1, 1, 1, 2, 2], 2)
+        @test future_refinement(W, ψ, φ1).n_target == 4
+        # Random graphs: it refines ψ, and the states of a fibre reach the same fibres of φ.
+        function reachable(Wr, φr, s)
+            seen, stack = Set([s]), [s]
+            while !isempty(stack)
+                x = pop!(stack)
+                for y in findall(!iszero, Wr[x, :])
+                    y in seen || (push!(seen, y); push!(stack, y))
+                end
+            end
+            return Set(φr.vertex_map[collect(seen)])
+        end
+        for _ in 1:30
+            m = 12
+            Wr = sprand(rng, m, m, 0.2)
+            ψr = GraphHomomorphism(rand(rng, 1:3, m), 3)
+            φr = GraphHomomorphism(rand(rng, 1:4, m), 4)
+            ϕr = future_refinement(Wr, ψr, φr)
+            same = [(s, t) for s in 1:m for t in 1:m if ϕr.vertex_map[s] == ϕr.vertex_map[t]]
+            @test all(ψr.vertex_map[s] == ψr.vertex_map[t] for (s, t) in same)
+            @test all(reachable(Wr, φr, s) == reachable(Wr, φr, t) for (s, t) in same)
+            # Coarsest: states of one fibre of ψ with the same future share a fibre.
+            @test all(ϕr.vertex_map[s] == ϕr.vertex_map[t] for s in 1:m for t in 1:m
+                      if ψr.vertex_map[s] == ψr.vertex_map[t] && reachable(Wr, φr, s) == reachable(Wr, φr, t))
+        end
         # Refining the summaries refines the stalks: their values can only grow.
         ψb = π
         ρb = [stable_refinement(W, ψb; arcs = (s, s2, c) -> s != s2) for W in Ws[1:2]]

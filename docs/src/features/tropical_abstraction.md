@@ -609,26 +609,35 @@ Observations:
 
 **The 2-complex with symmetric stalks** (`docs/scripts/tropical_cover_triangles.jl`,
 same instances, block 2). Edges keep agents exact within one block. The table
-varies only the triangles' contact radius:
+varies the agents' summary and the triangles' contact radius:
 
-| triangle contact radius | three-agent interactions seen (of 14) | recovered, N = 4 / 6 | bound at N = 8 vs. exact triangles | expansions per triangle, mean (max) | triangles per instance |
-|---|---|---|---|---|---|
-| 1 block (same as edges) | 9 | 60% / 89% | below on 2 of 4 | 800–1800 (9672) | at most 6 s |
-| 5 blocks | **13** | **100% / 100%** | **equal on 4 of 4** | 1000–1600 (12368) | at most 7 s |
-| (exact triple search) | 14 | 100% / 100% | – | – | up to 109 s |
+| summary | triangle contact radius | edges exact (of 175) | three-agent interactions seen (of 14) | recovered, N = 4 / 6 | bound at N = 8 vs. exact triangles | edge stalk states |
+|---|---|---|---|---|---|---|
+| (Reeb arc, block) | 1 block (same as edges) | 171 | 9 | 60% / 89% | below on 2 of 4 | 84k |
+| (Reeb arc, block) | 5 blocks | 171 | 13 | 100% / 100% | equal on 4 of 4 | 84k |
+| refined by future arcs | **1 block** | **174** | **13** | **100% / 100%** | below on 1 of 4 | 86k |
+| refined by future arcs | 5 blocks | **174** | **14** | **100% / 100%** | **equal on 4 of 4** | 86k |
+| (exact triple search) | – | – | 14 | 100% / 100% | – | (pair graph 132k) |
+
+Each triangle takes on average 750–1900 expansions (at most about 12k) and at
+most 7 s per instance for all of them, against up to 109 s for exact triple
+searches.
 
 Findings:
 
 - **Symmetric edges are exact pushforwards and nearly as tight.** The edge stalk
-  has about 84k coarse states, against 132k for the pair graph. Its value equals
-  the exact pair delay on 171 of 175 edges, against 175 for the asymmetric
-  stalks. Each asymmetric edge takes the larger of two directions, in each of
-  which one agent is never summarized.
-- **Triangles need a wider contact than edges, and the sheaf allows it.** With
-  the edges' radius, the triangle stalk misses most three-agent interactions.
-  With radius 5 it sees 13 of 14, and the bound equals the one from exactly
-  solved triangles on every instance. That includes all four N = 8 instances,
-  where it certifies the prioritized plans within 1–8% of optimal.
+  has 84–86k coarse states, against 132k for the pair graph. With refined
+  summaries its value equals the exact pair delay on 174 of 175 edges (171 with
+  the plain summary), against 175 for the asymmetric stalks. Each asymmetric edge
+  takes the larger of two directions, in each of which one agent is never
+  summarized.
+- **The fix belongs to the vertices, not to the triangles.** With the plain
+  summary, the triangles needed a contact radius of 5 blocks, half the map. With
+  summaries refined by their future, radius 1, the same as the edges, already
+  sees 13 of 14 interactions and closes every solved gap. Radius 5 sees all 14,
+  and the bound then equals the one from exactly solved triangles on every
+  instance. That includes all four N = 8 instances, where it certifies the
+  prioritized plans within 1–8% of optimal.
 - **Search on demand is cheap because of the restriction maps.** Pulled back, the
   edge values guide each triangle's search to a few thousand expansions. That is
   about 15× faster than the exact triple searches.
@@ -636,12 +645,24 @@ Findings:
   (Reeb arc, block). Each step may start from any cell of that fibre, so it can
   slide sideways along its level set by one cell per step at no cost. In open
   space a level set can touch two routes, and sliding switches routes for free.
-  The one interaction still missed is of this kind. Two agents meet head-on in a
-  corridor, but in the stalk one of them slides onto the other corridor's route
-  and avoids the conflict entirely. The same effect costs 4 of the 175 symmetric
-  edges. Widening the edges' contact to 2 blocks did not help: the slide happens
-  while the agents are still far apart.
-
+  In one example, two agents meet head-on in a corridor, but in the stalk one of
+  them slides onto the other corridor's route and avoids the conflict entirely.
+  Widening the edges' contact to 2 blocks did not help: the slide happens while
+  the agents are still far apart.
+- **The cure: summaries whose moves lift.** The summary map should let every coarse
+  zero-cost walk lift to a real one from each state of its fibre. Asking for that
+  exactly ([`stable_refinement`](@ref), the coarsest partition stable for
+  zero-delay moves; Paige & Tarjan 1987, regular equivalence in Everett & Borgatti
+  1994) removes the leak but, on a grid, splits the summary down to single cells:
+  131k states per edge stalk, the pair graph again. What the stalks need is
+  weaker: the states of a fibre must agree on which *Reeb arcs* lie ahead along
+  zero-delay moves ([`future_refinement`](@ref)). Then a summarized agent can only
+  reach, for free, parts of its future its actual state could also reach. It
+  cannot slide onto another corridor's route. The refinement costs about 2k
+  coarse states per edge stalk.
+- **What still leaks.** With refined summaries, one edge in 175 and, at radius 1,
+  one triangle in 14 are still below the exact value. Sharing a set of reachable
+  arcs does not fix *when* they are reached, so some lateral freedom remains.
 - **The edge stalk is exact and tight.** It equals the pushforward of the pair
   graph, and that pushforward along (Reeb arc, block) loses nothing against the
   exact pair delay on these maps. With exact pair bounds the gluing reproduced the
@@ -763,16 +784,15 @@ supersolutions and Tarski's theorem replaces linear algebra.
   bounds are only proved admissible at synchronized states. A half-moved
   configuration needs its own argument. Until then, large groups get the
   certificate but not the optimum.
-- **Summaries that let agents switch routes.** The (Reeb arc, block) summary lets
-  a summarized agent slide along its level set, and in open space that can
-  switch it between routes through different bottlenecks. A summary that also
-  records which bottleneck the agent's descent passes through would stop this
-  without breaking symmetry. That is the descending cells of a Morse–Smale-type
-  decomposition of its cost-to-go, a finer stratification than the Reeb graph.
-- **The triangles' contact radius is large on this map.** Five blocks is half of
-  a 20² map, so here the triangle stalks are close to the triple graph near the
-  agents, and the gain comes from the search, not from compression. Whether the
-  needed radius stays fixed as maps grow is open.
+- **Summaries between "future" and "stable".** Refining by future Reeb arcs leaves
+  a small leak (one edge, one triangle at radius 1); full stability on zero-delay
+  moves removes it but keeps almost nothing summarized on a grid. Intermediate
+  refinements, futures seen at a few steps' horizon or through a finer partition
+  than the Reeb arcs, are untested.
+- **Compression at this scale is modest.** On a 20² map the edge stalks are about
+  two thirds of the pair graph, and the gain comes mostly from searching the
+  triangles on demand with pulled-back edge values. Whether the summaries and the
+  contact radius stay small as maps grow is open.
 - **Bounds at the start only.** The triangle values are searched from one joint
   state. A heuristic at every state of a joint search needs them cached or built
   across queries.
@@ -802,7 +822,8 @@ supersolutions and Tarski's theorem replaces linear algebra.
     (`tropical_cover_gauge.jl`) and the simplicial cover with exact triangles;
   - `docs/scripts/tropical_cover_triangles.jl`: the same instances on the
     2-complex of `TropicalCovers`, with symmetric edge and triangle stalks
-    (arguments: map size, instances, triangle and edge contact radius);
+    (arguments: map size, instances, triangle and edge contact radius, and the
+    summary: `reeb`, `future` or `stable`);
   - `docs/scripts/tropical_multiagent_double_integrator.jl`: double-integrator
     pairs.
 

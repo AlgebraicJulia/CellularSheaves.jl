@@ -20,9 +20,10 @@
 #     resolves its agents at least as finely as its faces, so the restriction maps
 #     are defined, and the edge stalks stay small.
 #
-#   - SUMMARY "stable": each agent's summary is refined until its zero-delay moves lift
-#     (`stable_refinement`), which removes the sliding of summarized agents along their
-#     level sets; "reeb" keeps (Reeb arc, block).
+#   - SUMMARY: "reeb" keeps (Reeb arc, block). "future" refines it by the Reeb arcs the
+#     agent can reach along zero-delay moves (`future_refinement`), which stops summarized
+#     agents sliding along level sets onto other routes. "stable" refines it until every
+#     zero-delay move lifts (`stable_refinement`); on a grid that is nearly exact.
 #
 #   julia --project=docs docs/scripts/tropical_cover_triangles.jl [n] [instances] [triangle radius] [edge radius] [summary]
 
@@ -34,7 +35,7 @@ const TRI_RADIUS = length(ARGS) >= 3 ? parse(Int, ARGS[3]) : 1   # triangle cont
 const EDGE_RADIUS = length(ARGS) >= 4 ? parse(Int, ARGS[4]) : 1  # edge contact radius (at most TRI_RADIUS)
 @assert EDGE_RADIUS <= TRI_RADIUS "contact must grow with the dimension"
 const SUMMARY = length(ARGS) >= 5 ? ARGS[5] : "reeb"        # "reeb" or "stable"
-@assert SUMMARY in ("reeb", "stable")
+@assert SUMMARY in ("reeb", "future", "stable")
 
 grid_collides(u, s, s2, v, t, t2) = s2 == t2 || (s2 == t && t2 == s)
 
@@ -45,7 +46,17 @@ function cover_sheaf(agents, pairs)
         add_edge!(g, i, j)
     end
     summaries = [far_summary(MAP, A, BLOCK) for A in agents]
-    if SUMMARY == "stable"
+    if SUMMARY == "future"
+        # Refine each agent's summary by its future seen through its Reeb arcs: the arcs
+        # it can reach along zero-delay moves. A summarized agent then cannot slide onto
+        # a route (a sequence of arcs) its actual state could not take for free.
+        summaries = map(agents, summaries) do A, (π, B)
+            ρ = future_refinement(A.delays, π, A.arcs; arcs = (s, s2, c) -> c == 0)
+            parent = zeros(Int, ρ.n_target)
+            parent[ρ.vertex_map] .= π.vertex_map
+            (ρ, B[parent])
+        end
+    elseif SUMMARY == "stable"
         # Refine each agent's summary until its zero-delay moves lift: every state of a
         # fibre reaches the same fibres along shortest paths, so a summarized agent can no
         # longer slide along its level set onto another route.
@@ -162,7 +173,7 @@ for N in (4, 6, 8)
 end
 
 mkpath(OUT)
-open(joinpath(OUT, "tropical_cover_triangles_r$(TRI_RADIUS)_e$(EDGE_RADIUS)$(SUMMARY == "stable" ? "_stable" : "").csv"), "w") do io
+open(joinpath(OUT, "tropical_cover_triangles_r$(TRI_RADIUS)_e$(EDGE_RADIUS)$(SUMMARY == "reeb" ? "" : "_" * SUMMARY).csv"), "w") do io
     println(io, join(keys(first(rows)), ","))
     for r in rows
         println(io, join(values(r), ","))
