@@ -522,7 +522,12 @@ The stalks of every simplex of `complex` (agents are its vertices: `graphs[v]`,
 `summaries[v]`, `goals[v]` describe agent `v`; see [`ProductStalk`](@ref) for
 `contact` and `collides`). Stalks of dimension up to `explicit_dim` are built
 explicitly ([`stalk_graph`](@ref)); higher ones are searched on demand
-([`section_value`](@ref)).
+([`section_value`](@ref)). With `keep_arcs = false` an explicit stalk keeps only its
+states and cost-to-go, which is all the queries need.
+
+The stalks are built in parallel over Julia's threads: each depends only on the
+graphs and summaries of its own agents, so the work is a set of independent tasks,
+one per simplex.
 
 `contact` is either one contact relation for every simplex or a function `k ->
 relation` of the dimension `k`. The relations must grow with the dimension (contact
@@ -538,17 +543,25 @@ struct CoverSheaf
     explicit_dim::Int
 end
 
-function CoverSheaf(K::SimplicialComplex, graphs, summaries, goals; contact, collides, explicit_dim::Integer = 1)
+function CoverSheaf(K::SimplicialComplex, graphs, summaries, goals; contact, collides, explicit_dim::Integer = 1,
+    keep_arcs::Bool = true)
     @argcheck length(graphs) == length(summaries) == length(goals) == nv(K)
-    stalks = Dict{Vector{Int},ProductStalk}()
-    explicit = Dict{Vector{Int},StalkGraph}()
     # A relation takes four arguments; a function of the dimension takes one.
     contact_at(k) = hasmethod(contact, Tuple{Int}) && !hasmethod(contact, NTuple{4,Int}) ? contact(k) : contact
-    for k in 0:dimension(K), σ in simplices(K, k)
+    cells = [(k, σ) for k in 0:dimension(K) for σ in simplices(K, k)]
+    built = Vector{Tuple{ProductStalk,Union{Nothing,StalkGraph}}}(undef, length(cells))
+    # Each stalk depends only on its own agents: build them in parallel.
+    Threads.@threads :dynamic for i in eachindex(cells)
+        k, σ = cells[i]
         P = ProductStalk(Tuple(σ), graphs[σ], summaries[σ], goals[σ]; contact = contact_at(k), collides)
-        stalks[σ] = P
-        k <= explicit_dim && (explicit[σ] = stalk_graph(P))
+        G = k <= explicit_dim ? stalk_graph(P) : nothing
+        if !isnothing(G) && !keep_arcs
+            G = StalkGraph(G.states, G.index, spzeros(length(G.states), length(G.states)), G.Δ)
+        end
+        built[i] = (P, G)
     end
+    stalks = Dict{Vector{Int},ProductStalk}(σ => built[i][1] for (i, (_, σ)) in enumerate(cells))
+    explicit = Dict{Vector{Int},StalkGraph}(σ => built[i][2] for (i, (_, σ)) in enumerate(cells) if !isnothing(built[i][2]))
     return CoverSheaf(K, stalks, explicit, explicit_dim)
 end
 
@@ -620,12 +633,17 @@ end
 The [`simplicial_cover`](@ref) of the stalk values of every simplex of positive
 dimension at the joint state `states`: a lower bound on the total cost of the
 agents from `states`. `values` maps each simplex to `(value, expanded, exact)`.
+The simplices are evaluated in parallel over Julia's threads; only the cover itself,
+a small integer program on the agents, is sequential.
 """
 function cover_bound(C::CoverSheaf, states; max_expanded::Integer = 10^6)
-    values = Dict{Vector{Int},Tuple{Float64,Int,Bool}}()
-    for k in 1:dimension(C.complex), σ in simplices(C.complex, k)
-        values[σ] = section_value(C, σ, states; max_expanded)
+    cells = [σ for k in 1:dimension(C.complex) for σ in simplices(C.complex, k)]
+    vals = Vector{Tuple{Float64,Int,Bool}}(undef, length(cells))
+    # The simplices only read the stalks (and the explicit faces): evaluate them in parallel.
+    Threads.@threads :dynamic for i in eachindex(cells)
+        vals[i] = section_value(C, cells[i], states; max_expanded)
     end
+    values = Dict(zip(cells, vals))
     return simplicial_cover(nv(C.complex), [(σ, v[1]) for (σ, v) in values]), values
 end
 

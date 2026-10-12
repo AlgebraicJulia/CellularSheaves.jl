@@ -119,6 +119,10 @@ end
         C1 = CoverSheaf(K, Ws, fill(π, 3), goals; contact, collides = cycle_collides, explicit_dim = 1)
         C2 = CoverSheaf(K, Ws, fill(π, 3), goals; contact, collides = cycle_collides, explicit_dim = 2)
         G3 = C2.explicit[[1, 2, 3]]
+        # Dropping the arcs keeps every value; the stalks are built on all threads.
+        Cd = CoverSheaf(K, Ws, fill(π, 3), goals; contact, collides = cycle_collides, explicit_dim = 2, keep_arcs = false)
+        @test all(Cd.explicit[σ].Δ == C2.explicit[σ].Δ && Cd.explicit[σ].states == C2.explicit[σ].states for σ in keys(C2.explicit))
+        @test nnz(Cd.explicit[[1, 2, 3]].W) == 0
         rng = MersenneTwister(2)
         for _ in 1:20
             x = randperm(rng, n)[1:3]

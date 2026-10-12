@@ -29,7 +29,7 @@ include(joinpath(@__DIR__, "tropical_cover_gauge.jl"))
 
 const n = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 20
 const NI = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 4
-const BLOCK = 2
+const BLOCK = parse(Int, get(ENV, "COVER_BLOCK", "2"))     # block size of the summaries
 const CAP = 300_000                                   # expansions per joint search
 const MAXGROUP = 4                                    # joint searches move all agents at once: 5^m successors
 const ITERS = 60                                      # supergradient steps of the cover gauge
