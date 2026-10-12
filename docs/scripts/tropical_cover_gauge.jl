@@ -91,7 +91,8 @@ function GaugeFactor(M::GridMap, Ai::AgentStalk, Aj::AgentStalk, i, j, e, b)
         end
     end
     p = sortperm(xs)
-    offs = ones(Int, n + 1)
+    offs = zeros(Int, n + 1)
+    offs[1] = 1
     for x in xs
         offs[x + 1] += 1
     end
@@ -216,6 +217,31 @@ function min_vertex_cover(w::AbstractMatrix)
             x[k] = v
             go(k + 1, total + v)
         end
+    end
+    go(1, 0)
+    return float(best[])
+end
+
+# The smallest Σᵢ xᵢ over integers xᵢ ≥ 0 with Σ_{i ∈ σ} xᵢ ≥ Δ_σ for every simplex σ of
+# the cover (edges, triangles, ...), given as (members, Δ_σ) with Δ_σ the least delay of the
+# agents of σ planning together. The delays of a joint plan restrict to a plan of every σ,
+# so they are such an x. With edges alone this is `min_vertex_cover`.
+function simplicial_cover(N, simplices)
+    x = zeros(Int, N)
+    need(σ) = ceil(Int, σ[2] - 1e-9)
+    best = Ref(sum(need, simplices; init = 0))
+    closing = [[σ for σ in simplices if maximum(σ[1]) == k] for k in 1:N]   # simplices decided at agent k
+    function go(k, total)
+        total >= best[] && return
+        if k > N
+            best[] = total
+            return
+        end
+        for v in 0:maximum((need(σ) for σ in simplices if k in σ[1]); init = 0)
+            x[k] = v
+            all(sum(x[σ[1]]) >= need(σ) for σ in closing[k]) && go(k + 1, total + v)
+        end
+        x[k] = 0
     end
     go(1, 0)
     return float(best[])

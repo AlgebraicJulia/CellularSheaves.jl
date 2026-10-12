@@ -6,7 +6,9 @@
 #       * matching: the heaviest matching of pair bounds;
 #       * vertex cover: the weighted vertex cover of pair bounds (Li, Felner et al. 2019);
 #       * cover gauge (`tropical_cover_gauge.jl`): each agent's delay split state by state
-#         among its edges, the split optimized from the matching by supergradient ascent.
+#         among its edges, the split optimized from the matching by supergradient ascent;
+#       * simplicial cover: the cover over edges and triangles of the interaction graph,
+#         each triangle solved exactly (the 2-cells the edge bounds cannot see).
 #   - Upper bound (lax side): a feasible plan by prioritized planning (each agent plans
 #     in space-time around the reservations of the agents before it). Upper / lower
 #     certifies the plan's suboptimality without the optimum.
@@ -210,6 +212,14 @@ function check_factor(IS)
     println("check: the weighted edge stalk with unit weights is the edge stalk ($(count(isfinite, Δ)) coarse states)")
 end
 
+# The least total delay of the agents `m` planning together, ignoring the others.
+function subset_delay(agents, starts, m)
+    S = InteractionSheaf(MAP, agents[m], starts[m]; block = BLOCK)
+    path, _ = joint_astar(agents[m], starts[m], c -> joint_bound(S, c))
+    path === nothing && return NaN
+    return sum(plan_cost(agents[m[k]], [c[k] for c in path]) - agents[m[k]].d[starts[m[k]]] for k in eachindex(m))
+end
+
 function instance(rng, N)
     left = [k for (k, (x, y)) in enumerate(MAP.cells) if x < first(WALL) - 2]
     right = [k for (k, (x, y)) in enumerate(MAP.cells) if x > last(WALL) + 2]
@@ -239,6 +249,14 @@ for N in (4, 6, 8), inst in 1:NI
         pw[i, j] = pw[j, i] = pair_bound(MAP, IS.stalks[(i, j)], IS.stalks[(j, i)], agents[i], agents[j], starts[i], starts[j])
     end
     cover = decoupled + min_vertex_cover(pw)
+    # Triangles of the interaction graph, each solved exactly by joint A* (the identity
+    # pushforward of its triple graph), and the cover over edges and triangles.
+    E = Set(IS.pairs)
+    tris = [[i, j, k] for i in 1:N for j in (i + 1):N for k in (j + 1):N if (i, j) in E && (i, k) in E && (j, k) in E]
+    t_tri = @elapsed tri_delays = [subset_delay(agents, starts, m) for m in tris]
+    simplices = [[([i, j], pw[i, j]) for (i, j) in IS.pairs]; [(m, Δ) for (m, Δ) in zip(tris, tri_delays) if !isnan(Δ)]]
+    simplicial = decoupled + simplicial_cover(N, simplices)
+    higher = count(((m, Δ),) -> Δ > maximum(pw[a, b] for a in m for b in m) + 1e-9, zip(tris, tri_delays))
     t_gauge = @elapsed CG = CoverGauge(IS, starts; target = upper - decoupled, iters = ITERS)
     gauge = decoupled + CG.bound
     @assert isapprox(decoupled + CG.matching, lower) "the ascent starts at the matching"
@@ -258,18 +276,19 @@ for N in (4, 6, 8), inst in 1:NI
     t_gau = @elapsed (pg, eg, gg) = independence_detection(agents, starts, gauged)
     cost(p) = p === nothing ? NaN : sum(plan_cost(agents[i], p[i]) for i in 1:N)
     opts = filter(!isnan, [cost(pd), cost(ps), cost(pg)])
-    @assert all(==(first(opts)), opts) "every search is optimal"
+    @assert isempty(opts) || all(==(first(opts)), opts) "every search is optimal"
     opt = isempty(opts) ? NaN : first(opts)
     @assert decoupled <= lower + 1e-9 && lower <= gauge + 1e-9
-    @assert isnan(opt) || (max(gauge, cover) <= opt + 1e-9 && opt <= upper + 1e-9)
+    @assert isnan(opt) || (max(gauge, cover, simplicial) <= opt + 1e-9 && opt <= upper + 1e-9)
     push!(rows, (N = N, instance = inst, pairs = length(IS.pairs), all_pairs = N * (N - 1) ÷ 2,
-        decoupled = decoupled, lower = lower, cover = cover, gauge = gauge, optimal = opt, upper = upper,
+        decoupled = decoupled, lower = lower, cover = cover, gauge = gauge, simplicial = simplicial,
+        triangles = length(tris), higher_triangles = higher, optimal = opt, upper = upper,
         expanded_decoupled = isnothing(pd) ? -ed : ed, expanded_sheaf = isnothing(ps) ? -es : es,
         expanded_gauge = isnothing(pg) ? -eg : eg,
         largest_group = gs, seconds_decoupled = t_dec, seconds_sheaf = t_she, seconds_gauge_search = t_gau,
-        seconds_sheaf_build = t_sheaf, seconds_gauge = t_gauge, seconds_upper = t_upper))
-    @printf("N=%d #%d  pairs %2d/%2d  decoupled %5.1f  matching %5.1f  vertex cover %5.1f  cover gauge %6.2f (%.1f s)  optimum %5.1f  prioritized %5.1f\n",
-        N, inst, length(IS.pairs), N * (N - 1) ÷ 2, decoupled, lower, cover, gauge, t_gauge, opt, upper)
+        seconds_sheaf_build = t_sheaf, seconds_gauge = t_gauge, seconds_triangles = t_tri, seconds_upper = t_upper))
+    @printf("N=%d #%d  pairs %2d/%2d  decoupled %5.1f  matching %5.1f  vertex cover %5.1f  cover gauge %6.2f (%.1f s)  simplicial %5.1f (%d triangles, %d beyond their edges; %.0f s)  optimum %5.1f  prioritized %5.1f\n",
+        N, inst, length(IS.pairs), N * (N - 1) ÷ 2, decoupled, lower, cover, gauge, t_gauge, simplicial, length(tris), higher, t_tri, opt, upper)
     @printf("        independence detection: decoupled heuristic %9d expanded (%.1f s), matching %9d (%.1f s), gauge %9d (%.1f s), largest group %d%s\n",
         ed, t_dec, es, t_she, eg, t_gau, gs, isnan(opt) ? " (joint search out of reach)" : "")
 end
@@ -277,16 +296,16 @@ end
 avg(xs) = isempty(xs) ? NaN : mean(xs)
 println("\nsummary (means over instances)")
 println("gap closed: (bound - decoupled) / (optimum - decoupled) over solved instances with a gap; ratio: prioritized / bound")
-@printf("%3s %12s %26s %26s %12s %24s %14s\n", "N", "pairs", "gap: match / cover / gauge", "ratio: match / cover / gauge",
+@printf("%3s %12s %30s %34s %12s %24s %14s\n", "N", "pairs", "gap: match/cover/gauge/simpl", "ratio: match/cover/gauge/simpl",
     "true ratio", "expanded: dec/match/gauge", "largest group")
 for N in (4, 6, 8)
     rs = filter(r -> r.N == N, rows)
     solved = filter(r -> !isnan(r.optimal), rs)
     gap(f) = (g = [(f(r) - r.decoupled) / (r.optimal - r.decoupled) for r in solved if r.optimal > r.decoupled];
               isempty(g) ? "–" : @sprintf("%.2f", mean(g)))
-    @printf("%3d %6.1f/%-5d %26s %26s %12.3f %24s %14.1f\n", N, mean(r.pairs for r in rs), rs[1].all_pairs,
-        join((gap(r -> r.lower), gap(r -> r.cover), gap(r -> r.gauge)), " / "),
-        join((@sprintf("%.3f", mean(r.upper / f(r) for r in rs)) for f in (r -> r.lower, r -> r.cover, r -> r.gauge)), " / "),
+    @printf("%3d %6.1f/%-5d %30s %34s %12.3f %24s %14.1f\n", N, mean(r.pairs for r in rs), rs[1].all_pairs,
+        join((gap(r -> r.lower), gap(r -> r.cover), gap(r -> r.gauge), gap(r -> r.simplicial)), " / "),
+        join((@sprintf("%.3f", mean(r.upper / f(r) for r in rs)) for f in (r -> r.lower, r -> r.cover, r -> r.gauge, r -> r.simplicial)), " / "),
         avg([r.upper / r.optimal for r in solved]),
         join((@sprintf("%.0f", avg([f(r) for r in solved])) for f in (r -> r.expanded_decoupled, r -> r.expanded_sheaf, r -> r.expanded_gauge)), " / "),
         mean(r.largest_group for r in rs))
