@@ -1,65 +1,65 @@
 kind,heuristic,states,optimal,decoupled,bound,expanded,build_seconds
 swap,decoupled (Dijkstra on delays),0,26.0,25.0,25.0,801,0.0
-swap,sheaf: pair abstraction,1220517,26.0,25.0,26.0,490,27.087553566
-swap,sheaf: exact pair pushforward,1220517,26.0,25.0,26.0,332,20.125993195
-swap,exact pair delay,4192236,26.0,25.0,26.0,332,8.405280358
+swap,"sheaf: edge stalks, block 2",2013480,26.0,25.0,26.0,332,7.149633864
+swap,"sheaf: edge stalks, block 4",3569292,26.0,25.0,26.0,332,10.810406999
+swap,exact pair delay,4192236,26.0,25.0,26.0,332,8.327011469
 swap,decoupled (Dijkstra on delays),0,21.0,21.0,21.0,99,0.0
-swap,sheaf: pair abstraction,1193679,21.0,21.0,21.0,99,25.695212738
-swap,sheaf: exact pair pushforward,1193679,21.0,21.0,21.0,99,19.064429273000002
-swap,exact pair delay,4192236,21.0,21.0,21.0,99,8.352572597
+swap,"sheaf: edge stalks, block 2",1983987,21.0,21.0,21.0,99,7.039481415
+swap,"sheaf: edge stalks, block 4",3552921,21.0,21.0,21.0,99,10.451675664
+swap,exact pair delay,4192236,21.0,21.0,21.0,99,8.312200652
 swap,decoupled (Dijkstra on delays),0,24.0,24.0,24.0,80,0.0
-swap,sheaf: pair abstraction,1109871,24.0,24.0,24.0,80,21.124384089
-swap,sheaf: exact pair pushforward,1109871,24.0,24.0,24.0,80,19.289788558
-swap,exact pair delay,4192236,24.0,24.0,24.0,80,7.846124168999999
+swap,"sheaf: edge stalks, block 2",1910394,24.0,24.0,24.0,80,6.972505313
+swap,"sheaf: edge stalks, block 4",3486348,24.0,24.0,24.0,80,10.404412222
+swap,exact pair delay,4192236,24.0,24.0,24.0,80,8.210517454000001
 swap,decoupled (Dijkstra on delays),0,22.0,22.0,22.0,75,0.0
-swap,sheaf: pair abstraction,1151784,22.0,22.0,22.0,73,23.099475192
-swap,sheaf: exact pair pushforward,1151784,22.0,22.0,22.0,73,19.229933103
-swap,exact pair delay,4192236,22.0,22.0,22.0,58,8.338458863
+swap,"sheaf: edge stalks, block 2",1949067,22.0,22.0,22.0,58,7.128430752
+swap,"sheaf: edge stalks, block 4",3523374,22.0,22.0,22.0,58,10.789823004
+swap,exact pair delay,4192236,22.0,22.0,22.0,58,8.488302941
 swap,decoupled (Dijkstra on delays),0,24.0,22.0,22.0,829,0.0
-swap,sheaf: pair abstraction,1148013,24.0,22.0,24.0,275,22.954974996
-swap,sheaf: exact pair pushforward,1148013,24.0,22.0,24.0,275,19.242128754
-swap,exact pair delay,4192236,24.0,22.0,24.0,275,7.96393318
+swap,"sheaf: edge stalks, block 2",1945539,24.0,22.0,24.0,275,7.098352389
+swap,"sheaf: edge stalks, block 4",3516417,24.0,22.0,24.0,275,10.389631097
+swap,exact pair delay,4192236,24.0,22.0,24.0,275,8.351110425
 swap,decoupled (Dijkstra on delays),0,30.0,28.0,28.0,8186,0.0
-swap,sheaf: pair abstraction,1163754,30.0,28.0,28.0,5506,23.706758771
-swap,sheaf: exact pair pushforward,1163754,30.0,28.0,30.0,3573,19.248534272
-swap,exact pair delay,4192236,30.0,28.0,30.0,3481,7.994039153999999
+swap,"sheaf: edge stalks, block 2",1958688,30.0,28.0,30.0,3481,7.069133468
+swap,"sheaf: edge stalks, block 4",3532131,30.0,28.0,30.0,3481,10.908791765
+swap,exact pair delay,4192236,30.0,28.0,30.0,3481,8.426114018
 swap,decoupled (Dijkstra on delays),0,24.0,24.0,24.0,126,0.0
-swap,sheaf: pair abstraction,1191582,24.0,24.0,24.0,125,25.747691526
-swap,sheaf: exact pair pushforward,1191582,24.0,24.0,24.0,125,19.147549398000002
-swap,exact pair delay,4192236,24.0,24.0,24.0,125,8.188648666
+swap,"sheaf: edge stalks, block 2",1982259,24.0,24.0,24.0,125,7.220019878
+swap,"sheaf: edge stalks, block 4",3548376,24.0,24.0,24.0,125,10.742569907
+swap,exact pair delay,4192236,24.0,24.0,24.0,125,8.23703969
 swap,decoupled (Dijkstra on delays),0,25.0,25.0,25.0,118,0.0
-swap,sheaf: pair abstraction,1227375,25.0,25.0,25.0,118,27.1341001
-swap,sheaf: exact pair pushforward,1227375,25.0,25.0,25.0,118,19.137678667
-swap,exact pair delay,4192236,25.0,25.0,25.0,118,8.429796358
+swap,"sheaf: edge stalks, block 2",2011581,25.0,25.0,25.0,118,7.433144442
+swap,"sheaf: edge stalks, block 4",3569013,25.0,25.0,25.0,118,10.946471331
+swap,exact pair delay,4192236,25.0,25.0,25.0,118,8.847555517
 random,decoupled (Dijkstra on delays),0,13.0,13.0,13.0,22,0.0
-random,sheaf: pair abstraction,1155663,13.0,13.0,13.0,22,23.337161141
-random,sheaf: exact pair pushforward,1155663,13.0,13.0,13.0,22,19.285973124999998
-random,exact pair delay,4192236,13.0,13.0,13.0,22,8.446286952
+random,"sheaf: edge stalks, block 2",1951002,13.0,13.0,13.0,22,7.364542078
+random,"sheaf: edge stalks, block 4",3529251,13.0,13.0,13.0,22,11.01577422
+random,exact pair delay,4192236,13.0,13.0,13.0,22,8.562396415
 random,decoupled (Dijkstra on delays),0,15.0,15.0,15.0,83,0.0
-random,sheaf: pair abstraction,1191582,15.0,15.0,15.0,83,25.350869653
-random,sheaf: exact pair pushforward,1191582,15.0,15.0,15.0,83,18.951405645
-random,exact pair delay,4192236,15.0,15.0,15.0,83,8.235500522999999
+random,"sheaf: edge stalks, block 2",1986012,15.0,15.0,15.0,83,7.400910319
+random,"sheaf: edge stalks, block 4",3548304,15.0,15.0,15.0,83,11.186055718
+random,exact pair delay,4192236,15.0,15.0,15.0,83,8.422679857
 random,decoupled (Dijkstra on delays),0,24.0,24.0,24.0,323,0.0
-random,sheaf: pair abstraction,1146285,24.0,24.0,24.0,323,23.004870489
-random,sheaf: exact pair pushforward,1146285,24.0,24.0,24.0,323,19.252251524
-random,exact pair delay,4192236,24.0,24.0,24.0,323,8.254609283
+random,"sheaf: edge stalks, block 2",1940103,24.0,24.0,24.0,323,7.105242686
+random,"sheaf: edge stalks, block 4",3517389,24.0,24.0,24.0,323,10.933951105
+random,exact pair delay,4192236,24.0,24.0,24.0,323,8.466849629
 random,decoupled (Dijkstra on delays),0,23.0,23.0,23.0,25,0.0
-random,sheaf: pair abstraction,1204893,23.0,23.0,23.0,25,25.634708533
-random,sheaf: exact pair pushforward,1204893,23.0,23.0,23.0,25,20.157427662
-random,exact pair delay,4192236,23.0,23.0,23.0,25,9.169993633
+random,"sheaf: edge stalks, block 2",1996830,23.0,23.0,23.0,25,7.46546784
+random,"sheaf: edge stalks, block 4",3557871,23.0,23.0,23.0,25,10.981763008
+random,exact pair delay,4192236,23.0,23.0,23.0,25,9.10737566
 random,decoupled (Dijkstra on delays),0,19.0,19.0,19.0,90,0.0
-random,sheaf: pair abstraction,1199277,19.0,19.0,19.0,90,25.867183805
-random,sheaf: exact pair pushforward,1199277,19.0,19.0,19.0,90,19.077767525
-random,exact pair delay,4192236,19.0,19.0,19.0,90,8.260382544
+random,"sheaf: edge stalks, block 2",1987704,19.0,19.0,19.0,90,7.109332611
+random,"sheaf: edge stalks, block 4",3553470,19.0,19.0,19.0,90,10.546133246
+random,exact pair delay,4192236,19.0,19.0,19.0,90,8.567219094
 random,decoupled (Dijkstra on delays),0,26.0,26.0,26.0,211,0.0
-random,sheaf: pair abstraction,1186038,26.0,26.0,26.0,211,25.198177231
-random,sheaf: exact pair pushforward,1186038,26.0,26.0,26.0,211,19.203383992
-random,exact pair delay,4192236,26.0,26.0,26.0,211,9.045532525
+random,"sheaf: edge stalks, block 2",1969362,26.0,26.0,26.0,211,7.237774819
+random,"sheaf: edge stalks, block 4",3541194,26.0,26.0,26.0,211,11.452059439
+random,exact pair delay,4192236,26.0,26.0,26.0,211,9.264251471
 random,decoupled (Dijkstra on delays),0,22.0,22.0,22.0,199,0.0
-random,sheaf: pair abstraction,1157697,22.0,22.0,22.0,199,23.649963027
-random,sheaf: exact pair pushforward,1157697,22.0,22.0,22.0,199,19.244083462
-random,exact pair delay,4192236,22.0,22.0,22.0,199,8.149249834
+random,"sheaf: edge stalks, block 2",1953297,22.0,22.0,22.0,199,7.107952826
+random,"sheaf: edge stalks, block 4",3529233,22.0,22.0,22.0,199,10.906151581
+random,exact pair delay,4192236,22.0,22.0,22.0,199,8.084289983000001
 random,decoupled (Dijkstra on delays),0,22.0,22.0,22.0,192,0.0
-random,sheaf: pair abstraction,1112346,22.0,22.0,22.0,192,21.149348855
-random,sheaf: exact pair pushforward,1112346,22.0,22.0,22.0,192,19.178700134
-random,exact pair delay,4192236,22.0,22.0,22.0,192,7.803939858
+random,"sheaf: edge stalks, block 2",1916361,22.0,22.0,22.0,192,6.786892577
+random,"sheaf: edge stalks, block 4",3497562,22.0,22.0,22.0,192,10.571714872
+random,exact pair delay,4192236,22.0,22.0,22.0,192,8.032009125

@@ -1,92 +1,92 @@
 grid 16², wall with two corridors, velocities in {-1, 0, 1}²: 2052 states per agent, 4210704 pair states
 swap    optimal  26  decoupled  25  (coordination cost 1)
     decoupled (Dijkstra on delays)   bound  25.0  expanded      801  build   0.00 s
-    sheaf: pair abstraction          bound  26.0  expanded      490  build  27.09 s
-    sheaf: exact pair pushforward    bound  26.0  expanded      332  build  20.13 s
-    exact pair delay                 bound  26.0  expanded      332  build   8.41 s
+    sheaf: edge stalks, block 2      bound  26.0  expanded      332  build   7.15 s
+    sheaf: edge stalks, block 4      bound  26.0  expanded      332  build  10.81 s
+    exact pair delay                 bound  26.0  expanded      332  build   8.33 s
 swap    optimal  21  decoupled  21  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  21.0  expanded       99  build   0.00 s
-    sheaf: pair abstraction          bound  21.0  expanded       99  build  25.70 s
-    sheaf: exact pair pushforward    bound  21.0  expanded       99  build  19.06 s
-    exact pair delay                 bound  21.0  expanded       99  build   8.35 s
+    sheaf: edge stalks, block 2      bound  21.0  expanded       99  build   7.04 s
+    sheaf: edge stalks, block 4      bound  21.0  expanded       99  build  10.45 s
+    exact pair delay                 bound  21.0  expanded       99  build   8.31 s
 swap    optimal  24  decoupled  24  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  24.0  expanded       80  build   0.00 s
-    sheaf: pair abstraction          bound  24.0  expanded       80  build  21.12 s
-    sheaf: exact pair pushforward    bound  24.0  expanded       80  build  19.29 s
-    exact pair delay                 bound  24.0  expanded       80  build   7.85 s
+    sheaf: edge stalks, block 2      bound  24.0  expanded       80  build   6.97 s
+    sheaf: edge stalks, block 4      bound  24.0  expanded       80  build  10.40 s
+    exact pair delay                 bound  24.0  expanded       80  build   8.21 s
 swap    optimal  22  decoupled  22  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  22.0  expanded       75  build   0.00 s
-    sheaf: pair abstraction          bound  22.0  expanded       73  build  23.10 s
-    sheaf: exact pair pushforward    bound  22.0  expanded       73  build  19.23 s
-    exact pair delay                 bound  22.0  expanded       58  build   8.34 s
+    sheaf: edge stalks, block 2      bound  22.0  expanded       58  build   7.13 s
+    sheaf: edge stalks, block 4      bound  22.0  expanded       58  build  10.79 s
+    exact pair delay                 bound  22.0  expanded       58  build   8.49 s
 swap    optimal  24  decoupled  22  (coordination cost 2)
     decoupled (Dijkstra on delays)   bound  22.0  expanded      829  build   0.00 s
-    sheaf: pair abstraction          bound  24.0  expanded      275  build  22.95 s
-    sheaf: exact pair pushforward    bound  24.0  expanded      275  build  19.24 s
-    exact pair delay                 bound  24.0  expanded      275  build   7.96 s
+    sheaf: edge stalks, block 2      bound  24.0  expanded      275  build   7.10 s
+    sheaf: edge stalks, block 4      bound  24.0  expanded      275  build  10.39 s
+    exact pair delay                 bound  24.0  expanded      275  build   8.35 s
 swap    optimal  30  decoupled  28  (coordination cost 2)
     decoupled (Dijkstra on delays)   bound  28.0  expanded     8186  build   0.00 s
-    sheaf: pair abstraction          bound  28.0  expanded     5506  build  23.71 s
-    sheaf: exact pair pushforward    bound  30.0  expanded     3573  build  19.25 s
-    exact pair delay                 bound  30.0  expanded     3481  build   7.99 s
+    sheaf: edge stalks, block 2      bound  30.0  expanded     3481  build   7.07 s
+    sheaf: edge stalks, block 4      bound  30.0  expanded     3481  build  10.91 s
+    exact pair delay                 bound  30.0  expanded     3481  build   8.43 s
 swap    optimal  24  decoupled  24  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  24.0  expanded      126  build   0.00 s
-    sheaf: pair abstraction          bound  24.0  expanded      125  build  25.75 s
-    sheaf: exact pair pushforward    bound  24.0  expanded      125  build  19.15 s
-    exact pair delay                 bound  24.0  expanded      125  build   8.19 s
+    sheaf: edge stalks, block 2      bound  24.0  expanded      125  build   7.22 s
+    sheaf: edge stalks, block 4      bound  24.0  expanded      125  build  10.74 s
+    exact pair delay                 bound  24.0  expanded      125  build   8.24 s
 swap    optimal  25  decoupled  25  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  25.0  expanded      118  build   0.00 s
-    sheaf: pair abstraction          bound  25.0  expanded      118  build  27.13 s
-    sheaf: exact pair pushforward    bound  25.0  expanded      118  build  19.14 s
-    exact pair delay                 bound  25.0  expanded      118  build   8.43 s
+    sheaf: edge stalks, block 2      bound  25.0  expanded      118  build   7.43 s
+    sheaf: edge stalks, block 4      bound  25.0  expanded      118  build  10.95 s
+    exact pair delay                 bound  25.0  expanded      118  build   8.85 s
 random  optimal  13  decoupled  13  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  13.0  expanded       22  build   0.00 s
-    sheaf: pair abstraction          bound  13.0  expanded       22  build  23.34 s
-    sheaf: exact pair pushforward    bound  13.0  expanded       22  build  19.29 s
-    exact pair delay                 bound  13.0  expanded       22  build   8.45 s
+    sheaf: edge stalks, block 2      bound  13.0  expanded       22  build   7.36 s
+    sheaf: edge stalks, block 4      bound  13.0  expanded       22  build  11.02 s
+    exact pair delay                 bound  13.0  expanded       22  build   8.56 s
 random  optimal  15  decoupled  15  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  15.0  expanded       83  build   0.00 s
-    sheaf: pair abstraction          bound  15.0  expanded       83  build  25.35 s
-    sheaf: exact pair pushforward    bound  15.0  expanded       83  build  18.95 s
-    exact pair delay                 bound  15.0  expanded       83  build   8.24 s
+    sheaf: edge stalks, block 2      bound  15.0  expanded       83  build   7.40 s
+    sheaf: edge stalks, block 4      bound  15.0  expanded       83  build  11.19 s
+    exact pair delay                 bound  15.0  expanded       83  build   8.42 s
 random  optimal  24  decoupled  24  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  24.0  expanded      323  build   0.00 s
-    sheaf: pair abstraction          bound  24.0  expanded      323  build  23.00 s
-    sheaf: exact pair pushforward    bound  24.0  expanded      323  build  19.25 s
-    exact pair delay                 bound  24.0  expanded      323  build   8.25 s
+    sheaf: edge stalks, block 2      bound  24.0  expanded      323  build   7.11 s
+    sheaf: edge stalks, block 4      bound  24.0  expanded      323  build  10.93 s
+    exact pair delay                 bound  24.0  expanded      323  build   8.47 s
 random  optimal  23  decoupled  23  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  23.0  expanded       25  build   0.00 s
-    sheaf: pair abstraction          bound  23.0  expanded       25  build  25.63 s
-    sheaf: exact pair pushforward    bound  23.0  expanded       25  build  20.16 s
-    exact pair delay                 bound  23.0  expanded       25  build   9.17 s
+    sheaf: edge stalks, block 2      bound  23.0  expanded       25  build   7.47 s
+    sheaf: edge stalks, block 4      bound  23.0  expanded       25  build  10.98 s
+    exact pair delay                 bound  23.0  expanded       25  build   9.11 s
 random  optimal  19  decoupled  19  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  19.0  expanded       90  build   0.00 s
-    sheaf: pair abstraction          bound  19.0  expanded       90  build  25.87 s
-    sheaf: exact pair pushforward    bound  19.0  expanded       90  build  19.08 s
-    exact pair delay                 bound  19.0  expanded       90  build   8.26 s
+    sheaf: edge stalks, block 2      bound  19.0  expanded       90  build   7.11 s
+    sheaf: edge stalks, block 4      bound  19.0  expanded       90  build  10.55 s
+    exact pair delay                 bound  19.0  expanded       90  build   8.57 s
 random  optimal  26  decoupled  26  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  26.0  expanded      211  build   0.00 s
-    sheaf: pair abstraction          bound  26.0  expanded      211  build  25.20 s
-    sheaf: exact pair pushforward    bound  26.0  expanded      211  build  19.20 s
-    exact pair delay                 bound  26.0  expanded      211  build   9.05 s
+    sheaf: edge stalks, block 2      bound  26.0  expanded      211  build   7.24 s
+    sheaf: edge stalks, block 4      bound  26.0  expanded      211  build  11.45 s
+    exact pair delay                 bound  26.0  expanded      211  build   9.26 s
 random  optimal  22  decoupled  22  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  22.0  expanded      199  build   0.00 s
-    sheaf: pair abstraction          bound  22.0  expanded      199  build  23.65 s
-    sheaf: exact pair pushforward    bound  22.0  expanded      199  build  19.24 s
-    exact pair delay                 bound  22.0  expanded      199  build   8.15 s
+    sheaf: edge stalks, block 2      bound  22.0  expanded      199  build   7.11 s
+    sheaf: edge stalks, block 4      bound  22.0  expanded      199  build  10.91 s
+    exact pair delay                 bound  22.0  expanded      199  build   8.08 s
 random  optimal  22  decoupled  22  (coordination cost 0)
     decoupled (Dijkstra on delays)   bound  22.0  expanded      192  build   0.00 s
-    sheaf: pair abstraction          bound  22.0  expanded      192  build  21.15 s
-    sheaf: exact pair pushforward    bound  22.0  expanded      192  build  19.18 s
-    exact pair delay                 bound  22.0  expanded      192  build   7.80 s
+    sheaf: edge stalks, block 2      bound  22.0  expanded      192  build   6.79 s
+    sheaf: edge stalks, block 4      bound  22.0  expanded      192  build  10.57 s
+    exact pair delay                 bound  22.0  expanded      192  build   8.03 s
 
 summary (means over queries)
 queries heuristic                            states  bound/opt  gap closed  expanded   build s
 swap    decoupled (Dijkstra on delays)            0      0.976        0.00      1289      0.00
-swap    sheaf: pair abstraction             1175822      0.992        0.67       846     24.57
-swap    sheaf: exact pair pushforward       1175822      1.000        1.00       584     19.31
-swap    exact pair delay                    4192236      1.000        1.00       571      8.19
+swap    sheaf: edge stalks, block 2         1969374      1.000        1.00       571      7.14
+swap    sheaf: edge stalks, block 4         3537234      1.000        1.00       571     10.68
+swap    exact pair delay                    4192236      1.000        1.00       571      8.40
 random  decoupled (Dijkstra on delays)            0      1.000           –       143      0.00
-random  sheaf: pair abstraction             1169223      1.000           –       143     24.15
-random  sheaf: exact pair pushforward       1169223      1.000           –       143     19.29
-random  exact pair delay                    4192236      1.000           –       143      8.42
+random  sheaf: edge stalks, block 2         1962584      1.000           –       143      7.20
+random  sheaf: edge stalks, block 4         3534284      1.000           –       143     10.95
+random  exact pair delay                    4192236      1.000           –       143      8.56
