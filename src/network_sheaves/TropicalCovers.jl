@@ -291,11 +291,12 @@ A coarse state is a tuple of *modes*, one per agent: a state `s` of agent `a`
 struct ProductStalk{K,C,F}
     members::NTuple{K,Int}
     graphs::Vector{SparseMatrixCSC{Float64,Int}}
-    out::Vector{SparseMatrixCSC{Float64,Int}}           # transposes: out-moves by column
+    exact_moves::Vector{Vector{Vector{Tuple{Int,Float64}}}}  # [a][s]: (s2, cost) for the moves out of state s
     summaries::Vector{GraphHomomorphism}
     nstates::NTuple{K,Int}
     fibre_moves::Vector{Vector{Vector{Tuple{Int,Float64}}}}   # [a][k]: (s2, least cost from the fibre of k)
     fibres::Vector{Vector{Vector{Int}}}                   # [a][k]: the states with summary k
+    singletons::Vector{Vector{Vector{Int}}}               # [a][k]: the one mode [n_a + k] of summary k
     goal::NTuple{K,Int}
     contact::C
     collides::F
@@ -325,10 +326,15 @@ function ProductStalk(members, graphs, summaries, goals; contact, collides)
         end
         f
     end
+    exact_moves = map(Ws) do W
+        Wt = sparse(transpose(W))
+        [[(Int(rowvals(Wt)[k]), Float64(nonzeros(Wt)[k])) for k in nzrange(Wt, s)] for s in 1:size(W, 1)]
+    end
+    singletons = [[[size(W, 1) + k] for k in 1:π.n_target] for (W, π) in zip(Ws, summaries)]
     m = NTuple{K,Int}(members)
-    P = ProductStalk{K,typeof(contact),typeof(collides)}(m, Ws, [sparse(transpose(W)) for W in Ws],
+    P = ProductStalk{K,typeof(contact),typeof(collides)}(m, Ws, exact_moves,
         collect(GraphHomomorphism, summaries), ntuple(a -> size(Ws[a], 1), K),
-        [[[(Int(s), Float64(c)) for (s, c) in v] for v in fm] for fm in fibre_moves], fibres,
+        [[[(Int(s), Float64(c)) for (s, c) in v] for v in fm] for fm in fibre_moves], fibres, singletons,
         NTuple{K,Int}(goals), contact, collides)
     return P
 end
@@ -365,6 +371,11 @@ agent that is no longer in contact. The contact relation of `Pτ` must imply tha
 function restrict(Pσ::ProductStalk{K}, Pτ::ProductStalk{L}, x) where {K,L}
     idx = ntuple(b -> findfirst(==(Pτ.members[b]), Pσ.members), L)
     @argcheck all(!isnothing, idx) "the agents of the face must be agents of the simplex"
+    return _restrict(Pσ, Pτ, NTuple{L,Int}(idx), x)
+end
+
+# The restriction, given the positions `idx` of the face's agents among the simplex's.
+function _restrict(Pσ::ProductStalk{K}, Pτ::ProductStalk{L}, idx::NTuple{L,Int}, x) where {K,L}
     ks = ntuple(b -> _summary(Pσ, idx[b], x[idx[b]]), L)
     return ntuple(L) do b
         m = x[idx[b]]
@@ -374,9 +385,7 @@ function restrict(Pσ::ProductStalk{K}, Pτ::ProductStalk{L}, x) where {K,L}
     end
 end
 
-_moves(P::ProductStalk, a, m) =
-    _exact(P, a, m) ? [(Int(rowvals(P.out[a])[k]), nonzeros(P.out[a])[k]) for k in nzrange(P.out[a], m)] :
-    P.fibre_moves[a][m - P.nstates[a]]
+_moves(P::ProductStalk, a, m) = _exact(P, a, m) ? P.exact_moves[a][m] : P.fibre_moves[a][m - P.nstates[a]]
 
 """
     stalk_successors(f, P::ProductStalk, x)
@@ -422,7 +431,7 @@ function _all_states(P::ProductStalk{K}) where {K}
     out = NTuple{K,Int}[]
     for ks in Iterators.product((1:P.summaries[a].n_target for a in 1:K)...)
         touching = ntuple(a -> _in_contact(P, ks, a), K)
-        opts = ntuple(a -> touching[a] ? P.fibres[a][ks[a]] : [P.nstates[a] + ks[a]], K)
+        opts = ntuple(a -> touching[a] ? P.fibres[a][ks[a]] : P.singletons[a][ks[a]], K)
         any(isempty, opts) && continue
         for x in Iterators.product(opts...)
             ok = true
@@ -448,16 +457,36 @@ counts, so this is meant for edges, and for higher simplices only on small maps.
 """
 function stalk_graph(P::ProductStalk{K}) where {K}
     states = _all_states(P)
-    index = Dict(x => i for (i, x) in enumerate(states))
-    rows, cols, vals = Int[], Int[], Float64[]
-    for (i, x) in enumerate(states)
-        stalk_successors(P, x) do y, c
-            j = index[y]
-            push!(rows, i); push!(cols, j); push!(vals, c)
-        end
-    end
     n = length(states)
-    W = sparse(rows, cols, vals, n, n, min)
+    index = Dict{NTuple{K,Int},Int}()
+    sizehint!(index, n)
+    for (i, x) in enumerate(states)
+        index[x] = i
+    end
+    # The transpose, column by column: the arcs out of state i, each target once at its
+    # least cost (a buffer reused for every state).
+    colptr = Vector{Int}(undef, n + 1)
+    colptr[1] = 1
+    rowval, nzval = Int[], Float64[]
+    sizehint!(rowval, 4n)
+    sizehint!(nzval, 4n)
+    buf = Tuple{Int,Float64}[]
+    for (i, x) in enumerate(states)
+        empty!(buf)
+        stalk_successors(P, x) do y, c
+            push!(buf, (index[y], c))
+        end
+        sort!(buf; alg = InsertionSort)           # by target, then cost (short, sorted in place)
+        previous = 0
+        for (j, c) in buf
+            j == previous && continue
+            push!(rowval, j)
+            push!(nzval, c)
+            previous = j
+        end
+        colptr[i + 1] = length(rowval) + 1
+    end
+    W = copy(transpose(SparseMatrixCSC(n, n, colptr, rowval, nzval)))
     b = fill(Inf, n)
     b[index[coarse_state(P, P.goal)]] = 0.0
     return StalkGraph{K}(states, index, W, minplus_closure(W, b))
@@ -594,7 +623,20 @@ function section_value(C::CoverSheaf, σ::AbstractVector{<:Integer}, states; max
     x = coarse_state(P, Tuple(states[v] for v in σ))
     G = get(C.explicit, σ, nothing)
     isnothing(G) || return G.Δ[G.index[x]], 0, true
+    if all(τ -> haskey(C.explicit, τ), faces(σ))
+        # Every face explicit: gather the faces' stalks, tables and positions once, so the
+        # heuristic is compiled for their concrete types (no lookups per call).
+        fs = Tuple((C.stalks[τ], C.explicit[τ], NTuple{length(τ),Int}(map(v -> findfirst(==(v), σ), τ))) for τ in faces(σ))
+        return _search(P, fs, x, max_expanded)
+    end
     return stalk_value(P, x; heuristic = y -> _face_heuristic(C, P, σ, y), max_expanded)
+end
+
+_search(P::ProductStalk, fs::Tuple, x, max_expanded) = stalk_value(P, x; heuristic = y -> _faces_bound(P, fs, y), max_expanded)
+
+function _faces_bound(P::ProductStalk{K}, fs::Tuple, x) where {K}
+    vals = map(f -> f[2].Δ[f[2].index[_restrict(P, f[1], f[3], x)]], fs)
+    return max(maximum(vals), sum(vals) / (K - 1))
 end
 
 """
