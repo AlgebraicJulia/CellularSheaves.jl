@@ -40,3 +40,14 @@ bound on the cost-to-go and an exact A* heuristic, instead of a correction.
 ```@autodocs
 Modules = [CellularSheaves.NetworkSheaves.TropicalAbstraction]
 ```
+
+## Min-plus sheaves on a simplicial complex
+
+Several agents that share a space: the clique complex of their interaction graph,
+with the pushforward of the joint state graph of every simplex as its stalk
+(symmetric in the agents), restriction maps that forget agents, and the
+simplicial cover that glues the stalk values into a bound on the joint cost.
+
+```@autodocs
+Modules = [CellularSheaves.NetworkSheaves.TropicalCovers]
+```
