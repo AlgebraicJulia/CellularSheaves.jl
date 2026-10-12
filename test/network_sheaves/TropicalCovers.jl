@@ -69,6 +69,11 @@ end
         states, index, arcs = joint_graph(Ws[1:K], cycle_collides)
         μ = [coarse_state(P, x) for x in states]
         @test Set(μ) == Set(G.states)
+        # The index: a dense table over the box of modes here, inverse to the state list.
+        @test G.index isa CellularSheaves.NetworkSheaves.TropicalCovers.DenseIndex
+        @test all(G.index[x] == i && haskey(G.index, x) for (i, x) in enumerate(G.states))
+        @test !haskey(G.index, ntuple(_ -> 0, K)) && get(G.index, ntuple(_ -> 10^6, K), -1) == -1
+        @test_throws KeyError G.index[ntuple(_ -> 0, K)]
         pushed = Dict{Tuple{Int,Int},Float64}()
         for (i, j, c) in arcs
             key = (G.index[μ[i]], G.index[μ[j]])

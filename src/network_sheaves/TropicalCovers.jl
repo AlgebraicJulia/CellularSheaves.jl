@@ -416,13 +416,59 @@ end
     StalkGraph
 
 An explicitly built stalk: `states[i]` is the `i`-th coarse state, `index` its
-inverse, `W` the stalk's arcs and `Δ` its cost-to-go to the goal.
+inverse (`index[x]`, `get(index, x, default)`, `haskey(index, x)`), `W` the stalk's
+arcs and `Δ` its cost-to-go to the goal.
 """
-struct StalkGraph{K}
+struct StalkGraph{K,I}
     states::Vector{NTuple{K,Int}}
-    index::Dict{NTuple{K,Int},Int}
-    W::SparseMatrixCSC{Float64,Int}
+    index::I
+    W::SparseMatrixCSC{Float64,Int32}           # 32-bit indices: stalks can be large
     Δ::Vector{Float64}
+end
+
+# The index of a stalk's states as a dense table over the box of modes: a coarse state
+# is a tuple of mode numbers, mode a in 1:dims[a], so its position is plain arithmetic.
+# Cheaper than hashing and smaller than a Dict when the states fill a good part of the
+# box (as on edges); 0 marks a tuple that is not a state.
+struct DenseIndex{K}
+    dims::NTuple{K,Int}
+    table::Vector{Int32}
+end
+
+function _linear(d::DenseIndex{K}, x::NTuple{K,Int}) where {K}
+    i, stride = 0, 1
+    for a in 1:K
+        1 <= x[a] <= d.dims[a] || return 0
+        i += (x[a] - 1) * stride
+        stride *= d.dims[a]
+    end
+    return i + 1
+end
+
+Base.get(d::DenseIndex{K}, x::NTuple{K,Int}, default) where {K} =
+    (l = _linear(d, x); l == 0 || d.table[l] == 0 ? default : Int(d.table[l]))
+Base.getindex(d::DenseIndex{K}, x::NTuple{K,Int}) where {K} =
+    (v = get(d, x, 0); v == 0 ? throw(KeyError(x)) : v)
+Base.haskey(d::DenseIndex{K}, x::NTuple{K,Int}) where {K} = get(d, x, 0) != 0
+
+# The largest box of modes indexed densely (4 bytes per tuple).
+const _DENSE_LIMIT = 2^27
+
+function _state_index(P::ProductStalk{K}, states) where {K}
+    dims = ntuple(a -> P.nstates[a] + P.summaries[a].n_target, K)
+    if prod(big, dims) <= _DENSE_LIMIT && length(states) < typemax(Int32)
+        d = DenseIndex{K}(dims, zeros(Int32, prod(dims)))
+        for (i, x) in enumerate(states)
+            d.table[_linear(d, x)] = i
+        end
+        return d
+    end
+    index = Dict{NTuple{K,Int},Int}()
+    sizehint!(index, length(states))
+    for (i, x) in enumerate(states)
+        index[x] = i
+    end
+    return index
 end
 
 # Every coarse state of the stalk: each tuple of summaries, with the agents in
@@ -457,17 +503,16 @@ counts, so this is meant for edges, and for higher simplices only on small maps.
 """
 function stalk_graph(P::ProductStalk{K}) where {K}
     states = _all_states(P)
+    return _stalk_graph(P, states, _state_index(P, states))   # a barrier: the index's type is known inside
+end
+
+function _stalk_graph(P::ProductStalk{K}, states, index) where {K}
     n = length(states)
-    index = Dict{NTuple{K,Int},Int}()
-    sizehint!(index, n)
-    for (i, x) in enumerate(states)
-        index[x] = i
-    end
     # The transpose, column by column: the arcs out of state i, each target once at its
     # least cost (a buffer reused for every state).
-    colptr = Vector{Int}(undef, n + 1)
+    colptr = Vector{Int32}(undef, n + 1)
     colptr[1] = 1
-    rowval, nzval = Int[], Float64[]
+    rowval, nzval = Int32[], Float64[]
     sizehint!(rowval, 4n)
     sizehint!(nzval, 4n)
     buf = Tuple{Int,Float64}[]
@@ -489,7 +534,7 @@ function stalk_graph(P::ProductStalk{K}) where {K}
     W = copy(transpose(SparseMatrixCSC(n, n, colptr, rowval, nzval)))
     b = fill(Inf, n)
     b[index[coarse_state(P, P.goal)]] = 0.0
-    return StalkGraph{K}(states, index, W, minplus_closure(W, b))
+    return StalkGraph(states, index, W, minplus_closure(W, b))
 end
 
 """
@@ -585,7 +630,7 @@ function CoverSheaf(K::SimplicialComplex, graphs, summaries, goals; contact, col
         P = ProductStalk(Tuple(σ), graphs[σ], summaries[σ], goals[σ]; contact = contact_at(k), collides)
         G = k <= explicit_dim ? stalk_graph(P) : nothing
         if !isnothing(G) && !keep_arcs
-            G = StalkGraph(G.states, G.index, spzeros(length(G.states), length(G.states)), G.Δ)
+            G = StalkGraph(G.states, G.index, spzeros(Float64, Int32, length(G.states), length(G.states)), G.Δ)
         end
         built[i] = (P, G)
     end
