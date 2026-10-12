@@ -97,12 +97,26 @@ for (kind, starts, goals) in queries(MersenneTwister(3))
     end
     dec = glued(agents, (i, j, a, b) -> 0.0)
     sheaf = glued(agents, (i, j, a, b) -> pair_bound(MAP, P[(i, j)], P[(j, i)], agents[i], agents[j], a, b))
+    # The same through the interaction sheaf: every pair (its matching reduces to the best
+    # pair for three agents), and the sparse interaction graph of meeting tubes.
+    full = InteractionSheaf(MAP, agents, starts; block = BLOCK, slack = Inf)
+    t_sparse = @elapsed sparse_sheaf = InteractionSheaf(MAP, agents, starts; block = BLOCK)
+    sparse_h = fill(Inf, NF^NA)
+    for x in 1:NF^NA
+        c = cells_of(x)
+        allunique(c) || continue
+        @assert joint_bound(full, c) ≈ sheaf[x]
+        sparse_h[x] = joint_bound(sparse_sheaf, c)
+    end
     pairwise = glued(agents, (i, j, a, b) -> exact[(i, j)][a + NF * (b - 1)])
     reach = isfinite.(V)
     out = sparse(transpose(W))
-    @printf("%-6s  optimal %3.0f  decoupled %3.0f  (coordination cost %.0f)\n", kind, V[start], dec[start], V[start] - dec[start])
+    @printf("%-6s  optimal %3.0f  decoupled %3.0f  (coordination cost %.0f), interacting pairs %d of %d\n", kind,
+        V[start], dec[start], V[start] - dec[start], length(sparse_sheaf.pairs), length(PAIRS))
     for (name, h, build, states) in (("decoupled (sum of distances)", dec, 0.0, 0),
                                      ("sheaf: edge stalks, block $BLOCK", sheaf, t_sheaf, sheaf_states),
+                                     ("sheaf: interacting pairs only", sparse_h, t_sparse,
+                                      sum(coarse_states(p) for p in values(sparse_sheaf.stalks); init = 0)),
                                      ("exact pairwise delays", pairwise, t_exact, length(PAIRS) * NF^2),
                                      ("exact cost-to-go", V, 0.0, NF^NA))
         @assert all(h[reach] .<= V[reach] .+ 1e-9) "$name is not admissible"
@@ -110,17 +124,17 @@ for (kind, starts, goals) in queries(MersenneTwister(3))
         @assert r.cost == V[start]
         push!(rows, (kind = kind, heuristic = name, states = states, optimal = V[start], decoupled = dec[start],
             bound = h[start], expanded = r.expanded, build_seconds = build))
-        @printf("    %-34s bound %5.1f  expanded %7d  build %6.3f s\n", name, h[start], r.expanded, build)
+        @printf("    %-44s bound %5.1f  expanded %7d  build %6.3f s\n", name, h[start], r.expanded, build)
     end
 end
 
 println("\nsummary (means over queries)")
-@printf("%-7s %-34s %9s %10s %11s %9s %9s\n", "queries", "heuristic", "states", "bound/opt", "gap closed", "expanded", "build s")
+@printf("%-7s %-44s %9s %10s %11s %9s %9s\n", "queries", "heuristic", "states", "bound/opt", "gap closed", "expanded", "build s")
 for kind in ("cross", "random"), name in unique(r.heuristic for r in rows)
     rs = filter(r -> r.kind == kind && r.heuristic == name, rows)
     isempty(rs) && continue
     gap = [(r.bound - r.decoupled) / (r.optimal - r.decoupled) for r in rs if r.optimal > r.decoupled]
-    @printf("%-7s %-34s %9d %10.3f %11s %9.0f %9.3f\n", kind, name, round(Int, mean(r.states for r in rs)),
+    @printf("%-7s %-44s %9d %10.3f %11s %9.0f %9.3f\n", kind, name, round(Int, mean(r.states for r in rs)),
         mean(r.bound / r.optimal for r in rs), isempty(gap) ? "–" : @sprintf("%.2f", mean(gap)),
         mean(r.expanded for r in rs), mean(r.build_seconds for r in rs))
 end

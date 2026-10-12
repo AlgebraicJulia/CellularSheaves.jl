@@ -195,3 +195,76 @@ function pushed_pair(M, P::PairAbstraction, Ai, Aj, W = pair_graph(Ai, Aj))
             for t in 1:Sj for s in 1:Si]
     return lower_bound(Abstraction(W, GraphHomomorphism(vmap, Si * K)), [pair_goal(Ai, Aj)])
 end
+
+# ---------------------------------------------------------------------------
+# Gluing over the interaction graph.
+# ---------------------------------------------------------------------------
+
+# The cells agent A may use on a path from `start` delayed by at most `slack`: its tube.
+function tube(A::AgentStalk, start, slack)
+    g = cost_to_go(sparse(transpose(A.delays)), [start])          # least delay from start to each state
+    return Set(A.pos[s] for s in eachindex(g) if g[s] <= slack)
+end
+
+# Whether two tubes come within one cell of each other (where a collision is possible).
+function tubes_meet(M::GridMap, Ti, Tj)
+    for c in Ti, dy in -1:1, dx in -1:1
+        get(M.index, M.cells[c] .+ (dx, dy), 0) in Tj && return true
+    end
+    return false
+end
+
+# The heaviest matching of agents 1:N with pair weights w[i, j] ≥ 0: the best sum of pair
+# bounds over disjoint pairs, by dynamic programming over subsets (N up to about 16).
+function best_matching(w::AbstractMatrix)
+    N = size(w, 1)
+    best = zeros(1 << N)                                          # best[mask + 1]: agents in mask
+    for mask in 1:((1 << N) - 1)
+        i = trailing_zeros(mask) + 1
+        rest = mask & ~(1 << (i - 1))
+        v, r = best[rest + 1], rest                                # i unmatched
+        while r != 0
+            j = trailing_zeros(r) + 1
+            r &= r - 1
+            v = max(v, w[i, j] + best[(rest & ~(1 << (j - 1))) + 1])
+        end
+        best[mask + 1] = v
+    end
+    return best[end]
+end
+
+# The interaction sheaf of N agents: their vertex stalks, the interaction graph (pairs
+# whose tubes meet) and an edge stalk in each direction of every interacting pair.
+struct InteractionSheaf
+    map::GridMap
+    agents::Vector{AgentStalk}
+    pairs::Vector{Tuple{Int,Int}}
+    stalks::Dict{Tuple{Int,Int},PairAbstraction}
+end
+
+function InteractionSheaf(M::GridMap, agents, starts; block = 2, slack = 4.0)
+    N = length(agents)
+    tubes = [tube(agents[i], starts[i], slack) for i in 1:N]
+    pairs = [(i, j) for i in 1:N for j in (i + 1):N if tubes_meet(M, tubes[i], tubes[j])]
+    stalks = Dict{Tuple{Int,Int},PairAbstraction}()
+    for (i, j) in pairs
+        stalks[(i, j)] = PairAbstraction(M, agents[i], agents[j], block)
+        stalks[(j, i)] = PairAbstraction(M, agents[j], agents[i], block)
+    end
+    return InteractionSheaf(M, agents, pairs, stalks)
+end
+
+# A lower bound on the total delay of the agents from their states, glued from the edge
+# stalks: the heaviest matching of the interaction graph.
+function delay_bound(IS::InteractionSheaf, states)
+    N = length(IS.agents)
+    w = zeros(N, N)
+    for (i, j) in IS.pairs
+        w[i, j] = w[j, i] = pair_bound(IS.map, IS.stalks[(i, j)], IS.stalks[(j, i)], IS.agents[i], IS.agents[j],
+            states[i], states[j])
+    end
+    return best_matching(w)
+end
+
+# The admissible joint heuristic: Σᵢ dᵢ plus the glued delay bound.
+joint_bound(IS::InteractionSheaf, states) = sum(IS.agents[i].d[states[i]] for i in eachindex(states)) + delay_bound(IS, states)
