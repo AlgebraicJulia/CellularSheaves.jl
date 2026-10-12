@@ -71,7 +71,7 @@ module TropicalCovers
 
 export SimplicialComplex, clique_complex, simplices, faces, ProductStalk, coarse_state, restrict,
     stalk_successors, StalkGraph, stalk_graph, stalk_value, CoverSheaf, section_value, cover_bound,
-    simplicial_cover, stable_refinement, is_stable, future_refinement
+    simplicial_cover, stable_refinement, is_stable, future_refinement, ArcScratch, stalk_cost_to_go, cover_stalks
 
 using ArgCheck: @argcheck
 using Graphs
@@ -506,9 +506,14 @@ function stalk_graph(P::ProductStalk{K}) where {K}
     return _stalk_graph(P, states, _state_index(P, states), nothing)   # a barrier: the index's type is known inside
 end
 
-# Arc arrays reused from one explicit stalk to the next, when the arcs are not kept: the
-# stalk's arcs (out-arcs by state), their transpose (in-arcs, which the closure reads),
-# a cursor for the transpose and the per-state buffer.
+"""
+    ArcScratch()
+
+Arc arrays reused from one explicit stalk to the next when the arcs are not kept
+(see [`stalk_cost_to_go`](@ref)): the stalk's out-arcs by state, their transpose
+(the in-arcs the closure reads), a cursor for the transpose and a per-state buffer.
+One per thread; never shared between concurrent builds.
+"""
 struct ArcScratch
     colptr::Vector{Int32}
     rowval::Vector{Int32}
@@ -525,6 +530,49 @@ ArcScratch() = ArcScratch(Int32[], Int32[], Float64[], Int32[], Int32[], Float64
 function _stalk_values(P::ProductStalk{K}, scratch::ArcScratch) where {K}
     states = _all_states(P)
     return _stalk_graph(P, states, _state_index(P, states), scratch)
+end
+
+"""
+    stalk_cost_to_go(P::ProductStalk; scratch = ArcScratch()) -> Vector{Float64}
+
+The cost-to-go of the explicit stalk of `P` at each of its coarse states, in the
+order in which [`StalkGraph`](@ref)`(P, Δ)` enumerates them; the arcs are built in
+`scratch` and dropped. This is the only expensive part of an explicit stalk, and
+all that needs to travel: the states and their index are cheap to enumerate again
+wherever the stalk is used. So stalks can be computed on other threads, processes
+or nodes and assembled with [`CoverSheaf`](@ref)`(complex, stalks, explicit)`.
+"""
+stalk_cost_to_go(P::ProductStalk; scratch::ArcScratch = ArcScratch()) = _stalk_values(P, scratch).Δ
+
+"""
+    StalkGraph(P::ProductStalk, Δ)
+
+The explicit stalk of `P` from its cost-to-go `Δ` (as returned by
+[`stalk_cost_to_go`](@ref)), without arcs: the states and their index are
+enumerated again.
+"""
+function StalkGraph(P::ProductStalk{K}, Δ::AbstractVector{<:Real}) where {K}
+    states = _all_states(P)
+    @argcheck length(Δ) == length(states) "one cost-to-go per coarse state of the stalk"
+    n = length(states)
+    return StalkGraph(states, _state_index(P, states), spzeros(Float64, Int32, n, n), Vector{Float64}(Δ))
+end
+
+"""
+    cover_stalks(complex, graphs, summaries, goals; contact, collides) -> Dict
+
+The [`ProductStalk`](@ref) of every simplex of `complex` (arguments as in
+[`CoverSheaf`](@ref)). Cheap: no arcs are built. Together with
+[`stalk_cost_to_go`](@ref) and [`StalkGraph`](@ref)`(P, Δ)`, this lets the
+explicit stalks be computed anywhere, for instance one share per MPI rank, and
+assembled with `CoverSheaf(complex, stalks, explicit)`.
+"""
+function cover_stalks(K::SimplicialComplex, graphs, summaries, goals; contact, collides)
+    @argcheck length(graphs) == length(summaries) == length(goals) == nv(K)
+    # A relation takes four arguments; a function of the dimension takes one.
+    contact_at(k) = hasmethod(contact, Tuple{Int}) && !hasmethod(contact, NTuple{4,Int}) ? contact(k) : contact
+    return Dict{Vector{Int},ProductStalk}(σ => ProductStalk(Tuple(σ), graphs[σ], summaries[σ], goals[σ];
+        contact = contact_at(k), collides) for k in 0:dimension(K) for σ in simplices(K, k))
 end
 
 function _stalk_graph(P::ProductStalk{K}, states, index, scratch) where {K}
@@ -669,6 +717,15 @@ struct CoverSheaf
     stalks::Dict{Vector{Int},ProductStalk}
     explicit::Dict{Vector{Int},StalkGraph}
     explicit_dim::Int
+end
+
+# Assembly from stalks computed elsewhere (see `cover_stalks` and `stalk_cost_to_go`):
+# every simplex needs its stalk, and the explicit ones their tables.
+function CoverSheaf(K::SimplicialComplex, stalks::AbstractDict, explicit::AbstractDict)
+    @argcheck all(σ -> haskey(stalks, σ), (σ for k in 0:dimension(K) for σ in simplices(K, k))) "a stalk for every simplex"
+    @argcheck all(σ -> haskey(stalks, σ), keys(explicit)) "explicit stalks of simplices of the complex"
+    return CoverSheaf(K, Dict{Vector{Int},ProductStalk}(stalks), Dict{Vector{Int},StalkGraph}(explicit),
+        maximum(length, keys(explicit); init = 1) - 1)
 end
 
 function CoverSheaf(K::SimplicialComplex, graphs, summaries, goals; contact, collides, explicit_dim::Integer = 1,

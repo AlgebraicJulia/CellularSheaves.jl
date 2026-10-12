@@ -128,6 +128,17 @@ end
         Cd = CoverSheaf(K, Ws, fill(π, 3), goals; contact, collides = cycle_collides, explicit_dim = 2, keep_arcs = false)
         @test all(Cd.explicit[σ].Δ == C2.explicit[σ].Δ && Cd.explicit[σ].states == C2.explicit[σ].states for σ in keys(C2.explicit))
         @test nnz(Cd.explicit[[1, 2, 3]].W) == 0
+        # Assembled from stalks computed separately (as across processes): only the
+        # cost-to-go travels, the states and index are enumerated again.
+        stalks = cover_stalks(K, Ws, fill(π, 3), goals; contact, collides = cycle_collides)
+        sc = ArcScratch()
+        Ca = CoverSheaf(K, stalks, Dict(σ => StalkGraph(stalks[σ], stalk_cost_to_go(stalks[σ]; scratch = sc))
+                                        for σ in simplices(K, 1)))
+        @test Ca.explicit_dim == 1
+        @test all(Ca.explicit[σ].Δ == C1.explicit[σ].Δ && Ca.explicit[σ].states == C1.explicit[σ].states for σ in simplices(K, 1))
+        @test all(cover_bound(Ca, x)[1] == cover_bound(C1, x)[1] for x in ([1, 4, 8], [3, 9, 6], [10, 2, 5]))
+        @test_throws ArgumentError StalkGraph(stalks[[1, 2]], zeros(3))
+        @test_throws ArgumentError CoverSheaf(K, Dict(σ => stalks[σ] for σ in simplices(K, 1)), Dict{Vector{Int},StalkGraph}())
         rng = MersenneTwister(2)
         for _ in 1:20
             x = randperm(rng, n)[1:3]
