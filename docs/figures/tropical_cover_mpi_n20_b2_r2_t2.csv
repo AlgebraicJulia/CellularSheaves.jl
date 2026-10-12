@@ -1,0 +1,2 @@
+n,block,agents,instance,ranks,nodes,threads,edges,triangles,edge_states_mean,exchanged_mib,seconds_shared,seconds_edges_max,seconds_edges_min,seconds_wait,seconds_exchange,seconds_assemble,seconds_triangles,seconds_glue,seconds_total,triangles_capped,decoupled,bound,upper
+20,2,8,1,2,1,2,23,32,86369.60869565218,15.155799865722656,0.02273145999999926,1.2671509689999993,0.7992210359999987,0.4713571210000005,0.030614072000002324,0.10636937299999971,0.9197591020000004,0.0033545619999983955,2.271271087999999,0,134.0,144.0,146.0

@@ -1,0 +1,7 @@
+grid 40², wall with two 1-cell corridors: 1524 free cells; 8 agents; block 2; triangle contact radius 1; 1 ranks on 1 nodes × 16 threads
+#1  28 edges (1389564 states each), 56 triangles; 1 ranks × 16 threads
+    total 11.8 s: shared 0.2, edges 9.7 (fastest rank 9.7), exchange 0.0 (297 MiB), assemble 0.8, triangles 1.0, glue 0.00
+    decoupled 351  sheaf bound 356  prioritized 362  certified ratio 1.017
+#2  23 edges (1389343 states each), 32 triangles; 1 ranks × 16 threads
+    total 9.9 s: shared 0.1, edges 8.5 (fastest rank 8.5), exchange 0.0 (244 MiB), assemble 0.1, triangles 1.1, glue 0.00
+    decoupled 309  sheaf bound 309  prioritized 309  certified ratio 1.000
