@@ -663,6 +663,52 @@ Findings:
 - **What still leaks.** With refined summaries, one edge in 175 and, at radius 1,
   one triangle in 14 are still below the exact value. Sharing a set of reachable
   arcs does not fix *when* they are reached, so some lateral freedom remains.
+
+**Parallel construction and larger maps** (`docs/scripts/tropical_cover_scaling.jl`:
+eight agents, two instances per map, future-refined summaries, triangle radius 1).
+The cover's work is a set of independent tasks:
+- one summary per agent, which is vertex data;
+- one explicit stalk per edge, built from its two agents alone;
+- one search per triangle, which only reads finished edge stalks.
+
+`CoverSheaf` and [`cover_bound`](@ref) run these tasks over Julia's threads. Only the
+gluing, a small integer program on the agents, is sequential.
+
+| map (block) | edge stalk vs. pair graph | certified ratio (prioritized / bound) | build, 1 thread | build, 16 threads | triangles, 1 → 16 threads |
+|---|---|---|---|---|---|
+| 40² (2) | 1.39M vs. 2.32M states (60%) | 1.017, 1.000 | 45–54 s | 13–21 s | 3.5–6.3 s → 0.6–1.2 s |
+| 64² (4) | 3.5M vs. 15.8M states (22–23%) | 1.000, 1.009 | 177–241 s | 53–71 s | 3.3–10.2 s → 0.7–2.3 s |
+
+- **Compression grows with the map, if the blocks do.** With blocks of 2 cells,
+  (Reeb arc, block) has nearly one summary per cell, and the edge stalk is 60% of
+  the pair graph. On 64² with blocks of 4 cells it is 22%. The certificate stays
+  within 2%, and on one 64² instance it proves the prioritized plan optimal.
+- **Triangles stay cheap.** At every size, the triangle searches guided by the
+  pulled-back edge values take a few thousand expansions each, and seconds for
+  all of them together.
+- **Threads give 3–4× on 16 cores, limited by memory traffic.** The compute
+  itself scales: a pure-arithmetic loop scales perfectly on these nodes, and the
+  tasks share nothing. But one 40² edge stalk streams through about 32 million
+  arcs. With 16 built at once, each takes about twice as long as alone (6.6 s
+  against 3.1 s), so 16 concurrent edges finish 6.3× faster than in sequence. A
+  full cover runs its 20–28 edges in two waves on 16 threads, hence 3–4×.
+- **Allocation.** Allocation was the first bottleneck and is now small. Each
+  explicit stalk used to allocate 1.7 GB of short-lived arc arrays, and garbage
+  collection paused every thread.
+
+  Four changes removed it:
+  - precomputed move lists;
+  - building the arcs in compressed form, one state at a time;
+  - a dense index over the box of coarse states, in place of hashing;
+  - reusing arc buffers across stalks when the arcs are not kept.
+
+  An edge stalk now allocates 272 MB, mostly its own states, index and
+  cost-to-go, and a 40² instance builds on one thread in 54 s instead of 117 s. Faster thread
+  scaling would have to cut memory traffic, not allocation.
+- **Across nodes.** On one node the build is bandwidth-bound. The tasks need only
+  their agents' graphs and summaries and return a cost-to-go table, so the
+  natural next step is to spread edges over nodes (MPI or Distributed). That is
+  untested.
 - **The edge stalk is exact and tight.** It equals the pushforward of the pair
   graph, and that pushforward along (Reeb arc, block) loses nothing against the
   exact pair delay on these maps. With exact pair bounds the gluing reproduced the
@@ -789,10 +835,14 @@ supersolutions and Tarski's theorem replaces linear algebra.
   moves removes it but keeps almost nothing summarized on a grid. Intermediate
   refinements, futures seen at a few steps' horizon or through a finer partition
   than the Reeb arcs, are untested.
-- **Compression at this scale is modest.** On a 20² map the edge stalks are about
-  two thirds of the pair graph, and the gain comes mostly from searching the
-  triangles on demand with pulled-back edge values. Whether the summaries and the
-  contact radius stay small as maps grow is open.
+- **Compression needs larger blocks.** The edge stalks are 60–65% of the pair
+  graph with blocks of 2 cells, and 22% on a 64² map with blocks of 4 cells.
+  Larger blocks widen the contact region, so how block size, contact radius and
+  tightness trade off on larger maps is open. The 64² certificates stayed
+  within 1%.
+- **Thread scaling is bandwidth-bound.** On one node, 16 threads give 3–4×. The
+  edge tasks are independent and small to exchange, so distributing them over
+  nodes is the next step, and untested.
 - **Bounds at the start only.** The triangle values are searched from one joint
   state. A heuristic at every state of a joint search needs them cached or built
   across queries.
@@ -820,6 +870,10 @@ supersolutions and Tarski's theorem replaces linear algebra.
   - `docs/scripts/tropical_multiagent_cover.jl`: four to eight agents, the
     sandwich, independence detection, the gauge on the cover
     (`tropical_cover_gauge.jl`) and the simplicial cover with exact triangles;
+  - `docs/scripts/tropical_cover_scaling.jl`: 20² to 64² maps, eight agents,
+    the cover built and evaluated over threads (arguments: map size, agents,
+    instances, `profile`; `COVER_BLOCK` sets the block size), run with
+    `julia -t T`;
   - `docs/scripts/tropical_cover_triangles.jl`: the same instances on the
     2-complex of `TropicalCovers`, with symmetric edge and triangle stalks
     (arguments: map size, instances, triangle and edge contact radius, and the

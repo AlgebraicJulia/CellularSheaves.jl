@@ -1,0 +1,7 @@
+grid 64², wall with two 1-cell corridors: 3972 free cells; 8 agents; block 4; triangle contact radius 1; 16 threads
+#1  20 edges, 24 triangles; summaries 1782 per agent (3972 cells); edge stalk 3585881 states vs pair graph 15776784 (23%)
+    16 threads: summaries 0.1 s, build 52.8 s, bound 0.7 s (triangle expansions mean 5135)
+    decoupled 409  sheaf bound 411  prioritized 411  certified ratio 1.000 (decoupled 1.005)
+#2  25 edges, 41 triangles; summaries 1769 per agent (3972 cells); edge stalk 3529556 states vs pair graph 15776784 (22%)
+    16 threads: summaries 0.0 s, build 71.1 s, bound 2.3 s (triangle expansions mean 8649)
+    decoupled 450  sheaf bound 454  prioritized 458  certified ratio 1.009 (decoupled 1.018)
