@@ -392,6 +392,53 @@ coordinate. It had to be patched with an occupancy check and still lost a third 
 the coordination cost on double integrators. The missing piece was the relation,
 which is what an edge stalk is supposed to carry.
 
+**Changing the gauge on the cover.** The matching uses each agent in at most one
+edge. A gauge transformation on the cover uses every edge instead.
+
+- **The split.** Each agent's delay is split, state by state, among the edges at
+  it: weights ``w_{ie}(s) \ge 0`` with ``\sum_e w_{ie}(s) \le 1``. Edge
+  ``e = \{i, j\}`` then carries the pair problem with arc costs
+  ``w_{ie}\,\mathrm{delay}_i + w_{je}\,\mathrm{delay}_j``.
+- **Why it is a gauge.** The split moves cost between the cells of the cover
+  without changing the cost of any global section. This mirrors how ``\varphi``
+  adds a coboundary on one agent's graph without changing the cost of any path.
+- **The two gauges compose.** In the delay gauge every arc cost is nonnegative and
+  an agent alone costs 0. So the split is well posed, and the whole bound comes
+  from the edges.
+- **Validity.** For every split, the sum over edges of the weighted pair optima is
+  an admissible and consistent heuristic, because a joint move restricts to a move
+  of every pair. A matching is the split with ``w \equiv 1`` on matched edges.
+- **Optimization.** `docs/scripts/tropical_cover_gauge.jl` maximizes the split at
+  the start by projected supergradient ascent from the matching. Its weighted edge
+  stalk is the same pushforward as before: agent ``j``'s arc cost on a far coarse
+  arc is the least weighted delay over the fibre.
+
+**Edges are not enough: the cover needs 2-cells.** Weights are at most 1, so every
+edge factor is at most its pair's own optimum. No split, however clever, can see
+an interaction that no pair sees, and three agents meeting at a corridor is
+exactly that. In one four-agent instance:
+- every pair except ``(1, 4)`` has optimal delay 0, and ``(1, 4)`` has delay 3;
+- the triple ``\{1, 3, 4\}`` has delay 5, which is also the optimum for all four.
+
+The pairwise data is exhausted at 3. The gap is an obstruction that lives on a
+triangle of the interaction graph, not on any edge.
+
+So extend the cover to the clique complex of the interaction graph, with a stalk
+on every triangle: the triple problem.
+- **Bound.** The delays ``x_i`` of a joint plan restrict to a plan of every simplex
+  ``\sigma``, so they satisfy ``\sum_{i \in \sigma} x_i \ge \Delta_\sigma`` for
+  every edge and triangle. The smallest such integer 0-cochain, the *simplicial
+  cover*, bounds the total delay. With edges alone it is the weighted vertex cover
+  of Li, Felner et al. (2019).
+- **Its relation to the gauge.** Its linear relaxation is the linear-programming
+  dual of the scalar split over simplices,
+  ``\max \sum_\sigma y_\sigma \Delta_\sigma`` with ``\sum_{\sigma \ni i} y_\sigma \le 1``.
+  So the gauge on the cover and the cover by 0-cochains are two sides of one
+  duality, and integrality strengthens the cover side.
+
+In the studies the triangles are solved exactly by joint search: the identity
+pushforward, not yet a summarized stalk.
+
 ## What the studies found
 
 All timings are on one HiPerGator CPU node, averaged over 30 random
@@ -512,22 +559,35 @@ compares:
 - a feasible plan from prioritized planning (each agent plans around the
   reservations of those before it).
 
-| N | interacting pairs | recovered | certified ratio (feasible / sheaf bound) | joint expansions, decoupled → sheaf heuristic |
+| N | interacting pairs | recovered: matching / vertex cover / cover gauge / edges + triangles | certified ratio (feasible / bound): matching → edges + triangles | joint expansions, decoupled → sheaf heuristic |
 |---|---|---|---|---|
-| 4 | 5.5 of 6 | 60% | 1.007 | 6444 → 888 |
-| 6 | 12 of 15 | 85% | 1.012 | 5265 → 1946 |
-| 8 | 26 of 28 | – | 1.046 | groups of 5–7: out of reach |
+| 4 | 5.5 of 6 | 60% / 60% / 60% / **100%** | 1.007 → **1.000** | 6444 → 888 |
+| 6 | 12 of 15 | 85% / 85% / 85% / **100%** | 1.012 → **1.000** | 5265 → 1946 |
+| 8 | 26 of 28 | – | 1.046 → 1.034 | groups of 5–7: out of reach |
 
-Four observations:
+Observations:
+
+- **The gauge on the edges finds nothing the matching misses.** The ascent
+  reproduces the matching on every instance, and so does the vertex cover (one
+  N = 8 instance aside, by 1). Their ceiling is the sum of the pair optima, and
+  the pairs had already given what they had.
+- **Triangles close the gap.** On every solved instance with a gap, the
+  remaining coordination cost came from triangles whose triple delay exceeds every
+  one of their edges: 1 of 4 triangles at N = 4, 2 of 2 at N = 6, and 1–4 per
+  instance at N = 8. With the triangles, the bound equals the optimum on all 8
+  solved instances. At N = 8 it raises the bound on every instance, and certifies
+  the prioritized plans within 1–8% of optimal (previously 2–9%), still without
+  the optimum. Solving the 36–56 triangles exactly takes 1–2 minutes per
+  instance.
 
 - **The edge stalk is exact and tight.** It equals the pushforward of the pair
   graph, and that pushforward along (Reeb arc, block) loses nothing against the
   exact pair delay on these maps. With exact pair bounds the gluing reproduced the
   three-agent optimum on every query.
 - **The certificate scales; the search does not yet.** At eight agents no joint
-  search finishes, but the sandwich certifies the prioritized plans within 2–9%
-  of optimal without knowing the optimum. That is the lax/oplax sandwich of the
-  single-agent controller, now over the interaction sheaf.
+  search finishes, but with triangles the sandwich certifies the prioritized plans
+  within 1–8% of optimal without knowing the optimum. That is the lax/oplax
+  sandwich of the single-agent controller, now over the interaction sheaf.
 - **The heuristic cuts joint expansions 3–7×,** but each evaluation costs more, so
   on these small groups wall time is similar.
 - **Size.** At these map sizes the pair graph is still solvable and comparable in
@@ -606,6 +666,14 @@ other agent's value function (Reeb 1946); contour trees (Carr, Snoeyink & Axen
 2003) and Reeb graphs as cosheaves (de Silva, Munch & Patel 2016) are the
 computational and categorical forms of it.
 
+Splitting cost among the factors of a decomposition without changing the total is
+*reparametrization* in MAP inference. Maximizing the sum of local minima over
+reparametrizations is the dual of the local-polytope relaxation (Wainwright &
+Jordan 2008), and it is what tree-reweighted message passing optimizes (Kolmogorov
+2006). When pairwise factors leave a gap, that literature adds triplet clusters,
+found where the gap concentrates (Sontag, Meltzer, Globerson, Jaakkola & Weiss
+2008). That is the same move as the 2-cells of the interaction sheaf above.
+
 **Sheaves.** The real side of the package follows Curry (2014) and Hansen & Ghrist
 (2019): global sections, Laplacians, harmonic extension. Sheaves valued in
 lattices and their fixed-point "Laplacian" (Ghrist & Riess 2022) are the natural
@@ -633,6 +701,15 @@ supersolutions and Tarski's theorem replaces linear algebra.
   bounds are only proved admissible at synchronized states. A half-moved
   configuration needs its own argument. Until then, large groups get the
   certificate but not the optimum.
+- **Triangle stalks are solved, not summarized.** Each triangle is a three-agent
+  joint search, which is affordable at 20² but is the product-space work the
+  sheaf is meant to avoid. Two steps remain open:
+  - triangle stalks as pushforwards, along the same summaries as the edges;
+  - building only the triangles where the edge bounds leave a gap, which in
+    these studies is 1–4 triangles per instance.
+
+  The bound is computed at the start only. A heuristic at every joint state needs
+  the triangle stalks themselves.
 - **Dense interaction graphs.** On maps that funnel every agent through the same
   corridors nearly all pairs interact, and the gluing gains little from sparsity.
 - **Scale of the edge stalks.** The near field is fixed in size but large (a
