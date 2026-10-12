@@ -149,6 +149,80 @@ velocity). The coarse sheaf ``G`` then has stalk ``\mathbb R_{\min}^K`` over eve
 velocity-blind quotient; with one mode per state it is an isomorphism. The modes
 interpolate between the two, and the bound tightens monotonically.
 
+### Changing the gauge
+
+A change of gauge relabels the zero point of cost at every state. It leaves the
+fine problem alone and changes what a coarse problem can see.
+
+**The operation.** Pick a number ``\varphi(x)`` for every state, the *potential*,
+and replace each edge cost by its reduced cost
+
+```math
+W^\varphi_{xy} = W_{xy} + \varphi(y) - \varphi(x),
+\qquad\text{i.e.}\qquad
+W^\varphi = D^{-1} \otimes W \otimes D,\quad D = \operatorname{diag}(\varphi).
+```
+
+In min-plus, ``D`` is an invertible diagonal matrix, so this is a similarity: an
+isomorphism of min-plus sheaves that shifts each stalk's values by ``\varphi``. In
+cochain terms, the edge costs are a 1-cochain ``c`` and the change is
+``c \mapsto c + \delta\varphi``: it adds a coboundary.
+
+**Why the fine problem does not change.** Along any path ``x_0 \to \cdots \to x_n``
+the potentials telescope:
+
+```math
+\textstyle\sum W^\varphi(\text{path}) = \sum W(\text{path}) + \varphi(x_n) - \varphi(x_0).
+```
+
+Every path between the same endpoints shifts by the same amount, and every cycle
+by nothing. So the optimal paths, the optimal policy and the reachable set are
+unchanged. With ``\varphi = 0`` on the targets, the cost-to-go shifts by exactly
+the potential: ``V^\varphi = V - \varphi``. Only differences of ``\varphi``
+matter, which is why the name *gauge* fits.
+
+The same move is familiar under other names:
+
+- **A\* is Dijkstra in a gauge.** Dijkstra on the reduced costs with
+  ``\varphi = h`` is exactly A\* with heuristic ``h``. The heuristic must be
+  consistent, ``h(x) \le W_{xy} + h(y)``, precisely so that ``W^\varphi \ge 0``.
+- **Johnson's algorithm** (1977) reweights a graph this way to remove negative
+  edges.
+- **Linear programming:** ``\varphi`` is the dual vector and ``W^\varphi`` the
+  reduced costs.
+- **Reinforcement learning:** potential-based reward shaping (Ng, Harada &
+  Russell 1999), proved not to change the optimal policy.
+
+**Why the coarse problem does change.** The pushforward takes a *minimum over each
+block*, and a minimum does not commute with adding different amounts to different
+states. So the same fine problem in two gauges has two different quotients.
+
+A line of states ``0 - 1 - 2 - 3`` with unit steps and the goal at 3 has
+``V = (3, 2, 1, 0)``. Aggregate it into blocks ``A = \{0, 1\}`` and
+``B = \{2, 3\}``.
+
+- **Original gauge.** The quotient has one edge ``A \to B`` of cost 1, and the
+  steps inside each block are contracted away. The bound at state 0 is 1, against
+  a true cost of 3.
+- **Gauge ``\varphi = V``.** A step toward the goal costs 0 and a step away costs
+  2. The coarse cost-to-go is 0 everywhere, and the bound is
+  ``\varphi + 0 = 3``, which is exact.
+
+The gauge moves information *out of* the edge costs, which the minimum over blocks
+destroys, *into* the potential, which is added back state by state.
+
+[`Abstraction`](@ref)`(W, ψ; potential = φ)` does this. The quotient is built
+from ``W^\varphi``, and [`lower_bound`](@ref) returns ``\varphi + E V^\varphi_c``,
+a refinement that copies block values *on top of* ``\varphi`` rather than
+flat. The potential must be consistent, for example the cost-to-go of a
+relaxation, and then the bound is again a consistent heuristic.
+
+This is the min-plus counterpart of aggregation with a near-nullspace mode in
+algebraic multigrid. There too the choice of basis decides what the coarse space
+must represent: `TruncatedPushforwardCoarseSpace` aggregates ``D_h z`` rather than
+constants. Here the "mode" is ``\varphi``, and the coarse space only represents
+corrections to it.
+
 ### Elimination is min-plus harmonic extension
 
 On a real sheaf, [`harmonic_extension`](@ref) fixes the values on boundary cells
@@ -234,6 +308,76 @@ We also tried transporting a Lyapunov function from a *pessimistic* coarse sheaf
 every state in a mode to make the move, and wide speed bins rarely satisfy that.
 The per-query corridor certificate is the practical form of the lax side.
 
+## Cooperative multi-agent planning
+
+Several agents share a map, one planner controls them all, and each pays for its
+own steps, waiting included, until it rests at its goal. The joint state graph is
+the product of the agents' graphs with the collisions removed (vertex and swap
+conflicts), so it grows exponentially with the number of agents. The question is
+how much of the *coordination cost*, the waiting and detours that the agents
+impose on one another, a polynomial-size abstraction can see.
+
+**Work in the decoupled gauge.** Let ``d_i`` be agent ``i``'s single-agent
+cost-to-go and ``\varphi = \sum_i d_i``. In the gauge of ``\varphi``:
+
+- an agent moving along a shortest path costs 0;
+- waiting costs 1;
+- stepping away from its goal costs 2.
+
+So the joint cost-to-go is ``\varphi`` plus the total **delay**, and a heuristic
+only has to bound the delay. Without the gauge, coarsening the other agent by
+position throws away its travel cost, as in the line example above, and the bound
+cannot beat the plain sum of solo distances. The summary below keeps the other
+agent's remaining distance anyway, and with it the gauge turns out to be
+redundant: it matters exactly for summaries that discard ``d_j``.
+
+**Summarize the other agent by the Reeb graph of its value function.** In agent
+``i``'s coarse problem, ``i`` keeps its exact state and agent ``j`` is replaced by
+a mode, and the joint graph is pushed forward along that map. Which mode decides
+everything:
+
+- **Position blocks** of agent ``j`` leak *timing*. A block forgets where in it
+  ``j`` is, so consecutive coarse steps can put ``j`` anywhere in the block. ``j``
+  can then reach a corridor early and slip through before ``i`` arrives.
+- **Level sets** of ``d_j`` (agent ``j``'s remaining distance) fix the timing,
+  because ``j``'s delay-free moves go from level ``k`` to ``k - 1``. But a level
+  set contains equidistant cells on opposite sides of an obstacle, so ``j`` can
+  hop across a wall for free.
+- **Arcs of the Reeb graph of ``d_j``** fix both. A level-``k`` state's arc is its
+  component of the band ``k \le d_j \le k + 1``, the discrete level set
+  ``d_j = k + \tfrac12``, so cells on opposite sides of an obstacle fall in
+  different arcs. Reeb graphs are themselves cosheaves (de Silva, Munch & Patel
+  2016), so the summary is a pushforward along a map with topological content,
+  not a hand-made partition. The merge tree, which uses components of the
+  superlevel sets ``\{d_j \ge k\}``, does *not* work: those sets reconnect through
+  distant routes.
+
+**The interaction sheaf.** For ``N`` agents, the coarse problems become edge
+stalks on the interaction graph:
+
+- **Vertex stalk:** an agent's own state graph in the gauge of its ``d_i``.
+- **Edge stalk of a pair ``(i, j)``:** agent ``i``'s states times a mode of agent
+  ``j``. The mode is ``j``'s exact state (relative cell and velocity) when within
+  distance ``r`` of ``i``, where the collision coupling lives, and otherwise
+  ``j``'s Reeb arc. The far dynamics are the pushforward of ``j``'s own moves
+  along the arcs. Its cost-to-go ``\Delta_{ij}`` bounds the pair's delay.
+- **Gluing:** an ``N``-agent plan restricts to a feasible plan of every pair, and
+  delays are nonnegative. So for any matching of the interaction graph,
+  ``\varphi + \sum_{(i,j)} \Delta_{ij}`` is admissible, and the heuristic takes
+  the best matching. This is the pairwise heuristic of conflict-based search (Li,
+  Felner et al. 2019), with the pair bounds coming from abstractions instead of
+  pair solves.
+
+The edge stalk can be built from the two agents' graphs alone, without the pair
+graph. It is an over-approximation of the pushforward of the pair graph, so it
+still gives a lower bound. One condition must not be dropped: in a far mode, the
+other agent must be *outside* agent ``i``'s window. Each Reeb arc remembers its
+*footprint*, the cells its states occupy, and a far mode exists only where the
+footprint has a cell outside the window. When ``j`` enters the window, the
+construction checks its actual predecessor states. Without this check the pair
+bound recovered none of the coordination cost. With it, it matches the exact
+pushforward on the grid study.
+
 ## What the studies found
 
 All timings are on one HiPerGator CPU node, averaged over 30 random
@@ -303,6 +447,64 @@ isomorphism (169 modes) certifies everything exactly.
 route with the most clearance from the walls. The fastest routes take 23–29 steps
 with 0.5 cells of clearance, while the safest take 63–72 steps with up to 9.7 cells.
 
+**Multiple agents.** The coordination cost is the gap between the exact joint cost
+and the sum of solo distances. "Recovered" is the share of that gap a heuristic's
+bound closes at the start state, averaged over queries where the agents must
+cross. All heuristics are admissible and every search returns the optimum, so the
+expansions measure heuristic quality alone.
+
+*Two grid agents, 32² map with a wall and two one-cell corridors (712k joint
+states):*
+
+| other agent summarized by | coarse states (both agents) | recovered | joint A* expansions |
+|---|---|---|---|
+| nothing (sum of solo distances) | – | 0% | 1243 |
+| position blocks 4×4 + near field | 62k | 0% | 1237 |
+| level sets of ``d_j`` + near field (+ exact corridor cells) | 105k (125k) | 0% | 1237 (1174) |
+| **Reeb arcs of ``d_j``** | 173k | **89%** | **398** |
+| exact joint cost-to-go | 712k | 100% | 380 |
+
+With Reeb arcs, adding the near field or dropping the gauge changes nothing.
+
+*Three grid agents, 10² map (593k joint states), pair bounds glued over the
+interaction graph:*
+
+| pair bound | coarse states | recovered | joint A* expansions |
+|---|---|---|---|
+| none | – | 0% | 306 |
+| edge stalk from the agents' own graphs | 21k | 62% | 142 |
+| exact pushforward of each pair graph, same map | 21k | 62% | 142 |
+| exact pair delays | 21k (pair graphs) | 100% | 109 |
+| exact joint cost-to-go | 593k | 100% | 103 |
+
+*Two double integrators, 16² map, velocities in ``\{-1, 0, 1\}^2`` (2052 states
+each, 4.2M pair states):*
+
+| pair bound | coarse states | recovered | pair A* expansions | build |
+|---|---|---|---|---|
+| none | – | 0% | 1289 | – |
+| edge stalk from the agents' own graphs | 1.18M | 67% | 846 | 25 s |
+| exact pushforward of the pair graph, same map | 1.18M | 100% | 584 | 19 s |
+| exact pair delay | 4.2M | 100% | 571 | 8 s |
+
+Three observations:
+
+- **The gluing is right.** With exact pair delays it reproduced the exact
+  three-agent optimum on every query.
+- **The summary is right.** For double integrators, pushing the pair graph
+  forward along the Reeb-arc map recovers the whole coordination cost.
+- **The cheap edge stalk is the weak link.** Built without the pair graph, it
+  recovers 62–67%, and on the grid it equals the exact pushforward. On double
+  integrators it falls short of the exact pushforward. The likely cause, not yet
+  confirmed, is that it checks the start and end arcs of a far-to-far move
+  separately, instead of requiring a single state of ``j`` to make the whole move.
+
+At these sizes, solving the pair graph outright is cheaper than any abstraction.
+The abstraction pays only where a pair's state space is too large to solve: for
+example two double integrators on a ``128^2 \times 13^2`` lattice, whose pair graph
+has ``\sim 10^{13}`` states. There the near field also has to coarsen the other
+agent's velocity, with the heading × speed modes of [`TruncatedPushforward`](@ref).
+
 ## Relation to the literature
 
 The ingredients are classical. What the sheaf view adds is a single vocabulary in
@@ -360,6 +562,19 @@ Tabuada 2025; Ames, Mattenet & Moeller 2025). There a Lyapunov function is a lax
 morphism into a stability object, and the lax/oplax sandwich above is its
 two-sided form for optimal control.
 
+**Multi-agent path finding.** Planning in the joint graph with a decoupled
+heuristic, and coupling agents only where they conflict, is the core of
+independence detection (Standley 2010), subdimensional expansion and M\* (Wagner &
+Choset 2015), and conflict-based search (Sharon, Stern, Felner & Sturtevant 2015).
+Pairwise bounds combined over a matching or vertex cover of the conflict graph are
+the weighted dependency-graph heuristics of Li, Felner, Boyarski, Ma & Koenig
+(2019). The interaction sheaf replaces their exact pair solves by pushforwards along
+a summary of the other agent. The gauge is potential-based shaping (Ng, Harada &
+Russell 1999) and Johnson's reweighting (1977). The summary is the Reeb graph of the
+other agent's value function (Reeb 1946); contour trees (Carr, Snoeyink & Axen
+2003) and Reeb graphs as cosheaves (de Silva, Munch & Patel 2016) are the
+computational and categorical forms of it.
+
 **Sheaves.** The real side of the package follows Curry (2014) and Hansen & Ghrist
 (2019): global sections, Laplacians, harmonic extension. Sheaves valued in
 lattices and their fixed-point "Laplacian" (Ghrist & Riess 2022) are the natural
@@ -381,6 +596,12 @@ supersolutions and Tarski's theorem replaces linear algebra.
   merge-and-shrink and counterexample-guided abstraction refinement automate it.
   The lax/oplax gap is a natural refinement signal: refine where the two quotients
   disagree.
+- **Multi-agent edge stalks at scale.** Two things are untested. The first is
+  whether the edge stalk can keep "one state of the other agent makes the whole
+  far-to-far move" without the pair graph. The second is how far the near field's
+  velocity can be coarsened before the bound degrades. Both matter only where pair
+  graphs are too large to solve, which is also where the bounds can no longer be
+  checked exactly.
 
 ## Reproducing the results
 
@@ -390,6 +611,14 @@ supersolutions and Tarski's theorem replaces linear algebra.
   checks the commutation of aggregation and elimination.
 - **Layered planner and certificates:** `docs/scripts/tropical_layered_study.jl`.
 - **Pessimistic quotient:** `docs/scripts/tropical_lyapunov_study.jl`.
+- **Multiple agents:**
+  - `docs/scripts/tropical_multiagent_study.jl`: two agents, the ablation of
+    gauge, summary and near field;
+  - `docs/scripts/tropical_pair_sheaf.jl`: the interaction sheaf, shared by the
+    next two;
+  - `docs/scripts/tropical_multiagent_sheaf.jl`: three grid agents;
+  - `docs/scripts/tropical_multiagent_double_integrator.jl`: double-integrator
+    pairs.
 
 An interactive visualization is in `docs/viz/tropical_demo.html`, built from
 `docs/scripts/tropical_viz_export.jl`. It shows the value function, the coarse

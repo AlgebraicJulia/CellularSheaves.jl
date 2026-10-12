@@ -1,0 +1,65 @@
+kind,heuristic,states,optimal,decoupled,bound,expanded,build_seconds
+swap,decoupled (Dijkstra on delays),0,26.0,25.0,25.0,801,0.0
+swap,sheaf: pair abstraction,1220517,26.0,25.0,26.0,490,27.087553566
+swap,sheaf: exact pair pushforward,1220517,26.0,25.0,26.0,332,20.125993195
+swap,exact pair delay,4192236,26.0,25.0,26.0,332,8.405280358
+swap,decoupled (Dijkstra on delays),0,21.0,21.0,21.0,99,0.0
+swap,sheaf: pair abstraction,1193679,21.0,21.0,21.0,99,25.695212738
+swap,sheaf: exact pair pushforward,1193679,21.0,21.0,21.0,99,19.064429273000002
+swap,exact pair delay,4192236,21.0,21.0,21.0,99,8.352572597
+swap,decoupled (Dijkstra on delays),0,24.0,24.0,24.0,80,0.0
+swap,sheaf: pair abstraction,1109871,24.0,24.0,24.0,80,21.124384089
+swap,sheaf: exact pair pushforward,1109871,24.0,24.0,24.0,80,19.289788558
+swap,exact pair delay,4192236,24.0,24.0,24.0,80,7.846124168999999
+swap,decoupled (Dijkstra on delays),0,22.0,22.0,22.0,75,0.0
+swap,sheaf: pair abstraction,1151784,22.0,22.0,22.0,73,23.099475192
+swap,sheaf: exact pair pushforward,1151784,22.0,22.0,22.0,73,19.229933103
+swap,exact pair delay,4192236,22.0,22.0,22.0,58,8.338458863
+swap,decoupled (Dijkstra on delays),0,24.0,22.0,22.0,829,0.0
+swap,sheaf: pair abstraction,1148013,24.0,22.0,24.0,275,22.954974996
+swap,sheaf: exact pair pushforward,1148013,24.0,22.0,24.0,275,19.242128754
+swap,exact pair delay,4192236,24.0,22.0,24.0,275,7.96393318
+swap,decoupled (Dijkstra on delays),0,30.0,28.0,28.0,8186,0.0
+swap,sheaf: pair abstraction,1163754,30.0,28.0,28.0,5506,23.706758771
+swap,sheaf: exact pair pushforward,1163754,30.0,28.0,30.0,3573,19.248534272
+swap,exact pair delay,4192236,30.0,28.0,30.0,3481,7.994039153999999
+swap,decoupled (Dijkstra on delays),0,24.0,24.0,24.0,126,0.0
+swap,sheaf: pair abstraction,1191582,24.0,24.0,24.0,125,25.747691526
+swap,sheaf: exact pair pushforward,1191582,24.0,24.0,24.0,125,19.147549398000002
+swap,exact pair delay,4192236,24.0,24.0,24.0,125,8.188648666
+swap,decoupled (Dijkstra on delays),0,25.0,25.0,25.0,118,0.0
+swap,sheaf: pair abstraction,1227375,25.0,25.0,25.0,118,27.1341001
+swap,sheaf: exact pair pushforward,1227375,25.0,25.0,25.0,118,19.137678667
+swap,exact pair delay,4192236,25.0,25.0,25.0,118,8.429796358
+random,decoupled (Dijkstra on delays),0,13.0,13.0,13.0,22,0.0
+random,sheaf: pair abstraction,1155663,13.0,13.0,13.0,22,23.337161141
+random,sheaf: exact pair pushforward,1155663,13.0,13.0,13.0,22,19.285973124999998
+random,exact pair delay,4192236,13.0,13.0,13.0,22,8.446286952
+random,decoupled (Dijkstra on delays),0,15.0,15.0,15.0,83,0.0
+random,sheaf: pair abstraction,1191582,15.0,15.0,15.0,83,25.350869653
+random,sheaf: exact pair pushforward,1191582,15.0,15.0,15.0,83,18.951405645
+random,exact pair delay,4192236,15.0,15.0,15.0,83,8.235500522999999
+random,decoupled (Dijkstra on delays),0,24.0,24.0,24.0,323,0.0
+random,sheaf: pair abstraction,1146285,24.0,24.0,24.0,323,23.004870489
+random,sheaf: exact pair pushforward,1146285,24.0,24.0,24.0,323,19.252251524
+random,exact pair delay,4192236,24.0,24.0,24.0,323,8.254609283
+random,decoupled (Dijkstra on delays),0,23.0,23.0,23.0,25,0.0
+random,sheaf: pair abstraction,1204893,23.0,23.0,23.0,25,25.634708533
+random,sheaf: exact pair pushforward,1204893,23.0,23.0,23.0,25,20.157427662
+random,exact pair delay,4192236,23.0,23.0,23.0,25,9.169993633
+random,decoupled (Dijkstra on delays),0,19.0,19.0,19.0,90,0.0
+random,sheaf: pair abstraction,1199277,19.0,19.0,19.0,90,25.867183805
+random,sheaf: exact pair pushforward,1199277,19.0,19.0,19.0,90,19.077767525
+random,exact pair delay,4192236,19.0,19.0,19.0,90,8.260382544
+random,decoupled (Dijkstra on delays),0,26.0,26.0,26.0,211,0.0
+random,sheaf: pair abstraction,1186038,26.0,26.0,26.0,211,25.198177231
+random,sheaf: exact pair pushforward,1186038,26.0,26.0,26.0,211,19.203383992
+random,exact pair delay,4192236,26.0,26.0,26.0,211,9.045532525
+random,decoupled (Dijkstra on delays),0,22.0,22.0,22.0,199,0.0
+random,sheaf: pair abstraction,1157697,22.0,22.0,22.0,199,23.649963027
+random,sheaf: exact pair pushforward,1157697,22.0,22.0,22.0,199,19.244083462
+random,exact pair delay,4192236,22.0,22.0,22.0,199,8.149249834
+random,decoupled (Dijkstra on delays),0,22.0,22.0,22.0,192,0.0
+random,sheaf: pair abstraction,1112346,22.0,22.0,22.0,192,21.149348855
+random,sheaf: exact pair pushforward,1112346,22.0,22.0,22.0,192,19.178700134
+random,exact pair delay,4192236,22.0,22.0,22.0,192,7.803939858
