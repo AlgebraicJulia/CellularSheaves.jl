@@ -1,0 +1,34 @@
+grid 20², wall with two 1-cell corridors: 364 free cells
+N=4 #1  pairs  5/ 6  decoupled  92.0 ≤ sheaf  92.0 ≤ optimum  92.0 ≤ prioritized  92.0  (certified ratio 1.000)
+        independence detection: decoupled heuristic       500 expanded (0.9 s), sheaf       288 (1.1 s), largest group 2
+N=4 #2  pairs  6/ 6  decoupled  80.0 ≤ sheaf  80.0 ≤ optimum  80.0 ≤ prioritized  80.0  (certified ratio 1.000)
+        independence detection: decoupled heuristic        78 expanded (0.0 s), sheaf        68 (0.6 s), largest group 2
+N=4 #3  pairs  6/ 6  decoupled  72.0 ≤ sheaf  75.0 ≤ optimum  77.0 ≤ prioritized  77.0  (certified ratio 1.027)
+        independence detection: decoupled heuristic     25151 expanded (14.2 s), sheaf      3149 (8.1 s), largest group 4
+N=4 #4  pairs  5/ 6  decoupled  85.0 ≤ sheaf  85.0 ≤ optimum  85.0 ≤ prioritized  85.0  (certified ratio 1.000)
+        independence detection: decoupled heuristic        45 expanded (0.0 s), sheaf        45 (1.7 s), largest group 3
+N=6 #1  pairs  7/15  decoupled 101.0 ≤ sheaf 107.0 ≤ optimum 112.0 ≤ prioritized 112.0  (certified ratio 1.047)
+        independence detection: decoupled heuristic     16070 expanded (2.0 s), sheaf      5616 (5.3 s), largest group 3
+N=6 #2  pairs 15/15  decoupled 133.0 ≤ sheaf 133.0 ≤ optimum 133.0 ≤ prioritized 133.0  (certified ratio 1.000)
+        independence detection: decoupled heuristic       403 expanded (0.1 s), sheaf       400 (5.5 s), largest group 4
+N=6 #3  pairs 13/15  decoupled 118.0 ≤ sheaf 122.0 ≤ optimum 122.0 ≤ prioritized 122.0  (certified ratio 1.000)
+        independence detection: decoupled heuristic      3652 expanded (1.8 s), sheaf      1203 (6.4 s), largest group 4
+N=6 #4  pairs 13/15  decoupled 118.0 ≤ sheaf 121.0 ≤ optimum 121.0 ≤ prioritized 121.0  (certified ratio 1.000)
+        independence detection: decoupled heuristic       935 expanded (0.0 s), sheaf       566 (1.1 s), largest group 2
+N=8 #1  pairs 28/28  decoupled 171.0 ≤ sheaf 176.0 ≤ optimum   NaN ≤ prioritized 182.0  (certified ratio 1.034)
+        independence detection: decoupled heuristic      4019 expanded (0.5 s), sheaf       522 (3.3 s), largest group 5 (joint search out of reach)
+N=8 #2  pairs 28/28  decoupled 152.0 ≤ sheaf 159.0 ≤ optimum   NaN ≤ prioritized 174.0  (certified ratio 1.094)
+        independence detection: decoupled heuristic    307397 expanded (185.8 s), sheaf     37802 (30.3 s), largest group 7 (joint search out of reach)
+N=8 #3  pairs 25/28  decoupled 163.0 ≤ sheaf 168.0 ≤ optimum   NaN ≤ prioritized 174.0  (certified ratio 1.036)
+        independence detection: decoupled heuristic      1505 expanded (0.8 s), sheaf      1505 (5.2 s), largest group 5 (joint search out of reach)
+N=8 #4  pairs 24/28  decoupled 146.0 ≤ sheaf 150.0 ≤ optimum   NaN ≤ prioritized 153.0  (certified ratio 1.020)
+        independence detection: decoupled heuristic      4219 expanded (1.3 s), sheaf      1200 (8.1 s), largest group 5 (joint search out of reach)
+
+summary (means over instances)
+  N        pairs gap closed      ratio   true ratio   expanded (dec)      (sheaf)  largest group
+  4    5.5/6           0.60      1.007        1.000             6444          888            2.8
+    solved by joint search: 4 of 4
+  6   12.0/15          0.85      1.012        1.000             5265         1946            3.2
+    solved by joint search: 4 of 4
+  8   26.2/28             –      1.046          NaN              NaN          NaN            5.5
+    solved by joint search: 0 of 4

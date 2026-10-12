@@ -7,8 +7,8 @@
 #   - Edge stalk of a pair (i, j): the pushforward of the pair graph (both agents moving at
 #     once, collisions removed) along the map that keeps agent i's state and replaces
 #     agent j's by
-#       * its exact state, when j's block of the map is next to i's (the near region,
-#         which contains every collision), or
+#       * its cell and velocity mode (by default its exact velocity), when j's block of the
+#         map is next to i's (the near region, which contains every collision), or
 #       * the pair (Reeb arc of dⱼ, block) otherwise: its progress, and where it is
 #         relative to i at the resolution of the blocks.
 #     The far coordinate depends on j's state alone and the near/far split on blocks, so
@@ -72,7 +72,8 @@ end
 
 struct PairAbstraction
     b::Int                                       # block size
-    nnear::Int                                   # near modes: cells of a 3 × 3 block window × velocities of j
+    velmode::Vector{Int}                         # velocity of j -> its mode in the near field
+    nnear::Int                                   # near modes: cells of a 3 × 3 block window × velocity modes of j
     far::GraphHomomorphism                       # j's state -> (Reeb arc, block)
     far_block::Vector{NTuple{2,Int}}             # the block of each far summary
     Δ::Vector{Float64}                           # coarse delay-to-go over (state of i, mode of j)
@@ -90,15 +91,15 @@ function far_summary(M, Aj, b)
 end
 
 near(M, Ai, Aj, b, s, t) = block_distance(M, Ai.pos[s], Aj.pos[t], b) <= 1
-function near_index(M, Ai, Aj, b, s, t)
+function near_index(M, Ai, Aj, b, velmode, s, t)
     corner = (block(M, Ai.pos[s], b) .- 2) .* b                     # the window's cells are corner .+ (1:3b)
     l = M.cells[Aj.pos[t]] .- corner
-    return l[1] + 3b * (l[2] - 1) + (3b)^2 * (Aj.vel[t] - 1)
+    return l[1] + 3b * (l[2] - 1) + (3b)^2 * (velmode[Aj.vel[t]] - 1)
 end
 
 # The mode of agent j (in state t) as seen from agent i (in state s).
 pair_mode(M, P::PairAbstraction, Ai, Aj, s, t) =
-    near(M, Ai, Aj, P.b, s, t) ? near_index(M, Ai, Aj, P.b, s, t) : P.nnear + P.far.vertex_map[t]
+    near(M, Ai, Aj, P.b, s, t) ? near_index(M, Ai, Aj, P.b, P.velmode, s, t) : P.nnear + P.far.vertex_map[t]
 coarse(P::PairAbstraction, Si, s, m) = s + Si * (m - 1)
 
 # The states of agent j near agent i's state s.
@@ -112,12 +113,12 @@ function near_states(M, Ai, Aj, b, s)
     return out
 end
 
-function PairAbstraction(M::GridMap, Ai::AgentStalk, Aj::AgentStalk, b::Int)
+function PairAbstraction(M::GridMap, Ai::AgentStalk, Aj::AgentStalk, b::Int; velmode = collect(1:Aj.nvel))
     Si = length(Ai.pos)
     far, far_block = far_summary(M, Aj, b)
-    nnear = (3b)^2 * Aj.nvel
+    nnear = (3b)^2 * maximum(velmode)
     K = nnear + far.n_target
-    P = PairAbstraction(b, nnear, far, far_block, Float64[])
+    P = PairAbstraction(b, velmode, nnear, far, far_block, Float64[])
     rows, cols, vals = Int[], Int[], Float64[]
     edge!(x, y, c) = (push!(rows, x); push!(cols, y); push!(vals, c))
     # Far region: the tensor product of i's graph with the quotient of j's graph along the
@@ -132,7 +133,7 @@ function PairAbstraction(M::GridMap, Ai::AgentStalk, Aj::AgentStalk, b::Int)
     for s in 1:Si
         isfinite(Ai.d[s]) || continue
         for t in near_states(M, Ai, Aj, b, s)
-            x = coarse(P, Si, s, near_index(M, Ai, Aj, b, s, t))
+            x = coarse(P, Si, s, near_index(M, Ai, Aj, b, velmode, s, t))
             for s2 in Ai.succ[s], t2 in Aj.succ[t]
                 (Ai.pos[s2] == Aj.pos[t2] || (Ai.pos[s2] == Aj.pos[t] && Aj.pos[t2] == Ai.pos[s])) && continue
                 (isfinite(Ai.d[s2]) && isfinite(Aj.d[t2])) || continue
@@ -144,7 +145,7 @@ function PairAbstraction(M::GridMap, Ai::AgentStalk, Aj::AgentStalk, b::Int)
     for s2 in 1:Si
         isfinite(Ai.d[s2]) || continue
         for t2 in near_states(M, Ai, Aj, b, s2)
-            y = coarse(P, Si, s2, near_index(M, Ai, Aj, b, s2, t2))
+            y = coarse(P, Si, s2, near_index(M, Ai, Aj, b, velmode, s2, t2))
             for s in Ai.pred[s2], t in Aj.pred[t2]
                 (isfinite(Ai.d[s]) && isfinite(Aj.d[t]) && !near(M, Ai, Aj, b, s, t)) || continue
                 edge!(coarse(P, Si, s, nnear + far.vertex_map[t]), y, delay(Ai, s, s2) + delay(Aj, t, t2))
@@ -154,7 +155,7 @@ function PairAbstraction(M::GridMap, Ai::AgentStalk, Aj::AgentStalk, b::Int)
     Wc = sparse(rows, cols, vals, Si * K, Si * K, min)
     bc = fill(Inf, Si * K)
     bc[coarse(P, Si, Ai.goal, pair_mode(M, P, Ai, Aj, Ai.goal, Aj.goal))] = 0.0
-    return PairAbstraction(b, nnear, far, far_block, minplus_closure(Wc, bc))
+    return PairAbstraction(b, velmode, nnear, far, far_block, minplus_closure(Wc, bc))
 end
 
 coarse_states(P::PairAbstraction) = count(isfinite, P.Δ)

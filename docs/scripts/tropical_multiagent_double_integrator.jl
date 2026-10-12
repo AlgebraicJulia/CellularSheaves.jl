@@ -3,7 +3,9 @@
 # state space is the product of two 4-D lattices. The map is small enough that the pair
 # graph can still be solved exactly, to check that the edge stalk built from the two
 # agents' own graphs equals the pushforward of the pair graph along its map, and to
-# compare it with the exact pair delay, for two block sizes of the far summary. Searches
+# compare it with the exact pair delay, for velocity modes of the near field from exact
+# down to rest/moving (the near states are still enumerated exactly, so each is the exact
+# pushforward along its own map). Searches
 # run on the pair graph in the delay gauge (Dijkstra there is A* with the decoupled
 # heuristic Σᵢ dᵢ).
 #
@@ -16,7 +18,7 @@ using Statistics
 
 const n = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 16
 const NQ = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 8
-const BLOCKS = (2, 4)                            # block sizes of the far summary
+const BLOCK = 2                                  # block size of the far summary
 const OUT = joinpath(@__DIR__, "..", "figures")
 
 const WALL = (n ÷ 2):(n ÷ 2 + 1)
@@ -39,6 +41,10 @@ const SUCC = map(STATES) do (c, w)
     out
 end
 const REST = findfirst(==((0, 0)), VELS)
+# Velocity modes of the near field: exact, rest + 4 headings, rest/moving.
+heading(v) = v == (0, 0) ? 1 : 2 + mod(round(Int, atan(v[2], v[1]) / (π / 2)), 4)
+const VELMODES = [("exact velocity", collect(1:9)), ("rest + 4 headings", heading.(VELS)),
+                  ("rest / moving", [v == (0, 0) ? 1 : 2 for v in VELS])]
 di_agent(goal_cell) = AgentStalk(first.(STATES), last.(STATES), SUCC, STATE[(goal_cell, REST)])
 
 function queries(rng)
@@ -66,14 +72,14 @@ for (kind, starts, goals) in queries(MersenneTwister(5))
     base = A1.d[STATE[(starts[1], REST)]] + A2.d[STATE[(starts[2], REST)]]   # Σᵢ dᵢ at the start
     W21 = pair_graph(A2, A1)
     reach = isfinite.(D)
-    stalks = map(BLOCKS) do b
-        tb = @elapsed P12, P21 = PairAbstraction(MAP, A1, A2, b), PairAbstraction(MAP, A2, A1, b)
+    stalks = map(VELMODES) do (label, vm)
+        tb = @elapsed P12, P21 = PairAbstraction(MAP, A1, A2, BLOCK; velmode = vm), PairAbstraction(MAP, A2, A1, BLOCK; velmode = vm)
         h = [pair_bound(MAP, P12, P21, A1, A2, s, t) for t in 1:S for s in 1:S]
         Q12, Q21 = pushed_pair(MAP, P12, A1, A2, W), pushed_pair(MAP, P21, A2, A1, W21)
         pushforward = [max(Q12[s + S * (t - 1)], Q21[t + S * (s - 1)]) for t in 1:S for s in 1:S]
         @assert all(h[reach] .<= D[reach] .+ 1e-9)
         @assert all(h[reach] .≈ pushforward[reach])              # the edge stalk is the exact pushforward
-        ("sheaf: edge stalks, block $b", h, tb, coarse_states(P12) + coarse_states(P21))
+        ("sheaf, near field: $label", h, tb, coarse_states(P12) + coarse_states(P21))
     end
     out = sparse(transpose(W))
     @printf("%-6s  optimal %3.0f  decoupled %3.0f  (coordination cost %.0f)\n", kind, base + D[s0], base, D[s0])
@@ -84,17 +90,17 @@ for (kind, starts, goals) in queries(MersenneTwister(5))
         bound = isnothing(h) ? 0.0 : h[s0]
         push!(rows, (kind = kind, heuristic = name, states = states, optimal = base + D[s0], decoupled = base,
             bound = base + bound, expanded = r.expanded, build_seconds = build))
-        @printf("    %-32s bound %5.1f  expanded %8d  build %6.2f s\n", name, base + bound, r.expanded, build)
+        @printf("    %-40s bound %5.1f  expanded %8d  build %6.2f s\n", name, base + bound, r.expanded, build)
     end
 end
 
 println("\nsummary (means over queries)")
-@printf("%-7s %-32s %10s %10s %11s %9s %9s\n", "queries", "heuristic", "states", "bound/opt", "gap closed", "expanded", "build s")
+@printf("%-7s %-40s %10s %10s %11s %9s %9s\n", "queries", "heuristic", "states", "bound/opt", "gap closed", "expanded", "build s")
 for kind in ("swap", "random"), name in unique(r.heuristic for r in rows)
     rs = filter(r -> r.kind == kind && r.heuristic == name, rows)
     isempty(rs) && continue
     gap = [(r.bound - r.decoupled) / (r.optimal - r.decoupled) for r in rs if r.optimal > r.decoupled]
-    @printf("%-7s %-32s %10d %10.3f %11s %9.0f %9.2f\n", kind, name, round(Int, mean(r.states for r in rs)),
+    @printf("%-7s %-40s %10d %10.3f %11s %9.0f %9.2f\n", kind, name, round(Int, mean(r.states for r in rs)),
         mean(r.bound / r.optimal for r in rs), isempty(gap) ? "–" : @sprintf("%.2f", mean(gap)),
         mean(r.expanded for r in rs), mean(r.build_seconds for r in rs))
 end
