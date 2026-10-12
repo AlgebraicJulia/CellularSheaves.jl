@@ -67,7 +67,8 @@ coarse solution is a correction rather than a bound.
 module TropicalAbstraction
 
 export tropical_pullback, tropical_pushforward, quotient_graph, minplus_closure, cost_to_go,
-    Abstraction, ClosureMethod, DijkstraClosure, PathPackClosure, lower_bound, shortest_path, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid,
+    Abstraction, ClosureMethod, DijkstraClosure, PathPackClosure, lower_bound, shortest_path,
+tensor_product, reeb_arcs, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid,
     projection_homomorphism, LayeredPlanner, plan_route, corridor, layered_path,
     intertwines, TruncatedPushforward, coarsen, refine, coarsening_matrix, refinement_matrix,
     robust_quotient, upper_bound, is_control_lyapunov, greedy_policy, is_lyapunov, corridor_certificate, certified_path
@@ -141,21 +142,26 @@ function _minplus_mul(A::SparseMatrixCSC{T}, B::SparseMatrixCSC{T}) where {T}
 end
 
 """
-    quotient_graph(W, ψ; steps = 1, combine = min) -> SparseMatrixCSC
+    quotient_graph(W, ψ; steps = 1, combine = min, loops = false) -> SparseMatrixCSC
 
 The Galerkin operator ``E^T ⊗ W^{⊗k} ⊗ E`` of the edge weights `W` (`W[x, y]` the
 weight of the edge ``x → y``; absent entries are the semiring zero) along `ψ`,
 for `k = steps`: an edge between two blocks carries the best `k`-step move
-between their states. Edges inside a block are dropped.
+between their states. Edges inside a block are dropped, or with `loops = true`
+(`steps = 1`) kept as a loop carrying the best move inside the block, which is
+what [`tensor_product`](@ref) needs: the quotient of a tensor product along a
+product map is the tensor product of the quotients with loops.
 
 With `combine = min` (min-plus, costs ``≥ 0``) the quotient's cost-to-go is a
 lower bound on the fine one; with `combine = max` (max-min, `steps = 1` only) its
 bottleneck values are an upper bound.
 """
-function quotient_graph(W::SparseMatrixCSC{T}, ψ::GraphHomomorphism; steps::Integer = 1, combine = min) where {T<:Real}
+function quotient_graph(W::SparseMatrixCSC{T}, ψ::GraphHomomorphism; steps::Integer = 1, combine = min,
+        loops::Bool = false) where {T<:Real}
     @argcheck size(W, 1) == size(W, 2) "W must be square"
     @argcheck size(W, 1) == length(ψ.vertex_map) "ψ must map the states of W"
     @argcheck steps >= 1 "steps must be positive"
+    @argcheck !loops || steps == 1 "loops needs steps = 1"
     @argcheck combine === min || (combine === max && steps == 1) "combine must be min, or max with one step"
     combine === min && _check_costs(W)
     nc = ψ.n_target
@@ -173,8 +179,91 @@ function quotient_graph(W::SparseMatrixCSC{T}, ψ::GraphHomomorphism; steps::Int
         keep = [ψ.vertex_map[x] != b for (x, b) in zip(rows, cols)]
         return sparse(ψ.vertex_map[rows[keep]], cols[keep], vals[keep], nc, nc, min)
     end
-    keep = [ψ.vertex_map[x] != ψ.vertex_map[y] for (x, y) in zip(rows, cols)]
+    keep = loops ? trues(length(rows)) : [ψ.vertex_map[x] != ψ.vertex_map[y] for (x, y) in zip(rows, cols)]
     return sparse(ψ.vertex_map[rows[keep]], ψ.vertex_map[cols[keep]], vals[keep], nc, nc, combine)
+end
+
+"""
+    tensor_product(A, B; keep = (x, y) -> true) -> SparseMatrixCSC
+
+The min-plus tensor (Kronecker) product of two state graphs: the system of two
+independent agents moving *simultaneously*, state ``(a, b)`` numbered
+`a + size(A, 1) * (b - 1)`, with the edge ``(a, b) → (a', b')`` costing
+``A_{aa'} + B_{bb'}`` (staying put is a loop of the factor graph). `keep(x, y)`
+filters the edges by their joint endpoints, for example to a region of the joint
+state space.
+
+Pushforward commutes with it (base change): for maps ``ψ``, ``φ`` of the factors,
+the quotient of ``A ⊠ B`` along ``ψ × φ`` is ``Q_ψ(A) ⊠ Q_φ(B)``, the tensor
+product of the quotients with their loops (`quotient_graph(...; loops = true)`).
+So the coarse system of a product, or of any region of it that is a union of
+fibres of ``ψ × φ``, is computed from the factors without forming the product.
+"""
+function tensor_product(A::SparseMatrixCSC, B::SparseMatrixCSC; keep = (x, y) -> true)
+    @argcheck size(A, 1) == size(A, 2) && size(B, 1) == size(B, 2) "A and B must be square"
+    na, nb = size(A, 1), size(B, 1)
+    S = float(promote_type(eltype(A), eltype(B)))
+    rows, cols, vals = Int[], Int[], S[]
+    ra, va, rb, vb = rowvals(A), nonzeros(A), rowvals(B), nonzeros(B)
+    for b2 in 1:nb, q in nzrange(B, b2), a2 in 1:na, p in nzrange(A, a2)
+        x, y = ra[p] + na * (rb[q] - 1), a2 + na * (b2 - 1)
+        keep(x, y) || continue
+        push!(rows, x); push!(cols, y); push!(vals, va[p] + vb[q])
+    end
+    return sparse(rows, cols, vals, na * nb, na * nb, min)
+end
+
+"""
+    reeb_arcs(W, d) -> GraphHomomorphism
+
+The Reeb graph of a function `d` on the states of the graph `W`, as a map from
+each state to its *arc*. With ``ℓ_1 < ℓ_2 < ⋯`` the distinct finite values of
+`d`, a state at level ``ℓ_m`` belongs to the component of the band
+``ℓ_m ≤ d ≤ ℓ_{m+1}`` that contains it, adjacency taken in either direction of
+`W`: the discrete level set ``d = (ℓ_m + ℓ_{m+1})/2``. States where `d` is
+infinite form one arc of their own.
+
+For `d` a cost-to-go, the arcs are a summary of an agent's *progress*: its
+delay-free moves go from an arc to arcs one level down, and equidistant states that
+are joined only through states much nearer to or farther from the goal (opposite
+sides of an obstacle) fall in different arcs. Reeb graphs are cosheaves (de Silva,
+Munch & Patel 2016); the arcs here are the vertices of a discrete one.
+"""
+function reeb_arcs(W::SparseMatrixCSC, d::AbstractVector{<:Real})
+    N = size(W, 1)
+    @argcheck size(W, 2) == N && length(d) == N "one value of d per state of W"
+    I, J, _ = findnz(W)                                      # stored entries, zero costs included
+    pattern = sparse([I; J], [J; I], trues(2length(I)), N, N, |)
+    levels = sort(unique(filter(isfinite, d)))
+    level_of = Dict(ℓ => m for (m, ℓ) in enumerate(levels))
+    at = [Int[] for _ in levels]                             # the states of each level
+    for x in 1:N
+        isfinite(d[x]) && push!(at[level_of[d[x]]], x)
+    end
+    parent = collect(1:N)
+    root(x) = (while parent[x] != x; parent[x] = parent[parent[x]]; x = parent[x]; end; x)
+    arc, ids = zeros(Int, N), Dict{Tuple{Int,Int},Int}()
+    rv = rowvals(pattern)
+    for (m, ℓ) in enumerate(levels)
+        hi = m < length(levels) ? levels[m + 1] : ℓ
+        band = m < length(levels) ? [at[m]; at[m + 1]] : at[m]
+        for x in band
+            parent[x] = x
+        end
+        for x in band, p in nzrange(pattern, x)
+            u = rv[p]
+            if ℓ <= d[u] <= hi
+                ru, rx = root(u), root(x)
+                ru != rx && (parent[ru] = rx)
+            end
+        end
+        for x in band
+            d[x] == ℓ && (arc[x] = get!(ids, (m, root(x)), length(ids) + 1))
+        end
+    end
+    unreachable = length(ids) + 1
+    any(x -> !isfinite(d[x]), 1:N) && (arc[.!isfinite.(d)] .= unreachable)
+    return GraphHomomorphism(arc, maximum(arc; init = 1))
 end
 
 # Binary min-heap of (key, state) pairs with lazy deletion.

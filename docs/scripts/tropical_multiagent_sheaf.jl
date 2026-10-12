@@ -3,9 +3,9 @@
 # wall and two corridors. Compared heuristics on the joint graph:
 #
 #   - decoupled: Σᵢ dᵢ, the sum of single-agent distances;
-#   - the interaction sheaf: Σᵢ dᵢ + the best matching of pair bounds Δᵢⱼ, each built from the
-#     two agents' own graphs (no pair graph);
-#   - the same with each Δᵢⱼ the exact pushforward of the pair graph along the same map;
+#   - the interaction sheaf: Σᵢ dᵢ + the best matching of pair bounds Δᵢⱼ, each the edge stalk
+#     built from the two agents' own graphs (no pair graph), checked equal to the pushforward
+#     of the pair graph along the same map;
 #   - the same with exact pairwise delays (the best any pairwise gluing can do);
 #   - the exact joint cost-to-go.
 #
@@ -19,7 +19,7 @@ using Statistics
 const n = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 10
 const NQ = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 8
 const NA = 3
-const R = 2
+const BLOCK = 2                                  # block size of the far summary
 const OUT = joinpath(@__DIR__, "..", "figures")
 
 const WALL = (n ÷ 2):(n ÷ 2 + 1)
@@ -42,7 +42,7 @@ function joint_graph(agents)
         allunique(c) || continue
         for c2 in Iterators.product((NBRS[ci] for ci in c)...)
             conflict(c, c2) && continue
-            push!(rows, x); push!(cols, joint(c2)); push!(vals, sum(step_cost(agents[i], c[i], c2[i]) for i in 1:NA))
+            push!(rows, x); push!(cols, joint(c2)); push!(vals, sum(step_cost(agents[i].goal, c[i], c2[i]) for i in 1:NA))
         end
     end
     return sparse(rows, cols, vals, NF^NA, NF^NA)
@@ -78,8 +78,8 @@ println("grid $(n)², wall with two corridors: $(NF) free cells, $(NA) agents, $
 rows = NamedTuple[]
 for (kind, starts, goals) in queries(MersenneTwister(3))
     agents = [grid_agent(g) for g in goals]
-    t_sheaf = @elapsed P = Dict((i, j) => PairAbstraction(MAP, agents[i], agents[j], R) for i in 1:NA for j in 1:NA if i != j)
-    t_pushed = @elapsed pushed = Dict((i, j) => pushed_pair(MAP, agents[i], agents[j], R) for i in 1:NA for j in 1:NA if i != j)
+    t_sheaf = @elapsed P = Dict((i, j) => PairAbstraction(MAP, agents[i], agents[j], BLOCK) for i in 1:NA for j in 1:NA if i != j)
+    t_pushed = @elapsed pushed = Dict((i, j) => pushed_pair(MAP, P[(i, j)], agents[i], agents[j]) for i in 1:NA for j in 1:NA if i != j)
     t_exact = @elapsed exact = Dict((i, j) => cost_to_go(pair_graph(agents[i], agents[j]), [pair_goal(agents[i], agents[j])])
                                     for (i, j) in PAIRS)
     sheaf_states = sum(coarse_states(p) for p in values(P))
@@ -87,23 +87,22 @@ for (kind, starts, goals) in queries(MersenneTwister(3))
     goal, start = joint(goals), joint(starts)
     V = cost_to_go(W, [goal])
     isfinite(V[start]) || continue
-    # The edge stalks are relaxations: below the exact pushforward, itself below the exact pair delay.
+    # The edge stalks are the exact pushforwards of the pair graphs, and bound the pair delays.
     for (i, j) in PAIRS, b in 1:NF, a in 1:NF
         a == b && continue
         e = exact[(i, j)][a + NF * (b - 1)]
-        @assert pair_bound(MAP, P[(i, j)], P[(j, i)], agents[i], agents[j], a, b) <= e + 1e-9
-        @assert max(pushed[(i, j)][a + NF * (b - 1)], pushed[(j, i)][b + NF * (a - 1)]) <= e + 1e-9
+        h = pair_bound(MAP, P[(i, j)], P[(j, i)], agents[i], agents[j], a, b)
+        @assert h <= e + 1e-9
+        @assert isinf(e) || h ≈ max(pushed[(i, j)][a + NF * (b - 1)], pushed[(j, i)][b + NF * (a - 1)])
     end
     dec = glued(agents, (i, j, a, b) -> 0.0)
     sheaf = glued(agents, (i, j, a, b) -> pair_bound(MAP, P[(i, j)], P[(j, i)], agents[i], agents[j], a, b))
-    pushforward = glued(agents, (i, j, a, b) -> max(pushed[(i, j)][a + NF * (b - 1)], pushed[(j, i)][b + NF * (a - 1)]))
     pairwise = glued(agents, (i, j, a, b) -> exact[(i, j)][a + NF * (b - 1)])
     reach = isfinite.(V)
     out = sparse(transpose(W))
     @printf("%-6s  optimal %3.0f  decoupled %3.0f  (coordination cost %.0f)\n", kind, V[start], dec[start], V[start] - dec[start])
     for (name, h, build, states) in (("decoupled (sum of distances)", dec, 0.0, 0),
-                                     ("sheaf: pair abstractions", sheaf, t_sheaf, sheaf_states),
-                                     ("sheaf: exact pair pushforwards", pushforward, t_pushed, sheaf_states),
+                                     ("sheaf: edge stalks, block $BLOCK", sheaf, t_sheaf, sheaf_states),
                                      ("exact pairwise delays", pairwise, t_exact, length(PAIRS) * NF^2),
                                      ("exact cost-to-go", V, 0.0, NF^NA))
         @assert all(h[reach] .<= V[reach] .+ 1e-9) "$name is not admissible"

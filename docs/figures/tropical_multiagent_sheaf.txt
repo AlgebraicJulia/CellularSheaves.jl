@@ -1,110 +1,92 @@
 grid 10², wall with two corridors: 84 free cells, 3 agents, 592704 joint states
 cross   optimal  33  decoupled  33  (coordination cost 0)
     decoupled (sum of distances)       bound  33.0  expanded      16  build  0.000 s
-    sheaf: pair abstractions           bound  33.0  expanded      16  build  0.525 s
-    sheaf: exact pair pushforwards     bound  33.0  expanded      16  build  1.240 s
-    exact pairwise delays              bound  33.0  expanded      16  build  0.085 s
+    sheaf: edge stalks, block 2        bound  33.0  expanded      16  build  1.115 s
+    exact pairwise delays              bound  33.0  expanded      16  build  0.068 s
     exact cost-to-go                   bound  33.0  expanded      16  build  0.000 s
 cross   optimal  44  decoupled  44  (coordination cost 0)
     decoupled (sum of distances)       bound  44.0  expanded     370  build  0.000 s
-    sheaf: pair abstractions           bound  44.0  expanded     228  build  0.074 s
-    sheaf: exact pair pushforwards     bound  44.0  expanded     228  build  0.055 s
-    exact pairwise delays              bound  44.0  expanded     185  build  0.020 s
+    sheaf: edge stalks, block 2        bound  44.0  expanded     189  build  0.086 s
+    exact pairwise delays              bound  44.0  expanded     185  build  0.048 s
     exact cost-to-go                   bound  44.0  expanded     185  build  0.000 s
 cross   optimal  41  decoupled  39  (coordination cost 2)
     decoupled (sum of distances)       bound  39.0  expanded     683  build  0.000 s
-    sheaf: pair abstractions           bound  41.0  expanded     305  build  0.070 s
-    sheaf: exact pair pushforwards     bound  41.0  expanded     305  build  0.037 s
-    exact pairwise delays              bound  41.0  expanded     305  build  0.019 s
+    sheaf: edge stalks, block 2        bound  41.0  expanded     305  build  0.072 s
+    exact pairwise delays              bound  41.0  expanded     305  build  0.013 s
     exact cost-to-go                   bound  41.0  expanded     305  build  0.000 s
 cross   optimal  35  decoupled  35  (coordination cost 0)
     decoupled (sum of distances)       bound  35.0  expanded      22  build  0.000 s
-    sheaf: pair abstractions           bound  35.0  expanded      16  build  0.121 s
-    sheaf: exact pair pushforwards     bound  35.0  expanded      16  build  0.100 s
+    sheaf: edge stalks, block 2        bound  35.0  expanded      13  build  0.169 s
     exact pairwise delays              bound  35.0  expanded      13  build  0.014 s
     exact cost-to-go                   bound  35.0  expanded      13  build  0.000 s
 cross   optimal  31  decoupled  27  (coordination cost 4)
     decoupled (sum of distances)       bound  27.0  expanded     613  build  0.000 s
-    sheaf: pair abstractions           bound  29.0  expanded      97  build  0.121 s
-    sheaf: exact pair pushforwards     bound  29.0  expanded      97  build  0.104 s
-    exact pairwise delays              bound  31.0  expanded      96  build  0.014 s
+    sheaf: edge stalks, block 2        bound  31.0  expanded      96  build  0.172 s
+    exact pairwise delays              bound  31.0  expanded      96  build  0.013 s
     exact cost-to-go                   bound  31.0  expanded      93  build  0.000 s
 cross   optimal  39  decoupled  37  (coordination cost 2)
     decoupled (sum of distances)       bound  37.0  expanded     482  build  0.000 s
-    sheaf: pair abstractions           bound  37.0  expanded     351  build  0.120 s
-    sheaf: exact pair pushforwards     bound  37.0  expanded     351  build  0.100 s
-    exact pairwise delays              bound  39.0  expanded     149  build  0.014 s
+    sheaf: edge stalks, block 2        bound  39.0  expanded     149  build  0.173 s
+    exact pairwise delays              bound  39.0  expanded     149  build  0.013 s
     exact cost-to-go                   bound  39.0  expanded     114  build  0.000 s
 cross   optimal  36  decoupled  35  (coordination cost 1)
     decoupled (sum of distances)       bound  35.0  expanded     217  build  0.000 s
-    sheaf: pair abstractions           bound  36.0  expanded      97  build  0.119 s
-    sheaf: exact pair pushforwards     bound  36.0  expanded      97  build  0.103 s
+    sheaf: edge stalks, block 2        bound  36.0  expanded      94  build  0.169 s
     exact pairwise delays              bound  36.0  expanded      94  build  0.015 s
     exact cost-to-go                   bound  36.0  expanded      84  build  0.000 s
 cross   optimal  40  decoupled  40  (coordination cost 0)
     decoupled (sum of distances)       bound  40.0  expanded      46  build  0.000 s
-    sheaf: pair abstractions           bound  40.0  expanded      22  build  0.121 s
-    sheaf: exact pair pushforwards     bound  40.0  expanded      22  build  0.101 s
+    sheaf: edge stalks, block 2        bound  40.0  expanded      17  build  0.171 s
     exact pairwise delays              bound  40.0  expanded      17  build  0.012 s
     exact cost-to-go                   bound  40.0  expanded      17  build  0.000 s
 random  optimal   9  decoupled   9  (coordination cost 0)
     decoupled (sum of distances)       bound   9.0  expanded       8  build  0.000 s
-    sheaf: pair abstractions           bound   9.0  expanded       8  build  0.119 s
-    sheaf: exact pair pushforwards     bound   9.0  expanded       8  build  0.100 s
+    sheaf: edge stalks, block 2        bound   9.0  expanded       8  build  0.166 s
     exact pairwise delays              bound   9.0  expanded       8  build  0.014 s
     exact cost-to-go                   bound   9.0  expanded       8  build  0.000 s
 random  optimal  26  decoupled  22  (coordination cost 4)
     decoupled (sum of distances)       bound  22.0  expanded     754  build  0.000 s
-    sheaf: pair abstractions           bound  26.0  expanded      29  build  0.118 s
-    sheaf: exact pair pushforwards     bound  26.0  expanded      29  build  0.100 s
-    exact pairwise delays              bound  26.0  expanded      29  build  0.015 s
+    sheaf: edge stalks, block 2        bound  26.0  expanded      29  build  0.170 s
+    exact pairwise delays              bound  26.0  expanded      29  build  0.014 s
     exact cost-to-go                   bound  26.0  expanded      28  build  0.000 s
 random  optimal  18  decoupled  18  (coordination cost 0)
     decoupled (sum of distances)       bound  18.0  expanded       9  build  0.000 s
-    sheaf: pair abstractions           bound  18.0  expanded       9  build  0.118 s
-    sheaf: exact pair pushforwards     bound  18.0  expanded       9  build  0.100 s
+    sheaf: edge stalks, block 2        bound  18.0  expanded       9  build  0.173 s
     exact pairwise delays              bound  18.0  expanded       9  build  0.012 s
     exact cost-to-go                   bound  18.0  expanded       9  build  0.000 s
 random  optimal  12  decoupled  12  (coordination cost 0)
     decoupled (sum of distances)       bound  12.0  expanded      13  build  0.000 s
-    sheaf: pair abstractions           bound  12.0  expanded      13  build  0.120 s
-    sheaf: exact pair pushforwards     bound  12.0  expanded      13  build  0.106 s
-    exact pairwise delays              bound  12.0  expanded      13  build  0.020 s
+    sheaf: edge stalks, block 2        bound  12.0  expanded      13  build  0.172 s
+    exact pairwise delays              bound  12.0  expanded      13  build  0.014 s
     exact cost-to-go                   bound  12.0  expanded      13  build  0.000 s
 random  optimal  35  decoupled  35  (coordination cost 0)
     decoupled (sum of distances)       bound  35.0  expanded      50  build  0.000 s
-    sheaf: pair abstractions           bound  35.0  expanded      38  build  0.118 s
-    sheaf: exact pair pushforwards     bound  35.0  expanded      38  build  0.099 s
+    sheaf: edge stalks, block 2        bound  35.0  expanded      38  build  0.171 s
     exact pairwise delays              bound  35.0  expanded      38  build  0.014 s
     exact cost-to-go                   bound  35.0  expanded      38  build  0.000 s
 random  optimal  28  decoupled  28  (coordination cost 0)
     decoupled (sum of distances)       bound  28.0  expanded      50  build  0.000 s
-    sheaf: pair abstractions           bound  28.0  expanded      50  build  0.119 s
-    sheaf: exact pair pushforwards     bound  28.0  expanded      50  build  0.103 s
-    exact pairwise delays              bound  28.0  expanded      50  build  0.016 s
+    sheaf: edge stalks, block 2        bound  28.0  expanded      50  build  0.177 s
+    exact pairwise delays              bound  28.0  expanded      50  build  0.015 s
     exact cost-to-go                   bound  28.0  expanded      50  build  0.000 s
 random  optimal  28  decoupled  27  (coordination cost 1)
     decoupled (sum of distances)       bound  27.0  expanded     101  build  0.000 s
-    sheaf: pair abstractions           bound  28.0  expanded      65  build  0.118 s
-    sheaf: exact pair pushforwards     bound  28.0  expanded      65  build  0.101 s
-    exact pairwise delays              bound  28.0  expanded      65  build  0.012 s
+    sheaf: edge stalks, block 2        bound  28.0  expanded      65  build  0.168 s
+    exact pairwise delays              bound  28.0  expanded      65  build  0.011 s
     exact cost-to-go                   bound  28.0  expanded      65  build  0.000 s
 random  optimal  32  decoupled  32  (coordination cost 0)
     decoupled (sum of distances)       bound  32.0  expanded      60  build  0.000 s
-    sheaf: pair abstractions           bound  32.0  expanded      48  build  0.119 s
-    sheaf: exact pair pushforwards     bound  32.0  expanded      48  build  0.100 s
-    exact pairwise delays              bound  32.0  expanded      48  build  0.015 s
+    sheaf: edge stalks, block 2        bound  32.0  expanded      48  build  0.178 s
+    exact pairwise delays              bound  32.0  expanded      48  build  0.014 s
     exact cost-to-go                   bound  32.0  expanded      48  build  0.000 s
 
 summary (means over queries)
 queries heuristic                             states  bound/opt  gap closed  expanded   build s
 cross   decoupled (sum of distances)               0      0.968        0.00       306     0.000
-cross   sheaf: pair abstractions               21012      0.986        0.62       142     0.159
-cross   sheaf: exact pair pushforwards         21012      0.986        0.62       142     0.230
-cross   exact pairwise delays                  21168      1.000        1.00       109     0.024
+cross   sheaf: edge stalks, block 2            34392      1.000        1.00       110     0.266
+cross   exact pairwise delays                  21168      1.000        1.00       109     0.025
 cross   exact cost-to-go                      592704      1.000        1.00       103     0.000
 random  decoupled (sum of distances)               0      0.976        0.00       131     0.000
-random  sheaf: pair abstractions               20978      1.000        1.00        32     0.119
-random  sheaf: exact pair pushforwards         20978      1.000        1.00        32     0.101
-random  exact pairwise delays                  21168      1.000        1.00        32     0.015
+random  sheaf: edge stalks, block 2            34392      1.000        1.00        32     0.172
+random  exact pairwise delays                  21168      1.000        1.00        32     0.014
 random  exact cost-to-go                      592704      1.000        1.00        32     0.000

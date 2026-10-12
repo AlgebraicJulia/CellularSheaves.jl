@@ -1,10 +1,11 @@
 # Pairs of double integrators: the edge stalk of the interaction sheaf
 # (`tropical_pair_sheaf.jl`) where an agent's state includes its velocity, so a pair's
 # state space is the product of two 4-D lattices. The map is small enough that the pair
-# graph can still be solved exactly, to check the pair abstraction built from the two
-# agents' own graphs against the exact pushforward of the pair graph along the same map
-# and against the exact pair delay. Searches run on the pair graph in the delay gauge
-# (Dijkstra there is A* with the decoupled heuristic Σᵢ dᵢ).
+# graph can still be solved exactly, to check that the edge stalk built from the two
+# agents' own graphs equals the pushforward of the pair graph along its map, and to
+# compare it with the exact pair delay, for two block sizes of the far summary. Searches
+# run on the pair graph in the delay gauge (Dijkstra there is A* with the decoupled
+# heuristic Σᵢ dᵢ).
 #
 #   julia --project=docs docs/scripts/tropical_multiagent_double_integrator.jl [n] [queries]
 
@@ -15,7 +16,7 @@ using Statistics
 
 const n = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 16
 const NQ = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 8
-const R = 2
+const BLOCKS = (2, 4)                            # block sizes of the far summary
 const OUT = joinpath(@__DIR__, "..", "figures")
 
 const WALL = (n ÷ 2):(n ÷ 2 + 1)
@@ -63,18 +64,20 @@ for (kind, starts, goals) in queries(MersenneTwister(5))
     t_exact = @elapsed D = cost_to_go(W, [goal])                # exact pair delay
     isfinite(D[s0]) || continue
     base = A1.d[STATE[(starts[1], REST)]] + A2.d[STATE[(starts[2], REST)]]   # Σᵢ dᵢ at the start
-    t_sheaf = @elapsed P12, P21 = PairAbstraction(MAP, A1, A2, R), PairAbstraction(MAP, A2, A1, R)
-    t_pushed = @elapsed Q12, Q21 = pushed_pair(MAP, A1, A2, R, W), pushed_pair(MAP, A2, A1, R, pair_graph(A2, A1))
-    sheaf = [pair_bound(MAP, P12, P21, A1, A2, s, t) for t in 1:S for s in 1:S]
-    pushforward = [max(Q12[s + S * (t - 1)], Q21[t + S * (s - 1)]) for t in 1:S for s in 1:S]
+    W21 = pair_graph(A2, A1)
     reach = isfinite.(D)
-    @assert all(sheaf[reach] .<= D[reach] .+ 1e-9) && all(pushforward[reach] .<= D[reach] .+ 1e-9)
-    @assert all(sheaf[reach] .<= pushforward[reach] .+ 1e-9)    # the cheap stalk over-approximates the pushforward
+    stalks = map(BLOCKS) do b
+        tb = @elapsed P12, P21 = PairAbstraction(MAP, A1, A2, b), PairAbstraction(MAP, A2, A1, b)
+        h = [pair_bound(MAP, P12, P21, A1, A2, s, t) for t in 1:S for s in 1:S]
+        Q12, Q21 = pushed_pair(MAP, P12, A1, A2, W), pushed_pair(MAP, P21, A2, A1, W21)
+        pushforward = [max(Q12[s + S * (t - 1)], Q21[t + S * (s - 1)]) for t in 1:S for s in 1:S]
+        @assert all(h[reach] .<= D[reach] .+ 1e-9)
+        @assert all(h[reach] .≈ pushforward[reach])              # the edge stalk is the exact pushforward
+        ("sheaf: edge stalks, block $b", h, tb, coarse_states(P12) + coarse_states(P21))
+    end
     out = sparse(transpose(W))
     @printf("%-6s  optimal %3.0f  decoupled %3.0f  (coordination cost %.0f)\n", kind, base + D[s0], base, D[s0])
-    for (name, h, build, states) in (("decoupled (Dijkstra on delays)", nothing, 0.0, 0),
-                                     ("sheaf: pair abstraction", sheaf, t_sheaf, coarse_states(P12) + coarse_states(P21)),
-                                     ("sheaf: exact pair pushforward", pushforward, t_pair + t_pushed, coarse_states(P12) + coarse_states(P21)),
+    for (name, h, build, states) in (("decoupled (Dijkstra on delays)", nothing, 0.0, 0), stalks...,
                                      ("exact pair delay", D, t_pair + t_exact, count(reach)))
         r = shortest_path(W, s0, [goal]; heuristic = h, out_edges = out)
         @assert r.cost == D[s0]

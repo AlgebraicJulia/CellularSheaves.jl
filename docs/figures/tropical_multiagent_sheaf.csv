@@ -1,81 +1,65 @@
 kind,heuristic,states,optimal,decoupled,bound,expanded,build_seconds
 cross,decoupled (sum of distances),0,33.0,33.0,33.0,16,0.0
-cross,sheaf: pair abstractions,20944,33.0,33.0,33.0,16,0.525094365
-cross,sheaf: exact pair pushforwards,20944,33.0,33.0,33.0,16,1.240486295
-cross,exact pairwise delays,21168,33.0,33.0,33.0,16,0.08484382
+cross,"sheaf: edge stalks, block 2",34392,33.0,33.0,33.0,16,1.115331788
+cross,exact pairwise delays,21168,33.0,33.0,33.0,16,0.06846633
 cross,exact cost-to-go,592704,33.0,33.0,33.0,16,0.0
 cross,decoupled (sum of distances),0,44.0,44.0,44.0,370,0.0
-cross,sheaf: pair abstractions,20898,44.0,44.0,44.0,228,0.073621806
-cross,sheaf: exact pair pushforwards,20898,44.0,44.0,44.0,228,0.05463927
-cross,exact pairwise delays,21168,44.0,44.0,44.0,185,0.020427333
+cross,"sheaf: edge stalks, block 2",34392,44.0,44.0,44.0,189,0.085845593
+cross,exact pairwise delays,21168,44.0,44.0,44.0,185,0.04799761
 cross,exact cost-to-go,592704,44.0,44.0,44.0,185,0.0
 cross,decoupled (sum of distances),0,41.0,39.0,39.0,683,0.0
-cross,sheaf: pair abstractions,20964,41.0,39.0,41.0,305,0.06981122
-cross,sheaf: exact pair pushforwards,20964,41.0,39.0,41.0,305,0.036657095
-cross,exact pairwise delays,21168,41.0,39.0,41.0,305,0.01853591
+cross,"sheaf: edge stalks, block 2",34392,41.0,39.0,41.0,305,0.071710925
+cross,exact pairwise delays,21168,41.0,39.0,41.0,305,0.0133292
 cross,exact cost-to-go,592704,41.0,39.0,41.0,305,0.0
 cross,decoupled (sum of distances),0,35.0,35.0,35.0,22,0.0
-cross,sheaf: pair abstractions,20960,35.0,35.0,35.0,16,0.120981592
-cross,sheaf: exact pair pushforwards,20960,35.0,35.0,35.0,16,0.099976277
-cross,exact pairwise delays,21168,35.0,35.0,35.0,13,0.014073754
+cross,"sheaf: edge stalks, block 2",34392,35.0,35.0,35.0,13,0.169353169
+cross,exact pairwise delays,21168,35.0,35.0,35.0,13,0.013678774
 cross,exact cost-to-go,592704,35.0,35.0,35.0,13,0.0
 cross,decoupled (sum of distances),0,31.0,27.0,27.0,613,0.0
-cross,sheaf: pair abstractions,21104,31.0,27.0,29.0,97,0.121248481
-cross,sheaf: exact pair pushforwards,21104,31.0,27.0,29.0,97,0.103884987
-cross,exact pairwise delays,21168,31.0,27.0,31.0,96,0.014126934
+cross,"sheaf: edge stalks, block 2",34392,31.0,27.0,31.0,96,0.172469765
+cross,exact pairwise delays,21168,31.0,27.0,31.0,96,0.013495492
 cross,exact cost-to-go,592704,31.0,27.0,31.0,93,0.0
 cross,decoupled (sum of distances),0,39.0,37.0,37.0,482,0.0
-cross,sheaf: pair abstractions,20974,39.0,37.0,37.0,351,0.119707005
-cross,sheaf: exact pair pushforwards,20974,39.0,37.0,37.0,351,0.100419537
-cross,exact pairwise delays,21168,39.0,37.0,39.0,149,0.014025835
+cross,"sheaf: edge stalks, block 2",34392,39.0,37.0,39.0,149,0.173159547
+cross,exact pairwise delays,21168,39.0,37.0,39.0,149,0.013491744
 cross,exact cost-to-go,592704,39.0,37.0,39.0,114,0.0
 cross,decoupled (sum of distances),0,36.0,35.0,35.0,217,0.0
-cross,sheaf: pair abstractions,21228,36.0,35.0,36.0,97,0.11896748
-cross,sheaf: exact pair pushforwards,21228,36.0,35.0,36.0,97,0.103185606
-cross,exact pairwise delays,21168,36.0,35.0,36.0,94,0.015207308
+cross,"sheaf: edge stalks, block 2",34392,36.0,35.0,36.0,94,0.169403813
+cross,exact pairwise delays,21168,36.0,35.0,36.0,94,0.014660794
 cross,exact cost-to-go,592704,36.0,35.0,36.0,84,0.0
 cross,decoupled (sum of distances),0,40.0,40.0,40.0,46,0.0
-cross,sheaf: pair abstractions,21026,40.0,40.0,40.0,22,0.120925797
-cross,sheaf: exact pair pushforwards,21026,40.0,40.0,40.0,22,0.101043055
-cross,exact pairwise delays,21168,40.0,40.0,40.0,17,0.012009128
+cross,"sheaf: edge stalks, block 2",34392,40.0,40.0,40.0,17,0.171455466
+cross,exact pairwise delays,21168,40.0,40.0,40.0,17,0.011579985
 cross,exact cost-to-go,592704,40.0,40.0,40.0,17,0.0
 random,decoupled (sum of distances),0,9.0,9.0,9.0,8,0.0
-random,sheaf: pair abstractions,21042,9.0,9.0,9.0,8,0.119304731
-random,sheaf: exact pair pushforwards,21042,9.0,9.0,9.0,8,0.100132038
-random,exact pairwise delays,21168,9.0,9.0,9.0,8,0.014315037
+random,"sheaf: edge stalks, block 2",34392,9.0,9.0,9.0,8,0.165835989
+random,exact pairwise delays,21168,9.0,9.0,9.0,8,0.013939944
 random,exact cost-to-go,592704,9.0,9.0,9.0,8,0.0
 random,decoupled (sum of distances),0,26.0,22.0,22.0,754,0.0
-random,sheaf: pair abstractions,21014,26.0,22.0,26.0,29,0.117868592
-random,sheaf: exact pair pushforwards,21014,26.0,22.0,26.0,29,0.099531584
-random,exact pairwise delays,21168,26.0,22.0,26.0,29,0.014987505
+random,"sheaf: edge stalks, block 2",34392,26.0,22.0,26.0,29,0.169620596
+random,exact pairwise delays,21168,26.0,22.0,26.0,29,0.014305749
 random,exact cost-to-go,592704,26.0,22.0,26.0,28,0.0
 random,decoupled (sum of distances),0,18.0,18.0,18.0,9,0.0
-random,sheaf: pair abstractions,20904,18.0,18.0,18.0,9,0.118326138
-random,sheaf: exact pair pushforwards,20904,18.0,18.0,18.0,9,0.099578731
-random,exact pairwise delays,21168,18.0,18.0,18.0,9,0.012301716
+random,"sheaf: edge stalks, block 2",34392,18.0,18.0,18.0,9,0.172962504
+random,exact pairwise delays,21168,18.0,18.0,18.0,9,0.011813221
 random,exact cost-to-go,592704,18.0,18.0,18.0,9,0.0
 random,decoupled (sum of distances),0,12.0,12.0,12.0,13,0.0
-random,sheaf: pair abstractions,21056,12.0,12.0,12.0,13,0.120174169
-random,sheaf: exact pair pushforwards,21056,12.0,12.0,12.0,13,0.105860455
-random,exact pairwise delays,21168,12.0,12.0,12.0,13,0.02011104
+random,"sheaf: edge stalks, block 2",34392,12.0,12.0,12.0,13,0.171605843
+random,exact pairwise delays,21168,12.0,12.0,12.0,13,0.014091858
 random,exact cost-to-go,592704,12.0,12.0,12.0,13,0.0
 random,decoupled (sum of distances),0,35.0,35.0,35.0,50,0.0
-random,sheaf: pair abstractions,20812,35.0,35.0,35.0,38,0.118072313
-random,sheaf: exact pair pushforwards,20812,35.0,35.0,35.0,38,0.099387093
-random,exact pairwise delays,21168,35.0,35.0,35.0,38,0.014427948
+random,"sheaf: edge stalks, block 2",34392,35.0,35.0,35.0,38,0.171430234
+random,exact pairwise delays,21168,35.0,35.0,35.0,38,0.013866477
 random,exact cost-to-go,592704,35.0,35.0,35.0,38,0.0
 random,decoupled (sum of distances),0,28.0,28.0,28.0,50,0.0
-random,sheaf: pair abstractions,20948,28.0,28.0,28.0,50,0.119292919
-random,sheaf: exact pair pushforwards,20948,28.0,28.0,28.0,50,0.103234387
-random,exact pairwise delays,21168,28.0,28.0,28.0,50,0.016104697
+random,"sheaf: edge stalks, block 2",34392,28.0,28.0,28.0,50,0.1767839
+random,exact pairwise delays,21168,28.0,28.0,28.0,50,0.014801577
 random,exact cost-to-go,592704,28.0,28.0,28.0,50,0.0
 random,decoupled (sum of distances),0,28.0,27.0,27.0,101,0.0
-random,sheaf: pair abstractions,21030,28.0,27.0,28.0,65,0.11811355
-random,sheaf: exact pair pushforwards,21030,28.0,27.0,28.0,65,0.101091394
-random,exact pairwise delays,21168,28.0,27.0,28.0,65,0.011847636
+random,"sheaf: edge stalks, block 2",34392,28.0,27.0,28.0,65,0.168297869
+random,exact pairwise delays,21168,28.0,27.0,28.0,65,0.011333102
 random,exact cost-to-go,592704,28.0,27.0,28.0,65,0.0
 random,decoupled (sum of distances),0,32.0,32.0,32.0,60,0.0
-random,sheaf: pair abstractions,21018,32.0,32.0,32.0,48,0.118673078
-random,sheaf: exact pair pushforwards,21018,32.0,32.0,32.0,48,0.100407213
-random,exact pairwise delays,21168,32.0,32.0,32.0,48,0.014842534
+random,"sheaf: edge stalks, block 2",34392,32.0,32.0,32.0,48,0.177767463
+random,exact pairwise delays,21168,32.0,32.0,32.0,48,0.014435792
 random,exact cost-to-go,592704,32.0,32.0,32.0,48,0.0

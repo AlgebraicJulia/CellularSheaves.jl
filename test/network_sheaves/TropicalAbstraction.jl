@@ -286,6 +286,35 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     @test count(htw[reach] .> hp[reach] .+ 1e-9) > 0
     @test shortest_path(W, sources[1], goal; heuristic = htw).cost == V[sources[1]]
     @test_throws ArgumentError Abstraction(W, ψp; potential = 2 .* V)                 # not consistent
+
+    # Base change: the quotient of a tensor product (two agents moving at once) along a
+    # product map is the tensor product of the quotients with their loops.
+    rngt = MersenneTwister(5)
+    edgeset(M) = Set(zip(findnz(M)...))
+    for _ in 1:5
+        A, B = sprand(rngt, 7, 7, 0.4) .* 3, sprand(rngt, 6, 6, 0.4) .* 2
+        ψA, ψB = GraphHomomorphism(rand(rngt, 1:3, 7), 3), GraphHomomorphism(rand(rngt, 1:2, 6), 2)
+        AB = tensor_product(A, B)
+        @test nnz(AB) == nnz(A) * nnz(B) && AB[2 + 7 * (3 - 1), 4 + 7 * (5 - 1)] == (A[2, 4] == 0 || B[3, 5] == 0 ? 0 : A[2, 4] + B[3, 5])
+        prodmap = GraphHomomorphism([ψA.vertex_map[a] + 3 * (ψB.vertex_map[b] - 1) for b in 1:6 for a in 1:7], 6)
+        @test edgeset(quotient_graph(AB, prodmap; loops = true)) ==
+              edgeset(tensor_product(quotient_graph(A, ψA; loops = true), quotient_graph(B, ψB; loops = true)))
+    end
+    @test nnz(tensor_product(sparse([1.0;;]), sparse([2.0;;]); keep = (x, y) -> false)) == 0
+    @test_throws ArgumentError quotient_graph(W, ψp; steps = 2, loops = true)
+
+    # Reeb arcs: on a path with the goal in the middle, equidistant states on the two sides
+    # are different arcs; around a cycle they meet at the far side; unreachable states
+    # form their own arc. Zero-cost edges count as adjacency.
+    path = sparse([1:6; 2:7], [2:7; 1:6], ones(12), 7, 7)
+    arcs = reeb_arcs(path, abs.((1:7) .- 4.0)).vertex_map
+    @test arcs[3] != arcs[5] && arcs[2] != arcs[6] && arcs[1] != arcs[7]
+    @test length(unique(arcs)) == 7
+    cyc = sparse([1:8; [2:8; 1]], [[2:8; 1]; 1:8], ones(16), 8, 8)
+    carcs = reeb_arcs(cyc, Float64[0, 1, 2, 3, 4, 3, 2, 1]).vertex_map
+    @test carcs[4] == carcs[6] && carcs[2] != carcs[8] && carcs[3] != carcs[7]
+    zarcs = reeb_arcs(sparse([1, 2], [2, 3], [0.0, 1.0], 4, 4), [1.0, 1.0, 0.0, Inf])
+    @test zarcs.vertex_map[1] == zarcs.vertex_map[2] && zarcs.vertex_map[4] == zarcs.n_target
     @test_throws ArgumentError lower_bound(Abstraction(W, ψp; potential = fill(Inf, size(W, 1))), goal)
     Wq = P.abstraction.quotient
     for s in sources
