@@ -87,31 +87,9 @@ block_index(c, B) = (CELLS[c][1] - 1) ÷ cld(n, B) + B * ((CELLS[c][2] - 1) ÷ c
 const CORRIDOR = Dict(k => i for (i, k) in enumerate(k for (k, (x, y)) in enumerate(CELLS) if x in WALL))
 const LEVELS = 4n                                                # more than any distance
 
-# The Reeb graph of d: a level-k cell's arc is its component of the band {k ≤ d ≤ k + 1}
-# (the discrete level set d = k + 1/2), so equidistant cells joined only through cells much
-# nearer to or farther from the goal (opposite sides of an obstacle) are kept apart.
-# Returns an arc index per cell.
-function level_components(d)
-    comp, ids = zeros(Int, NF), Dict{Tuple{Int,Int},Int}()
-    parent = collect(1:NF)
-    root(x) = (while parent[x] != x; parent[x] = parent[parent[x]]; x = parent[x]; end; x)
-    for k in sort(unique(filter(isfinite, d)))
-        band = [c for c in 1:NF if k <= d[c] <= k + 1]
-        for c in band
-            parent[c] = c
-        end
-        for c in band, u in NBRS[c]
-            if k <= d[u] <= k + 1
-                ru, rc = root(u), root(c)
-                ru != rc && (parent[ru] = rc)
-            end
-        end
-        for c in band
-            d[c] == k && (comp[c] = get!(ids, (Int(k), root(c)), length(ids) + 1))
-        end
-    end
-    return comp
-end
+# The single-agent graph (moves and waits on the free cells), for the library's Reeb arcs.
+const SOLO = sparse([k for k in 1:NF for _ in NBRS[k]], reduce(vcat, NBRS), ones(sum(length, NBRS)), NF, NF)
+level_components(d) = reeb_arcs(SOLO, d).vertex_map
 
 struct Summary{F}
     name::String

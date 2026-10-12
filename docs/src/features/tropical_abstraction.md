@@ -356,27 +356,41 @@ everything:
 stalks on the interaction graph:
 
 - **Vertex stalk:** an agent's own state graph in the gauge of its ``d_i``.
-- **Edge stalk of a pair ``(i, j)``:** agent ``i``'s states times a mode of agent
-  ``j``. The mode is ``j``'s exact state (relative cell and velocity) when within
-  distance ``r`` of ``i``, where the collision coupling lives, and otherwise
-  ``j``'s Reeb arc. The far dynamics are the pushforward of ``j``'s own moves
-  along the arcs. Its cost-to-go ``\Delta_{ij}`` bounds the pair's delay.
+- **Edge stalk of a pair ``(i, j)``:** the pushforward of the *pair graph* (both
+  agents moving at once, collisions removed) along a map that keeps ``i``'s state
+  and summarizes ``j`` relative to it. Cover the map with blocks:
+  - **Near** (``j``'s block next to ``i``'s): ``j``'s cell and velocity mode are
+    kept. Every collision happens here.
+  - **Far:** ``j`` becomes the pair (Reeb arc of ``d_j``, block). That records its
+    progress, and where it is relative to ``i`` at the resolution of the blocks.
+
+  The cost-to-go ``\Delta_{ij}`` of the edge stalk bounds the pair's delay.
 - **Gluing:** an ``N``-agent plan restricts to a feasible plan of every pair, and
   delays are nonnegative. So for any matching of the interaction graph,
   ``\varphi + \sum_{(i,j)} \Delta_{ij}`` is admissible, and the heuristic takes
   the best matching. This is the pairwise heuristic of conflict-based search (Li,
-  Felner et al. 2019), with the pair bounds coming from abstractions instead of
-  pair solves.
+  Felner et al. 2019), with the pair bounds coming from pushforwards instead of
+  pair solves. The interaction graph keeps only pairs whose *tubes* meet: the
+  cells each agent can use within a small delay. Dropping a pair never breaks
+  admissibility, only tightness.
 
-The edge stalk can be built from the two agents' graphs alone, without the pair
-graph. It is an over-approximation of the pushforward of the pair graph, so it
-still gives a lower bound. One condition must not be dropped: in a far mode, the
-other agent must be *outside* agent ``i``'s window. Each Reeb arc remembers its
-*footprint*, the cells its states occupy, and a far mode exists only where the
-footprint has a cell outside the window. When ``j`` enters the window, the
-construction checks its actual predecessor states. Without this check the pair
-bound recovered none of the coordination cost. With it, it matches the exact
-pushforward on the grid study.
+**Base change makes the edge stalk exact without the pair graph.** The far summary
+depends on ``j``'s state alone, and the near/far split depends only on blocks. So
+the far region is a union of fibres of a *product* map ``\mathrm{id} \times \pi_j``.
+On a product, pushforward commutes with the tensor product (simultaneous moves),
+[`tensor_product`](@ref). Over the far region the edge stalk is therefore
+``W_i \boxtimes Q_{\pi_j}(W_j)``: agent ``i``'s graph times the quotient of
+``j``'s own graph, with its loops ([`quotient_graph`](@ref) with
+`loops = true`). Only the near region and its boundary are enumerated, and their
+size does not grow with the map. The result *equals* the pushforward of the pair
+graph, which the studies assert state by state; it is not an over-approximation.
+[`reeb_arcs`](@ref) computes the arcs as a `GraphHomomorphism`, using bands between
+consecutive distinct levels, so costs need not be unit.
+
+An earlier version kept only ``j``'s Reeb arc when far, with no relative
+coordinate. It had to be patched with an occupancy check and still lost a third of
+the coordination cost on double integrators. The missing piece was the relation,
+which is what an edge stalk is supposed to carry.
 
 ## What the studies found
 
@@ -472,38 +486,55 @@ interaction graph:*
 | pair bound | coarse states | recovered | joint A* expansions |
 |---|---|---|---|
 | none | – | 0% | 306 |
-| edge stalk from the agents' own graphs | 21k | 62% | 142 |
-| exact pushforward of each pair graph, same map | 21k | 62% | 142 |
-| exact pair delays | 21k (pair graphs) | 100% | 109 |
+| edge stalks (block 2), glued | 34k | 100% | 110 |
+| exact pair delays, glued | 21k (pair graphs) | 100% | 109 |
 | exact joint cost-to-go | 593k | 100% | 103 |
 
 *Two double integrators, 16² map, velocities in ``\{-1, 0, 1\}^2`` (2052 states
-each, 4.2M pair states):*
+each, 4.2M pair states). The near field keeps the other agent's velocity exactly
+or as a mode; each row is the exact pushforward along its own map:*
 
-| pair bound | coarse states | recovered | pair A* expansions | build |
+| near field keeps | coarse states (both directions) | recovered | pair A* expansions | build |
 |---|---|---|---|---|
-| none | – | 0% | 1289 | – |
-| edge stalk from the agents' own graphs | 1.18M | 67% | 846 | 25 s |
-| exact pushforward of the pair graph, same map | 1.18M | 100% | 584 | 19 s |
-| exact pair delay | 4.2M | 100% | 571 | 8 s |
+| nothing (decoupled) | – | 0% | 1289 | – |
+| exact velocity (9) | 1.97M | 100% | 571 | 7 s |
+| rest + 4 headings (5) | 1.54M | 67% | 720 | 7 s |
+| rest / moving (2) | 1.22M | 33% | 994 | 6 s |
+| (exact pair delay) | 4.2M | 100% | 571 | 8 s |
 
-Three observations:
+*Four to eight grid agents, 20² map with two corridors, half crossing each way
+(4 instances each).* Here the joint graph cannot be built. The **sandwich**
+compares:
+- the sum of solo distances;
+- the sheaf bound at the start;
+- the optimum, found by independence detection (agents merge into jointly searched
+  groups only when their plans collide);
+- a feasible plan from prioritized planning (each agent plans around the
+  reservations of those before it).
 
-- **The gluing is right.** With exact pair delays it reproduced the exact
+| N | interacting pairs | recovered | certified ratio (feasible / sheaf bound) | joint expansions, decoupled → sheaf heuristic |
+|---|---|---|---|---|
+| 4 | 5.5 of 6 | 60% | 1.007 | 6444 → 888 |
+| 6 | 12 of 15 | 85% | 1.012 | 5265 → 1946 |
+| 8 | 26 of 28 | – | 1.046 | groups of 5–7: out of reach |
+
+Four observations:
+
+- **The edge stalk is exact and tight.** It equals the pushforward of the pair
+  graph, and that pushforward along (Reeb arc, block) loses nothing against the
+  exact pair delay on these maps. With exact pair bounds the gluing reproduced the
   three-agent optimum on every query.
-- **The summary is right.** For double integrators, pushing the pair graph
-  forward along the Reeb-arc map recovers the whole coordination cost.
-- **The cheap edge stalk is the weak link.** Built without the pair graph, it
-  recovers 62–67%, and on the grid it equals the exact pushforward. On double
-  integrators it falls short of the exact pushforward. The likely cause, not yet
-  confirmed, is that it checks the start and end arcs of a far-to-far move
-  separately, instead of requiring a single state of ``j`` to make the whole move.
-
-At these sizes, solving the pair graph outright is cheaper than any abstraction.
-The abstraction pays only where a pair's state space is too large to solve: for
-example two double integrators on a ``128^2 \times 13^2`` lattice, whose pair graph
-has ``\sim 10^{13}`` states. There the near field also has to coarsen the other
-agent's velocity, with the heading × speed modes of [`TruncatedPushforward`](@ref).
+- **The certificate scales; the search does not yet.** At eight agents no joint
+  search finishes, but the sandwich certifies the prioritized plans within 2–9%
+  of optimal without knowing the optimum. That is the lax/oplax sandwich of the
+  single-agent controller, now over the interaction sheaf.
+- **The heuristic cuts joint expansions 3–7×,** but each evaluation costs more, so
+  on these small groups wall time is similar.
+- **Size.** At these map sizes the pair graph is still solvable and comparable in
+  cost. Each direction of the double-integrator edge stalk uses about a quarter
+  of the pair graph's states (0.98M against 4.2M). Its near field is the part that
+  does not shrink with the map, and velocity modes trade its size for tightness
+  gradually.
 
 ## Relation to the literature
 
@@ -596,12 +627,18 @@ supersolutions and Tarski's theorem replaces linear algebra.
   merge-and-shrink and counterexample-guided abstraction refinement automate it.
   The lax/oplax gap is a natural refinement signal: refine where the two quotients
   disagree.
-- **Multi-agent edge stalks at scale.** Two things are untested. The first is
-  whether the edge stalk can keep "one state of the other agent makes the whole
-  far-to-far move" without the pair graph. The second is how far the near field's
-  velocity can be coarsened before the bound degrades. Both matter only where pair
-  graphs are too large to solve, which is also where the bounds can no longer be
-  checked exactly.
+- **Joint search beyond four agents.** Searching a group of ``m`` agents moves
+  all of them at once: ``5^m`` successors per step on a grid. Operator
+  decomposition (one agent moves per step) is the standard fix, but the pair
+  bounds are only proved admissible at synchronized states. A half-moved
+  configuration needs its own argument. Until then, large groups get the
+  certificate but not the optimum.
+- **Dense interaction graphs.** On maps that funnel every agent through the same
+  corridors nearly all pairs interact, and the gluing gains little from sparsity.
+- **Scale of the edge stalks.** The near field is fixed in size but large (a
+  ``3 \times 3`` block window times the velocity modes). The edge stalks pay off
+  only where pair graphs are too large to solve, which is also where they can no
+  longer be checked against them.
 
 ## Reproducing the results
 
@@ -614,9 +651,11 @@ supersolutions and Tarski's theorem replaces linear algebra.
 - **Multiple agents:**
   - `docs/scripts/tropical_multiagent_study.jl`: two agents, the ablation of
     gauge, summary and near field;
-  - `docs/scripts/tropical_pair_sheaf.jl`: the interaction sheaf, shared by the
-    next two;
+  - `docs/scripts/tropical_pair_sheaf.jl`: the interaction sheaf (edge stalks by
+    base change, tubes, matching), shared by the next three;
   - `docs/scripts/tropical_multiagent_sheaf.jl`: three grid agents;
+  - `docs/scripts/tropical_multiagent_cover.jl`: four to eight agents, the
+    sandwich and independence detection;
   - `docs/scripts/tropical_multiagent_double_integrator.jl`: double-integrator
     pairs.
 
