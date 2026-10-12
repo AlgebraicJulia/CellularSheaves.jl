@@ -36,7 +36,7 @@ column of ``W^*``. Other control problems are closures in other semirings:
 |---|---|---|---|
 | tropical | ``\min``, ``+`` | minimum cost / minimum time to a target | [`cost_to_go`](@ref), [`Abstraction`](@ref) |
 | bottleneck | ``\max``, ``\min`` | reach-avoid value: best worst-case margin along a path | [`reach_avoid`](@ref), [`maxmin_closure`](@ref) |
-| real | ``+``, ``\times`` | discounted policy evaluation ``V = P^* c``, ``P = D^{-1}N`` | `PathPackCoarsest` in [`Multigrid`](@ref) |
+| real | ``+``, ``\times`` | discounted policy evaluation ``V = P^* c``, ``P = D^{-1}N`` | `PathPackCoarsest` in [`Multigrid`](@ref CellularSheaves.ControlSheaves.DoubleIntegratorHJB.Multigrid) |
 
 The first two are *idempotent* (``a \oplus a = a``), and that is what this page
 exploits. The third is the ordinary linear algebra of the HJB solvers
@@ -370,7 +370,7 @@ supersolutions and Tarski's theorem replaces linear algebra.
 
 - **Deterministic only.** Expectations bring back ``(+, \times)`` and with it
   subtraction, so stochastic problems belong to the real-semiring solvers
-  ([`GridPolicyIteration`](@ref) with [`Multigrid`](@ref)).
+  ([`GridPolicyIteration`](@ref CellularSheaves.ControlSheaves.DoubleIntegratorHJB.GridPolicyIteration) with [`Multigrid`](@ref CellularSheaves.ControlSheaves.DoubleIntegratorHJB.Multigrid)).
 - **Lattice dynamics.** The state graph is a discretization with finitely many
   controls and a unit time step. The bounds are exact *for the lattice*, not for
   the continuous system.
