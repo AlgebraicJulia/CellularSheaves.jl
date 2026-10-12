@@ -274,6 +274,19 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     P = LayeredPlanner(W, ψp, (24, 24))
     hp = lower_bound(P.abstraction, goal)
     @test all(hp .<= V)
+
+    # A twisted refinement (a potential): zero changes nothing; the exact cost-to-go is
+    # reproduced exactly; a consistent bound as potential gives a bound between it and V.
+    reach = isfinite.(V)
+    @test lower_bound(Abstraction(W, ψp; potential = zeros(size(W, 1))), goal) == hp
+    hexact = lower_bound(Abstraction(W, ψp; potential = V), goal)
+    @test hexact[reach] ≈ V[reach] && all(isinf, hexact[.!reach])
+    htw = lower_bound(Abstraction(W, space[1][1]; potential = hp), goal)
+    @test all(htw[reach] .<= V[reach] .+ 1e-9) && all(htw[reach] .>= hp[reach] .- 1e-9)
+    @test count(htw[reach] .> hp[reach] .+ 1e-9) > 0
+    @test shortest_path(W, sources[1], goal; heuristic = htw).cost == V[sources[1]]
+    @test_throws ArgumentError Abstraction(W, ψp; potential = 2 .* V)                 # not consistent
+    @test_throws ArgumentError lower_bound(Abstraction(W, ψp; potential = fill(Inf, size(W, 1))), goal)
     Wq = P.abstraction.quotient
     for s in sources
         route = plan_route(P, s, goal)

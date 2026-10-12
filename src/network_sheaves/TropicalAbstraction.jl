@@ -338,7 +338,7 @@ function _full_closure(::_DijkstraClosure, Wc)
 end
 
 """
-    Abstraction(W, ψ; steps = 1, closure = DijkstraClosure(), table = false)
+    Abstraction(W, ψ; steps = 1, closure = DijkstraClosure(), table = false, potential = nothing)
 
 The coarse problem of the edge costs `W` along the aggregation `ψ` with time
 coarsened by `steps`: the quotient graph of the `steps`-step graph
@@ -356,31 +356,67 @@ the coarse terminal cost, a lookup of the columns of the target blocks. This is 
 pattern database (Culberson & Schaeffer 1998) and, in control terms, the min-plus
 fundamental solution of the coarse Bellman equation: the value for any terminal
 cost ``φ`` is the Hopf–Lax formula ``V(B) = \\min_C W_c^*(B, C) + φ(C)``.
+
+**A twisted refinement.** With a `potential` ``φ`` (one value per state) the
+refinement copies a block's value *on top of* ``φ``, ``E_φ v = φ ⊗ E v``, instead of
+copying it flat. Equivalently, the costs are conjugated by the invertible diagonal
+matrix ``D = \\operatorname{diag}(φ)`` before the pushforward,
+
+```math
+W^φ = D^{-1} ⊗ W ⊗ D, \\qquad W^φ_{xy} = W_{xy} + φ(y) - φ(x),
+```
+
+an isomorphism of min-plus sheaves (a change of gauge) that leaves the fine problem
+unchanged but not its quotient, because the minimum over a block does not commute
+with it. The coarse problem then bounds only what ``φ`` misses, and the bound is
+``φ + E V^φ_c``. This is the min-plus counterpart of aggregation with a near-nullspace
+mode in algebraic multigrid (compare the `modes` of `TruncatedPushforwardCoarseSpace`):
+the coarse space represents corrections to ``φ`` rather than to a constant. The
+potential must be *consistent*, ``φ(x) ≤ W_{xy} + φ(y)`` on every edge, so that
+``W^φ ≥ 0`` (for example the cost-to-go of a relaxation, such as each agent's
+single-agent distance in a multi-agent problem); states where ``φ = ∞`` keep the bound
+``∞``. With ``φ`` the exact cost-to-go the bound is exact.
 """
-struct Abstraction{G<:SparseMatrixCSC,C<:MinPlusClosure}
+struct Abstraction{G<:SparseMatrixCSC,C<:MinPlusClosure,P<:Union{Nothing,Vector{Float64}}}
     W::G
     ψ::GraphHomomorphism
     steps::Int
     quotient::SparseMatrixCSC{Float64,Int}
     closure::C
     table::Union{Nothing,Matrix{Float64}}
+    potential::P
 
     function Abstraction(W::G, ψ::GraphHomomorphism, steps::Integer, quotient::SparseMatrixCSC{Float64,Int}, closure::C,
-            table::Union{Nothing,Matrix{Float64}}) where {G<:SparseMatrixCSC,C<:MinPlusClosure}
+            table::Union{Nothing,Matrix{Float64}}, potential::P = nothing) where {G<:SparseMatrixCSC,C<:MinPlusClosure,P<:Union{Nothing,Vector{Float64}}}
         nc = ψ.n_target
         @argcheck size(W, 1) == size(W, 2) == length(ψ.vertex_map) "ψ must map the states of W"
         @argcheck size(quotient) == (nc, nc) "the quotient has one vertex per block of ψ"
         @argcheck steps >= 1 "steps must be positive"
         @argcheck isnothing(table) || size(table) == (nc, nc) "the table has one entry per pair of blocks"
-        return new{G,C}(W, ψ, Int(steps), quotient, closure, table)
+        @argcheck isnothing(potential) || length(potential) == size(W, 1) "one potential value per state"
+        return new{G,C,P}(W, ψ, Int(steps), quotient, closure, table, potential)
     end
 end
 
 function Abstraction(W::SparseMatrixCSC, ψ::GraphHomomorphism; steps::Integer = 1,
-        closure::ClosureMethod = DijkstraClosure(), table::Bool = false)
-    Wc = SparseMatrixCSC{Float64,Int}(quotient_graph(W, ψ; steps))
+        closure::ClosureMethod = DijkstraClosure(), table::Bool = false,
+        potential::Union{Nothing,AbstractVector{<:Real}} = nothing)
+    φ = isnothing(potential) ? nothing : Vector{Float64}(potential)
+    Wc = SparseMatrixCSC{Float64,Int}(quotient_graph(isnothing(φ) ? W : _gauge(W, φ), ψ; steps))
     solver = _closure(closure, Wc)
-    return Abstraction(W, ψ, Int(steps), Wc, solver, table ? _full_closure(solver, Wc) : nothing)
+    return Abstraction(W, ψ, Int(steps), Wc, solver, table ? _full_closure(solver, Wc) : nothing, φ)
+end
+
+# The costs in the gauge of the potential φ: W_xy + φ(y) - φ(x), on the edges between
+# states of finite potential (the others cannot reach the targets).
+function _gauge(W::SparseMatrixCSC, φ::Vector{Float64})
+    @argcheck length(φ) == size(W, 1) "one potential value per state"
+    rows, cols, vals = findnz(W)
+    keep = [isfinite(φ[x]) && isfinite(φ[y]) for (x, y) in zip(rows, cols)]
+    shaped = Float64[vals[k] + φ[cols[k]] - φ[rows[k]] for k in findall(keep)]
+    tol = 1e-9 * max(1.0, maximum(abs, filter(isfinite, φ); init = 1.0))
+    @argcheck all(>=(-tol), shaped) "the potential must be consistent: φ(x) ≤ W[x, y] + φ(y) on every edge"
+    return sparse(rows[keep], cols[keep], max.(shaped, 0.0), size(W)...)
 end
 
 """
@@ -390,13 +426,20 @@ A lower bound on the cost-to-go of every state to `targets`: the coarse
 cost-to-go of its block, with terminal cost the best fewer-than-`steps` move into
 the targets from each block (from the stored all-pairs table if there is one).
 For `steps = 1` it is a consistent heuristic; for more steps an admissible one.
+With a potential ``φ`` the bound is ``φ + E V^φ_c`` (see [`Abstraction`](@ref)).
 """
 function lower_bound(A::Abstraction, targets)
     N = size(A.W, 1)
     @argcheck !isempty(targets) && all(t -> 1 <= t <= N, targets) "targets must be states of W"
     b = fill(Inf, N)
     b[targets] .= 0
-    bc = tropical_pushforward(A.ψ, _short_horizon(A.W, b, A.steps))
+    φ = A.potential
+    if !isnothing(φ)
+        @argcheck all(isfinite, φ[targets]) "the potential must be finite on the targets"
+        b[targets] .-= φ[targets]                                           # terminal cost in the gauge
+    end
+    Wg = isnothing(φ) || A.steps == 1 ? A.W : _gauge(A.W, φ)
+    bc = tropical_pushforward(A.ψ, _short_horizon(Wg, b, A.steps))
     if isnothing(A.table)
         vc = _apply_closure(A.closure, A.quotient, bc)
     else
@@ -405,7 +448,9 @@ function lower_bound(A::Abstraction, targets)
             isinf(bc[c]) || (vc .= min.(vc, view(A.table, :, c) .+ bc[c]))
         end
     end
-    return tropical_pullback(A.ψ, vc)
+    v = tropical_pullback(A.ψ, vc)
+    isnothing(φ) || (v .= ifelse.(isfinite.(φ), φ .+ v, Inf))
+    return v
 end
 
 # A* from `source` with the out-edges given by `each_out(f, x)` (calling f(y, w) for

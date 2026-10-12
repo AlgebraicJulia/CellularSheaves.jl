@@ -1,145 +1,113 @@
 kind,heuristic,coarse_states,optimal,decoupled,bound,expanded,exact_expanded,build_seconds,search_seconds
-swap,decoupled (sum of distances),0,33.0,31.0,31.0,79,42,0.010463234,0.009083862
-swap,"costs, rooms 4×4 + corridors + near 2",82040,33.0,31.0,31.0,72,42,2.409368066,0.008610285
-swap,"delays, near 2",36680,33.0,31.0,31.0,76,42,1.317049868,0.009271693
-swap,"delays, near 6",194168,33.0,31.0,31.0,65,42,1.34790488,0.009364877
-swap,"delays, rooms 4×4 + corridors",47240,33.0,31.0,31.0,54,42,1.374657408,0.007445393
-swap,"delays, rooms 4×4 + corridors + near 2",82040,33.0,31.0,31.0,54,42,1.302038617,0.009305076
-swap,"delays, rooms 8×8 + corridors + near 2",162488,33.0,31.0,31.0,51,42,1.359537182,0.009175292
-swap,"delays, progress + corridors + near 2",155241,33.0,31.0,33.0,42,42,1.551309871,0.007355284
-swap,"delays, progress + corridors + near 4",222694,33.0,31.0,33.0,42,42,1.487121396,0.009243931
-swap,decoupled (sum of distances),0,43.0,40.0,40.0,182,110,7.704e-6,0.007359873
-swap,"costs, rooms 4×4 + corridors + near 2",82040,43.0,40.0,40.0,182,110,1.245946444,0.009327347
-swap,"delays, near 2",36680,43.0,40.0,40.0,178,110,1.114695574,0.007409686
-swap,"delays, near 6",194168,43.0,40.0,40.0,165,110,1.264535756,0.009382982
-swap,"delays, rooms 4×4 + corridors",47240,43.0,40.0,40.0,156,110,1.083931463,0.007439502
-swap,"delays, rooms 4×4 + corridors + near 2",82040,43.0,40.0,40.0,156,110,1.123752825,0.009336584
-swap,"delays, rooms 8×8 + corridors + near 2",162488,43.0,40.0,40.0,145,110,1.286182854,0.007477343
-swap,"delays, progress + corridors + near 2",148527,43.0,40.0,43.0,110,110,1.417432301,0.007440043
-swap,"delays, progress + corridors + near 4",216136,43.0,40.0,43.0,110,110,1.470150806,0.007435554
-swap,decoupled (sum of distances),0,47.0,40.0,40.0,2236,244,7.263e-6,0.008161294
-swap,"costs, rooms 4×4 + corridors + near 2",82040,47.0,40.0,40.0,2236,244,1.167930355,0.008194836
-swap,"delays, near 2",36680,47.0,40.0,40.0,2230,244,1.126036201,0.008245451
-swap,"delays, near 6",194168,47.0,40.0,40.0,2163,244,1.200771707,0.008116079
-swap,"delays, rooms 4×4 + corridors",47240,47.0,40.0,40.0,2126,244,1.128896087,0.009843884
-swap,"delays, rooms 4×4 + corridors + near 2",82040,47.0,40.0,40.0,2125,244,1.247032798,0.008070634
-swap,"delays, rooms 8×8 + corridors + near 2",162488,47.0,40.0,40.0,2081,244,1.245824095,0.009099972
-swap,"delays, progress + corridors + near 2",145138,47.0,40.0,46.0,256,244,1.369480082,0.007534981
-swap,"delays, progress + corridors + near 4",212780,47.0,40.0,46.0,256,244,1.472149268,0.007418032
-swap,decoupled (sum of distances),0,54.0,46.0,46.0,3138,1281,7.874e-6,0.008269666
-swap,"costs, rooms 4×4 + corridors + near 2",82040,54.0,46.0,46.0,3138,1281,1.26336863,0.008627437
-swap,"delays, near 2",36680,54.0,46.0,46.0,3137,1281,1.149561166,0.008420829
-swap,"delays, near 6",194168,54.0,46.0,46.0,3117,1281,1.365363253,0.008372098
-swap,"delays, rooms 4×4 + corridors",47240,54.0,46.0,46.0,3104,1281,1.12455668,0.008571302
-swap,"delays, rooms 4×4 + corridors + near 2",82040,54.0,46.0,46.0,3104,1281,1.221488763,0.008405391
-swap,"delays, rooms 8×8 + corridors + near 2",162488,54.0,46.0,46.0,3066,1281,1.369664167,0.008386395
-swap,"delays, progress + corridors + near 2",144289,54.0,46.0,46.0,1712,1281,1.286058059,0.008014649
-swap,"delays, progress + corridors + near 4",211886,54.0,46.0,46.0,1712,1281,1.472019321,0.007958113
-swap,decoupled (sum of distances),0,43.0,36.0,36.0,1162,339,7.534e-6,0.007733883
-swap,"costs, rooms 4×4 + corridors + near 2",82040,43.0,36.0,36.0,1162,339,1.24863298,0.00772152
-swap,"delays, near 2",36680,43.0,36.0,36.0,1157,339,1.083700105,0.008786855
-swap,"delays, near 6",194168,43.0,36.0,36.0,1104,339,1.347682277,0.007815806
-swap,"delays, rooms 4×4 + corridors",47240,43.0,36.0,36.0,1076,339,1.09722424,0.007692425
-swap,"delays, rooms 4×4 + corridors + near 2",82040,43.0,36.0,36.0,1075,339,1.217700313,0.007863356
-swap,"delays, rooms 8×8 + corridors + near 2",162488,43.0,36.0,36.0,1036,339,1.226932431,0.007672599
-swap,"delays, progress + corridors + near 2",153545,43.0,36.0,43.0,339,339,1.391987274,0.007504934
-swap,"delays, progress + corridors + near 4",221026,43.0,36.0,43.0,339,339,1.458627651,0.007515474
-swap,decoupled (sum of distances),0,44.0,36.0,36.0,1581,490,7.404e-6,0.007918769
-swap,"costs, rooms 4×4 + corridors + near 2",82040,44.0,36.0,36.0,1579,490,1.226844777,0.007922456
-swap,"delays, near 2",36680,44.0,36.0,36.0,1565,490,1.047657598,0.007855701
-swap,"delays, near 6",194168,44.0,36.0,36.0,1483,490,1.181316197,0.008921577
-swap,"delays, rooms 4×4 + corridors",47240,44.0,36.0,36.0,1429,490,1.092117277,0.007868124
-swap,"delays, rooms 4×4 + corridors + near 2",82040,44.0,36.0,36.0,1427,490,1.165636103,0.007861883
-swap,"delays, rooms 8×8 + corridors + near 2",162488,44.0,36.0,36.0,1376,490,1.198189906,0.007820695
-swap,"delays, progress + corridors + near 2",147684,44.0,36.0,44.0,490,490,1.355080801,0.007581858
-swap,"delays, progress + corridors + near 4",215337,44.0,36.0,44.0,490,490,1.455506205,0.007604841
-swap,decoupled (sum of distances),0,42.0,35.0,35.0,1022,315,7.765e-6,0.007669181
-swap,"costs, rooms 4×4 + corridors + near 2",82040,42.0,35.0,35.0,1022,315,1.220349864,0.009675679
-swap,"delays, near 2",36680,42.0,35.0,35.0,1018,315,1.122787452,0.00781775
-swap,"delays, near 6",194168,42.0,35.0,35.0,973,315,1.258752741,0.007678489
-swap,"delays, rooms 4×4 + corridors",47240,42.0,35.0,35.0,950,315,1.184499568,0.007713114
-swap,"delays, rooms 4×4 + corridors + near 2",82040,42.0,35.0,35.0,949,315,1.274076527,0.009657986
-swap,"delays, rooms 8×8 + corridors + near 2",162488,42.0,35.0,35.0,899,315,1.274362883,0.007645998
-swap,"delays, progress + corridors + near 2",147684,42.0,35.0,42.0,315,315,1.362060723,0.009293293
-swap,"delays, progress + corridors + near 4",215337,42.0,35.0,42.0,315,315,1.452277529,0.008495138
-swap,decoupled (sum of distances),0,43.0,40.0,40.0,543,220,8.886e-6,0.007501478
-swap,"costs, rooms 4×4 + corridors + near 2",82040,43.0,40.0,40.0,534,220,1.124513154,0.007568824
-swap,"delays, near 2",36680,43.0,40.0,40.0,538,220,1.05556649,0.007551241
-swap,"delays, near 6",194168,43.0,40.0,40.0,518,220,1.310504955,0.007656127
-swap,"delays, rooms 4×4 + corridors",47240,43.0,40.0,40.0,503,220,1.259994986,0.007517869
-swap,"delays, rooms 4×4 + corridors + near 2",82040,43.0,40.0,40.0,503,220,1.186824513,0.007533628
-swap,"delays, rooms 8×8 + corridors + near 2",162488,43.0,40.0,40.0,476,220,1.2640926,0.007591146
-swap,"delays, progress + corridors + near 2",155256,43.0,40.0,43.0,220,220,1.342133735,0.007501407
-swap,"delays, progress + corridors + near 4",222789,43.0,40.0,43.0,220,220,1.446803778,0.007524551
-random,decoupled (sum of distances),0,50.0,50.0,50.0,112,112,8.496e-6,0.007163806
-random,"costs, rooms 4×4 + corridors + near 2",82040,50.0,50.0,50.0,112,112,1.274752393,0.009319482
-random,"delays, near 2",36680,50.0,50.0,50.0,112,112,1.113274607,0.007423592
-random,"delays, near 6",194168,50.0,50.0,50.0,112,112,1.27075674,0.009383512
-random,"delays, rooms 4×4 + corridors",47240,50.0,50.0,50.0,112,112,1.222767933,0.007674462
-random,"delays, rooms 4×4 + corridors + near 2",82040,50.0,50.0,50.0,112,112,1.190161231,0.007467063
-random,"delays, rooms 8×8 + corridors + near 2",162488,50.0,50.0,50.0,112,112,1.256461039,0.009209857
-random,"delays, progress + corridors + near 2",159458,50.0,50.0,50.0,112,112,1.352400151,0.007440524
-random,"delays, progress + corridors + near 4",226925,50.0,50.0,50.0,112,112,1.492365851,0.00954252
-random,decoupled (sum of distances),0,39.0,39.0,39.0,21,21,8.476e-6,0.007302776
-random,"costs, rooms 4×4 + corridors + near 2",82040,39.0,39.0,39.0,21,21,1.255423586,0.0075721
-random,"delays, near 2",36680,39.0,39.0,39.0,21,21,1.131512621,0.007387445
-random,"delays, near 6",194168,39.0,39.0,39.0,21,21,1.281181331,0.009175413
-random,"delays, rooms 4×4 + corridors",47240,39.0,39.0,39.0,21,21,1.147840759,0.007398845
-random,"delays, rooms 4×4 + corridors + near 2",82040,39.0,39.0,39.0,21,21,1.093376225,0.0083519
-random,"delays, rooms 8×8 + corridors + near 2",162488,39.0,39.0,39.0,21,21,1.234397732,0.007439471
-random,"delays, progress + corridors + near 2",155266,39.0,39.0,39.0,21,21,1.420249862,0.0091205
-random,"delays, progress + corridors + near 4",222830,39.0,39.0,39.0,21,21,1.536735361,0.00736385
-random,decoupled (sum of distances),0,29.0,29.0,29.0,33,33,8.316e-6,0.007288478
-random,"costs, rooms 4×4 + corridors + near 2",82040,29.0,29.0,29.0,33,33,1.192452485,0.007286325
-random,"delays, near 2",36680,29.0,29.0,29.0,33,33,1.108213678,0.00757254
-random,"delays, near 6",194168,29.0,29.0,29.0,33,33,1.370704074,0.009130398
-random,"delays, rooms 4×4 + corridors",47240,29.0,29.0,29.0,33,33,1.181476823,0.007432999
-random,"delays, rooms 4×4 + corridors + near 2",82040,29.0,29.0,29.0,33,33,1.188865788,0.007421758
-random,"delays, rooms 8×8 + corridors + near 2",162488,29.0,29.0,29.0,33,33,1.42420485,0.007341197
-random,"delays, progress + corridors + near 2",156926,29.0,29.0,29.0,33,33,1.297659078,0.007360624
-random,"delays, progress + corridors + near 4",224403,29.0,29.0,29.0,33,33,1.512658731,0.008414647
-random,decoupled (sum of distances),0,24.0,24.0,24.0,59,59,7.544e-6,0.007399236
-random,"costs, rooms 4×4 + corridors + near 2",82040,24.0,24.0,24.0,59,59,1.233267627,0.007420596
-random,"delays, near 2",36680,24.0,24.0,24.0,59,59,1.09708028,0.008391404
-random,"delays, near 6",194168,24.0,24.0,24.0,59,59,1.364065783,0.007356647
-random,"delays, rooms 4×4 + corridors",47240,24.0,24.0,24.0,59,59,1.094370315,0.007555689
-random,"delays, rooms 4×4 + corridors + near 2",82040,24.0,24.0,24.0,59,59,1.140850144,0.008406572
-random,"delays, rooms 8×8 + corridors + near 2",162488,24.0,24.0,24.0,59,59,1.355466269,0.007404446
-random,"delays, progress + corridors + near 2",156092,24.0,24.0,24.0,59,59,1.27078895,0.007493643
-random,"delays, progress + corridors + near 4",223603,24.0,24.0,24.0,59,59,1.4786201,0.007384929
-random,decoupled (sum of distances),0,14.0,14.0,14.0,13,13,7.895e-6,0.007423792
-random,"costs, rooms 4×4 + corridors + near 2",82040,14.0,14.0,14.0,13,13,1.229407429,0.007280374
-random,"delays, near 2",36680,14.0,14.0,14.0,13,13,1.11067076,0.007451404
-random,"delays, near 6",194168,14.0,14.0,14.0,13,13,1.314217796,0.00746517
-random,"delays, rooms 4×4 + corridors",47240,14.0,14.0,14.0,13,13,1.093087893,0.007386522
-random,"delays, rooms 4×4 + corridors + near 2",82040,14.0,14.0,14.0,13,13,1.228255681,0.00735325
-random,"delays, rooms 8×8 + corridors + near 2",162488,14.0,14.0,14.0,13,13,1.209884589,0.00906219
-random,"delays, progress + corridors + near 2",169561,14.0,14.0,14.0,13,13,1.407782328,0.007376824
-random,"delays, progress + corridors + near 4",236928,14.0,14.0,14.0,13,13,1.497773106,0.007435595
-random,decoupled (sum of distances),0,40.0,40.0,40.0,516,516,8.165e-6,0.007440113
-random,"costs, rooms 4×4 + corridors + near 2",82040,40.0,40.0,40.0,516,516,1.274593925,0.007799586
-random,"delays, near 2",36680,40.0,40.0,40.0,516,516,1.153353277,0.007720387
-random,"delays, near 6",194168,40.0,40.0,40.0,516,516,1.362495973,0.007772003
-random,"delays, rooms 4×4 + corridors",47240,40.0,40.0,40.0,516,516,1.132785391,0.007705159
-random,"delays, rooms 4×4 + corridors + near 2",82040,40.0,40.0,40.0,516,516,1.234740125,0.007641209
-random,"delays, rooms 8×8 + corridors + near 2",162488,40.0,40.0,40.0,516,516,1.385028568,0.007658261
-random,"delays, progress + corridors + near 2",170423,40.0,40.0,40.0,516,516,1.304751409,0.007768848
-random,"delays, progress + corridors + near 4",237887,40.0,40.0,40.0,516,516,1.477543323,0.007784458
-random,decoupled (sum of distances),0,63.0,63.0,63.0,486,486,6.993e-6,0.007718814
-random,"costs, rooms 4×4 + corridors + near 2",82040,63.0,63.0,63.0,486,486,1.261777626,0.007617014
-random,"delays, near 2",36680,63.0,63.0,63.0,486,486,1.147303658,0.007881018
-random,"delays, near 6",194168,63.0,63.0,63.0,486,486,1.380919213,0.00761479
-random,"delays, rooms 4×4 + corridors",47240,63.0,63.0,63.0,486,486,1.1354653,0.007755213
-random,"delays, rooms 4×4 + corridors + near 2",82040,63.0,63.0,63.0,486,486,1.241549736,0.007765712
-random,"delays, rooms 8×8 + corridors + near 2",162488,63.0,63.0,63.0,486,486,1.397070708,0.00776497
-random,"delays, progress + corridors + near 2",178850,63.0,63.0,63.0,486,486,1.312117193,0.007649114
-random,"delays, progress + corridors + near 4",246201,63.0,63.0,63.0,486,486,1.507511172,0.008728395
-random,decoupled (sum of distances),0,39.0,39.0,39.0,27,27,7.414e-6,0.007076842
-random,"costs, rooms 4×4 + corridors + near 2",82040,39.0,39.0,39.0,27,27,1.224141016,0.007391141
-random,"delays, near 2",36680,39.0,39.0,39.0,27,27,1.074408142,0.007324937
-random,"delays, near 6",194168,39.0,39.0,39.0,27,27,1.349922388,0.00736379
-random,"delays, rooms 4×4 + corridors",47240,39.0,39.0,39.0,27,27,1.104449539,0.007383135
-random,"delays, rooms 4×4 + corridors + near 2",82040,39.0,39.0,39.0,27,27,1.214297032,0.007374349
-random,"delays, rooms 8×8 + corridors + near 2",162488,39.0,39.0,39.0,27,27,1.215786311,0.009203855
-random,"delays, progress + corridors + near 2",180556,39.0,39.0,39.0,27,27,1.332435792,0.007404386
-random,"delays, progress + corridors + near 4",247979,39.0,39.0,39.0,27,27,1.451098192,0.009260331
+swap,decoupled (sum of distances),0,33.0,31.0,31.0,79,42,0.007345366,0.008811541
+swap,untwisted: progress (Reeb arcs) + near 2,203119,33.0,31.0,33.0,42,42,2.931312107,0.008824254
+swap,twisted: position blocks 4×4 + near 2,62000,33.0,31.0,31.0,76,42,3.041019095,0.007257721
+swap,twisted: progress levels + near 2,102409,33.0,31.0,31.0,76,42,3.200415763,0.009452691
+swap,twisted: progress levels + near 2 + corridors,122449,33.0,31.0,31.0,54,42,3.069577564,0.00726243
+swap,twisted: progress (Reeb arcs),168759,33.0,31.0,33.0,42,42,3.04625471,0.008903362
+swap,twisted: progress (Reeb arcs) + near 2,203119,33.0,31.0,33.0,42,42,2.997863722,0.00723079
+swap,decoupled (sum of distances),0,43.0,40.0,40.0,182,110,5.45e-6,0.007285433
+swap,untwisted: progress (Reeb arcs) + near 2,210615,43.0,40.0,43.0,110,110,1.449045779,0.009209095
+swap,twisted: position blocks 4×4 + near 2,62000,43.0,40.0,40.0,178,110,2.699473854,0.007863966
+swap,twisted: progress levels + near 2,110841,43.0,40.0,40.0,178,110,2.93395702,0.00736419
+swap,twisted: progress levels + near 2 + corridors,130881,43.0,40.0,40.0,156,110,3.059555928,0.007362447
+swap,twisted: progress (Reeb arcs),176355,43.0,40.0,43.0,110,110,2.938187662,0.008783178
+swap,twisted: progress (Reeb arcs) + near 2,210615,43.0,40.0,43.0,110,110,3.086783123,0.007408904
+swap,decoupled (sum of distances),0,47.0,40.0,40.0,2236,244,6.061e-6,0.008015701
+swap,untwisted: progress (Reeb arcs) + near 2,208076,47.0,40.0,46.0,249,244,1.515677384,0.007426708
+swap,twisted: position blocks 4×4 + near 2,62000,47.0,40.0,40.0,2230,244,2.854186761,0.008145964
+swap,twisted: progress levels + near 2,103250,47.0,40.0,40.0,2230,244,2.853460371,0.008088256
+swap,twisted: progress levels + near 2 + corridors,123290,47.0,40.0,40.0,2125,244,2.961934114,0.008044015
+swap,twisted: progress (Reeb arcs),173821,47.0,40.0,46.0,249,244,3.127535543,0.007446526
+swap,twisted: progress (Reeb arcs) + near 2,208076,47.0,40.0,46.0,249,244,3.073661328,0.007405589
+swap,decoupled (sum of distances),0,54.0,46.0,46.0,3138,1281,5.16e-6,0.008259108
+swap,untwisted: progress (Reeb arcs) + near 2,210565,54.0,46.0,48.0,1423,1281,1.462040853,0.009533725
+swap,twisted: position blocks 4×4 + near 2,62000,54.0,46.0,46.0,3137,1281,2.800233615,0.010094344
+swap,twisted: progress levels + near 2,107447,54.0,46.0,46.0,3137,1281,2.87666257,0.010127146
+swap,twisted: progress levels + near 2 + corridors,127487,54.0,46.0,46.0,3104,1281,2.868692894,0.009862611
+swap,twisted: progress (Reeb arcs),176352,54.0,46.0,48.0,1423,1281,2.98113228,0.009647598
+swap,twisted: progress (Reeb arcs) + near 2,210565,54.0,46.0,48.0,1423,1281,2.901798985,0.00781706
+swap,decoupled (sum of distances),0,43.0,36.0,36.0,1162,339,6.021e-6,0.007629478
+swap,untwisted: progress (Reeb arcs) + near 2,204766,43.0,36.0,43.0,339,339,1.543631465,0.008725471
+swap,twisted: position blocks 4×4 + near 2,62000,43.0,36.0,36.0,1157,339,2.849245884,0.007717173
+swap,twisted: progress levels + near 2,104089,43.0,36.0,36.0,1157,339,3.151242302,0.007691083
+swap,twisted: progress levels + near 2 + corridors,124129,43.0,36.0,36.0,1075,339,3.079011408,0.007765252
+swap,twisted: progress (Reeb arcs),170447,43.0,36.0,43.0,339,339,3.089011987,0.007433792
+swap,twisted: progress (Reeb arcs) + near 2,204766,43.0,36.0,43.0,339,339,3.113416732,0.007402083
+swap,decoupled (sum of distances),0,44.0,36.0,36.0,1581,490,5.741e-6,0.009183209
+swap,untwisted: progress (Reeb arcs) + near 2,208156,44.0,36.0,44.0,490,490,1.383773394,0.007521206
+swap,twisted: position blocks 4×4 + near 2,62000,44.0,36.0,36.0,1565,490,2.583445074,0.007799717
+swap,twisted: progress levels + near 2,104112,44.0,36.0,36.0,1565,490,2.836299187,0.007767557
+swap,twisted: progress levels + near 2 + corridors,124152,44.0,36.0,36.0,1427,490,2.849917702,0.007728875
+swap,twisted: progress (Reeb arcs),173826,44.0,36.0,44.0,490,490,2.852256523,0.009190031
+swap,twisted: progress (Reeb arcs) + near 2,208156,44.0,36.0,44.0,490,490,2.855024616,0.007450002
+swap,decoupled (sum of distances),0,42.0,35.0,35.0,1022,315,5.35e-6,0.009171797
+swap,untwisted: progress (Reeb arcs) + near 2,208129,42.0,35.0,42.0,315,315,1.222569643,0.007379972
+swap,twisted: position blocks 4×4 + near 2,62000,42.0,35.0,35.0,1018,315,2.483853279,0.00764097
+swap,twisted: progress levels + near 2,104956,42.0,35.0,35.0,1018,315,2.774640213,0.007601897
+swap,twisted: progress levels + near 2 + corridors,124996,42.0,35.0,35.0,949,315,2.611422041,0.007654595
+swap,twisted: progress (Reeb arcs),173824,42.0,35.0,42.0,315,315,2.755831161,0.007417181
+swap,twisted: progress (Reeb arcs) + near 2,208129,42.0,35.0,42.0,315,315,2.687368617,0.009117236
+swap,decoupled (sum of distances),0,43.0,40.0,40.0,543,220,5.771e-6,0.007470399
+swap,untwisted: progress (Reeb arcs) + near 2,204832,43.0,40.0,43.0,220,220,1.13352325,0.007373098
+swap,twisted: position blocks 4×4 + near 2,62000,43.0,40.0,40.0,538,220,2.457368188,0.007615241
+swap,twisted: progress levels + near 2,104956,43.0,40.0,40.0,538,220,2.693446438,0.007499344
+swap,twisted: progress levels + near 2 + corridors,124996,43.0,40.0,40.0,503,220,2.564518436,0.007665235
+swap,twisted: progress (Reeb arcs),170450,43.0,40.0,43.0,220,220,2.675555148,0.007484497
+swap,twisted: progress (Reeb arcs) + near 2,204832,43.0,40.0,43.0,220,220,2.673254907,0.007409826
+random,decoupled (sum of distances),0,50.0,50.0,50.0,112,112,5.731e-6,0.007479718
+random,untwisted: progress (Reeb arcs) + near 2,205604,50.0,50.0,50.0,112,112,1.2366026,0.007639587
+random,twisted: position blocks 4×4 + near 2,62000,50.0,50.0,50.0,112,112,2.483228443,0.007449411
+random,twisted: progress levels + near 2,120129,50.0,50.0,50.0,112,112,2.624825471,0.007415176
+random,twisted: progress levels + near 2 + corridors,140169,50.0,50.0,50.0,112,112,2.649616051,0.007365783
+random,twisted: progress (Reeb arcs),171291,50.0,50.0,50.0,112,112,2.593952952,0.007524381
+random,twisted: progress (Reeb arcs) + near 2,205604,50.0,50.0,50.0,112,112,2.64261489,0.009262296
+random,decoupled (sum of distances),0,39.0,39.0,39.0,21,21,5.651e-6,0.007360464
+random,untwisted: progress (Reeb arcs) + near 2,203940,39.0,39.0,39.0,21,21,1.227795479,0.007371103
+random,twisted: position blocks 4×4 + near 2,62000,39.0,39.0,39.0,21,21,2.367726186,0.007363529
+random,twisted: progress levels + near 2,104092,39.0,39.0,39.0,21,21,2.653393554,0.007446515
+random,twisted: progress levels + near 2 + corridors,124132,39.0,39.0,39.0,21,21,2.608254455,0.007394858
+random,twisted: progress (Reeb arcs),169603,39.0,39.0,39.0,21,21,2.694800536,0.007393396
+random,twisted: progress (Reeb arcs) + near 2,203940,39.0,39.0,39.0,21,21,2.646028542,0.0074442
+random,decoupled (sum of distances),0,29.0,29.0,29.0,33,33,5.811e-6,0.007351387
+random,untwisted: progress (Reeb arcs) + near 2,206425,29.0,29.0,29.0,33,33,1.311499858,0.009507624
+random,twisted: position blocks 4×4 + near 2,62000,29.0,29.0,29.0,33,33,2.481999521,0.007403795
+random,twisted: progress levels + near 2,117593,29.0,29.0,29.0,33,33,2.898783337,0.008329007
+random,twisted: progress levels + near 2 + corridors,137633,29.0,29.0,29.0,33,33,2.917973524,0.007461002
+random,twisted: progress (Reeb arcs),172135,29.0,29.0,29.0,33,33,2.903423425,0.00886928
+random,twisted: progress (Reeb arcs) + near 2,206425,29.0,29.0,29.0,33,33,2.967842556,0.007474558
+random,decoupled (sum of distances),0,24.0,24.0,24.0,59,59,5.46e-6,0.007273241
+random,untwisted: progress (Reeb arcs) + near 2,202297,24.0,24.0,24.0,59,59,1.402010467,0.007377637
+random,twisted: position blocks 4×4 + near 2,62000,24.0,24.0,24.0,59,59,2.655892402,0.007341229
+random,twisted: progress levels + near 2,110009,24.0,24.0,24.0,59,59,2.761921982,0.007394629
+random,twisted: progress levels + near 2 + corridors,130049,24.0,24.0,24.0,59,59,2.8844767,0.007388697
+random,twisted: progress (Reeb arcs),167917,24.0,24.0,24.0,59,59,2.947529925,0.007473777
+random,twisted: progress (Reeb arcs) + near 2,202297,24.0,24.0,24.0,59,59,2.829283735,0.007385922
+random,decoupled (sum of distances),0,14.0,14.0,14.0,13,13,5.34e-6,0.00716047
+random,untwisted: progress (Reeb arcs) + near 2,204775,14.0,14.0,14.0,13,13,1.306735388,0.00867714
+random,twisted: position blocks 4×4 + near 2,62000,14.0,14.0,14.0,13,13,2.561836496,0.007246802
+random,twisted: progress levels + near 2,110821,14.0,14.0,14.0,13,13,2.836375758,0.007264505
+random,twisted: progress levels + near 2 + corridors,130861,14.0,14.0,14.0,13,13,3.011169267,0.009070046
+random,twisted: progress (Reeb arcs),170447,14.0,14.0,14.0,13,13,2.903321252,0.008672732
+random,twisted: progress (Reeb arcs) + near 2,204775,14.0,14.0,14.0,13,13,3.064307323,0.00724598
+random,decoupled (sum of distances),0,40.0,40.0,40.0,516,516,5.45e-6,0.007520214
+random,untwisted: progress (Reeb arcs) + near 2,203942,40.0,40.0,40.0,516,516,1.403263815,0.007594573
+random,twisted: position blocks 4×4 + near 2,62000,40.0,40.0,40.0,516,516,2.682870566,0.007678881
+random,twisted: progress levels + near 2,125170,40.0,40.0,40.0,516,516,2.691014147,0.007667249
+random,twisted: progress levels + near 2 + corridors,145210,40.0,40.0,40.0,516,516,2.82058809,0.009024831
+random,twisted: progress (Reeb arcs),169603,40.0,40.0,40.0,516,516,2.866560366,0.007521206
+random,twisted: progress (Reeb arcs) + near 2,203942,40.0,40.0,40.0,516,516,2.851042256,0.007773017
+random,decoupled (sum of distances),0,63.0,63.0,63.0,486,486,5.761e-6,0.007513862
+random,untwisted: progress (Reeb arcs) + near 2,203125,63.0,63.0,63.0,486,486,1.427589241,0.009405985
+random,twisted: position blocks 4×4 + near 2,62000,63.0,63.0,63.0,486,486,2.657079455,0.007559216
+random,twisted: progress levels + near 2,125174,63.0,63.0,63.0,486,486,2.833521362,0.007623397
+random,twisted: progress levels + near 2 + corridors,145214,63.0,63.0,63.0,486,486,2.881015539,0.009817215
+random,twisted: progress (Reeb arcs),168759,63.0,63.0,63.0,486,486,2.970933976,0.007562794
+random,twisted: progress (Reeb arcs) + near 2,203125,63.0,63.0,63.0,486,486,2.977054093,0.008537179
+random,decoupled (sum of distances),0,39.0,39.0,39.0,27,27,5.29e-6,0.007283931
+random,untwisted: progress (Reeb arcs) + near 2,204029,39.0,39.0,39.0,27,27,1.32392099,0.007319669
+random,twisted: position blocks 4×4 + near 2,62000,39.0,39.0,39.0,27,27,2.568203762,0.007362048
+random,twisted: progress levels + near 2,126036,39.0,39.0,39.0,27,27,2.592998849,0.007713476
+random,twisted: progress levels + near 2 + corridors,146076,39.0,39.0,39.0,27,27,2.791823662,0.008793428
+random,twisted: progress (Reeb arcs),169606,39.0,39.0,39.0,27,27,2.733043326,0.007382226
+random,twisted: progress (Reeb arcs) + near 2,204029,39.0,39.0,39.0,27,27,2.757785575,0.007337692

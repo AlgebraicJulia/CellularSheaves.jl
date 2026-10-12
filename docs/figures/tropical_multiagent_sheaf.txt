@@ -1,0 +1,110 @@
+grid 10², wall with two corridors: 84 free cells, 3 agents, 592704 joint states
+cross   optimal  35  decoupled  35  (coordination cost 0)
+    decoupled (sum of distances)             bound  35.0  expanded      14  build  0.000 s
+    sheaf: pair abstractions, glued          bound  35.0  expanded      14  build  0.753 s
+    sheaf: exact pair pushforwards, glued    bound  35.0  expanded      14  build  1.019 s
+    exact pairwise delays, glued             bound  35.0  expanded      14  build  0.274 s
+    exact cost-to-go                         bound  35.0  expanded      14  build  0.000 s
+cross   optimal  37  decoupled  33  (coordination cost 4)
+    decoupled (sum of distances)             bound  33.0  expanded    1221  build  0.000 s
+    sheaf: pair abstractions, glued          bound  33.0  expanded    1167  build  0.066 s
+    sheaf: exact pair pushforwards, glued    bound  33.0  expanded     268  build  0.064 s
+    exact pairwise delays, glued             bound  37.0  expanded      16  build  0.012 s
+    exact cost-to-go                         bound  37.0  expanded      16  build  0.000 s
+cross   optimal  35  decoupled  32  (coordination cost 3)
+    decoupled (sum of distances)             bound  32.0  expanded     271  build  0.000 s
+    sheaf: pair abstractions, glued          bound  32.0  expanded     221  build  0.085 s
+    sheaf: exact pair pushforwards, glued    bound  34.0  expanded      18  build  0.030 s
+    exact pairwise delays, glued             bound  35.0  expanded      18  build  0.084 s
+    exact cost-to-go                         bound  35.0  expanded      18  build  0.000 s
+cross   optimal  36  decoupled  36  (coordination cost 0)
+    decoupled (sum of distances)             bound  36.0  expanded      68  build  0.000 s
+    sheaf: pair abstractions, glued          bound  36.0  expanded      66  build  0.092 s
+    sheaf: exact pair pushforwards, glued    bound  36.0  expanded      65  build  0.030 s
+    exact pairwise delays, glued             bound  36.0  expanded      65  build  0.085 s
+    exact cost-to-go                         bound  36.0  expanded      65  build  0.000 s
+cross   optimal  32  decoupled  30  (coordination cost 2)
+    decoupled (sum of distances)             bound  30.0  expanded      98  build  0.000 s
+    sheaf: pair abstractions, glued          bound  30.0  expanded      87  build  0.088 s
+    sheaf: exact pair pushforwards, glued    bound  32.0  expanded      20  build  0.029 s
+    exact pairwise delays, glued             bound  32.0  expanded      20  build  0.084 s
+    exact cost-to-go                         bound  32.0  expanded      20  build  0.000 s
+cross   optimal  34  decoupled  34  (coordination cost 0)
+    decoupled (sum of distances)             bound  34.0  expanded      21  build  0.000 s
+    sheaf: pair abstractions, glued          bound  34.0  expanded      21  build  0.091 s
+    sheaf: exact pair pushforwards, glued    bound  34.0  expanded      21  build  0.029 s
+    exact pairwise delays, glued             bound  34.0  expanded      21  build  0.084 s
+    exact cost-to-go                         bound  34.0  expanded      21  build  0.000 s
+cross   optimal  32  decoupled  30  (coordination cost 2)
+    decoupled (sum of distances)             bound  30.0  expanded     417  build  0.000 s
+    sheaf: pair abstractions, glued          bound  30.0  expanded     390  build  0.088 s
+    sheaf: exact pair pushforwards, glued    bound  32.0  expanded     112  build  0.029 s
+    exact pairwise delays, glued             bound  32.0  expanded     112  build  0.084 s
+    exact cost-to-go                         bound  32.0  expanded     112  build  0.000 s
+cross   optimal  35  decoupled  35  (coordination cost 0)
+    decoupled (sum of distances)             bound  35.0  expanded      20  build  0.000 s
+    sheaf: pair abstractions, glued          bound  35.0  expanded      19  build  0.039 s
+    sheaf: exact pair pushforwards, glued    bound  35.0  expanded      18  build  0.288 s
+    exact pairwise delays, glued             bound  35.0  expanded      18  build  0.018 s
+    exact cost-to-go                         bound  35.0  expanded      18  build  0.000 s
+random  optimal  36  decoupled  36  (coordination cost 0)
+    decoupled (sum of distances)             bound  36.0  expanded      30  build  0.000 s
+    sheaf: pair abstractions, glued          bound  36.0  expanded      27  build  0.058 s
+    sheaf: exact pair pushforwards, glued    bound  36.0  expanded      27  build  0.126 s
+    exact pairwise delays, glued             bound  36.0  expanded      27  build  0.012 s
+    exact cost-to-go                         bound  36.0  expanded      27  build  0.000 s
+random  optimal  25  decoupled  25  (coordination cost 0)
+    decoupled (sum of distances)             bound  25.0  expanded      27  build  0.000 s
+    sheaf: pair abstractions, glued          bound  25.0  expanded      22  build  0.092 s
+    sheaf: exact pair pushforwards, glued    bound  25.0  expanded      22  build  0.029 s
+    exact pairwise delays, glued             bound  25.0  expanded      22  build  0.084 s
+    exact cost-to-go                         bound  25.0  expanded      22  build  0.000 s
+random  optimal  18  decoupled  18  (coordination cost 0)
+    decoupled (sum of distances)             bound  18.0  expanded      37  build  0.000 s
+    sheaf: pair abstractions, glued          bound  18.0  expanded      37  build  0.093 s
+    sheaf: exact pair pushforwards, glued    bound  18.0  expanded      37  build  0.029 s
+    exact pairwise delays, glued             bound  18.0  expanded      37  build  0.085 s
+    exact cost-to-go                         bound  18.0  expanded      37  build  0.000 s
+random  optimal  17  decoupled  17  (coordination cost 0)
+    decoupled (sum of distances)             bound  17.0  expanded      20  build  0.000 s
+    sheaf: pair abstractions, glued          bound  17.0  expanded      20  build  0.086 s
+    sheaf: exact pair pushforwards, glued    bound  17.0  expanded      20  build  0.029 s
+    exact pairwise delays, glued             bound  17.0  expanded      20  build  0.084 s
+    exact cost-to-go                         bound  17.0  expanded      20  build  0.000 s
+random  optimal  15  decoupled  15  (coordination cost 0)
+    decoupled (sum of distances)             bound  15.0  expanded      11  build  0.000 s
+    sheaf: pair abstractions, glued          bound  15.0  expanded      11  build  0.086 s
+    sheaf: exact pair pushforwards, glued    bound  15.0  expanded      11  build  0.029 s
+    exact pairwise delays, glued             bound  15.0  expanded      11  build  0.084 s
+    exact cost-to-go                         bound  15.0  expanded      11  build  0.000 s
+random  optimal  20  decoupled  20  (coordination cost 0)
+    decoupled (sum of distances)             bound  20.0  expanded      10  build  0.000 s
+    sheaf: pair abstractions, glued          bound  20.0  expanded      10  build  0.095 s
+    sheaf: exact pair pushforwards, glued    bound  20.0  expanded      10  build  0.029 s
+    exact pairwise delays, glued             bound  20.0  expanded      10  build  0.090 s
+    exact cost-to-go                         bound  20.0  expanded      10  build  0.000 s
+random  optimal  34  decoupled  32  (coordination cost 2)
+    decoupled (sum of distances)             bound  32.0  expanded     201  build  0.000 s
+    sheaf: pair abstractions, glued          bound  32.0  expanded     164  build  0.097 s
+    sheaf: exact pair pushforwards, glued    bound  32.0  expanded      77  build  0.029 s
+    exact pairwise delays, glued             bound  34.0  expanded      55  build  0.084 s
+    exact cost-to-go                         bound  34.0  expanded      55  build  0.000 s
+random  optimal  13  decoupled  13  (coordination cost 0)
+    decoupled (sum of distances)             bound  13.0  expanded      12  build  0.000 s
+    sheaf: pair abstractions, glued          bound  13.0  expanded      12  build  0.039 s
+    sheaf: exact pair pushforwards, glued    bound  13.0  expanded      12  build  0.052 s
+    exact pairwise delays, glued             bound  13.0  expanded      12  build  0.017 s
+    exact cost-to-go                         bound  13.0  expanded      12  build  0.000 s
+
+summary (means over queries)
+queries heuristic                                       states  bound/opt  gap closed  expanded   build s
+cross   decoupled (sum of distances)                         0      0.960        0.00       266     0.000
+cross   sheaf: pair abstractions, glued                  27489      0.960        0.00       248     0.163
+cross   sheaf: exact pair pushforwards, glued            27489      0.983        0.67        67     0.190
+cross   exact pairwise delays, glued                     21168      1.000        1.00        36     0.091
+cross   exact cost-to-go                                592704      1.000        1.00        36     0.000
+random  decoupled (sum of distances)                         0      0.993        0.00        44     0.000
+random  sheaf: pair abstractions, glued                  27489      0.993        0.00        38     0.081
+random  sheaf: exact pair pushforwards, glued            27489      0.993        0.00        27     0.044
+random  exact pairwise delays, glued                     21168      1.000        1.00        24     0.067
+random  exact cost-to-go                                592704      1.000        1.00        24     0.000

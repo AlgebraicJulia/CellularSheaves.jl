@@ -1,0 +1,81 @@
+kind,heuristic,states,optimal,decoupled,bound,expanded,build_seconds
+cross,decoupled (sum of distances),0,35.0,35.0,35.0,14,0.0
+cross,"sheaf: pair abstractions, glued",27552,35.0,35.0,35.0,14,0.752533519
+cross,"sheaf: exact pair pushforwards, glued",27552,35.0,35.0,35.0,14,1.018871108
+cross,"exact pairwise delays, glued",21168,35.0,35.0,35.0,14,0.273880135
+cross,exact cost-to-go,592704,35.0,35.0,35.0,14,0.0
+cross,decoupled (sum of distances),0,37.0,33.0,33.0,1221,0.0
+cross,"sheaf: pair abstractions, glued",27552,37.0,33.0,33.0,1167,0.066374029
+cross,"sheaf: exact pair pushforwards, glued",27552,37.0,33.0,33.0,268,0.064306046
+cross,"exact pairwise delays, glued",21168,37.0,33.0,37.0,16,0.011922527
+cross,exact cost-to-go,592704,37.0,33.0,37.0,16,0.0
+cross,decoupled (sum of distances),0,35.0,32.0,32.0,271,0.0
+cross,"sheaf: pair abstractions, glued",27216,35.0,32.0,32.0,221,0.085495337
+cross,"sheaf: exact pair pushforwards, glued",27216,35.0,32.0,34.0,18,0.029964084
+cross,"exact pairwise delays, glued",21168,35.0,32.0,35.0,18,0.084440511
+cross,exact cost-to-go,592704,35.0,32.0,35.0,18,0.0
+cross,decoupled (sum of distances),0,36.0,36.0,36.0,68,0.0
+cross,"sheaf: pair abstractions, glued",27552,36.0,36.0,36.0,66,0.091622621
+cross,"sheaf: exact pair pushforwards, glued",27552,36.0,36.0,36.0,65,0.029815245
+cross,"exact pairwise delays, glued",21168,36.0,36.0,36.0,65,0.084704756
+cross,exact cost-to-go,592704,36.0,36.0,36.0,65,0.0
+cross,decoupled (sum of distances),0,32.0,30.0,30.0,98,0.0
+cross,"sheaf: pair abstractions, glued",27552,32.0,30.0,30.0,87,0.087509498
+cross,"sheaf: exact pair pushforwards, glued",27552,32.0,30.0,32.0,20,0.029147935
+cross,"exact pairwise delays, glued",21168,32.0,30.0,32.0,20,0.084487649
+cross,exact cost-to-go,592704,32.0,30.0,32.0,20,0.0
+cross,decoupled (sum of distances),0,34.0,34.0,34.0,21,0.0
+cross,"sheaf: pair abstractions, glued",27552,34.0,34.0,34.0,21,0.09134442
+cross,"sheaf: exact pair pushforwards, glued",27552,34.0,34.0,34.0,21,0.028991742
+cross,"exact pairwise delays, glued",21168,34.0,34.0,34.0,21,0.084039129
+cross,exact cost-to-go,592704,34.0,34.0,34.0,21,0.0
+cross,decoupled (sum of distances),0,32.0,30.0,30.0,417,0.0
+cross,"sheaf: pair abstractions, glued",27552,32.0,30.0,30.0,390,0.088052214
+cross,"sheaf: exact pair pushforwards, glued",27552,32.0,30.0,32.0,112,0.02915068
+cross,"exact pairwise delays, glued",21168,32.0,30.0,32.0,112,0.084446462
+cross,exact cost-to-go,592704,32.0,30.0,32.0,112,0.0
+cross,decoupled (sum of distances),0,35.0,35.0,35.0,20,0.0
+cross,"sheaf: pair abstractions, glued",27384,35.0,35.0,35.0,19,0.038754234
+cross,"sheaf: exact pair pushforwards, glued",27384,35.0,35.0,35.0,18,0.288283505
+cross,"exact pairwise delays, glued",21168,35.0,35.0,35.0,18,0.017712289
+cross,exact cost-to-go,592704,35.0,35.0,35.0,18,0.0
+random,decoupled (sum of distances),0,36.0,36.0,36.0,30,0.0
+random,"sheaf: pair abstractions, glued",27384,36.0,36.0,36.0,27,0.05804459
+random,"sheaf: exact pair pushforwards, glued",27384,36.0,36.0,36.0,27,0.126053069
+random,"exact pairwise delays, glued",21168,36.0,36.0,36.0,27,0.011980155
+random,exact cost-to-go,592704,36.0,36.0,36.0,27,0.0
+random,decoupled (sum of distances),0,25.0,25.0,25.0,27,0.0
+random,"sheaf: pair abstractions, glued",27552,25.0,25.0,25.0,22,0.092241681
+random,"sheaf: exact pair pushforwards, glued",27552,25.0,25.0,25.0,22,0.028937601
+random,"exact pairwise delays, glued",21168,25.0,25.0,25.0,22,0.083868079
+random,exact cost-to-go,592704,25.0,25.0,25.0,22,0.0
+random,decoupled (sum of distances),0,18.0,18.0,18.0,37,0.0
+random,"sheaf: pair abstractions, glued",27552,18.0,18.0,18.0,37,0.093262883
+random,"sheaf: exact pair pushforwards, glued",27552,18.0,18.0,18.0,37,0.029295662
+random,"exact pairwise delays, glued",21168,18.0,18.0,18.0,37,0.085164597
+random,exact cost-to-go,592704,18.0,18.0,18.0,37,0.0
+random,decoupled (sum of distances),0,17.0,17.0,17.0,20,0.0
+random,"sheaf: pair abstractions, glued",27216,17.0,17.0,17.0,20,0.085659182
+random,"sheaf: exact pair pushforwards, glued",27216,17.0,17.0,17.0,20,0.029209671
+random,"exact pairwise delays, glued",21168,17.0,17.0,17.0,20,0.084093301
+random,exact cost-to-go,592704,17.0,17.0,17.0,20,0.0
+random,decoupled (sum of distances),0,15.0,15.0,15.0,11,0.0
+random,"sheaf: pair abstractions, glued",27384,15.0,15.0,15.0,11,0.085838393
+random,"sheaf: exact pair pushforwards, glued",27384,15.0,15.0,15.0,11,0.02864973
+random,"exact pairwise delays, glued",21168,15.0,15.0,15.0,11,0.083528227
+random,exact cost-to-go,592704,15.0,15.0,15.0,11,0.0
+random,decoupled (sum of distances),0,20.0,20.0,20.0,10,0.0
+random,"sheaf: pair abstractions, glued",27720,20.0,20.0,20.0,10,0.094664301
+random,"sheaf: exact pair pushforwards, glued",27720,20.0,20.0,20.0,10,0.029336006
+random,"exact pairwise delays, glued",21168,20.0,20.0,20.0,10,0.089600478
+random,exact cost-to-go,592704,20.0,20.0,20.0,10,0.0
+random,decoupled (sum of distances),0,34.0,32.0,32.0,201,0.0
+random,"sheaf: pair abstractions, glued",27720,34.0,32.0,32.0,164,0.09681087
+random,"sheaf: exact pair pushforwards, glued",27720,34.0,32.0,32.0,77,0.029218956
+random,"exact pairwise delays, glued",21168,34.0,32.0,34.0,55,0.084339126
+random,exact cost-to-go,592704,34.0,32.0,34.0,55,0.0
+random,decoupled (sum of distances),0,13.0,13.0,13.0,12,0.0
+random,"sheaf: pair abstractions, glued",27384,13.0,13.0,13.0,12,0.039250612
+random,"sheaf: exact pair pushforwards, glued",27384,13.0,13.0,13.0,12,0.052054148
+random,"exact pairwise delays, glued",21168,13.0,13.0,13.0,12,0.017386308
+random,exact cost-to-go,592704,13.0,13.0,13.0,12,0.0
