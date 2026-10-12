@@ -137,6 +137,7 @@ makedocs(
       "features/morphisms_and_pushforwards.md",
       "features/trajectory_and_control.md",
       "features/schwarz_and_coordination.md",
+      "features/tropical_abstraction.md",
       "Distributed Sheaf Solve"=>Any[
         "features/distributed_sheaf_solve/index.md",
         "features/distributed_sheaf_solve/theory_coordination.md",
