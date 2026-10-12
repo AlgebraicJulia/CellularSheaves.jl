@@ -1,16 +1,20 @@
 # N-agent planning on the cover of the interaction sheaf (`tropical_pair_sheaf.jl`), at
 # sizes where the joint graph cannot be built. Three pieces:
 #
-#   - Lower bound (oplax side): the glued bound Σᵢ dᵢ + best matching of edge-stalk bounds
-#     at the start, over the interaction graph of agents whose tubes meet.
+#   - Lower bounds (oplax side), from the edge stalks over the interaction graph of agents
+#     whose tubes meet, all added to Σᵢ dᵢ:
+#       * matching: the heaviest matching of pair bounds;
+#       * vertex cover: the weighted vertex cover of pair bounds (Li, Felner et al. 2019);
+#       * cover gauge (`tropical_cover_gauge.jl`): each agent's delay split state by state
+#         among its edges, the split optimized from the matching by supergradient ascent.
 #   - Upper bound (lax side): a feasible plan by prioritized planning (each agent plans
 #     in space-time around the reservations of the agents before it). Upper / lower
 #     certifies the plan's suboptimality without the optimum.
 #   - Search on the cover: independence detection (Standley 2010). Agents follow their
 #     own optimal paths; when two groups' plans collide the groups merge and are solved
-#     jointly by A* on the fly, with the sheaf bound of the group as heuristic (or the
-#     decoupled Σᵢ dᵢ, for comparison). Merging on conflict is optimal, so the optimum
-#     is known and the sandwich can be checked.
+#     jointly by A* on the fly, with a bound of the group as heuristic: the decoupled
+#     Σᵢ dᵢ, the matching, or the larger of the matching and the cover gauge. Merging on
+#     conflict is optimal, so the optimum is known and the sandwich can be checked.
 #
 #   julia --project=docs docs/scripts/tropical_multiagent_cover.jl [n] [instances]
 
@@ -19,12 +23,14 @@ using Printf
 using Random
 using Statistics
 import CellularSheaves.NetworkSheaves.TropicalAbstraction as TA
+include(joinpath(@__DIR__, "tropical_cover_gauge.jl"))
 
 const n = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 20
 const NI = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 4
 const BLOCK = 2
 const CAP = 300_000                                   # expansions per joint search
 const MAXGROUP = 4                                    # joint searches move all agents at once: 5^m successors
+const ITERS = 60                                      # supergradient steps of the cover gauge
 const OUT = joinpath(@__DIR__, "..", "figures")
 
 const WALL = (n ÷ 2):(n ÷ 2 + 1)
@@ -184,6 +190,26 @@ end
 
 # ---------------------------------------------------------------------------
 
+# The best total cost of prioritized planning over a few priority orders.
+function prioritized_cost(agents, starts, rng; orders = 5)
+    N = length(agents)
+    return minimum(1:orders) do r
+        p = prioritized(agents, starts, r == 1 ? collect(1:N) : randperm(rng, N))
+        p === nothing ? Inf : sum(plan_cost(agents[i], p[i]) for i in 1:N)
+    end
+end
+
+# The weighted edge stalks with all weights 1 are the edge stalks: a check of GaugeFactor.
+function check_factor(IS)
+    (i, j) = first(IS.pairs)
+    Ai, Aj = IS.agents[i], IS.agents[j]
+    F = GaugeFactor(IS.map, Ai, Aj, i, j, 1, IS.stalks[(i, j)].b)
+    Δ = weighted_stalk(F, ones(length(Ai.pos)), ones(length(Aj.pos))).Δ
+    Δ0 = IS.stalks[(i, j)].Δ
+    @assert length(Δ) == length(Δ0) && all(isapprox(a, b; atol = 1e-9) || (isinf(a) && isinf(b)) for (a, b) in zip(Δ, Δ0))
+    println("check: the weighted edge stalk with unit weights is the edge stalk ($(count(isfinite, Δ)) coarse states)")
+end
+
 function instance(rng, N)
     left = [k for (k, (x, y)) in enumerate(MAP.cells) if x < first(WALL) - 2]
     right = [k for (k, (x, y)) in enumerate(MAP.cells) if x > last(WALL) + 2]
@@ -204,43 +230,65 @@ for N in (4, 6, 8), inst in 1:NI
     t_sheaf = @elapsed IS = InteractionSheaf(MAP, agents, starts; block = BLOCK)
     decoupled = sum(agents[i].d[starts[i]] for i in 1:N)
     lower = joint_bound(IS, starts)
+    N == 4 && inst == 1 && check_factor(IS)
     # Upper bound: the best of a few priority orders.
-    t_upper = @elapsed upper = minimum(1:5) do r
-        p = prioritized(agents, starts, r == 1 ? collect(1:N) : randperm(rng, N))
-        p === nothing ? Inf : sum(plan_cost(agents[i], p[i]) for i in 1:N)
+    t_upper = @elapsed upper = prioritized_cost(agents, starts, rng)
+    # Vertex cover and cover gauge.
+    pw = zeros(N, N)
+    for (i, j) in IS.pairs
+        pw[i, j] = pw[j, i] = pair_bound(MAP, IS.stalks[(i, j)], IS.stalks[(j, i)], agents[i], agents[j], starts[i], starts[j])
     end
+    cover = decoupled + min_vertex_cover(pw)
+    t_gauge = @elapsed CG = CoverGauge(IS, starts; target = upper - decoupled, iters = ITERS)
+    gauge = decoupled + CG.bound
+    @assert isapprox(decoupled + CG.matching, lower) "the ascent starts at the matching"
+    @assert abs(gauge - (decoupled + gauge_bound(CG, starts))) < 1e-6 "the weighted stalks reproduce the bound"
     # The optimum by independence detection, with the decoupled and the sheaf heuristic.
     sub(members) = InteractionSheaf(MAP, agents[members], starts[members]; block = BLOCK)
     t_dec = @elapsed (pd, ed, gd) = independence_detection(agents, starts,
         members -> (c -> sum(agents[members[k]].d[c[k]] for k in eachindex(members))))
     t_she = @elapsed (ps, es, gs) = independence_detection(agents, starts, members -> (S = sub(members); c -> joint_bound(S, c)))
+    gauged(members) = begin
+        S = sub(members)
+        up = prioritized_cost(agents[members], starts[members], MersenneTwister(1))   # leaves the instance stream alone
+        dec = sum(agents[members[k]].d[starts[members[k]]] for k in eachindex(members))
+        C = CoverGauge(S, starts[members]; target = up - dec, iters = ITERS)
+        c -> sum(S.agents[k].d[c[k]] for k in eachindex(c)) + max(delay_bound(S, c), gauge_bound(C, c))
+    end
+    t_gau = @elapsed (pg, eg, gg) = independence_detection(agents, starts, gauged)
     cost(p) = p === nothing ? NaN : sum(plan_cost(agents[i], p[i]) for i in 1:N)
-    opt_d, opt_s = cost(pd), cost(ps)
-    @assert isnan(opt_d) || isnan(opt_s) || opt_d == opt_s "both searches are optimal"
-    opt = isnan(opt_s) ? opt_d : opt_s
-    @assert isnan(opt) || (decoupled <= lower + 1e-9 && lower <= opt + 1e-9 && opt <= upper + 1e-9)
+    opts = filter(!isnan, [cost(pd), cost(ps), cost(pg)])
+    @assert all(==(first(opts)), opts) "every search is optimal"
+    opt = isempty(opts) ? NaN : first(opts)
+    @assert decoupled <= lower + 1e-9 && lower <= gauge + 1e-9
+    @assert isnan(opt) || (max(gauge, cover) <= opt + 1e-9 && opt <= upper + 1e-9)
     push!(rows, (N = N, instance = inst, pairs = length(IS.pairs), all_pairs = N * (N - 1) ÷ 2,
-        decoupled = decoupled, lower = lower, optimal = opt, upper = upper,
+        decoupled = decoupled, lower = lower, cover = cover, gauge = gauge, optimal = opt, upper = upper,
         expanded_decoupled = isnothing(pd) ? -ed : ed, expanded_sheaf = isnothing(ps) ? -es : es,
-        largest_group = gs, seconds_decoupled = t_dec, seconds_sheaf = t_she, seconds_sheaf_build = t_sheaf,
-        seconds_upper = t_upper))
-    @printf("N=%d #%d  pairs %2d/%2d  decoupled %5.1f ≤ sheaf %5.1f ≤ optimum %5.1f ≤ prioritized %5.1f  (certified ratio %.3f)\n",
-        N, inst, length(IS.pairs), N * (N - 1) ÷ 2, decoupled, lower, opt, upper, upper / lower)
-    @printf("        independence detection: decoupled heuristic %9d expanded (%.1f s), sheaf %9d (%.1f s), largest group %d%s\n",
-        ed, t_dec, es, t_she, gs, isnan(opt) ? " (joint search out of reach)" : "")
+        expanded_gauge = isnothing(pg) ? -eg : eg,
+        largest_group = gs, seconds_decoupled = t_dec, seconds_sheaf = t_she, seconds_gauge_search = t_gau,
+        seconds_sheaf_build = t_sheaf, seconds_gauge = t_gauge, seconds_upper = t_upper))
+    @printf("N=%d #%d  pairs %2d/%2d  decoupled %5.1f  matching %5.1f  vertex cover %5.1f  cover gauge %6.2f (%.1f s)  optimum %5.1f  prioritized %5.1f\n",
+        N, inst, length(IS.pairs), N * (N - 1) ÷ 2, decoupled, lower, cover, gauge, t_gauge, opt, upper)
+    @printf("        independence detection: decoupled heuristic %9d expanded (%.1f s), matching %9d (%.1f s), gauge %9d (%.1f s), largest group %d%s\n",
+        ed, t_dec, es, t_she, eg, t_gau, gs, isnan(opt) ? " (joint search out of reach)" : "")
 end
 
 avg(xs) = isempty(xs) ? NaN : mean(xs)
 println("\nsummary (means over instances)")
-@printf("%3s %12s %10s %10s %12s %16s %12s %14s\n", "N", "pairs", "gap closed", "ratio", "true ratio", "expanded (dec)", "(sheaf)", "largest group")
+println("gap closed: (bound - decoupled) / (optimum - decoupled) over solved instances with a gap; ratio: prioritized / bound")
+@printf("%3s %12s %26s %26s %12s %24s %14s\n", "N", "pairs", "gap: match / cover / gauge", "ratio: match / cover / gauge",
+    "true ratio", "expanded: dec/match/gauge", "largest group")
 for N in (4, 6, 8)
     rs = filter(r -> r.N == N, rows)
     solved = filter(r -> !isnan(r.optimal), rs)
-    gap = [(r.lower - r.decoupled) / (r.optimal - r.decoupled) for r in solved if r.optimal > r.decoupled]
-    @printf("%3d %6.1f/%-5d %10s %10.3f %12.3f %16.0f %12.0f %14.1f\n", N, mean(r.pairs for r in rs), rs[1].all_pairs,
-        isempty(gap) ? "–" : @sprintf("%.2f", mean(gap)), mean(r.upper / r.lower for r in rs),
+    gap(f) = (g = [(f(r) - r.decoupled) / (r.optimal - r.decoupled) for r in solved if r.optimal > r.decoupled];
+              isempty(g) ? "–" : @sprintf("%.2f", mean(g)))
+    @printf("%3d %6.1f/%-5d %26s %26s %12.3f %24s %14.1f\n", N, mean(r.pairs for r in rs), rs[1].all_pairs,
+        join((gap(r -> r.lower), gap(r -> r.cover), gap(r -> r.gauge)), " / "),
+        join((@sprintf("%.3f", mean(r.upper / f(r) for r in rs)) for f in (r -> r.lower, r -> r.cover, r -> r.gauge)), " / "),
         avg([r.upper / r.optimal for r in solved]),
-        avg([r.expanded_decoupled for r in solved]), avg([r.expanded_sheaf for r in solved]),
+        join((@sprintf("%.0f", avg([f(r) for r in solved])) for f in (r -> r.expanded_decoupled, r -> r.expanded_sheaf, r -> r.expanded_gauge)), " / "),
         mean(r.largest_group for r in rs))
     @printf("    solved by joint search: %d of %d\n", length(solved), length(rs))
 end
