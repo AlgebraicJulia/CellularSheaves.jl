@@ -16,17 +16,19 @@
 # independence detection finds it.
 #
 #   - Contact grows with the dimension: edges keep agents exact when their blocks are
-#     at most one apart, triangles when at most TRI_RADIUS apart. A simplex then
+#     at most EDGE_RADIUS apart, triangles when at most TRI_RADIUS apart. A simplex then
 #     resolves its agents at least as finely as its faces, so the restriction maps
 #     are defined, and the edge stalks stay small.
 #
-#   julia --project=docs docs/scripts/tropical_cover_triangles.jl [n] [instances] [triangle radius]
+#   julia --project=docs docs/scripts/tropical_cover_triangles.jl [n] [instances] [triangle radius] [edge radius]
 
 include(joinpath(@__DIR__, "tropical_multiagent_cover.jl"))
 using Graphs: SimpleGraph, add_edge!
 
 const TRI_CAP = 2_000_000                             # expansions per triangle search
 const TRI_RADIUS = length(ARGS) >= 3 ? parse(Int, ARGS[3]) : 1   # triangle contact radius, in blocks
+const EDGE_RADIUS = length(ARGS) >= 4 ? parse(Int, ARGS[4]) : 1  # edge contact radius (at most TRI_RADIUS)
+@assert EDGE_RADIUS <= TRI_RADIUS "contact must grow with the dimension"
 
 grid_collides(u, s, s2, v, t, t2) = s2 == t2 || (s2 == t && t2 == s)
 
@@ -40,7 +42,7 @@ function cover_sheaf(agents, pairs)
     blocks = [last(s) for s in summaries]
     within(r) = (u, k, v, l) -> cheb(blocks[u][k] .- blocks[v][l]) <= r
     return CoverSheaf(clique_complex(g), [A.delays for A in agents], [first(s) for s in summaries],
-        [A.goal for A in agents]; contact = k -> within(k >= 2 ? TRI_RADIUS : 1), collides = grid_collides)
+        [A.goal for A in agents]; contact = k -> within(k >= 2 ? TRI_RADIUS : EDGE_RADIUS), collides = grid_collides)
 end
 
 # The symmetric edge stalk equals the pushforward of the pair graph.
@@ -62,7 +64,7 @@ function check_edge(C, agents, e)
         "pair graph $(count(isfinite, Ai.d) * count(isfinite, Aj.d)))")
 end
 
-println("grid $(n)², wall with two 1-cell corridors: $(NF) free cells; block $BLOCK; triangle contact radius $TRI_RADIUS blocks")
+println("grid $(n)², wall with two 1-cell corridors: $(NF) free cells; block $BLOCK; triangle contact radius $TRI_RADIUS blocks, edge $EDGE_RADIUS")
 rows = NamedTuple[]
 rng = MersenneTwister(11)                             # the instances of tropical_multiagent_cover.jl
 for N in (4, 6, 8), inst in 1:NI
@@ -143,7 +145,7 @@ for N in (4, 6, 8)
 end
 
 mkpath(OUT)
-open(joinpath(OUT, "tropical_cover_triangles_r$(TRI_RADIUS).csv"), "w") do io
+open(joinpath(OUT, "tropical_cover_triangles_r$(TRI_RADIUS)_e$(EDGE_RADIUS).csv"), "w") do io
     println(io, join(keys(first(rows)), ","))
     for r in rows
         println(io, join(values(r), ","))

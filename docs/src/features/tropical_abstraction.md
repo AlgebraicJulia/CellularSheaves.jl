@@ -436,8 +436,35 @@ on every triangle: the triple problem.
   So the gauge on the cover and the cover by 0-cochains are two sides of one
   duality, and integrality strengthens the cover side.
 
-In the studies the triangles are solved exactly by joint search: the identity
-pushforward, not yet a summarized stalk.
+**The cover as a sheaf on a 2-complex.** `TropicalCovers` builds this structure in
+the package, using these pieces:
+
+- **The complex** is the clique complex of the interaction graph
+  ([`clique_complex`](@ref)): agents are vertices, interacting pairs are edges,
+  and mutually interacting triples are triangles.
+- **Stalks** ([`ProductStalk`](@ref)). Every simplex carries the pushforward of
+  its agents' joint graph along a summary map that is *symmetric* in the agents.
+  Each agent is replaced by its own summary (Reeb arc of its cost-to-go, block)
+  unless its summary is in contact with that of another agent of the simplex, and
+  then it keeps its exact state. No agent of a simplex is privileged, on edges or
+  on triangles.
+- **Exactness.** Contact is decided on summaries, so the coarse states are unions
+  of fibres, and the fibres are products. As long as agents out of contact cannot
+  collide, the stalk is enumerated move by move and *equals* the pushforward of
+  the joint graph. The tests and the study check this against the pair graph.
+- **Restriction maps** ([`restrict`](@ref)) forget agents. An agent kept exact
+  only because of a contact outside the face falls back to its summary. The square
+  with the summary maps commutes, and every arc restricts to an arc that costs no
+  more. So a face's cost-to-go, pulled back, is a subsolution on the simplex: a
+  cellular sheaf of min-plus modules with pullbacks as restrictions.
+- **Contact may grow with the dimension.** A simplex must resolve its agents at
+  least as finely as its faces, or the restriction is undefined. So triangles may
+  keep agents exact over a wider range than edges.
+- **Building and gluing.** Edge stalks are built and solved once
+  ([`stalk_graph`](@ref)). Triangle stalks are searched on demand from the query
+  state, with the pulled-back edge values as the A* heuristic
+  ([`section_value`](@ref)). [`cover_bound`](@ref) glues the values by the
+  simplicial cover.
 
 ## What the studies found
 
@@ -580,6 +607,41 @@ Observations:
   the optimum. Solving the 36–56 triangles exactly takes 1–2 minutes per
   instance.
 
+**The 2-complex with symmetric stalks** (`docs/scripts/tropical_cover_triangles.jl`,
+same instances, block 2). Edges keep agents exact within one block. The table
+varies only the triangles' contact radius:
+
+| triangle contact radius | three-agent interactions seen (of 14) | recovered, N = 4 / 6 | bound at N = 8 vs. exact triangles | expansions per triangle, mean (max) | triangles per instance |
+|---|---|---|---|---|---|
+| 1 block (same as edges) | 9 | 60% / 89% | below on 2 of 4 | 800–1800 (9672) | at most 6 s |
+| 5 blocks | **13** | **100% / 100%** | **equal on 4 of 4** | 1000–1600 (12368) | at most 7 s |
+| (exact triple search) | 14 | 100% / 100% | – | – | up to 109 s |
+
+Findings:
+
+- **Symmetric edges are exact pushforwards and nearly as tight.** The edge stalk
+  has about 84k coarse states, against 132k for the pair graph. Its value equals
+  the exact pair delay on 171 of 175 edges, against 175 for the asymmetric
+  stalks. Each asymmetric edge takes the larger of two directions, in each of
+  which one agent is never summarized.
+- **Triangles need a wider contact than edges, and the sheaf allows it.** With
+  the edges' radius, the triangle stalk misses most three-agent interactions.
+  With radius 5 it sees 13 of 14, and the bound equals the one from exactly
+  solved triangles on every instance. That includes all four N = 8 instances,
+  where it certifies the prioritized plans within 1–8% of optimal.
+- **Search on demand is cheap because of the restriction maps.** Pulled back, the
+  edge values guide each triangle's search to a few thousand expansions. That is
+  about 15× faster than the exact triple searches.
+- **What leaks: sliding along a level set.** A summarized agent is known by its
+  (Reeb arc, block). Each step may start from any cell of that fibre, so it can
+  slide sideways along its level set by one cell per step at no cost. In open
+  space a level set can touch two routes, and sliding switches routes for free.
+  The one interaction still missed is of this kind. Two agents meet head-on in a
+  corridor, but in the stalk one of them slides onto the other corridor's route
+  and avoids the conflict entirely. The same effect costs 4 of the 175 symmetric
+  edges. Widening the edges' contact to 2 blocks did not help: the slide happens
+  while the agents are still far apart.
+
 - **The edge stalk is exact and tight.** It equals the pushforward of the pair
   graph, and that pushforward along (Reeb arc, block) loses nothing against the
   exact pair delay on these maps. With exact pair bounds the gluing reproduced the
@@ -701,15 +763,19 @@ supersolutions and Tarski's theorem replaces linear algebra.
   bounds are only proved admissible at synchronized states. A half-moved
   configuration needs its own argument. Until then, large groups get the
   certificate but not the optimum.
-- **Triangle stalks are solved, not summarized.** Each triangle is a three-agent
-  joint search, which is affordable at 20² but is the product-space work the
-  sheaf is meant to avoid. Two steps remain open:
-  - triangle stalks as pushforwards, along the same summaries as the edges;
-  - building only the triangles where the edge bounds leave a gap, which in
-    these studies is 1–4 triangles per instance.
-
-  The bound is computed at the start only. A heuristic at every joint state needs
-  the triangle stalks themselves.
+- **Summaries that let agents switch routes.** The (Reeb arc, block) summary lets
+  a summarized agent slide along its level set, and in open space that can
+  switch it between routes through different bottlenecks. A summary that also
+  records which bottleneck the agent's descent passes through would stop this
+  without breaking symmetry. That is the descending cells of a Morse–Smale-type
+  decomposition of its cost-to-go, a finer stratification than the Reeb graph.
+- **The triangles' contact radius is large on this map.** Five blocks is half of
+  a 20² map, so here the triangle stalks are close to the triple graph near the
+  agents, and the gain comes from the search, not from compression. Whether the
+  needed radius stays fixed as maps grow is open.
+- **Bounds at the start only.** The triangle values are searched from one joint
+  state. A heuristic at every state of a joint search needs them cached or built
+  across queries.
 - **Dense interaction graphs.** On maps that funnel every agent through the same
   corridors nearly all pairs interact, and the gluing gains little from sparsity.
 - **Scale of the edge stalks.** The near field is fixed in size but large (a
@@ -732,7 +798,11 @@ supersolutions and Tarski's theorem replaces linear algebra.
     base change, tubes, matching), shared by the next three;
   - `docs/scripts/tropical_multiagent_sheaf.jl`: three grid agents;
   - `docs/scripts/tropical_multiagent_cover.jl`: four to eight agents, the
-    sandwich and independence detection;
+    sandwich, independence detection, the gauge on the cover
+    (`tropical_cover_gauge.jl`) and the simplicial cover with exact triangles;
+  - `docs/scripts/tropical_cover_triangles.jl`: the same instances on the
+    2-complex of `TropicalCovers`, with symmetric edge and triangle stalks
+    (arguments: map size, instances, triangle and edge contact radius);
   - `docs/scripts/tropical_multiagent_double_integrator.jl`: double-integrator
     pairs.
 
