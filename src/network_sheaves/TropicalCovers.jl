@@ -503,19 +503,40 @@ counts, so this is meant for edges, and for higher simplices only on small maps.
 """
 function stalk_graph(P::ProductStalk{K}) where {K}
     states = _all_states(P)
-    return _stalk_graph(P, states, _state_index(P, states))   # a barrier: the index's type is known inside
+    return _stalk_graph(P, states, _state_index(P, states), nothing)   # a barrier: the index's type is known inside
 end
 
-function _stalk_graph(P::ProductStalk{K}, states, index) where {K}
+# Arc arrays reused from one explicit stalk to the next, when the arcs are not kept: the
+# stalk's arcs (out-arcs by state), their transpose (in-arcs, which the closure reads),
+# a cursor for the transpose and the per-state buffer.
+struct ArcScratch
+    colptr::Vector{Int32}
+    rowval::Vector{Int32}
+    nzval::Vector{Float64}
+    tcolptr::Vector{Int32}
+    trowval::Vector{Int32}
+    tnzval::Vector{Float64}
+    cursor::Vector{Int32}
+    buf::Vector{Tuple{Int,Float64}}
+end
+ArcScratch() = ArcScratch(Int32[], Int32[], Float64[], Int32[], Int32[], Float64[], Int32[], Tuple{Int,Float64}[])
+
+# The cost-to-go of the stalk, with its arcs built in `scratch` and dropped.
+function _stalk_values(P::ProductStalk{K}, scratch::ArcScratch) where {K}
+    states = _all_states(P)
+    return _stalk_graph(P, states, _state_index(P, states), scratch)
+end
+
+function _stalk_graph(P::ProductStalk{K}, states, index, scratch) where {K}
     n = length(states)
-    # The transpose, column by column: the arcs out of state i, each target once at its
-    # least cost (a buffer reused for every state).
-    colptr = Vector{Int32}(undef, n + 1)
+    keep = isnothing(scratch)
+    # The arcs out of each state, each target once at its least cost: the transpose of
+    # the stalk's matrix, column by column.
+    colptr = keep ? Vector{Int32}(undef, n + 1) : resize!(scratch.colptr, n + 1)
+    rowval = keep ? sizehint!(Int32[], 4n) : empty!(scratch.rowval)
+    nzval = keep ? sizehint!(Float64[], 4n) : empty!(scratch.nzval)
+    buf = keep ? Tuple{Int,Float64}[] : scratch.buf
     colptr[1] = 1
-    rowval, nzval = Int32[], Float64[]
-    sizehint!(rowval, 4n)
-    sizehint!(nzval, 4n)
-    buf = Tuple{Int,Float64}[]
     for (i, x) in enumerate(states)
         empty!(buf)
         stalk_successors(P, x) do y, c
@@ -531,10 +552,43 @@ function _stalk_graph(P::ProductStalk{K}, states, index) where {K}
         end
         colptr[i + 1] = length(rowval) + 1
     end
-    W = copy(transpose(SparseMatrixCSC(n, n, colptr, rowval, nzval)))
+    if keep
+        W = copy(transpose(SparseMatrixCSC(n, n, colptr, rowval, nzval)))
+    else
+        _transpose!(scratch, n)
+        W = SparseMatrixCSC(n, n, scratch.tcolptr, scratch.trowval, scratch.tnzval)
+    end
     b = fill(Inf, n)
     b[index[coarse_state(P, P.goal)]] = 0.0
-    return StalkGraph(states, index, W, minplus_closure(W, b))
+    Δ = minplus_closure(W, b)
+    return StalkGraph(states, index, keep ? W : spzeros(Float64, Int32, n, n), Δ)
+end
+
+# The transpose of the arcs in scratch (colptr, rowval, nzval) into (tcolptr, trowval,
+# tnzval), by counting sort; rows come out sorted because columns are read in order.
+function _transpose!(s::ArcScratch, n)
+    nz = s.colptr[n + 1] - 1
+    resize!(s.tcolptr, n + 1)
+    fill!(s.tcolptr, 0)
+    for k in 1:nz
+        s.tcolptr[s.rowval[k] + 1] += 1
+    end
+    s.tcolptr[1] = 1
+    for i in 1:n
+        s.tcolptr[i + 1] += s.tcolptr[i]
+    end
+    resize!(s.trowval, nz)
+    resize!(s.tnzval, nz)
+    resize!(s.cursor, n)
+    copyto!(s.cursor, 1, s.tcolptr, 1, n)
+    for col in 1:n, k in s.colptr[col]:(s.colptr[col + 1] - 1)
+        r = s.rowval[k]
+        p = s.cursor[r]
+        s.trowval[p] = col
+        s.tnzval[p] = s.nzval[k]
+        s.cursor[r] = p + 1
+    end
+    return s
 end
 
 """
@@ -624,13 +678,24 @@ function CoverSheaf(K::SimplicialComplex, graphs, summaries, goals; contact, col
     contact_at(k) = hasmethod(contact, Tuple{Int}) && !hasmethod(contact, NTuple{4,Int}) ? contact(k) : contact
     cells = [(k, σ) for k in 0:dimension(K) for σ in simplices(K, k)]
     built = Vector{Tuple{ProductStalk,Union{Nothing,StalkGraph}}}(undef, length(cells))
+    pool = Channel{ArcScratch}(Threads.nthreads())
+    foreach(_ -> put!(pool, ArcScratch()), 1:Threads.nthreads())
     # Each stalk depends only on its own agents: build them in parallel.
     Threads.@threads :dynamic for i in eachindex(cells)
         k, σ = cells[i]
         P = ProductStalk(Tuple(σ), graphs[σ], summaries[σ], goals[σ]; contact = contact_at(k), collides)
-        G = k <= explicit_dim ? stalk_graph(P) : nothing
-        if !isnothing(G) && !keep_arcs
-            G = StalkGraph(G.states, G.index, spzeros(Float64, Int32, length(G.states), length(G.states)), G.Δ)
+        G = nothing
+        if k <= explicit_dim
+            if keep_arcs
+                G = stalk_graph(P)
+            else                                  # arcs dropped: reuse a free set of arc arrays
+                scratch = take!(pool)
+                try
+                    G = _stalk_values(P, scratch)
+                finally
+                    put!(pool, scratch)
+                end
+            end
         end
         built[i] = (P, G)
     end
