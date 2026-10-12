@@ -254,7 +254,8 @@ end
 
 The restriction of the coarse state `x` of `Pσ` to the face `Pτ` (whose agents are
 among those of `Pσ`): forget the other agents, and replace by its summary every
-agent that is no longer in contact.
+agent that is no longer in contact. The contact relation of `Pτ` must imply that of
+`Pσ` (a face may resolve agents later, never earlier).
 """
 function restrict(Pσ::ProductStalk{K}, Pτ::ProductStalk{L}, x) where {K,L}
     idx = ntuple(b -> findfirst(==(Pτ.members[b]), Pσ.members), L)
@@ -262,7 +263,9 @@ function restrict(Pσ::ProductStalk{K}, Pτ::ProductStalk{L}, x) where {K,L}
     ks = ntuple(b -> _summary(Pσ, idx[b], x[idx[b]]), L)
     return ntuple(L) do b
         m = x[idx[b]]
-        _exact(Pσ, idx[b], m) && _in_contact(Pτ, ks, b) ? m : Pτ.nstates[b] + ks[b]
+        touching = _in_contact(Pτ, ks, b)
+        @argcheck _exact(Pσ, idx[b], m) || !touching "the face's contact relation must imply the simplex's"
+        touching ? m : Pτ.nstates[b] + ks[b]
     end
 end
 
@@ -415,6 +418,13 @@ The stalks of every simplex of `complex` (agents are its vertices: `graphs[v]`,
 `contact` and `collides`). Stalks of dimension up to `explicit_dim` are built
 explicitly ([`stalk_graph`](@ref)); higher ones are searched on demand
 ([`section_value`](@ref)).
+
+`contact` is either one contact relation for every simplex or a function `k ->
+relation` of the dimension `k`. The relations must grow with the dimension (contact
+on a face implies contact on the simplex), so that a simplex resolves its agents at
+least as finely as its faces and the restriction maps are defined: triangles may
+keep agents exact over a wider range than edges do, which lets them see
+three-agent interactions while the edge stalks stay small.
 """
 struct CoverSheaf
     complex::SimplicialComplex
@@ -427,8 +437,10 @@ function CoverSheaf(K::SimplicialComplex, graphs, summaries, goals; contact, col
     @argcheck length(graphs) == length(summaries) == length(goals) == nv(K)
     stalks = Dict{Vector{Int},ProductStalk}()
     explicit = Dict{Vector{Int},StalkGraph}()
+    # A relation takes four arguments; a function of the dimension takes one.
+    contact_at(k) = hasmethod(contact, Tuple{Int}) && !hasmethod(contact, NTuple{4,Int}) ? contact(k) : contact
     for k in 0:dimension(K), σ in simplices(K, k)
-        P = ProductStalk(Tuple(σ), graphs[σ], summaries[σ], goals[σ]; contact, collides)
+        P = ProductStalk(Tuple(σ), graphs[σ], summaries[σ], goals[σ]; contact = contact_at(k), collides)
         stalks[σ] = P
         k <= explicit_dim && (explicit[σ] = stalk_graph(P))
     end

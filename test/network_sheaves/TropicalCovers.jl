@@ -149,6 +149,33 @@ end
         end
     end
 
+    @testset "contact growing with the dimension" begin
+        wide(u, k, v, l) = cycle_dist(k, l, cld(n, b)) <= 2
+        K = clique_complex(complete_graph(3))
+        Cn = CoverSheaf(K, Ws, fill(π, 3), goals; contact, collides = cycle_collides, explicit_dim = 2)
+        Cw = CoverSheaf(K, Ws, fill(π, 3), goals; contact = k -> k >= 2 ? wide : contact, collides = cycle_collides,
+            explicit_dim = 2)
+        Gn, Gw = Cn.explicit[[1, 2, 3]], Cw.explicit[[1, 2, 3]]
+        @test length(Gw.states) > length(Gn.states)
+        @test Cw.explicit[[1, 2]].states == Cn.explicit[[1, 2]].states        # the edges are unchanged
+        # Restriction is defined and still gives lower bounds.
+        P3 = Cw.stalks[[1, 2, 3]]
+        for τ in ([1, 2], [1, 3], [2, 3])
+            G2 = Cw.explicit[τ]
+            @test all(G2.Δ[G2.index[restrict(P3, Cw.stalks[τ], x)]] <= Gw.Δ[i] + 1e-9 for (i, x) in enumerate(Gw.states))
+        end
+        # The wider triangle resolves at least as much: its values dominate on every joint state.
+        for x in Iterators.product(1:n, 1:n, 1:n)
+            allunique(x) || continue
+            @test Gw.Δ[Gw.index[coarse_state(P3, x)]] >= Gn.Δ[Gn.index[coarse_state(Cn.stalks[[1, 2, 3]], x)]] - 1e-9
+        end
+        # A face that resolves earlier than its simplex has no restriction.
+        Pn = Cn.stalks[[1, 2, 3]]
+        Pw2 = ProductStalk((1, 2), Ws[1:2], fill(π, 2), goals[1:2]; contact = wide, collides = cycle_collides)
+        far_apart = coarse_state(Pn, (1, 5, 8))
+        @test_throws ArgumentError restrict(Pn, Pw2, far_apart)
+    end
+
     @testset "simplicial cover" begin
         tri = [([1, 2], 1.0), ([1, 3], 1.0), ([2, 3], 1.0)]
         @test simplicial_cover(3, tri) == 2.0
