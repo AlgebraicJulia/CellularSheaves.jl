@@ -176,6 +176,50 @@ end
         @test_throws ArgumentError restrict(Pn, Pw2, far_apart)
     end
 
+    @testset "stable summaries" begin
+        # Two routes merged by the summary: 1 → 3 → 5 and 2 → 4 → 6 with {1, 2} and {3, 4}
+        # summarized together. The quotient lets a walk start on one route and finish on
+        # the other; the stable refinement separates the routes.
+        W = sparse([1, 2, 3, 4, 5, 6], [3, 4, 5, 6, 5, 6], zeros(6), 6, 6)
+        ψ = GraphHomomorphism([1, 1, 2, 2, 3, 4], 4)
+        @test !is_stable(W, ψ)
+        ρ = stable_refinement(W, ψ)
+        @test is_stable(W, ρ)
+        @test ρ.n_target == 6
+        # A stable summary is its own refinement (up to renumbering).
+        @test is_stable(W, ρ) && stable_refinement(W, ρ).n_target == ρ.n_target
+        Wc = cycle_graph_costs(8, 1)
+        @test stable_refinement(Wc, GraphHomomorphism(ones(Int, 8), 1); arcs = (s, s2, c) -> s != s2).n_target == 1
+        # Only the selected arcs matter.
+        Wm = sparse([1, 2, 1], [3, 4, 4], [0.0, 0.0, 1.0], 4, 4)
+        ψm = GraphHomomorphism([1, 1, 2, 3], 3)
+        @test is_stable(Wm, ψm; arcs = (s, s2, c) -> c == 0) == false
+        @test stable_refinement(Wm, ψm; arcs = (s, s2, c) -> c > 0).n_target == 4
+        # Random graphs: the refinement is stable and refines ψ.
+        rng = MersenneTwister(3)
+        for _ in 1:30
+            m = 12
+            Wr = sprand(rng, m, m, 0.25)
+            ψr = GraphHomomorphism(rand(rng, 1:3, m), 3)
+            ρr = stable_refinement(Wr, ψr)
+            @test is_stable(Wr, ρr)
+            @test all(ψr.vertex_map[s] == ψr.vertex_map[t] for s in 1:m for t in 1:m if ρr.vertex_map[s] == ρr.vertex_map[t])
+        end
+        # Refining the summaries refines the stalks: their values can only grow.
+        ψb = π
+        ρb = [stable_refinement(W, ψb; arcs = (s, s2, c) -> s != s2) for W in Ws[1:2]]
+        P = ProductStalk((1, 2), Ws[1:2], fill(ψb, 2), goals[1:2]; contact, collides = cycle_collides)
+        blocks_of(ρ) = [ψb.vertex_map[findfirst(==(k), ρ.vertex_map)] for k in 1:ρ.n_target]
+        bl = blocks_of.(ρb)
+        Q = ProductStalk((1, 2), Ws[1:2], ρb, goals[1:2];
+            contact = (u, k, v, l) -> contact(u, bl[u][k], v, bl[v][l]), collides = cycle_collides)
+        GP, GQ = stalk_graph(P), stalk_graph(Q)
+        for s in 1:n, t in 1:n
+            s == t && continue
+            @test GQ.Δ[GQ.index[coarse_state(Q, (s, t))]] >= GP.Δ[GP.index[coarse_state(P, (s, t))]] - 1e-9
+        end
+    end
+
     @testset "simplicial cover" begin
         tri = [([1, 2], 1.0), ([1, 3], 1.0), ([2, 3], 1.0)]
         @test simplicial_cover(3, tri) == 2.0

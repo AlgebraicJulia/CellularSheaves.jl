@@ -33,6 +33,15 @@ contact, and the pushforward can be enumerated move by move without the joint gr
 change of [`tensor_product`](@ref) and [`quotient_graph`](@ref) to the product of
 the agents' quotients.
 
+**Summaries should lift moves.** A pushforward lets each coarse step start from
+any state of the current fibre, so a summarized agent can switch between states
+with different futures for free. When each summary is *stable* for the agent's
+zero-cost moves ([`stable_refinement`](@ref), [`is_stable`](@ref)), every
+zero-cost walk of its quotient lifts to a real path from every state of its fibre,
+and so does every zero-cost joint walk of agents out of contact (a product of
+locally surjective maps is locally surjective). This is a condition on the vertex
+data alone; every stalk inherits it.
+
 **Restriction maps.** For a face ``τ ⊂ σ``, forgetting the agents outside ``τ`` maps
 the joint states of ``σ`` to those of ``τ``, and on coarse states it is again
 determined: an agent kept exact in ``σ`` only because of a contact outside ``τ``
@@ -62,7 +71,7 @@ module TropicalCovers
 
 export SimplicialComplex, clique_complex, simplices, faces, ProductStalk, coarse_state, restrict,
     stalk_successors, StalkGraph, stalk_graph, stalk_value, CoverSheaf, section_value, cover_bound,
-    simplicial_cover
+    simplicial_cover, stable_refinement, is_stable
 
 using ArgCheck: @argcheck
 using Graphs
@@ -154,6 +163,66 @@ dimension(K::SimplicialComplex) = length(K.cells) - 1
 
 function Base.show(io::IO, K::SimplicialComplex)
     print(io, "SimplicialComplex(", join((length(c) for c in K.cells), ", "), " simplices by dimension)")
+end
+
+# ---------------------------------------------------------------------------
+# Summaries that lift moves
+# ---------------------------------------------------------------------------
+
+# The fibres reached from s by the selected arcs, as a sorted vector.
+function _successor_fibres(out, label, arcs, s)
+    return sort!(unique!([label[rowvals(out)[k]] for k in nzrange(out, s) if arcs(s, rowvals(out)[k], nonzeros(out)[k])]))
+end
+
+"""
+    is_stable(W, ψ; arcs = (s, s2, c) -> true)
+
+Whether every state of a fibre of `ψ` reaches the same fibres by the selected arcs
+of `W` (`arcs(s, s2, W[s, s2])`). Then `ψ` is *locally surjective* on those arcs:
+every arc of the quotient out of a fibre lifts to an arc out of each of its states,
+so every walk of the quotient lifts to a path from any state of its first fibre.
+"""
+function is_stable(W::SparseMatrixCSC, ψ::GraphHomomorphism; arcs = (s, s2, c) -> true)
+    @argcheck size(W, 1) == size(W, 2) == length(ψ.vertex_map)
+    out = sparse(transpose(W))
+    seen = Dict{Int,Vector{Int}}()
+    for s in eachindex(ψ.vertex_map)
+        succ = _successor_fibres(out, ψ.vertex_map, arcs, s)
+        get!(seen, ψ.vertex_map[s], succ) == succ || return false
+    end
+    return true
+end
+
+"""
+    stable_refinement(W, ψ; arcs = (s, s2, c) -> true) -> GraphHomomorphism
+
+The coarsest refinement of the summary `ψ` that is [`is_stable`](@ref) for the
+selected arcs of `W`: two states share a fibre when they share one in `ψ` and, at
+every round, reach the same fibres. This is the relational coarsest partition
+(Paige & Tarjan 1987), or *regular equivalence* of social networks (Everett &
+Borgatti 1994); the quotient map it gives is locally surjective, a relative of the
+graph fibrations of Boldi & Vigna (2002), which ask for unique lifts.
+
+**Why summaries need it.** A pushforward along `ψ` lets each step of a coarse walk
+start from whichever state of the current fibre suits it. If two states of a fibre
+have different futures, the coarse walk can switch between them for free; in the
+multi-agent stalks, a summarized agent at a level of its cost-to-go can slide
+along the level set onto another route. With `arcs` the zero-cost moves (the
+moves along shortest paths, in the gauge of the cost-to-go), the refined summary
+lifts every zero-cost coarse walk to a real one from each state of its fibre, and
+the product of such summaries over the agents of a simplex lifts them too.
+"""
+function stable_refinement(W::SparseMatrixCSC, ψ::GraphHomomorphism; arcs = (s, s2, c) -> true)
+    @argcheck size(W, 1) == size(W, 2) == length(ψ.vertex_map)
+    out = sparse(transpose(W))
+    label = ψ.vertex_map
+    count = length(unique(label))
+    while true
+        ids = Dict{Tuple{Int,Vector{Int}},Int}()
+        next = [get!(ids, (label[s], _successor_fibres(out, label, arcs, s)), length(ids) + 1) for s in eachindex(label)]
+        length(ids) == count && return GraphHomomorphism(next, length(ids))
+        label, count = next, length(ids)
+    end
 end
 
 # ---------------------------------------------------------------------------
