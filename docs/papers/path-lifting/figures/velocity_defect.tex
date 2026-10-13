@@ -1,0 +1,37 @@
+% Forgetting velocity on a one-dimensional lattice double integrator:
+% state (p, v) with |v| <= 2, one step chooses v' with |v' - v| <= 1 and sets p' = p + v', cost 1.
+% Blocks are the columns (cells). The coarse arc q -> q+1 costs 1; the defect of a state of column q
+% is d((q,v), q+1) - 1: 0 for v >= 0, 1 for v = -1, 3 for v = -2.
+\begin{tikzpicture}[
+    x=1.55cm, y=0.95cm,
+    st/.style={circle, draw, thick, minimum size=5.2mm, inner sep=0pt, fill=white},
+    arc/.style={-{Stealth[length=2.2mm]}, thick},
+    path/.style={-{Stealth[length=2.2mm]}, very thick, accent},
+    lab/.style={font=\small},
+  ]
+  % columns q-1, q, q+1 as blocks
+  \foreach \c/\name in {0/{q-1}, 1/q, 2/{q+1}} {
+    \fill[blockfill, draw=blockline, rounded corners=2.5mm] (\c-0.32,-2.55) rectangle (\c+0.32,2.55);
+    \node[lab] at (\c,-2.95) {cell $\name$};
+  }
+  \foreach \c in {0,1,2} \foreach \v in {-2,...,2} { \node[st] (s\c\v) at (\c,\v) {}; }
+  % velocity axis
+  \draw[-{Stealth[length=2.2mm]}] (-0.75,-2.4) -- (-0.75,2.6) node[above, lab] {$v$};
+  \foreach \v in {-2,...,2} { \node[lab, anchor=east] at (-0.8,\v) {$\v$}; }
+  % the coarse arc, realised from (q, 0)
+  \draw[arc] (s10) -- (s21);
+  \node[lab, anchor=south] at (1.5,2.75) {coarse arc $q \to q{+}1$: cost $1$};
+  \draw[arc, densely dotted] (1.1,2.62) -- (1.9,2.62);
+  % the optimal way from (q, -2) into cell q+1: brake, turn, cross (4 steps)
+  \draw[path] (s1-2) -- (s0-1);
+  \draw[path] (s0-1) -- (s00);
+  \draw[path] (s00) -- (s11);
+  \draw[path] (s11) -- (s21);
+  \node[lab, text=accent, anchor=north] at (1.0,-3.3) {from $(q,-2)$ into cell $q{+}1$: brake, turn, cross, $4$ steps};
+  % defects of column q
+  \foreach \v/\e in {2/0, 1/0, 0/0, -1/1, -2/3} {
+    \node[lab, anchor=west] at (2.55,\v) {$(q, \v)$: \ $\eps = \e$};
+  }
+  \draw[decorate, decoration={brace, amplitude=4pt}] (4.2,2.3) -- (4.2,-2.3)
+    node[midway, right=5pt, lab, align=left] {defects of the\\ states of cell $q$};
+\end{tikzpicture}

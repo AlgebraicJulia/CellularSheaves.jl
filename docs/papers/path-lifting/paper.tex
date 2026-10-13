@@ -3,6 +3,15 @@
 \usepackage{amsmath,amssymb,amsthm,mathtools}
 \usepackage{booktabs}
 \usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usepackage{tikz-cd}
+\usetikzlibrary{arrows.meta,positioning,calc,fit,backgrounds,decorations.pathreplacing,shapes.geometric}
+\definecolor{accent}{RGB}{196,78,30}
+\definecolor{accentB}{RGB}{38,104,176}
+\colorlet{blockfill}{accentB!7}
+\colorlet{blockline}{accentB!45}
+\colorlet{coarsefill}{accent!10}
 \usepackage[hidelinks]{hyperref}
 \usepackage[capitalise,noabbrev]{cleveref}
 
@@ -56,6 +65,11 @@ cost a state of the arc's source block must pay to follow it.
 \item In general, the quotient with defect-inflated arc costs gives an upper bound
   that is never worse than the classical pessimistic (``must'') abstraction.
 \end{itemize}
+Within the categorical Lyapunov theory of Ames, Moeller and Tabuada, the same
+bounds are Lyapunov certificates. The path category is a setting for stability
+whose norm is the optimal cost-to-go. The two sides of the sandwich are the two
+class-$\mathcal K$ bounds of a Lyapunov morphism, and the defect-inflated
+quotient certifies a layered controller.
 Experiments on a double integrator with $2.8$ million lattice states and on
 cooperative multi-agent planning show the theorem's message in practice. The
 natural maps are loose exactly where dynamics and constraints obstruct path
@@ -139,6 +153,10 @@ those with smaller defects.
   (\cref{sec:enriched,sec:abstraction}).
 \item The path-lifting theorem: a sandwich bound and an exactness criterion
   (\cref{thm:sandwich,thm:exact}), with locality and may/must corollaries.
+\item Lyapunov certificates in the categorical Lyapunov theory of Ames, Moeller
+  and Tabuada~\cite{ames2025clt1}. Supersolutions with greedy feedback are
+  Lyapunov morphisms whose class-$\mathcal K$ gains are certified by lower bounds,
+  and both quotients yield certificates (\cref{sec:lyapunov}).
 \item Sheaves of lattices on nerves of covers, with pullbacks along arbitrary maps
   of cost graphs as restriction maps, and their use for multi-agent planning
   (\cref{sec:sheaves}).
@@ -446,6 +464,18 @@ On every arc of $\Wm$, $\eps_\psi(B,C) \le \Wm(B,C) - W_\psi(B,C)$. The gap betw
 the two quotients bounds the defect, and with it the loss of the optimistic bound.
 \end{corollary}
 
+\begin{figure}[t]
+\centering
+\input{figures/quotients.tex}
+\caption{The two quotients and the defect. (a) The cheapest arc into $C$ leaves
+$x_1$ and costs $1$. The arc out of $x_2$ costs $3$, but $x_2$ reaches $C$ for $2$
+through $x_1$ (dashed). (b) The optimistic arc $B \to C$ costs $1$ and the
+pessimistic arc costs $3$. The defect is $1$, so the defect-inflated arc costs
+$2$, as in \cref{cor:gap}. (c) The sandwich of \cref{thm:sandwich} at $x_2$ for
+the target $C$.}
+\label{fig:quotients}
+\end{figure}
+
 \begin{proposition}[locality]\label{prop:local}
 \Cref{thm:sandwich} remains true when $\dd(x,C)$ and $V$ in \cref{def:defect} are
 replaced by any upper bounds. In particular, distances computed in the subgraph
@@ -465,6 +495,17 @@ defect vanishes, and the bound $\varphi + E V^\varphi_\psi$ is exact. The gauge
 moves information out of arc costs, which the minimum over a block destroys, into
 the potential, which is added back state by state.
 \end{example}
+
+\begin{figure}[t]
+\centering
+\input{figures/line_defect.tex}
+\caption{The line of \cref{ex:line}. (a) The coarse arc $A \to B$ costs $1$,
+realised by $2 \to 3$. From state $1$, reaching $B$ costs $2$ (dashed), so the arc
+has defect $1$, and the bound at $1$ is $1$ against a true cost of $3$. (b) In the
+gauge $\varphi = V$ every arc costs $0$ and every arc lifts, so the bound
+$\varphi + E V^\varphi_\psi$ is exact.}
+\label{fig:line}
+\end{figure}
 
 \paragraph{Boolean special cases.}
 Restrict attention to a set of arcs of equal cost, for example the zero-cost arcs
@@ -487,6 +528,153 @@ abstractions have small but nonzero defects.
 The script \texttt{docs/scripts/path\_lifting\_check.jl} checks every statement of
 this section on 3000 random cost graphs with random partitions and terminal costs
 (1026 of them with zero defect), with no failures.
+
+\section{Lyapunov certificates}\label{sec:lyapunov}
+
+The sandwich of \cref{thm:sandwich} brackets the cost-to-go. This section shows
+that the same brackets are Lyapunov certificates for closed loops, in the sense of
+the categorical Lyapunov theory of Ames, Moeller and
+Tabuada~\cite{ames2025clt1}. In their framework a Lyapunov function is a
+\emph{Lyapunov morphism} $V : E \to R$ into a posetal ``stable object'' $R$.
+\begin{itemize}[nosep]
+\item Positive definiteness and decrease are lax commuting diagrams.
+\item The existence of a Lyapunov morphism implies stability of an equilibrium
+  (their Theorem~1, the categorical Lyapunov theorem).
+\end{itemize}
+They instantiate the framework for discrete-time systems and for Lawvere metric
+spaces (their \S4.2 and \S5.2). The cost-enriched path categories of
+\cref{sec:enriched} are an instance of both.
+
+\paragraph{A setting for stability whose norm is the cost-to-go.}
+Collapse the target set $\Gamma$ into the sink $\tgt$, and assume every arc out of
+a state of $X$ costs at least $c > 0$. Let $E$ be the set of states with
+$V < \infty$, together with $\tgt$. Following their Definition~4, take:
+\begin{itemize}[nosep]
+\item the category $\mathbf{Set}$ (S0) and the space $E$ (S1);
+\item time $(\mathbb Z_{\ge 0}, +, 0)$ (S2);
+\item the stable object $R = [0,\infty]$ with its usual order and point $0$ (S3);
+\item the distance $\dd$, the path quasi-metric of \cref{sec:enriched} (S4).
+\end{itemize}
+Axiom S4 asks for $\dd \ge 0$ and $\dd(x,y) = 0$ only when $x = y$. The latter
+holds because arc costs are positive; symmetry is not required. Their norm
+relative to the equilibrium $\tgt$ (their Definition~5) is
+\[ \|x\|_{\tgt} = \dd(x, \tgt) = V(x). \]
+\emph{In this setting the norm is the optimal cost-to-go.}
+
+A feedback $\pi : E \to E$ with $\pi(\tgt) = \tgt$, taking each state along one
+of its arcs, gives the discrete-time flow $\phi(k, x) = \pi^k(x)$ with equilibrium
+$\tgt$ (their \S4.2). A \emph{Lyapunov morphism} (their Definition~13) is a map
+$f : E \to [0,\infty]$ with two properties:
+\begin{itemize}[nosep]
+\item \emph{positive definite}: there are class-$\mathcal K$ maps
+  $\underline\alpha, \overline\alpha$ (order-preserving bijections of $[0,\infty]$
+  fixing $0$) with
+  $\underline\alpha(\|x\|_\tgt) \le f(x) \le \overline\alpha(\|x\|_\tgt)$;
+\item \emph{decrescent}: $f(\pi(x)) \le f(x)$.
+\end{itemize}
+Their Theorem~1 then gives stability: $\|\pi^k(x)\|_\tgt \le
+\underline\alpha^{-1}\overline\alpha(\|x\|_\tgt)$.
+
+\begin{proposition}[supersolutions are Lyapunov morphisms]\label{prop:clf}
+Let $f$ be a supersolution with $f(\tgt) = 0$, let $E_f = \{f < \infty\}$, and let
+$\pi$ be a greedy feedback: $W(x,\pi x) + f(\pi x) \le f(x)$ for $x \in E_f
+\setminus \{\tgt\}$. Then:
+\begin{enumerate}[label=(\roman*),nosep]
+\item $\pi$ maps $E_f$ into itself, and $f(\pi x) \le f(x) - c$ off $\tgt$;
+\item $V \le f$ on $E_f$, so $\underline\alpha = \mathrm{id}$ is a lower class-$\mathcal K$ bound;
+\item $\overline\alpha(t) = \kappa_f\, t$ with
+  $\kappa_f = \max_{x \in E_f \setminus\{\tgt\}} f(x)/V(x)$ is an upper
+  class-$\mathcal K$ bound;
+\item hence $f$ is a Lyapunov morphism for $\pi$ on $E_f$. The closed loop reaches
+  $\tgt$ from $x$ within $f(x)/c$ steps, at total cost at most
+  $f(x) \le \kappa_f V(x)$.
+\end{enumerate}
+\end{proposition}
+\begin{proof}
+(i) is the greedy inequality together with $W \ge c$. By (i), $f$ decreases by at
+least $c$ per step, so the closed loop from $x$ reaches $\tgt$ within $f(x)/c$
+steps. Summing the greedy inequality along the way, its cost is at most $f(x)$.
+Since $V(x)$ is the cheapest cost, $V(x) \le f(x)$, which is (ii). For (iii),
+$E_f$ is finite and $V > 0$ off $\tgt$, so $\kappa_f < \infty$, and $t \mapsto
+\kappa_f t$ is an order-preserving bijection of $[0,\infty]$ fixing $0$. (iv)
+combines (i)--(iii) with their Definition~13.
+\end{proof}
+
+Finite-time reach is our addition. Their Theorem~1 concludes stability, while the
+strict decrease in (i) gives reachability.
+
+The useful reading is the following. The two lax triangles of positive
+definiteness are the two sides of our sandwich. The upper gain $\kappa_f$ involves
+the unknown $V$, but any subsolution $L \le V$ bounds it:
+\[
+\begin{tikzcd}[column sep=large]
+& E \arrow[dl, "L"'] \arrow[d, "\|\cdot\|_\tgt = V" description] \arrow[dr, "f"] & \\
+{[0,\infty]} \arrow[r, phantom, "\le"] & {[0,\infty]} \arrow[r, phantom, "\le"] & {[0,\infty]}
+\end{tikzcd}
+\qquad\qquad
+f \le \kappa\, L \le \kappa\, V, \quad \kappa = \max_{x \ne \tgt} \frac{f(x)}{L(x)}
+\quad (L > 0 \text{ off } \tgt).
+\]
+So a lower bound from an optimistic abstraction ($L = V_\psi \circ \psi$,
+\cref{prop:lower}) certifies the class-$\mathcal K$ gain, and with it the
+suboptimality of the closed loop, without computing $V$. This is the
+``guaranteed bound'' of \cref{sec:experiments}.
+
+\begin{theorem}[Lyapunov certificates from abstractions]\label{thm:lyap-abstraction}
+Let $\psi$ be an abstraction and let the target be a union of blocks, so that
+$V_\psi \circ \psi > 0$ off the target.
+\begin{enumerate}[label=(\alph*),nosep]
+\item \emph{Pessimistic.} $\Vm \circ \psi$ is a supersolution. With its greedy
+  feedback, it is a Lyapunov morphism on $\{\Vm \circ \psi < \infty\}$, with gain
+  at most $\max \Vm\circ\psi / V_\psi \circ \psi$.
+\item \emph{Lifted.} Define the macro-step feedback $\Pi$: from $x \in B$, let $B'$
+  be the next block (or $\tgt$) on an optimal walk of the defect-inflated quotient,
+  and let $\Pi(x) \in B'$ attain $\dd(x, B')$. Then
+  \[ V^{+\eps}_\psi(\psi\, \Pi x) + \dd(x, \Pi x) \;\le\; V^{+\eps}_\psi(\psi x). \]
+  So $V^{+\eps}_\psi \circ \psi$ is a Lyapunov morphism for the discrete-time
+  system $\Pi$, whose time step is one coarse arc. It reaches $\tgt$ within the
+  number of arcs of the walk, at fine cost at most $V^{+\eps}_\psi(\psi x)$, and its
+  gain is at most $\max V^{+\eps}_\psi \circ\psi / V_\psi \circ \psi$.
+\end{enumerate}
+\end{theorem}
+\begin{proof}
+(a) Let $B \to C$ be the first arc of an optimal walk of $\Wm$ from $B = \psi x$.
+Every $x \in B$ has an arc into $C$ costing at most $\Wm(B,C)$, so
+$\min_y W(x,y) + \Vm(\psi y) \le \Wm(B,C) + \Vm(C) = \Vm(B)$. The terminal case uses
+$b(x) \le b^{\mathrm{must}}(B)$. Apply \cref{prop:clf}, with the gain bounded via
+$L = V_\psi \circ \psi$.
+
+(b) Along an optimal walk, $V^{+\eps}_\psi(B') = V^{+\eps}_\psi(B) -
+(W_\psi + \eps_\psi)(B,B')$. By \cref{def:defect},
+$\dd(x, \Pi x) = \dd(x, B') \le (W_\psi + \eps_\psi)(B,B')$, and likewise for the
+terminal arc. The decrease is at least $W_\psi(B,B') \ge c$ per macro-step.
+Positive definiteness follows from \cref{thm:sandwich} ($V \le V^{+\eps}_\psi \circ
+\psi$) and, for the gain, from \cref{prop:lower}.
+\end{proof}
+
+Part (b) is a layered controller with a coarse Lyapunov certificate. The upper
+layer chooses the next block from $V^{+\eps}_\psi$. The lower layer only needs to
+reach that block within the arc's inflated cost, which by \cref{prop:local} it can
+verify with a search confined to $B \cup B'$. Part (a) is sound but conservative,
+for the same reason the must quotient is: every state of a block must be able to
+follow the coarse arc in a single step. (b) relaxes this to several steps at a
+cost recorded by the defect, and it is never worse than (a) (\cref{thm:sandwich}).
+
+\paragraph{Scope.}
+\begin{itemize}
+\item \emph{Deterministic closed loops.} Ames, Mattenet and Moeller treat systems
+  as coalgebras. For graphs, their trajectories require out-degree exactly one;
+  they leave lax maps of coalgebras, which would allow general graphs, outside
+  their scope~\cite{ames2025clt2}. A control Lyapunov function is a statement
+  about the nondeterministic graph of all controls: \emph{some} arc decreases $f$.
+  \Cref{prop:clf} reduces it to their deterministic setting by choosing a
+  feedback. A treatment of control Lyapunov functions as lax coalgebra maps,
+  without choosing a feedback, is open.
+\item \emph{Covers.} Each local cost-to-go $V_\sigma$ of \cref{sec:sheaves} is a
+  supersolution of the global problem: paths inside a piece are paths. So it is a
+  Lyapunov morphism for its own greedy feedback, and the lax section condition
+  $V_\tau|_{U_\sigma} \le V_\sigma$ says that larger pieces certify smaller gains.
+\end{itemize}
 
 \section{Decompositions as sheaves on nerves}\label{sec:sheaves}
 
@@ -536,6 +724,20 @@ By the argument of \cref{prop:lower}, the pulled-back cost-to-go of a face is a
 subsolution on $\sigma$ whenever $\rho_{\sigma\tau}$ is non-expansive and
 compatible with the terminal costs. Soundness holds for every choice. Tightness
 depends on the lifting defect of $\rho_{\sigma\tau}$ (\cref{sec:lifting}).
+
+\begin{figure}[t]
+\centering
+\input{figures/nerve.tex}
+\caption{Sheaves on nerves. (a) A cover $\{U_1,U_2,U_3\}$ of the state space and
+its nerve. The canonical sheaf has the value functions on $U_\sigma$ as stalks and
+restriction along inclusions as restriction maps. The local cost-to-go functions
+form a lax section. (b) For several agents, the cover is of the set of agents (the
+clique complex of the interaction graph). Stalks are joint state graphs pushed
+forward along symmetric summaries. The restriction $\rho$ forgets an agent and
+returns agents out of contact to their summaries. Pulling back a face's cost-to-go
+gives a lower bound on the simplex.}
+\label{fig:nerve}
+\end{figure}
 
 \paragraph{Base change.}
 Two commutation facts make these sheaves computable.
@@ -596,6 +798,19 @@ because some velocity state moves from $q$ to $q'$ at once. A state in $q$ movin
 away from $q'$ at speed $s$ must first brake, which takes about $s$ steps, so the
 defect grows with speed. Modes group states whose velocities can follow the same
 coarse arcs, which reduces the defect.
+\Cref{fig:velocity} shows this on a one-dimensional lattice.
+
+\begin{figure}[t]
+\centering
+\input{figures/velocity_defect.tex}
+\caption{Forgetting velocity on a one-dimensional lattice double integrator:
+$|v| \le 2$, and each unit-cost step chooses $v'$ with $|v' - v| \le 1$ and sets
+$p' = p + v'$. The blocks are cells (columns). The coarse arc $q \to q+1$ costs
+$1$. From $(q,-2)$, reaching cell $q+1$ takes $4$ steps: brake, turn, cross. The
+defect is therefore $3$, and it grows with speed away from the arc's direction.
+Velocity modes separate states with different defects.}
+\label{fig:velocity}
+\end{figure}
 
 \begin{center}
 \begin{tabular}{lrrrr}
@@ -626,13 +841,33 @@ stay inside. With corridor width 4:
 \item at width 16 with 49 modes, every query is optimal.
 \end{itemize}
 
-Each closed loop also comes with two certificates:
+Each closed loop also comes with a certificate in the sense of
+\cref{sec:lyapunov}. The corridor cost-to-go $V_U$ is a supersolution of the
+whole problem. With the feedback of its shortest-path tree it is checked per
+query to be positive, decrescent and strictly decreasing on a closed domain, and
+every query was certified. At the query state $x_0$, the closed loop costs
+$V_U(x_0)$ (\cref{prop:clf}(iv)). The coarse lower bound gives $V(x_0) \ge
+L(x_0)$, so the ratio $V_U(x_0)/L(x_0)$ bounds the suboptimality without knowing
+the optimum. It is the pointwise form of the class-$\mathcal K$ gain:
 \begin{itemize}[nosep]
-\item the corridor cost-to-go is a Lyapunov function, checked per query;
-\item the ratio of that cost-to-go to the coarse lower bound bounds the
-  suboptimality, without knowing the optimum. It averages 2.18 when velocity is
-  forgotten and 1.30 with 49 modes.
+\item forgetting velocity: 2.18 on average, 7.50 at worst;
+\item 49 modes: 1.30 on average, 1.79 at worst;
+\item the true ratios are 1.062 and 1.006.
 \end{itemize}
+
+The pessimistic certificate of \cref{thm:lyap-abstraction}(a) is much more
+conservative (\texttt{tropical\_lyapunov\_study.jl}). Every state of a mode must
+follow the coarse arc in one step, and wide speed bins rarely allow that. It
+certifies:
+\begin{itemize}[nosep]
+\item none of the 2.4 million reachable states with one mode;
+\item 9 states with 25 or 49 heading-major modes;
+\item 59\% with 8 headings $\times$ 6 speeds, at 2.74 times the optimum on
+  average (6.17 at worst);
+\item all of them only with one mode per velocity (169 modes).
+\end{itemize}
+The lifted certificate of \cref{thm:lyap-abstraction}(b) relaxes exactly the
+one-step requirement. It has not yet been measured.
 
 \subsection{Cooperative multi-agent planning}
 One planner controls all agents, and each agent pays for its steps until it rests
@@ -672,6 +907,19 @@ In lifting terms the three summaries fail or succeed for different reasons:
 \item \emph{Reeb arcs} are the connected components of the bands between
   consecutive levels. They separate the two sides~\cite{reeb1946,desilva2016}.
 \end{itemize}
+
+\begin{figure}[t]
+\centering
+\input{figures/reeb.tex}
+\caption{Level sets versus Reeb arcs. Agent $j$'s goal lies below a wall with
+gaps at both ends. Cells are coloured by the band $14 \le \dd_j \le 16$ of its
+cost-to-go, computed by breadth-first search
+(\texttt{figures/make\_reeb\_figure.jl}). The band is one level set but has two
+connected components, the Reeb arcs $a$ and $b$. A summary by level sets puts both
+arms in one fibre, so a coarse move available on one side does not lift from the
+other. Reeb arcs keep them apart.}
+\label{fig:reeb}
+\end{figure}
 
 \paragraph{Two double integrators.}
 The map is $16^2$ with velocities in $\{-1,0,1\}^2$: 2052 states per agent and
@@ -754,6 +1002,13 @@ Cellular sheaves and their Laplacians~\cite{curry2014,hansen2019} have lattice-v
 analogues: the Tarski Laplacian~\cite{ghrist2022} and its quantale-enriched
 generalization, the Lawvere Laplacian~\cite{ghrist2025diffusion}. Reeb graphs are
 cosheaves~\cite{desilva2016}.
+
+\paragraph{Lyapunov theory.}
+Categorical Lyapunov theory~\cite{ames2025clt1,ames2025clt2} supplies the notion
+of Lyapunov morphism we use. Our contributions there are the identification of
+the norm with the cost-to-go, certified class-$\mathcal K$ gains, and certificates
+transported from abstractions. Layered planning and control architectures are
+surveyed by Matni, Ames and Doyle~\cite{matni2024}.
 
 \paragraph{Multi-agent path finding.}
 Our cover bound with edges alone is the weighted dependency-graph heuristic of

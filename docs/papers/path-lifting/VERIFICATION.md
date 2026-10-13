@@ -79,6 +79,16 @@ cost-enriched statement directly and cites Bénabou only for the Set prototype.
 | `bertsekas1989` | Aggregation in dynamic programming, used to correct value iteration (the real semiring). | IEEE abstract | verified (abstract) |
 | `chow1991` | Multigrid for discrete-time stochastic control. | Crossref | bibliographic |
 
+## Categorical Lyapunov theory
+
+| Key | Claim in the paper | Source read | Verdict |
+|---|---|---|---|
+| `ames2025clt1` | Setting for stability (Definition 4: S0–S4; S4 asks for `d ≥ 0` and `ker d ≅ Δ`, with no symmetry); norm `‖x‖ = d(x, x*)` (Definition 5); Lyapunov morphism = positive definite (class-K bounds) and decrescent (Definition 13); Theorem 1 (categorical Lyapunov theorem): a Lyapunov morphism implies stability; discrete-time setting (§4.2) and Lawvere metric spaces (§5.2). The paper's finite-time reach, certified gains and abstraction certificates are claimed as *ours*, not theirs. | arXiv 2502.15276v2 LaTeX source (amsart, one counter per environment type, so theorem and definition numbers were counted from the source) | verified |
+| `ames2025clt2` | Systems as coalgebras; graph trajectories require out-degree exactly one ("limited to discussing 'deterministic' graphs"); lax maps of coalgebras for general graphs are left outside its scope. The PDF title reads "Categorical Lyapunov stability II"; the arXiv metadata, used in the bib, reads "Theory II". | arXiv 2505.22968v1 LaTeX source, the example on graphs (around line 1119 of the source) | verified |
+
+The user's message spelled the author's name "Moller". The correct spelling is
+**Joe Moeller**.
+
 ## Software
 
 `PathPack.jl` (AlgebraicJulia, unregistered) is mentioned in the repository
