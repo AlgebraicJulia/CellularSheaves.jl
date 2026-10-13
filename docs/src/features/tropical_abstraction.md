@@ -705,10 +705,40 @@ gluing, a small integer program on the agents, is sequential.
   An edge stalk now allocates 272 MB, mostly its own states, index and
   cost-to-go, and a 40² instance builds on one thread in 54 s instead of 117 s. Faster thread
   scaling would have to cut memory traffic, not allocation.
-- **Across nodes.** On one node the build is bandwidth-bound. The tasks need only
-  their agents' graphs and summaries and return a cost-to-go table, so the
-  natural next step is to spread edges over nodes (MPI or Distributed). That is
-  untested.
+- **Across nodes, over MPI** (`docs/scripts/tropical_cover_mpi.jl`, `hpg-milan`,
+  AMD EPYC 75F3, two instances per map). The decomposition follows the sheaf:
+  - every rank builds the shared structure itself (summaries, complex, product
+    stalks), deterministically;
+  - edges are dealt to ranks, longest first, and built over each rank's threads;
+  - each edge's cost-to-go is broadcast, and every rank enumerates its states and
+    index again (`StalkGraph(P, Δ)`);
+  - triangles are dealt to ranks, and only their values are reduced;
+  - rank 0 glues the cover.
+
+  Every configuration gives exactly the same bound as one process.
+
+  | layout | 40² total (edges) | 64² total (edges) |
+  |---|---|---|
+  | 1 node, 1 rank × 16 threads | 10–12 s (9.1–9.4) | 43–49 s (41–44) |
+  | 1 node, 4 ranks × 4 threads | 9.5–13 s (7.4–8.9) | 33–37 s (28–32) |
+  | 2 nodes, 1 rank × 16 threads each | 6.4–9.0 s (4.9–7.0) | 25–29 s (22–23) |
+  | 4 nodes, 1 rank × 16 threads each | 6.6–10 s (4.9–6.6) | 23–24 s (19) |
+  | 4 nodes, 4 ranks × 4 threads each | 10–12 s (4.9–5.1) | 27–31 s (15) |
+
+  - **More nodes do help.** On 64², two nodes halve the edge phase, because each
+    node brings its own memory bandwidth.
+  - **Four nodes reach the floor set by the longest edge.** Its stalk takes about
+    12 s alone, and 20–25 edges over 64 threads leave little for a fifth node to
+    do. Going further means splitting a single stalk's states across threads.
+  - **NUMA matters within a node.** These nodes have 8 NUMA domains. Four ranks of
+    four threads build the edges 1.3–1.5× faster than one rank of 16, since each
+    process keeps its memory near its cores.
+  - **The exchange is the cost of many ranks.** Broadcasting every table to every
+    rank, one edge at a time, takes 4–11 s with 16 ranks, against under 1 s with
+    four. Only the ranks that search a triangle need the tables of its edges, so
+    targeted sends (or one all-gather) would remove most of that.
+  - **Each 4-node job waited 31–78 minutes for nodes** on a nearly full
+    partition, under the group's investment QOS and with a 15-minute limit.
 - **The edge stalk is exact and tight.** It equals the pushforward of the pair
   graph, and that pushforward along (Reeb arc, block) loses nothing against the
   exact pair delay on these maps. With exact pair bounds the gluing reproduced the
@@ -840,9 +870,11 @@ supersolutions and Tarski's theorem replaces linear algebra.
   Larger blocks widen the contact region, so how block size, contact radius and
   tightness trade off on larger maps is open. The 64² certificates stayed
   within 1%.
-- **Thread scaling is bandwidth-bound.** On one node, 16 threads give 3–4×. The
-  edge tasks are independent and small to exchange, so distributing them over
-  nodes is the next step, and untested.
+- **Scaling stops at the longest stalk.** On one node 16 threads give 3–4×, limited
+  by memory bandwidth. Over MPI, two nodes halve the 64² edge phase, and four
+  reach the floor of the longest single edge stalk. Splitting one stalk's states
+  across threads would lower that floor. Targeted exchange, sending each table
+  only to the ranks that use it, would let more ranks per node pay off.
 - **Bounds at the start only.** The triangle values are searched from one joint
   state. A heuristic at every state of a joint search needs them cached or built
   across queries.
@@ -870,6 +902,8 @@ supersolutions and Tarski's theorem replaces linear algebra.
   - `docs/scripts/tropical_multiagent_cover.jl`: four to eight agents, the
     sandwich, independence detection, the gauge on the cover
     (`tropical_cover_gauge.jl`) and the simplicial cover with exact triangles;
+  - `docs/scripts/tropical_cover_mpi.jl`: the same study over MPI, run with
+    `srun --mpi=pmix` (one or more ranks per node, each with threads);
   - `docs/scripts/tropical_cover_scaling.jl`: 20² to 64² maps, eight agents,
     the cover built and evaluated over threads (arguments: map size, agents,
     instances, `profile`; `COVER_BLOCK` sets the block size), run with

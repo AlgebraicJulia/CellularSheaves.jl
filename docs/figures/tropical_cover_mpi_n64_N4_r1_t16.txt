@@ -1,0 +1,9 @@
+Model name:                              AMD EPYC 75F3 32-Core Processor
+nodes: c0710a-s27,c0711a-s[11,20],c0712a-s29
+grid 64², wall with two 1-cell corridors: 3972 free cells; 8 agents; block 4; triangle contact radius 1; 4 ranks on 4 nodes × 16 threads
+#1  20 edges (3585881 states each), 24 triangles; 4 ranks × 16 threads
+    total 22.7 s: shared 0.5, edges 18.5 (fastest rank 15.3), exchange 0.5 (547 MiB), assemble 2.3, triangles 1.5, glue 0.00
+    decoupled 409  sheaf bound 411  prioritized 411  certified ratio 1.000
+#2  25 edges (3529556 states each), 41 triangles; 4 ranks × 16 threads
+    total 23.8 s: shared 0.4, edges 19.0 (fastest rank 18.0), exchange 1.0 (673 MiB), assemble 2.7, triangles 1.6, glue 0.00
+    decoupled 450  sheaf bound 454  prioritized 458  certified ratio 1.009
