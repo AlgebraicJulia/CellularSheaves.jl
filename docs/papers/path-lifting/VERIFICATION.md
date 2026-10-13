@@ -61,7 +61,23 @@ cost-enriched statement directly and cites Bénabou only for the Set prototype.
 
 ## Path algebra and dynamic programming
 
-Pending: being verified.
+| Key | Claim in the paper | Source read | Verdict |
+|---|---|---|---|
+| `carre1971` | Routing problems share one algebraic form and are solved by variants of classical linear-algebra methods. Only this general claim is cited; specific pairings such as Jacobi ↔ Bellman are **not** attributed to Carré. | OUP abstract. The primary text is paywalled; the pairings are confirmed only secondarily (Litvinov & Maslov, arXiv math/0101021). | verified (abstract) |
+| `lehmann1977` | Closed semirings; closure by Gauss–Jordan and Gauss elimination. The 2×2 block formula holds only under Conway's extra identities, and the paper says so. | Warwick Theory of Computation Report No. 10 (1976), the same title and content; §§2, 4, 6–7 | verified |
+| `kozen1994` | The 2×2 block-matrix star formula over a Kleene algebra. | Cornell author PDF, §3, eq. (21), Lemmas 9–10 | verified |
+| `tarjan1981` | Path problems solved by elimination in a general algebraic setting. | JACM PDF (Wayback copy), abstract | verified |
+| `gondran2008` | General reference on dioids and path algebra. | Crossref | bibliographic |
+| `baccelli1992` | Residuation in dioids. | Authors' online edition, §4.4 | verified |
+| `cohen2004` | Canonical projector `P_V(x) = max{v ∈ V : v ≤ x}` onto complete subsemimodules, defined via residuation. | arXiv math/0212294, §3.1, Theorem 5 (*arXiv numbering*) | verified |
+| `akian2008` | The max-plus finite element method projects the Lax–Oleinik (Bellman) semigroup with residuation-based projectors. | arXiv math/0603619, §2, Theorem 1, Corollary 3 (*arXiv numbering*) | verified |
+| `bellman1958` | Bellman's iterative method for shortest routes. | Crossref | bibliographic |
+| `dijkstra1959` | Dijkstra's algorithm. | Crossref | bibliographic |
+| `hart1968` | A*. The paper attributes no theorem; "A* is Dijkstra on reduced costs" is the paper's own remark. For reference: Theorem 1 is admissibility; the consistency assumption is §III.B. | Nilsson's scanned copy | verified |
+| `johnson1977` | Reweighting arcs by a vertex potential to remove negative arcs. Johnson attributes the lemma to Edmonds and Karp (1972). | JACM PDF (Wayback copy), §5, Lemma 2 | verified |
+| `ng1999` | Potential-based shaping preserves optimal policies (Theorem 1). | Author PDF | verified |
+| `bertsekas1989` | Aggregation in dynamic programming, used to correct value iteration (the real semiring). | IEEE abstract | verified (abstract) |
+| `chow1991` | Multigrid for discrete-time stochastic control. | Crossref | bibliographic |
 
 ## Software
 
