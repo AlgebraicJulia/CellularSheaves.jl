@@ -1,39 +1,53 @@
-# The simplicial cover bound at map sizes where no stalk can be tabulated: the
-# Warcraft III maps of MovingAI (512², 70–90k free cells), with MAPF scenarios made by
-# make_mapf_scenarios.jl.
+# The simplicial cover bound at map sizes where no stalk can be tabulated, run with
+# the standard MAPF benchmark protocol.
 #
 # tropical_cover_triangles.jl tabulates every edge stalk (a pushforward of the pair
 # graph, about |cells|² states). The cover bound only needs each stalk's value at one
 # section, the instance's start. Here that value is computed on demand, exactly:
-#   - edges: the pairs whose tubes meet (delay slack 4, as in InteractionSheaf); the
-#     value is the pair's least total delay, by joint A* with the decoupled heuristic
-#     Σ dᵢ (ties broken toward deeper states, which matters at this size: every joint
-#     state on the agents' own shortest paths ties). If the agents' own shortest paths
-#     do not collide, the value is 0 and no search runs.
-#   - triangles: the triangles of the interaction graph, solved by joint A* the same way.
-#     The obstruction o(σ) = Δ_σ − c_E(σ) is the triangle's value beyond the least
-#     cover of its three edges.
+#   - edges: the pairs whose tubes meet (delay slack 4, the rule of InteractionSheaf);
+#     the value is the pair's least total delay, by joint A* with the decoupled
+#     heuristic Σ dᵢ (ties broken toward deeper states, which matters at this size:
+#     every joint state on the agents' own shortest paths ties). If the agents' own
+#     shortest paths do not collide, the value is 0 and no search runs.
+#   - triangles: the triangles of the interaction graph with at least one edge of
+#     positive delay (at most LAZY_MAX_TRIANGLES per scenario), by joint A* the same
+#     way. The obstruction o(σ) = Δ_σ − c_E(σ) is the triangle's value beyond the least
+#     cover of its three edges. Leaving a triangle out only weakens the bound.
 #   - the cover: the simplicial cover of the positive values, solved exactly on each
 #     connected component (the integer program separates over them). A component with
-#     more than 16 agents falls back to a greedy packing of disjoint simplices, which
-#     is still a lower bound. A capped search contributes 0, also still a lower bound.
-#   - the upper bound: prioritized planning in space-time, with a horizon that scales
-#     with the paths. Where it meets the cover bound, the plan is certified optimal.
-# No joint optimum is computed: at these sizes independence detection does not finish.
+#     more than 16 agents falls back to a greedy packing of disjoint simplices, still a
+#     lower bound. A capped search contributes 0, also still a lower bound.
+#   - the upper bound: prioritized planning in space-time, in the scenario's order.
+#     Where it meets the cover bound, the plan is certified optimal.
+#
+# Protocol (Stern et al. 2019, §4.3): for each scenario file, the instance with N
+# agents is the file's first N agents, and N grows until the method does not finish
+# within the time limit. N grows in steps of LAZY_STEP rather than 1. The instances
+# are nested, so everything carries over from one N to the next: the first N agents'
+# prioritized plans do not depend on later agents, and pair and triangle values are
+# reused. The time of an instance is the cumulative time to reach it, i.e. the time to
+# solve it from scratch. Single-agent preprocessing (each agent's cost-to-go and tube)
+# is included.
 #
 #   MAPF_MAP=~/data/movingai/wc3/losttemple.map MAPF_SCEN_DIR=~/data/movingai/wc3/scen-random \
-#   LAZY_N=25,50,100 LAZY_INSTANCES=4 julia -t 16 --project=docs docs/scripts/tropical_cover_lazy.jl
+#   LAZY_SCENARIOS=1:25 LAZY_STEP=50 LAZY_MAX_N=1000 LAZY_TIME_LIMIT=300 \
+#   julia -t 16 --project=docs docs/scripts/tropical_cover_lazy.jl
+# With LAZY_OPT=1 (small maps), the optimum is also found by independence detection,
+# where it finishes, and the plans are checked collision-free.
 
 isempty(get(ENV, "MAPF_MAP", "")) && error("set MAPF_MAP to a MovingAI map")
 include(joinpath(@__DIR__, "tropical_multiagent_cover.jl"))
 
-const SIZES = parse.(Int, split(get(ENV, "LAZY_N", "25,50,100"), ","))
-const INSTANCES = parse(Int, get(ENV, "LAZY_INSTANCES", "4"))
+const SCENARIOS = eval(Meta.parse(get(ENV, "LAZY_SCENARIOS", "1:25")))::AbstractVector{Int}
+const STEP = parse(Int, get(ENV, "LAZY_STEP", "50"))
+const FIRST = parse(Int, get(ENV, "LAZY_FIRST", string(STEP)))
+const MAX_N = parse(Int, get(ENV, "LAZY_MAX_N", "1000"))
+const TIME_LIMIT = parse(Float64, get(ENV, "LAZY_TIME_LIMIT", "300"))
 const PAIR_CAP = parse(Int, get(ENV, "LAZY_PAIR_CAP", "2000000"))
 const TRI_CAP = parse(Int, get(ENV, "LAZY_TRI_CAP", "2000000"))
-const MAX_TRIANGLES = parse(Int, get(ENV, "LAZY_MAX_TRIANGLES", "5000"))
+const MAX_TRIANGLES = parse(Int, get(ENV, "LAZY_MAX_TRIANGLES", "20000"))
+const WITH_OPT = get(ENV, "LAZY_OPT", "0") == "1"
 const SLACK = 4.0
-const ORDERS = parse(Int, get(ENV, "LAZY_ORDERS", "3"))       # priority orders tried (5 replays tropical_cover_triangles.jl)
 
 # The least total delay of `agents` from `starts`, ignoring all others: (value, expanded, exact).
 function joint_delay(agents, starts; cap)
@@ -116,147 +130,207 @@ function component_cover(N, cons)
     return total, largest, packed
 end
 
-# Prioritized planning in space-time (as in tropical_multiagent_cover.jl) with horizon T,
-# ties broken toward later times.
-function prioritized_scaled(agents, starts, order, T)
-    vertex = Set{Tuple{Int,Int}}()
-    edge = Set{Tuple{Int,Int,Int}}()
-    held = Dict{Int,Int}()
-    last_use = Dict{Int,Int}()
-    plans = Vector{Vector{Int}}(undef, length(agents))
-    for i in order
-        A = agents[i]
-        free(c, t) = !((c, t) in vertex) && t < get(held, c, typemax(Int))
-        g = Dict((starts[i], 1) => 0.0)
-        parent = Dict{Tuple{Int,Int},Tuple{Int,Int}}()
-        heap = Tuple{Float64,Int,Int,Int}[]
-        TA._push!(heap, (A.d[starts[i]], -1, starts[i], 1))
-        found = nothing
-        while !isempty(heap)
-            f, _, c, t = TA._pop!(heap)
-            f > g[(c, t)] + A.d[c] + 1e-9 && continue
-            if c == A.goal && t > get(last_use, c, 0)
-                found = (c, t)
-                break
+
+# ---------------------------------------------------------------------------
+# Prioritized planning in space-time, one agent at a time in the scenario's order (as
+# in tropical_multiagent_cover.jl, ties broken toward later times). The reservations
+# of the first agents do not depend on later ones, so the planner grows with N.
+# ---------------------------------------------------------------------------
+
+struct Reservations
+    vertex::Set{Tuple{Int,Int}}                                      # (cell, time)
+    edge::Set{Tuple{Int,Int,Int}}                                    # (from, to, time) of the move t → t + 1
+    held::Dict{Int,Int}                                              # cell -> time from which it is held forever
+    last_use::Dict{Int,Int}                                          # cell -> last time an earlier agent uses it
+    T::Int
+end
+Reservations(T) = Reservations(Set{Tuple{Int,Int}}(), Set{Tuple{Int,Int,Int}}(), Dict{Int,Int}(), Dict{Int,Int}(), T)
+
+function plan_next!(R::Reservations, A, start)
+    free(c, t) = !((c, t) in R.vertex) && t < get(R.held, c, typemax(Int))
+    g = Dict((start, 1) => 0.0)
+    parent = Dict{Tuple{Int,Int},Tuple{Int,Int}}()
+    heap = Tuple{Float64,Int,Int,Int}[]
+    TA._push!(heap, (A.d[start], -1, start, 1))
+    found = nothing
+    while !isempty(heap)
+        f, _, c, t = TA._pop!(heap)
+        f > g[(c, t)] + A.d[c] + 1e-9 && continue
+        if c == A.goal && t > get(R.last_use, c, 0)
+            found = (c, t)
+            break
+        end
+        t >= R.T && continue
+        for c2 in NBRS[c]
+            (free(c2, t + 1) && !((c2, c, t) in R.edge)) || continue
+            gy = g[(c, t)] + (c == c2 == A.goal ? 0.0 : 1.0)
+            if gy < get(g, (c2, t + 1), Inf)
+                g[(c2, t + 1)] = gy
+                parent[(c2, t + 1)] = (c, t)
+                TA._push!(heap, (gy + A.d[c2], -(t + 1), c2, t + 1))
             end
-            t >= T && continue
-            for c2 in NBRS[c]
-                (free(c2, t + 1) && !((c2, c, t) in edge)) || continue
-                gy = g[(c, t)] + (c == c2 == A.goal ? 0.0 : 1.0)
-                if gy < get(g, (c2, t + 1), Inf)
-                    g[(c2, t + 1)] = gy
-                    parent[(c2, t + 1)] = (c, t)
-                    TA._push!(heap, (gy + A.d[c2], -(t + 1), c2, t + 1))
+        end
+    end
+    found === nothing && return nothing
+    path = [found]
+    while haskey(parent, path[end])
+        push!(path, parent[path[end]])
+    end
+    plan = [c for (c, _) in reverse(path)]
+    for (t, c) in enumerate(plan)
+        push!(R.vertex, (c, t))
+        R.last_use[c] = max(get(R.last_use, c, 0), t)
+        t < length(plan) && push!(R.edge, (c, plan[t + 1], t))
+    end
+    R.held[plan[end]] = length(plan)
+    return plan
+end
+
+# The first `n` agents of scenario file k, in the file's order (cells 0-based there).
+function scenario_agents(k, n)
+    base = splitext(basename(MAPF_MAP))[1]
+    file = joinpath(get(ENV, "MAPF_SCEN_DIR", joinpath(dirname(MAPF_MAP), "scen-random")), "$(base)-random-$(k).scen")
+    starts, goals = Int[], Int[]
+    for l in readlines(file)[2:end]
+        length(starts) == n && break
+        f = split(l)
+        s, g = (parse(Int, f[5]) + 1, parse(Int, f[6]) + 1), (parse(Int, f[7]) + 1, parse(Int, f[8]) + 1)
+        (haskey(MAP.index, s) && haskey(MAP.index, g)) || error("$(basename(file)): agent outside the largest region")
+        push!(starts, MAP.index[s]); push!(goals, MAP.index[g])
+    end
+    return starts, goals
+end
+
+const W_MAP = maximum(c[1] for c in MAP.cells)
+const H_MAP = maximum(c[2] for c in MAP.cells)
+
+println("MovingAI map $(basename(MAPF_MAP)): $(NF) free cells; scenarios $(SCENARIOS); N = $(FIRST):$(STEP):$(MAX_N) until $(TIME_LIMIT) s; $(Threads.nthreads()) threads")
+rows = NamedTuple[]
+for k in SCENARIOS
+    starts_all, goals_all = scenario_agents(k, MAX_N)
+    nmax = length(starts_all)
+    agents = AgentStalk[]
+    tubes, near = BitVector[], BitVector[]
+    R = Reservations(4 * (W_MAP + H_MAP) + 2 * nmax)
+    plans = Vector{Int}[]
+    upper_sum, failed = 0.0, false
+    edgeval = Dict{Tuple{Int,Int},Tuple{Float64,Int,Bool}}()
+    trival = Dict{Vector{Int},Tuple{Float64,Int,Bool}}()
+    adj = Dict{Int,Set{Int}}()
+    tri_seen, tri_skipped = 0, 0
+    elapsed = 0.0
+    n = 0
+    for N in FIRST:STEP:nmax
+        step_time = @elapsed begin
+            new = (n + 1):N
+            # single agents: cost-to-go, tube
+            built = Vector{AgentStalk}(undef, length(new))
+            Threads.@threads for q in eachindex(new)
+                built[q] = grid_agent(goals_all[new[q]])
+            end
+            append!(agents, built)
+            tb, nb = tube_masks(built, starts_all[new])
+            append!(tubes, tb); append!(near, nb)
+            # prioritized planning, the new agents in order
+            for i in new
+                failed && break
+                p = plan_next!(R, agents[i], starts_all[i])
+                if p === nothing
+                    failed = true
+                else
+                    push!(plans, p)
+                    upper_sum += plan_cost(agents[i], p)
                 end
             end
+            # new pairs (i, j), j new
+            newpairs = [(i, j) for j in new for i in 1:(j - 1) if any(near[i] .& tubes[j])]
+            ev = Vector{Tuple{Float64,Int,Bool}}(undef, length(newpairs))
+            Threads.@threads :dynamic for q in eachindex(newpairs)
+                i, j = newpairs[q]
+                ev[q] = joint_delay(agents[[i, j]], starts_all[[i, j]]; cap = PAIR_CAP)
+            end
+            for (q, (i, j)) in enumerate(newpairs)
+                edgeval[(i, j)] = ev[q]
+                push!(get!(adj, i, Set{Int}()), j)
+                push!(get!(adj, j, Set{Int}()), i)
+            end
+            # new triangles (i, j, l), l new, with an edge of positive delay
+            pos(a, b) = edgeval[minmax(a, b)][1] > 0
+            newtris = Vector{Int}[]
+            for l in new, i in get(adj, l, Set{Int}()), j in get(adj, l, Set{Int}())
+                (i < j < l && j in get(adj, i, Set{Int}())) || continue
+                tri_seen += 1
+                (pos(i, j) || pos(i, l) || pos(j, l)) || continue
+                if length(trival) + length(newtris) >= MAX_TRIANGLES
+                    tri_skipped += 1
+                    continue
+                end
+                push!(newtris, [i, j, l])
+            end
+            tv = Vector{Tuple{Float64,Int,Bool}}(undef, length(newtris))
+            Threads.@threads :dynamic for q in eachindex(newtris)
+                tv[q] = joint_delay(agents[newtris[q]], starts_all[newtris[q]]; cap = TRI_CAP)
+            end
+            for (q, σ) in enumerate(newtris)
+                trival[σ] = tv[q]
+            end
+            # the covers
+            edge_cons = [([i, j], v[1]) for ((i, j), v) in edgeval]
+            tri_cons = [(σ, v[1]) for (σ, v) in trival]
+            cover_e, _, _ = component_cover(N, edge_cons)
+            cover_t, comp_t, packed_t = component_cover(N, [edge_cons; tri_cons])
         end
-        found === nothing && return nothing
-        path = [found]
-        while haskey(parent, path[end])
-            push!(path, parent[path[end]])
+        elapsed += step_time
+        n = N
+        decoupled = sum(agents[i].d[starts_all[i]] for i in 1:N)
+        upper = failed ? Inf : upper_sum
+        obstructed = count(trival) do (σ, v)
+            e(a, b) = edgeval[(σ[a], σ[b])][1]
+            v[1] - simplicial_cover(3, [([1, 2], e(1, 2)), ([1, 3], e(1, 3)), ([2, 3], e(2, 3))]) > 1e-9
         end
-        plan = [c for (c, _) in reverse(path)]
-        for (t, c) in enumerate(plan)
-            push!(vertex, (c, t))
-            last_use[c] = max(get(last_use, c, 0), t)
-            t < length(plan) && push!(edge, (c, plan[t + 1], t))
+        @assert cover_e <= cover_t + 1e-9
+        @assert decoupled + cover_t <= upper + 1e-9 "the cover bound must not exceed a feasible plan"
+        opt = NaN
+        if WITH_OPT
+            @assert failed || first_conflict(plans, collect(1:N)) === nothing "prioritized plans must be collision-free"
+            pd, _, _ = independence_detection(agents, starts_all[1:N], m -> (c -> sum(agents[m[q]].d[c[q]] for q in eachindex(m))))
+            opt = pd === nothing ? NaN : sum(plan_cost(agents[i], pd[i]) for i in 1:N)
+            @assert isnan(opt) || decoupled + cover_t <= opt + 1e-9 <= upper + 2e-9
         end
-        held[plan[end]] = length(plan)
-        plans[i] = plan
+        r = (map = splitext(basename(MAPF_MAP))[1], scenario = k, N = N, seconds = elapsed,
+            pairs = length(edgeval), pairs_positive = count(v -> v[1] > 0, values(edgeval)),
+            pairs_capped = count(v -> !v[3], values(edgeval)),
+            pair_expanded_max = isempty(edgeval) ? 0 : maximum(v[2] for v in values(edgeval)),
+            triangles = tri_seen, triangles_evaluated = length(trival), triangles_skipped = tri_skipped,
+            triangles_positive = count(v -> v[1] > 0, values(trival)), triangles_obstructed = obstructed,
+            triangles_capped = count(v -> !v[3], values(trival)),
+            largest_component = comp_t, packed_components = packed_t,
+            decoupled = decoupled, bound_edges = decoupled + cover_e, bound_sheaf = decoupled + cover_t,
+            upper = upper, optimal = opt, certified = upper == decoupled + cover_t)
+        push!(rows, r)
+        @printf("scen %2d N=%4d %7.1f s  pairs %6d (%4d with delay, %d capped)  triangles %6d (%d evaluated, %d with delay, %d obstructed%s)  decoupled %.0f  edges %.0f  +tri %.0f  plan %.0f%s%s\n",
+            k, N, elapsed, r.pairs, r.pairs_positive, r.pairs_capped, tri_seen, r.triangles_evaluated, r.triangles_positive,
+            obstructed, tri_skipped > 0 ? ", $(tri_skipped) skipped" : "", decoupled, r.bound_edges, r.bound_sheaf, upper,
+            r.certified ? " certified" : @sprintf(" (gap %.0f)", upper - r.bound_sheaf), isnan(opt) ? "" : @sprintf("  optimum %.0f", opt))
+        flush(stdout)
+        (elapsed > TIME_LIMIT || failed) && break
     end
-    return plans
 end
 
-function upper_bound_scaled(agents, starts, rng)
-    N = length(agents)
-    T = 2 * round(Int, maximum(agents[i].d[starts[i]] for i in 1:N)) + 2N + 50
-    return minimum(1:ORDERS) do r
-        p = prioritized_scaled(agents, starts, r == 1 ? collect(1:N) : randperm(rng, N), T)
-        p === nothing ? Inf : sum(plan_cost(agents[i], p[i]) for i in 1:N)
-    end
+println("\nsummary over scenarios (largest N finished within the time limit, and certification at each N)")
+for N in sort(unique(r.N for r in rows))
+    rs = filter(r -> r.N == N && r.seconds <= TIME_LIMIT, rows)
+    isempty(rs) && continue
+    gap = sum(r.upper - r.decoupled for r in rs if isfinite(r.upper); init = 0.0)
+    cov(f) = gap == 0 ? "–" : @sprintf("%.0f%%", 100 * sum(f(r) - r.decoupled for r in rs if isfinite(r.upper); init = 0.0) / gap)
+    @printf("N=%4d  scenarios %2d  certified %2d  plan − decoupled %6.0f  covered: edges %s, + triangles %s  mean time %.1f s\n",
+        N, length(rs), count(r -> r.certified, rs), gap, cov(r -> r.bound_edges), cov(r -> r.bound_sheaf), mean(r.seconds for r in rs))
 end
-
-println("MovingAI map $(basename(MAPF_MAP)): $(NF) free cells; sizes $(SIZES), $(INSTANCES) instances each; $(Threads.nthreads()) threads")
-rows = NamedTuple[]
-rng = MersenneTwister(11)
-for N in SIZES, inst in 1:INSTANCES
-    starts, goals = instance(rng, N)
-    length(starts) == N || error("the scenario has fewer than $N usable agents")
-    t_agents = @elapsed begin
-        agents = Vector{AgentStalk}(undef, N)
-        Threads.@threads for i in 1:N
-            agents[i] = grid_agent(goals[i])
-        end
-    end
-    decoupled = sum(agents[i].d[starts[i]] for i in 1:N)
-    t_upper = @elapsed upper = upper_bound_scaled(agents, starts, rng)
-    tubes, near = tube_masks(agents, starts)
-    pairs = [(i, j) for i in 1:N for j in (i + 1):N if any(near[i] .& tubes[j])]
-    # edges
-    t_pairs = @elapsed begin
-        ev = Vector{Tuple{Float64,Int,Bool}}(undef, length(pairs))
-        Threads.@threads :dynamic for k in eachindex(pairs)
-            i, j = pairs[k]
-            ev[k] = joint_delay(agents[[i, j]], starts[[i, j]]; cap = PAIR_CAP)
-        end
-    end
-    edgeval = Dict(pairs[k] => ev[k][1] for k in eachindex(pairs))
-    # triangles of the interaction graph
-    adj = [Int[] for _ in 1:N]
-    for (i, j) in pairs
-        push!(adj[i], j)
-    end
-    tris = [[i, j, k] for (i, j) in pairs for k in adj[j] if k in adj[i]]
-    ntris = length(tris)
-    # positive edges first: those are where a triangle can matter most
-    sort!(tris; by = σ -> -sum(edgeval[(σ[a], σ[b])] for (a, b) in ((1, 2), (1, 3), (2, 3))))
-    tris = tris[1:min(end, MAX_TRIANGLES)]
-    t_tris = @elapsed begin
-        tv = Vector{Tuple{Float64,Int,Bool}}(undef, length(tris))
-        Threads.@threads :dynamic for k in eachindex(tris)
-            tv[k] = joint_delay(agents[tris[k]], starts[tris[k]]; cap = TRI_CAP)
-        end
-    end
-    edge_cons = [([i, j], edgeval[(i, j)]) for (i, j) in pairs]
-    tri_cons = [(tris[k], tv[k][1]) for k in eachindex(tris)]
-    obstruction = [tv[k][1] - simplicial_cover(3, [([1, 2], edgeval[(σ[1], σ[2])]), ([1, 3], edgeval[(σ[1], σ[3])]),
-                                                   ([2, 3], edgeval[(σ[2], σ[3])])]) for (k, σ) in enumerate(tris)]
-    cover_e, comp_e, packed_e = component_cover(N, edge_cons)
-    cover_t, comp_t, packed_t = component_cover(N, [edge_cons; tri_cons])
-    @assert cover_e <= cover_t + 1e-9
-    @assert decoupled + cover_t <= upper + 1e-9 "the cover bound must not exceed a feasible plan"
-    push!(rows, (map = splitext(basename(MAPF_MAP))[1], N = N, instance = inst, decoupled = decoupled,
-        pairs = length(pairs), pairs_positive = count(v -> v[1] > 0, ev), pairs_capped = count(v -> !v[3], ev),
-        pair_expanded_max = isempty(ev) ? 0 : maximum(v[2] for v in ev),
-        triangles = ntris, triangles_evaluated = length(tris), triangles_positive = count(v -> v[1] > 0, tv),
-        triangles_obstructed = count(>(1e-9), obstruction), triangles_capped = count(v -> !v[3], tv),
-        tri_expanded_max = isempty(tv) ? 0 : maximum(v[2] for v in tv),
-        largest_component = comp_t, packed_components = packed_t,
-        bound_edges = decoupled + cover_e, bound_sheaf = decoupled + cover_t, upper = upper,
-        seconds_agents = t_agents, seconds_pairs = t_pairs, seconds_triangles = t_tris, seconds_upper = t_upper))
-    r = rows[end]
-    @printf("N=%3d #%d  pairs %4d (%d with delay, %d capped; max %d expanded, %.0f s)  triangles %d (%d evaluated, %d with delay, %d obstructed, %d capped; %.0f s)\n",
-        N, inst, r.pairs, r.pairs_positive, r.pairs_capped, r.pair_expanded_max, t_pairs, ntris, length(tris),
-        r.triangles_positive, r.triangles_obstructed, r.triangles_capped, t_tris)
-    @printf("        decoupled %.0f  cover of edges %.0f  + triangles %.0f  prioritized %.0f  (ratio %.4f%s; largest component %d%s)\n",
-        decoupled, r.bound_edges, r.bound_sheaf, upper, upper / r.bound_sheaf, upper == r.bound_sheaf ? ", certified optimal" : "",
-        comp_t, packed_t > 0 ? ", $(packed_t) packed" : "")
-    flush(stdout)
-end
-
-println("\nsummary (sums over instances)")
-@printf("%4s %8s %10s %10s %12s %14s %18s %12s\n", "N", "pairs", "w/ delay", "triangles", "obstructed",
-    "plan − decoupled", "covered: e / e+t", "certified")
-for N in SIZES
-    rs = filter(r -> r.N == N, rows)
-    gap = sum(r.upper - r.decoupled for r in rs)
-    cov(f) = gap == 0 ? "–" : @sprintf("%.0f%%", 100 * sum(f(r) - r.decoupled for r in rs) / gap)
-    @printf("%4d %8d %10d %10d %12d %14.0f %18s %9d of %d\n", N, sum(r.pairs for r in rs), sum(r.pairs_positive for r in rs),
-        sum(r.triangles for r in rs), sum(r.triangles_obstructed for r in rs), gap,
-        cov(r -> r.bound_edges) * " / " * cov(r -> r.bound_sheaf), count(r -> r.upper == r.bound_sheaf, rs), length(rs))
-end
+reached = [maximum((r.N for r in rows if r.scenario == k && r.seconds <= TIME_LIMIT); init = 0) for k in SCENARIOS]
+println("largest N within $(TIME_LIMIT) s per scenario: ", reached)
 mkpath(OUT)
-open(joinpath(OUT, "tropical_cover_lazy_" * splitext(basename(MAPF_MAP))[1] * ".csv"), "w") do io
+tag = length(SCENARIOS) == 25 ? "" : "_s$(first(SCENARIOS))-$(last(SCENARIOS))"
+open(joinpath(OUT, "tropical_cover_lazy_" * splitext(basename(MAPF_MAP))[1] * tag * ".csv"), "w") do io
     println(io, join(keys(first(rows)), ","))
     for r in rows
         println(io, join(values(r), ","))
