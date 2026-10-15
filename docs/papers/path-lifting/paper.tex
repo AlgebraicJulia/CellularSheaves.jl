@@ -437,11 +437,25 @@ The following are equivalent:
 \item $V_\psi \circ \psi = V$ for every target $\Gamma$ that is a union of blocks
   ($b = 0$ on $\Gamma$, $\infty$ elsewhere);
 \item $\eps_\psi(B,C) = 0$ for every arc $B \to C$ of $W_\psi$ between distinct
-  blocks.
+  blocks;
+\item $\dd(x, \psi^{-1}C) = \dd_\psi(\psi x, C)$ for every state $x$ and block $C$;
+\item $\psi$ maps forward balls onto forward balls:
+  $\psi\big(\{y : \dd(x,y) \le r\}\big) = \{C : \dd_\psi(\psi x, C) \le r\}$ for
+  every $x$ and $r \ge 0$.
 \end{enumerate}
 When they hold, $V_\psi \circ \psi = V$ for every terminal cost constant on blocks.
 \end{theorem}
 \begin{proof}
+(i)$\Leftrightarrow$(iii). For the target $C$, $V(x) = \dd(x, \psi^{-1}C)$ and
+$V_\psi(\psi x) = \dd_\psi(\psi x, C)$. A union of blocks takes the minimum over
+its blocks on both sides.
+
+(iii)$\Leftrightarrow$(iv). The inclusion $\subseteq$ always holds, since $\psi$ is
+non-expansive (\cref{prop:quotient-map}). The inclusion $\supseteq$ says that every
+block within $r$ of $\psi x$ in the quotient contains a state within $r$ of $x$,
+that is, $\dd(x, \psi^{-1} C) \le \dd_\psi(\psi x, C)$. The reverse inequality
+always holds.
+
 (i)$\Rightarrow$(ii). Take $\Gamma = C$. For $x \in B$,
 $\dd(x,C) = V(x) = V_\psi(B) \le W_\psi(B,C)$.
 
@@ -449,6 +463,23 @@ $\dd(x,C) = V(x) = V_\psi(B) \le W_\psi(B,C)$.
 so $V(x) \le b(x) = b_\psi(\psi x)$ and the terminal defects vanish. All defects
 are $0$, so $V_\psi^{+\eps} = V_\psi$, and \cref{thm:sandwich} gives equality.
 \end{proof}
+
+\begin{remark}[categorical reading]\label{rem:bc}
+Condition (iii) says that a square of presheaf constructions commutes. Send a set
+$S$ of states to its distance presheaf $\dd(-, S)$. Pulling back along $\psi$ and
+forming distance presheaves are then related by
+\[
+\dd_X(-, \psi^{-1}C) \;\ge\; \dd_Y(\psi(-), C),
+\]
+which always holds because $\psi$ is an $\Lq$-functor. The theorem says that this
+lax square commutes strictly, a Beck--Chevalley-type condition, exactly when every
+coarse arc lifts. The defect measures how far it is from commuting.
+Condition (iv) is a cost-enriched counterpart of the submetries of metric
+geometry~\cite{berestovskii1987,berestovskii2000}, which map every closed ball
+$B(x,r)$ onto the closed ball $B(f(x),r)$. Here
+balls are forward (the quasi-metric is not symmetric) and the target is the
+quotient path category.
+\end{remark}
 
 \begin{corollary}[quantitative form]\label{cor:quant}
 Let $\eps_{\max}$ be the largest defect, and let $\kappa(B)$ be the fewest arcs,
@@ -463,6 +494,72 @@ Lift that walk as in the proof of \cref{thm:sandwich}.
 On every arc of $\Wm$, $\eps_\psi(B,C) \le \Wm(B,C) - W_\psi(B,C)$. The gap between
 the two quotients bounds the defect, and with it the loss of the optimistic bound.
 \end{corollary}
+
+The defect is not only sufficient to control the loss. It is also necessary: no
+abstraction with a large defect has a small worst-case error.
+
+\begin{theorem}[the defect measures the worst-case error]\label{thm:twosided}
+For a block $B$, let
+\[
+\Lambda_\psi(B) = \max_{C \ne B}\ \max_{x \in B}\ \big(V_C(x) - V_{\psi,C}(B)\big)
+\]
+be the worst error of the lower bound at $B$ over one-block targets $C$, where
+$V_C$ and $V_{\psi,C}$ are the fine and coarse cost-to-go functions to $C$. Then
+\[
+\max_{C}\ \eps_\psi(B,C) \;\le\; \Lambda_\psi(B) \;\le\;
+\max_{C}\big(V^{+\eps}_{\psi,C}(B) - V_{\psi,C}(B)\big) \;\le\; \kappa_{\max}\,
+\eps_{\max},
+\]
+where the first maximum is over the arcs $B \to C$ of $W_\psi$, and $\kappa_{\max}$
+is the largest number of arcs on an optimal coarse walk.
+\end{theorem}
+\begin{proof}
+For the target $C$ and $x \in B$, $V_C(x) = \dd(x, C)$ and
+$V_{\psi,C}(B) = \dd_\psi(B, C) \le W_\psi(B,C)$, so the error at $x$ is at least
+$\dd(x,C) - W_\psi(B,C)$. Maximizing over $x$ gives the first inequality. The
+second and third are \cref{thm:sandwich,cor:quant} applied to the target $C$.
+\end{proof}
+
+Which upper bound is best? Call an arc weighting $W'$ on $Y$ \emph{sound} if its
+cost-to-go bounds the fine one from above for every one-block target:
+$V_C \le V'_C \circ \psi$.
+
+\begin{theorem}[the least sound weighting]\label{thm:hausdorff}
+Let
+\[
+h_\psi(B,C) = \max_{x \in B}\ \min_{y \in C}\ \dd(x,y) \qquad (B \ne C)
+\]
+be the one-sided Hausdorff distance from the fibre $B$ to the fibre $C$ in the
+path category, in the orientation $\sup_{x\in A} \dd(x,B)$ of Akhvlediani,
+Clementino and Tholen. They show that this distance comes from a monad on
+$\Lq$-categories lifting the powerset monad~\cite{akhvlediani2010}. Then:
+\begin{enumerate}[label=(\alph*),nosep]
+\item $h_\psi$ is sound;
+\item every sound weighting satisfies $W' \ge h_\psi$ entrywise;
+\item on the arcs of $W_\psi$, $h_\psi \le W_\psi + \eps_\psi = \max(W_\psi, h_\psi)
+  \le \Wm$.
+\end{enumerate}
+\end{theorem}
+\begin{proof}
+(a) Lift an optimal walk of $h_\psi$ arc by arc, as in the proof of
+\cref{thm:sandwich}: from any state of $B_i$, some state of $B_{i+1}$ is within
+$h_\psi(B_i,B_{i+1})$. (b) Let $x \in B$ attain the maximum defining $h_\psi(B,C)$.
+Soundness for the target $C$ gives
+$h_\psi(B,C) = \dd(x,C) = V_C(x) \le V'_C(B) \le W'(B,C)$. (c) is
+\cref{def:defect} and \cref{thm:sandwich}.
+\end{proof}
+
+So the best one-number-per-arc upper bound is the Hausdorff quotient of the path
+category. The two classical constructions approximate it from above:
+\begin{itemize}[nosep]
+\item the defect-inflated quotient $W_\psi + \eps_\psi$ is computable locally, one
+  search per coarse arc (\cref{prop:local});
+\item the pessimistic quotient $\Wm$ looks only one step ahead.
+\end{itemize}
+In this sense the may and must abstractions of modal transition
+systems~\cite{larsen1988} are the inf--inf and sup--inf quotients of the cost
+graph, and the optimal upper abstraction is the sup--inf quotient of its path
+category.
 
 \begin{figure}[t]
 \centering
@@ -527,7 +624,10 @@ abstractions have small but nonzero defects.
 \paragraph{Numerical check.}
 The script \texttt{docs/scripts/path\_lifting\_check.jl} checks every statement of
 this section on 3000 random cost graphs with random partitions and terminal costs
-(1026 of them with zero defect), with no failures.
+(1027 of them with zero defect), with no failures. This includes the two-sided
+bound, and the minimality of $h_\psi$: lowering any finite entry makes it unsound.
+The library function \texttt{lifting\_defect} computes the defects, exactly or
+within a search horizon (every value it returns is an upper bound on the defect).
 
 \section{Lyapunov certificates}\label{sec:lyapunov}
 
@@ -601,7 +701,36 @@ combines (i)--(iii) with their Definition~13.
 \end{proof}
 
 Finite-time reach is our addition. Their Theorem~1 concludes stability, while the
-strict decrease in (i) gives reachability.
+strict decrease in (i) gives reachability. That the optimal value function is a
+Lyapunov function of the optimal closed loop is classical in optimal control and
+model predictive control~\cite{bertsekas2017,rawlings2017}. The case $f = V$ of
+\cref{prop:clf} is that fact. The proposition extends it to every supersolution
+and supplies certified class-$\mathcal K$ gains.
+
+\begin{remark}[the converse construction recovers the cost-to-go]\label{rem:converse}
+Their converse theorem (their Theorem~2) builds a Lyapunov morphism for a stable
+equilibrium as the supremum of the norm along trajectories. In our setting that is
+\[
+V^{\mathrm{conv}}(x) = \sup_{k \ge 0} \|\pi^k(x)\|_\tgt = \max_{k \ge 0} V(\pi^k(x)),
+\]
+the worst cost-to-go met along the closed loop. It equals $V$ exactly when $V$ does
+not increase along the closed loop, for instance for any greedy feedback of $V$. So
+for an optimal closed loop the converse Lyapunov morphism is the optimal cost-to-go
+itself. For a suboptimal feedback, the excess $V^{\mathrm{conv}} - V$ records how far
+the loop strays above the optimal value.
+\end{remark}
+
+\begin{remark}[gauges and zero-cost arcs]\label{rem:gauge-lyap}
+Positive definiteness needs $\dd(x,y) = 0$ only when $x = y$, hence positive arc
+costs. A change of gauge $W^\varphi$ (\cref{sec:abstraction}) creates zero-cost
+arcs. In the multi-agent studies, for example, moves along shortest paths cost $0$.
+This does not conflict with the Lyapunov statements, because they are
+gauge-invariant. A feedback is the same map in every gauge, and
+$f(\pi x) + W(x,\pi x) \le f(x)$ holds exactly when
+$f^\varphi(\pi x) + W^\varphi(x,\pi x) \le f^\varphi(x)$, with
+$f^\varphi = f - \varphi$. So a search may run in any gauge, while its certificates
+are stated and checked in the original, positive costs.
+\end{remark}
 
 The useful reading is the following. The two lax triangles of positive
 definiteness are the two sides of our sandwich. The upper gain $\kappa_f$ involves

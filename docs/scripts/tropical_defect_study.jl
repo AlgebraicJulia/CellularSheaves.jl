@@ -1,6 +1,10 @@
 # The lifting defect of velocity-mode abstractions of the double integrator lattice,
 # and the two certificates it gives (docs/papers/path-lifting, Theorems 4.2 and 5.2).
 #
+# The study works on the *viable* subgraph: the states that can reach the goal.
+# Dead states (doomed to leave the grid or hit a wall) would otherwise give every arc
+# out of their block an infinite defect, which measures dead ends, not lifting.
+#
 # For each truncation of the pushforward onto positions (velocity modes per cell):
 #   - the defect of every arc of the optimistic quotient (lifting_defect, global
 #     scope with a horizon: defects beyond it count as ∞, which keeps the bounds sound);
@@ -75,16 +79,29 @@ samples = length(ARGS) >= 4 ? parse(Int, ARGS[4]) : 300
 
 m = n ÷ 3
 walls(qx, qy) = (qx in m:(m + 1) && !(qy in 2:(n ÷ 6))) || (qx in (2m):(2m + 1) && !(qy in (n - n ÷ 6):(n - 1)))
-W, points = double_integrator_lattice(n, vmax, walls)
-Wt = sparse(transpose(W))
+Wfull, points = double_integrator_lattice(n, vmax, walls)
 L = LinearIndices(points)
 stop = vmax + 1
-goal = [L[qx, qy, stop, stop] for qx in (n - 3):(n - 1) for qy in 2:4]
-b = [x in goal ? 0.0 : Inf for x in 1:size(W, 1)]
-V = cost_to_go(W, goal)
-reach = findall(x -> isfinite(V[x]) && V[x] > 0, eachindex(V))
-@printf("lattice %d² × %d², %d states, %d reach the goal; horizon %.0f; %d threads\n",
-    n, 2vmax + 1, size(W, 1), length(reach), horizon, Threads.nthreads())
+goal_full = [L[qx, qy, stop, stop] for qx in (n - 3):(n - 1) for qy in 2:4]
+Vfull = cost_to_go(Wfull, goal_full)
+keep = findall(isfinite, Vfull)                                  # the viable states
+newindex = zeros(Int, size(Wfull, 1))
+newindex[keep] = 1:length(keep)
+W = Wfull[keep, keep]
+Wt = sparse(transpose(W))
+goal = newindex[goal_full]
+V = Vfull[keep]
+reach = findall(>(0), V)
+@printf("lattice %d² × %d², %d states, %d viable (reach the goal); horizon %.0f; %d threads\n",
+    n, 2vmax + 1, size(Wfull, 1), length(keep), horizon, Threads.nthreads())
+
+# An abstraction of the full lattice, restricted to the viable states (empty blocks dropped).
+function restrict_map(μ, keep)
+    labels = μ.vertex_map[keep]
+    ids = Dict{Int,Int}()
+    compact = [get!(ids, l, length(ids) + 1) for l in labels]
+    return GraphHomomorphism(compact, length(ids))
+end
 
 nv = 2vmax + 1
 truncations = [("1 mode (velocity-blind)", ones(Int, nv, nv)),
@@ -96,8 +113,8 @@ rng = MersenneTwister(2026)
 rows = []
 println("\ntruncation                    modes   arcs   lift  ε>h(∞)  mean ε   L/V    certified: inflated / must   U/V: inflated / must   corr(U−L, V−L)  loop ok   build")
 for (name, modes) in truncations
-    T = TruncatedPushforward(W, points, (1, 2), modes)
-    μ = T.μ
+    T = TruncatedPushforward(Wfull, points, (1, 2), modes)
+    μ = restrict_map(T.μ, keep)
     nc = μ.n_target
     t = @elapsed begin
         Wq = SparseMatrixCSC{Float64,Int}(quotient_graph(W, μ))
@@ -123,7 +140,16 @@ for (name, modes) in truncations
     G = with_sink(Wq, ε, bq, εterm)
     Uq = cost_to_go(G, [nc + 1])[1:nc]
     U = Uq[μ.vertex_map]
-    Um = upper_bound(T, goal)
+    # pessimistic (∀∃) quotient on the same viable graph, terminal cost max over the block
+    Wm = SparseMatrixCSC{Float64,Int}(robust_quotient(W, μ))
+    bm = zeros(nc)
+    isgoal = falses(length(V)); isgoal[goal] .= true
+    for x in eachindex(V)
+        B = μ.vertex_map[x]
+        isgoal[x] || (bm[B] = Inf)
+    end
+    Gm = with_sink(Wm, SparseMatrixCSC{Float64,Int}(sparse(findnz(Wm)[1], findnz(Wm)[2], zeros(nnz(Wm)), nc, nc)), bm, zeros(nc))
+    Um = cost_to_go(Gm, [nc + 1])[1:nc][μ.vertex_map]
 
     @assert all(Lb[x] <= V[x] + 1e-9 for x in eachindex(V))                 # Theorem 4.2, lower side
     @assert all(V[x] <= U[x] + 1e-9 for x in eachindex(V))                  # Theorem 4.2, upper side

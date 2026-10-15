@@ -94,3 +94,18 @@ The user's message spelled the author's name "Moller". The correct spelling is
 `PathPack.jl` (AlgebraicJulia, unregistered) is mentioned in the repository
 documentation but not cited in the paper. Confirm its public availability before
 citing it.
+
+## Added in the second revision
+
+| Key | Claim in the paper | Source read | Verdict |
+|---|---|---|---|
+| `berestovskii1987` | Origin of submetries. | zbMATH review (Zbl 0643.53053) quoting the definition. The original was not accessed. | secondary |
+| `berestovskii2000` | A submetry sends closed balls of radius R around a point onto closed balls of radius R around the image (Section 1; Definition 2.1). | Author copy | verified |
+| `akhvlediani2010` | Non-symmetric Hausdorff distance `Hd(A,B) = sup_{x∈A} d(x,B)` (introduction), the same orientation as our `h_ψ(B,C)`; §4: the Hausdorff monad on V-Cat lifts the powerset monad (Theorem 2, Lemma 1). | arXiv 0901.0618v1 source (*arXiv numbering*) | verified |
+| `ames2025clt1`, Theorem 2 | Converse categorical Lyapunov theorem: `V(x)` is the supremum of the norm along the flow. | arXiv 2502.15276v2 source, §3.3 | verified |
+| `bertsekas2017` | An optimal controller restricted to `{J* < ∞}` is Lyapunov-stable with Lyapunov function `J*` (§II). | arXiv 1507.01026 source | verified |
+| `rawlings2017` | "A standard approach to establish stability is to employ the value function ... as a Lyapunov function" (§2.4.1); Theorem 2.19. | Open PDF, 2nd edition | verified |
+| `botea2004` | HPA*: clusters, entrances, abstract graph; within 1% of optimal *after path smoothing*. | Author PDF (page range from secondary sources, so omitted in the bib) | verified |
+| `sturtevant2012` | Grid pathfinding benchmarks. | Crossref | bibliographic |
+| `stern2019` | MovingAI MAPF benchmark: 24 maps, 25 scenarios each. | arXiv 1906.08291 source | verified |
+| `felner2018` | Admissible h-value from a minimum vertex cover of the cardinal conflict graph (§3.2); the name "CG" comes from `li2019`. | Author PDF | verified |

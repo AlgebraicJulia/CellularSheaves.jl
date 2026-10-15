@@ -1179,11 +1179,11 @@ function lifting_defect(W::SparseMatrixCSC, ψ::GraphHomomorphism; scope::Symbol
     out = zeros(Float64, length(I))
     N = size(W, 1)
     if scope === :pair
-        S = _DefectSearch(N)
+        pair = _DefectSearch(N)
         for k in eachindex(I)
             B, C = I[k], J[k]
-            _defect_search!(S, W, members[C], x -> (label[x] == B || label[x] == C), Inf)
-            out[k] = max(0.0, maximum(S.dist[x] for x in members[B]) - Vals[k])
+            _defect_search!(pair, W, members[C], x -> (label[x] == B || label[x] == C), Inf)
+            out[k] = max(0.0, maximum(pair.dist[x] for x in members[B]) - Vals[k])
         end
     else
         byhead = Dict{Int,Vector{Int}}()
@@ -1193,13 +1193,13 @@ function lifting_defect(W::SparseMatrixCSC, ψ::GraphHomomorphism; scope::Symbol
         heads = collect(keys(byhead))
         chunks = collect(Iterators.partition(heads, max(1, cld(length(heads), 4 * Threads.nthreads()))))
         Threads.@threads for chunk in chunks
-            S = _DefectSearch(N)
+            local search = _DefectSearch(N)                     # one per task; a shared name would be boxed
             for C in chunk
                 ks = byhead[C]
                 limit = maximum(Vals[k] for k in ks) + horizon
-                _defect_search!(S, W, members[C], x -> true, limit)
+                _defect_search!(search, W, members[C], x -> true, limit)
                 for k in ks
-                    out[k] = max(0.0, maximum(S.dist[x] for x in members[I[k]]) - Vals[k])
+                    out[k] = max(0.0, maximum(search.dist[x] for x in members[I[k]]) - Vals[k])
                 end
             end
         end
