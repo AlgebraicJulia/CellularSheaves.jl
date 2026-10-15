@@ -94,6 +94,7 @@ V = Vfull[keep]
 reach = findall(>(0), V)
 @printf("lattice %d² × %d², %d states, %d viable (reach the goal); horizon %.0f; %d threads\n",
     n, 2vmax + 1, size(Wfull, 1), length(keep), horizon, Threads.nthreads())
+flush(stdout)
 
 # An abstraction of the full lattice, restricted to the viable states (empty blocks dropped).
 function restrict_map(μ, keep)
@@ -209,6 +210,7 @@ for (name, modes) in truncations
     @printf("%-28s %5d %7d %5.1f%% %6.1f%% %6.2f  %5.3f   %8.1f%% / %5.1f%%        %6.3f / %6.3f        %6.3f       %d/%d   %6.1f s\n",
         name, T.K, length(e), 100lift, 100over, isempty(fin) ? NaN : mean(fin), lr,
         100length(cu) / length(reach), 100length(cm) / length(reach), ur, mr, corr, ok, tried, t)
+    flush(stdout)
     push!(rows, (name, T.K, length(e), lift, over, isempty(fin) ? NaN : mean(fin), isempty(fin) ? NaN : median(fin),
         lr, length(cu) / length(reach), length(cm) / length(reach), ur, mr, corr, ok, tried, t))
 end
