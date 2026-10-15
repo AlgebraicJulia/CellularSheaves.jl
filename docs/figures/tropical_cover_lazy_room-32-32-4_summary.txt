@@ -6,8 +6,7 @@ time limit 30 s
   N bin      instances  certified  gap closed: edges / +triangles   triangles: evaluated / obstructed   packed
      1–10          225        72%            48% /  54%                      2 / 0.2       0%
     11–20          242         8%            30% /  36%                     30 / 1.6      18%
-    21–30          210         0%            26% /  32%                    127 / 6.6      94%
-    31–50          252         0%            20% /  26%                    534 / 28.1     100%
+    21–50          462         0%            22% /  28%                    349 / 18.3      97%
     51–62           19         0%            16% /  20%                   1238 / 77.1     100%
   capped pair searches: 0; capped triangle searches: 0; skipped triangles: 0; packed components: 512 (instances)
 
@@ -17,7 +16,6 @@ time limit 300 s
   N bin      instances  certified  gap closed: edges / +triangles   triangles: evaluated / obstructed   packed
      1–10          225        72%            48% /  54%                      2 / 0.2       0%
     11–20          242         8%            30% /  36%                     30 / 1.6      18%
-    21–30          210         0%            26% /  32%                    127 / 6.6      94%
-    31–50          283         0%            20% /  26%                    608 / 34.6     100%
+    21–50          493         0%            21% /  27%                    403 / 22.7      98%
     51–87          214         0%            14% /  19%                   2487 / 143.8     100%
   capped pair searches: 0; capped triangle searches: 0; skipped triangles: 0; packed components: 738 (instances)

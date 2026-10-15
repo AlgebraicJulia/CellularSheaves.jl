@@ -1161,8 +1161,11 @@ certifies 87--100\% of the states, against 0--73\% for the pessimistic one.
 \subsection{Benchmark maps and a standard baseline}\label{sec:baselines}
 To test against external maps and the standard heuristic, we place the lattice
 double integrator ($|v| \le 3$, 49 velocities per cell) on six maps of the MovingAI
-MAPF benchmark~\cite{stern2019,sturtevant2012}. Each map has 20 random queries
-between rest states (\texttt{tropical\_baselines.jl}).
+MAPF benchmark~\cite{stern2019,sturtevant2012}, and on two $512^2$ Warcraft~III maps
+of the MovingAI collection~\cite{sturtevant2012}. Each map has 20 queries between rest
+states (\texttt{tropical\_baselines.jl}). On the MAPF maps these are random. On the
+Warcraft maps they are the first 20 agents of a scenario file made as the MAPF
+benchmark makes its own (\cref{sec:mapf-protocol}).
 
 The baseline is the usual double-integrator heuristic: the larger of the two
 one-axis minimum times on an obstacle-free line. It is itself a pushforward, along
@@ -1182,7 +1185,10 @@ room-64-64-8 (130k) & 42816 & 1873 & 5366 & 1515 & 808 & 776 \\
 den312d (102k) & 32549 & 4396 & 3548 & 1017 & 592 & 574 \\
 warehouse-10-20-10-2-1 (204k) & 66799 & 2384 & 3978 & 636 & 406 & 345 \\
 \midrule
-arcs that lift & -- & -- & 0\% & 55--65\% & 69--79\% & -- \\
+losttemple, $512^2$ (4.3M) & 1871769 & 25174 & 115184 & 26145 & 13271 & 13075 \\
+tranquilpaths, $512^2$ (3.3M) & 1441711 & 162170 & 94019 & 24688 & 17946 & 17700 \\
+\midrule
+arcs that lift & -- & -- & 0\% & 49--65\% & 64--79\% & -- \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1192,14 +1198,15 @@ are 8 headings times 2 or 3 speed bins.
 \begin{itemize}[nosep]
 \item On every map the share of coarse arcs that lift orders the three abstractions
   the same way as their search effort.
-\item The 25-mode abstraction expands 2.3--7.4 times fewer states than the
-  kinematic heuristic on five maps. On the map with scattered obstacles the two
-  are close (50 against 64).
+\item The 25-mode abstraction expands 1.9--9.0 times fewer states than the
+  kinematic heuristic on seven maps, the two $512^2$ maps included. On the map with
+  scattered obstacles the two are close (50 against 64).
 \item Taking the larger of the two heuristics helps a little more.
 \end{itemize}
 
 Wall-clock time is a different matter. At these sizes the abstraction is
-\emph{slower} per query: 14--24\,ms against 4--5\,ms on the larger maps. Each
+\emph{slower} per query: 14--24\,ms against 4--5\,ms on the larger MAPF maps, and
+0.46--0.69\,s against 0.16--0.19\,s on the $512^2$ maps. Each
 query solves the coarse problem for its goal, and that costs more than the
 expansions it saves. A stored all-pairs table (a pattern database) would remove
 this cost but needs memory quadratic in the number of coarse states.
@@ -1308,64 +1315,104 @@ coordination cost recovered, $N = 4$ / $N = 6$ & 60\% / 89\% & 100\% / 100\% \\
 At $N = 8$ no joint search finishes. The sandwich of the cover bound and a
 prioritized plan still certifies the plan within a few percent of optimal.
 
-\paragraph{The cover on a benchmark map, under the benchmark protocol.}
-We follow the protocol of the MAPF benchmark~\cite{stern2019}. Each of the 25
-official random scenario files of a map lists start--goal pairs, and the instance
-with $N$ agents uses the first $N$ of them. $N$ grows one agent at a time until the
-method stops within a time limit. Stern et al.\ used 30~s. We also report 300~s, and
-the time of an instance is the time to solve it from scratch. At these sizes no
-stalk is tabulated. Each edge and triangle value is the stalk's value at the
-instance's start, computed exactly when needed by a joint A$^*$ search
-(\texttt{tropical\_cover\_lazy.jl}). On twelve earlier room-32-32-4 instances whose
-stalks were tabulated, it reproduces the tabulated exact cover. The upper bound is prioritized
-planning in the scenario's order, and an instance is \emph{certified} when the cover
-bound meets the plan. A group of more than 16 interacting agents is outside the
-exact cover search. There the bound falls back to a packing of disjoint simplices,
-which is weaker but still sound.
+\paragraph{The benchmark protocol.}\label{sec:mapf-protocol}
+For the MAPF benchmark maps we follow the benchmark's own protocol~\cite{stern2019}.
+Each of the 25 official random scenario files of a map lists start--goal pairs, and
+the instance with $N$ agents uses the first $N$ of them. $N$ grows one agent at a
+time until the method stops within a time limit. Stern et al.\ used 30~s; we also
+report 300~s. The time of an instance is the time to solve it from scratch.
 
-On room-32-32-4 (682 cells, 25 scenarios, 1199 instances), the outcomes, binned by
-$N$ within 300~s, are:
+At these sizes no stalk is tabulated. Each edge and triangle value is the stalk's
+value at the instance's start. It is computed exactly when needed, by a joint A$^*$
+search with the decoupled heuristic (\texttt{tropical\_cover\_lazy.jl}). On twelve
+earlier room-32-32-4 instances whose stalks were tabulated, this reproduces the
+tabulated exact cover. The upper bound is prioritized planning in the scenario's
+order, and an instance is \emph{certified} when the cover bound meets the plan. A
+group of more than 16 interacting agents is beyond our exact cover search. There
+the bound falls back to a packing of disjoint simplices, which is weaker but still
+sound.
+
+\paragraph{Results on two MAPF maps.}
+We ran room-32-32-4 (682 cells, rooms joined by one-cell doors) and
+random-32-32-10 (922 cells, scattered obstacles), 25 scenarios each. All counts
+below are from \texttt{summarize\_cover\_lazy.jl}. Within 300~s, by $N$:
 
 \begin{center}
 \small
-\begin{tabular}{lccccc}
+\begin{tabular}{llcccc}
 \toprule
-$N$ & instances & certified & gap closed: edges / + triangles & obstructed triangles & packed \\
+map & $N$ & instances & certified & plan gap closed: edges / + triangles & packed \\
 \midrule
-1--10  & 225 & 72\% & 48\% / 54\% & 0.2 & 0\% \\
-11--20 & 242 & 8\%  & 30\% / 36\% & 1.6 & 18\% \\
-21--30 & 210 & 0\%  & 26\% / 32\% & 6.6 & 94\% \\
-31--50 & 283 & 0\%  & 20\% / 26\% & 35 & 100\% \\
-51--87 & 214 & 0\%  & 14\% / 19\% & 144 & 100\% \\
+room   & 1--10  & 225 & 72\% & 48\% / 54\% & 0\% \\
+       & 11--20 & 242 & 8\%  & 30\% / 36\% & 18\% \\
+       & 21--50 & 493 & 0\%  & 21\% / 27\% & 98\% \\
+       & 51--87 & 214 & 0\%  & 14\% / 19\% & 100\% \\
+\midrule
+random & 1--10   & 225  & 86\% & 16\% / 16\% & 0\% \\
+       & 11--20  & 250  & 30\% & 13\% / 13\% & 2\% \\
+       & 21--50  & 750  & 1\%  & 13\% / 15\% & 62\% \\
+       & 51--191 & 2166 & 0\%  & 10\% / 10\% & 99\% \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-\noindent The \emph{gap} is the plan's cost minus the decoupled bound, which
-overstates the coordination cost by the plan's suboptimality. ``Obstructed'' is the
-mean number of triangles per instance with $o(\sigma) > 0$, and ``packed'' the share of
-instances with a component beyond the exact cover search (summarized by
-\texttt{summarize\_cover\_lazy.jl}).
+\noindent The \emph{plan gap} is the plan's cost minus the decoupled bound.
+``Packed'' is the share of instances with a component beyond the exact cover search.
 \begin{itemize}[nosep]
-\item Prioritized planning finds plans up to $N = 43$ in the median scenario
-  within 30~s (14--62), and up to $N = 47$ within 300~s (14--87).
-\item Certification stops early: in the median scenario every instance is certified
-  optimal up to $N = 8$ (0--15). The same limit holds at 30~s and at 300~s, so it
-  comes from the bound, not from time.
-\item Triangles add a consistent 5--6 points of the gap at every size. The number
-  of obstructed triangles grows quickly with $N$. Three-agent obstructions are rare
-  for a few agents and common in crowded instances.
-\item From $N \approx 20$ almost every instance has a component beyond the exact cover
-  search, and the packing fallback is a large part of the decline. An exact cover
-  solver for large components is the first thing to improve.
+\item Prioritized planning finds plans up to $N = 47$ in the median room scenario
+  within 300~s (43 within 30~s), and up to $N = 140$ on random (69 within 30~s).
+\item Every instance is certified optimal up to $N = 8$ in the median room scenario
+  (range 0--15), and up to $N = 12$ on random (3--28). These figures are the same at
+  30~s and at 300~s, so they come from the bounds, not from time.
 \end{itemize}
-The earlier picture, from four instances of one scenario at $N = 4, 6, 8$, was too
-favourable: under the protocol, the cover certifies small instances and only part
-of the gap of crowded ones.
 
-\textbf{[Pending: the same protocol on random-32-32-10, and on two $512^2$ Warcraft~III
-maps (losttemple, tranquilpaths) with scenarios generated by the benchmark's
-procedure (\texttt{make\_mapf\_scenarios.jl}), $N$ in steps of 50.]}
+The plan gap overstates the coordination cost, because prioritized planning is
+often suboptimal. To separate the two, we found the optimum by independence
+detection~\cite{standley2010} where it finishes, for $N \le 30$. On room it finishes
+on 294 of 685 instances; 146 of those need coordination. On random it finishes on
+386 of 725, but only 44 of those need coordination. Over the instances whose
+optimum is known and positive, the share of the true coordination cost (optimum minus
+decoupled bound) that the cover recovers is:
+
+\begin{center}
+\small
+\begin{tabular}{llccc}
+\toprule
+map & $N$ & instances & plan optimal & coordination cost recovered: edges / + triangles \\
+\midrule
+room   & 1--5   & 100 & 93\% & 83\% / 94\% \\
+       & 6--10  & 108 & 67\% & 85\% / 91\% \\
+       & 11--15 & 62  & 26\% & 85\% / 97\% \\
+       & 16--25 & 24  & 0\%  & 94\% / 100\% \\
+\midrule
+random & 6--10  & 118 & 80\% & 87\% / 87\% \\
+       & 11--20 & 149 & 46\% & 100\% / 100\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent (Instance counts include those that need no coordination, so the plan
+column is over all of them.) Three findings:
+\begin{itemize}[nosep]
+\item Where the optimum is known, the cover recovers most of the coordination cost:
+  83--94\% from edges on room, and 91--100\% with triangles. The low plan-gap
+  figures mostly measure the planner. On room at $N = 11$--$15$, the plan is
+  optimal on only 26\% of instances.
+\item These are the instances independence detection can solve, which are the
+  easier ones; on random they are few. The large-$N$ rows of the first table have no
+  such check.
+\item Triangles matter on the map with doors (6--12 points) and not on the open map.
+  This is the triangle obstruction at work, and it depends on the map's geometry.
+\end{itemize}
+Earlier we drew conclusions from four instances of one scenario at $N = 4, 6, 8$.
+That picture was too favourable at large $N$. Under the protocol, the cover
+recovers most of the coordination cost where it can be checked, but certification
+stops at about ten agents. Two things limit it: the cover search beyond 16 agents,
+and the planner's suboptimality.
+
+\textbf{[Pending: the protocol on two $512^2$ Warcraft~III maps (losttemple,
+tranquilpaths), with scenarios generated by the benchmark's procedure
+(\texttt{make\_mapf\_scenarios.jl}), $N$ in steps of 10.]}
 
 \paragraph{Joint defects of the summaries.}
 Do the summaries that fail have larger defects? The answer depends on which map is

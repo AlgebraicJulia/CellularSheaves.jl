@@ -6,10 +6,8 @@ time limit 30 s
   N bin      instances  certified  gap closed: edges / +triangles   triangles: evaluated / obstructed   packed
      1–10          225        86%            16% /  16%                      0 / 0.0       0%
     11–20          250        30%            13% /  13%                      2 / 0.0       2%
-    21–30          246         4%            11% /  12%                      9 / 0.0      28%
-    31–50          454         0%            13% /  14%                     50 / 0.3      76%
-    51–100         432         0%            11% /  13%                    207 / 1.0      97%
-   101–110          10         0%             9% /  10%                    696 / 2.2     100%
+    21–50          700         2%            12% /  14%                     36 / 0.2      59%
+    51–110         442         0%            11% /  13%                    219 / 1.0      98%
   capped pair searches: 0; capped triangle searches: 0; skipped triangles: 0; packed components: 850 (instances)
 
 time limit 300 s
@@ -18,8 +16,6 @@ time limit 300 s
   N bin      instances  certified  gap closed: edges / +triangles   triangles: evaluated / obstructed   packed
      1–10          225        86%            16% /  16%                      0 / 0.0       0%
     11–20          250        30%            13% /  13%                      2 / 0.0       2%
-    21–30          250         4%            12% /  12%                      9 / 0.0      29%
-    31–50          500         0%            14% /  15%                     54 / 0.2      78%
-    51–100        1182         0%            12% /  13%                    383 / 1.3      99%
-   101–191         984         0%             9% /   9%                   1736 / 5.0     100%
+    21–50          750         1%            13% /  15%                     39 / 0.2      62%
+    51–191        2166         0%            10% /  10%                    998 / 3.0      99%
   capped pair searches: 0; capped triangle searches: 0; skipped triangles: 0; packed components: 2624 (instances)
