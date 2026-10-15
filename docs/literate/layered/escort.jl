@@ -56,9 +56,15 @@ target1_pos(node, t) = [0.5cos(0.5*t), 0.5sin(0.5*t), 1.5 + 0.1sin(1.0*t), 1.0]
 
 # ## Provision Worker Processes
 
-# Provision exactly NA worker processes (one for each agent's flight computer)
-workers_pids = addprocs(NA; exeflags = ["--project=$(Base.active_project())",
+# Provision exactly NA worker processes (one for each agent's flight computer).
+# Workers start with stderr detached: a worker inherits the parent's stderr, which
+# while these docs are built is the pipe capturing the page's output, and holding it
+# open stalls the build. Each worker still reports through its stdout, which the
+# parent relays.
+workers_pids = redirect_stderr(devnull) do
+    addprocs(NA; exeflags = ["--project=$(Base.active_project())",
         "--sysimage=$(unsafe_string(Base.JLOptions().image_file))"])
+end
 
 # Provide the cellular sheaves environment to all workers
 @everywhere workers_pids begin
