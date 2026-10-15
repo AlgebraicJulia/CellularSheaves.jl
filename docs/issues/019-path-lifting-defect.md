@@ -214,7 +214,7 @@ dependencies.
 - [x] Line example: defect 1 in the plain gauge, 0 in the gauge of ``V``.
 - [x] `stable_refinement` on a unit-cost graph gives zero defect.
 - [x] `docs/scripts/path_lifting_check.jl` still passes (`julia docs/scripts/path_lifting_check.jl`).
-- [ ] Full test suite passes on a compute node. (The `TropicalAbstraction` tests pass, 837 of 837, with 1 and with 4 threads; the full suite has not been run.)
+- [x] Full test suite on a compute node: 5818 passed, 3 failed. The `TropicalAbstraction` tests pass (837 of 837, with 1 and with 4 threads). The 3 failures are the `GridSchwarz boxes` MPI launches, whose subprocess cannot load MPI in the sandboxed test environment. This change does not touch that test or the code it runs. Two test-file name clashes that hid tests in the full run (`tensor_product`, `constant_sheaf`) are fixed.
 - [x] A short paragraph and the theorem statement added to `docs/src/features/tropical_abstraction.md`.
 
 ## Out of Scope
