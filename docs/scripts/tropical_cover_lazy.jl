@@ -94,7 +94,7 @@ function joint_delay(agents, starts; cap)
     goal = key(Tuple(A.goal for A in agents))
     s0 = key(Tuple(starts))
     g = Dict(s0 => 0.0)
-    heap = Tuple{Float64,Float64,Int}[]
+    heap = Tuple{Float64,Float64,KeyT}[]
     TA._push!(heap, (h(Tuple(starts)), 0.0, s0))
     expanded = 0
     while !isempty(heap)

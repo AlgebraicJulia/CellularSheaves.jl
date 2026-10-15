@@ -103,16 +103,19 @@ end
 # Joint A* on the fly for a group of agents.
 # ---------------------------------------------------------------------------
 
-key(c) = 1 + sum((c[k] - 1) * NF^(k - 1) for k in eachindex(c))
-unkey(x, m) = ntuple(k -> ((x - 1) ÷ NF^(k - 1)) % NF + 1, m)
+# A joint state of up to MAXGROUP agents as one integer (cells in base NF). On large maps
+# NF^MAXGROUP overflows Int64, and the keys are Int128 there; small maps keep Int.
+const KeyT = big(NF)^MAXGROUP < typemax(Int) ? Int : Int128
+key(c) = one(KeyT) + sum(KeyT(c[k] - 1) * KeyT(NF)^(k - 1) for k in eachindex(c))
+unkey(x, m) = ntuple(k -> Int(((x - 1) ÷ KeyT(NF)^(k - 1)) % NF) + 1, m)
 
 function joint_astar(agents, starts, h)
     m = length(agents)
     goal = key(Tuple(A.goal for A in agents))
     s0 = key(Tuple(starts))
     g = Dict(s0 => 0.0)
-    parent = Dict(s0 => 0)
-    heap = Tuple{Float64,Int}[]
+    parent = Dict(s0 => zero(KeyT))
+    heap = Tuple{Float64,KeyT}[]
     TA._push!(heap, (h(Tuple(starts)), s0))
     expanded = 0
     while !isempty(heap)
