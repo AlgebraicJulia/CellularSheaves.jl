@@ -49,6 +49,8 @@ const TRI_CAP = parse(Int, get(ENV, "LAZY_TRI_CAP", "2000000"))
 const MAX_TRIANGLES = parse(Int, get(ENV, "LAZY_MAX_TRIANGLES", "20000"))
 const WITH_OPT = get(ENV, "LAZY_OPT", "0") == "1"
 const SLACK = 4.0
+const DEADLINE = Ref(Inf)                                        # time() at which a step runs out of the time limit
+past_deadline() = time() > DEADLINE[]
 
 # The least total delay of `agents` from `starts`, ignoring all others: (value, expanded, exact).
 function joint_delay(agents, starts; cap)
@@ -67,6 +69,7 @@ function joint_delay(agents, starts; cap)
         -ng > g[x] + 1e-9 && continue                               # stale entry
         x == goal && return g[x] - h(Tuple(starts)), expanded, true
         (expanded += 1) > cap && return 0.0, expanded, false
+        expanded % 4096 == 0 && past_deadline() && return 0.0, expanded, false   # sound: 0 is a lower bound
         c = unkey(x, m)
         for c2 in Iterators.product((NBRS[ci] for ci in c)...)
             any(collides(c, c2, k, l) for k in 1:m for l in (k + 1):m) && continue
@@ -153,8 +156,10 @@ function plan_next!(R::Reservations, A, start)
     parent = Dict{Tuple{Int,Int},Tuple{Int,Int}}()
     heap = Tuple{Float64,Int,Int,Int}[]
     TA._push!(heap, (A.d[start], -1, start, 1))
+    iter = 0
     found = nothing
     while !isempty(heap)
+        (iter += 1) % 4096 == 0 && past_deadline() && return nothing
         f, _, c, t = TA._pop!(heap)
         f > g[(c, t)] + A.d[c] + 1e-9 && continue
         if c == A.goal && t > get(R.last_use, c, 0)
@@ -206,6 +211,11 @@ const W_MAP = maximum(c[1] for c in MAP.cells)
 const H_MAP = maximum(c[2] for c in MAP.cells)
 
 println("MovingAI map $(basename(MAPF_MAP)): $(NF) free cells; scenarios $(SCENARIOS); N = $(FIRST):$(STEP):$(MAX_N) until $(TIME_LIMIT) s; $(Threads.nthreads()) threads")
+mkpath(OUT)
+const CSV = joinpath(OUT, "tropical_cover_lazy_" * splitext(basename(MAPF_MAP))[1] *
+    (length(SCENARIOS) == 25 ? "" : "_s$(first(SCENARIOS))-$(last(SCENARIOS))") * ".csv")
+const HEADER = "map,scenario,N,seconds,pairs,pairs_positive,pairs_capped,pair_expanded_max,triangles,triangles_evaluated,triangles_skipped,triangles_positive,triangles_obstructed,triangles_capped,largest_component,packed_components,decoupled,bound_edges,bound_sheaf,upper,optimal,certified"
+write(CSV, HEADER * "\n")
 rows = NamedTuple[]
 for k in SCENARIOS
     starts_all, goals_all = scenario_agents(k, MAX_N)
@@ -222,6 +232,7 @@ for k in SCENARIOS
     elapsed = 0.0
     n = 0
     for N in FIRST:STEP:nmax
+        DEADLINE[] = time() + (TIME_LIMIT - elapsed)                  # a step stops when the limit runs out
         step_time = @elapsed begin
             new = (n + 1):N
             # single agents: cost-to-go, tube
@@ -311,7 +322,9 @@ for k in SCENARIOS
             largest_component = comp_t, packed_components = packed_t,
             decoupled = decoupled, bound_edges = decoupled + cover_e, bound_sheaf = decoupled + cover_t,
             upper = upper, optimal = opt, certified = upper == decoupled + cover_t)
+        @assert join(keys(r), ",") == HEADER
         push!(rows, r)
+        open(io -> println(io, join(values(r), ",")), CSV, "a")       # row by row: a killed job keeps its data
         @printf("scen %2d N=%4d %7.1f s  pairs %6d (%4d with delay, %d capped)  triangles %6d (%d evaluated, %d with delay, %d obstructed%s)  decoupled %.0f  edges %.0f  +tri %.0f  plan %.0f%s%s\n",
             k, N, elapsed, r.pairs, r.pairs_positive, r.pairs_capped, tri_seen, r.triangles_evaluated, r.triangles_positive,
             obstructed, tri_skipped > 0 ? ", $(tri_skipped) skipped" : "", decoupled, r.bound_edges, r.bound_sheaf, upper,
@@ -332,11 +345,3 @@ for N in sort(unique(r.N for r in rows))
 end
 reached = [maximum((r.N for r in rows if r.scenario == k && r.seconds <= TIME_LIMIT); init = 0) for k in SCENARIOS]
 println("largest N within $(TIME_LIMIT) s per scenario: ", reached)
-mkpath(OUT)
-tag = length(SCENARIOS) == 25 ? "" : "_s$(first(SCENARIOS))-$(last(SCENARIOS))"
-open(joinpath(OUT, "tropical_cover_lazy_" * splitext(basename(MAPF_MAP))[1] * tag * ".csv"), "w") do io
-    println(io, join(keys(first(rows)), ","))
-    for r in rows
-        println(io, join(values(r), ","))
-    end
-end
