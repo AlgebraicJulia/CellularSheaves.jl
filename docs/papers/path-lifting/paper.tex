@@ -1231,11 +1231,43 @@ coordination cost recovered, $N = 4$ / $N = 6$ & 60\% / 89\% & 100\% / 100\% \\
 At $N = 8$ no joint search finishes. The sandwich of the cover bound and a
 prioritized plan still certifies the plan within a few percent of optimal.
 
-\paragraph{What we have not yet measured.}
-The experiments above predate the theorem. We read them through it, but we have
-not yet computed the defects themselves. Computing the defects of each map, and
-correlating them with the measured bounds, is the next step (issue~019 in the
-repository).
+\paragraph{Joint defects of the summaries.}
+Do the summaries that fail have larger defects? The answer depends on which map is
+measured.
+\begin{itemize}[nosep]
+\item \emph{On agent $j$'s own graph}, in the gauge of its distance, level sets lift
+  almost perfectly: every cell at distance $k$ has a free move to level $k-1$
+  (\texttt{tropical\_summary\_defects.jl}).
+\item \emph{On the joint map} that defines agent $i$'s coarse problem (agent $i$
+  exact, agent $j$ summarized, collisions removed, delays as costs), the defects
+  separate the summaries. This is the map \cref{thm:sandwich} is about.
+\end{itemize}
+The table gives means over the swap queries of the two-agent study, from 2000
+sampled coarse arcs of each kind, with defects computed up to a horizon of 4
+(\texttt{tropical\_joint\_defects.jl}):
+
+\begin{center}
+\small
+\begin{tabular}{lccc}
+\toprule
+summary of the other agent & arcs that lift & zero-delay arcs that leak & recovered \\
+\midrule
+position blocks $4\times4$ + near field & 55\% & 55\% & 0\% \\
+level sets + near field & 86\% & 11\% & 0\% \\
+level sets + near field + corridor cells & 87\% & 13\% & 0\% \\
+Reeb arcs & 94\% & 3\% & 89\% \\
+Reeb arcs + near field & 90\% & 8\% & 89\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A zero-delay coarse arc that leaks is a move the delay bound gets for free but
+some summarized state cannot make for free. The ordering matches the recovered
+coordination cost, but the relation is not proportional. Level sets lift 86\% of
+their arcs and still recover nothing. The bound at the start depends only on the
+arcs of its optimal coarse walk (\cref{thm:sandwich}), and a few leaking arcs
+through the corridors are enough to lose all of the coordination cost. The defect
+is a worst-case quantity along walks, and so is what it predicts.
 
 \section{Related work}
 
@@ -1251,7 +1283,9 @@ connections we use~\cite{baccelli1992,cohen2004}.
   stochastic control~\cite{chow1991} work in the real semiring, where coarse
   solutions correct rather than bound.
 \item Abstraction heuristics include Hierarchical A$^*$~\cite{holte1996},
-  pattern databases~\cite{culberson1998} and merge-and-shrink~\cite{helmert2007}.
+  pattern databases~\cite{culberson1998}, merge-and-shrink~\cite{helmert2007} and,
+  on grids, clustering with precomputed entrance-to-entrance distances
+  (HPA$^*$)~\cite{botea2004}.
 \item Abstraction-based control relies on refinement relations between a system
   and its abstraction~\cite{tabuada2009,reissig2017}.
 \end{itemize}
@@ -1273,11 +1307,25 @@ surveyed by Matni, Ames and Doyle~\cite{matni2024}.
 
 \paragraph{Multi-agent path finding.}
 Our cover bound with edges alone is the weighted dependency-graph heuristic of
-conflict-based search~\cite{sharon2015,li2019}. Independence detection merges
+conflict-based search~\cite{sharon2015,li2019}, which refines the conflict-graph
+vertex cover of Felner et al.~\cite{felner2018}. Independence detection merges
 agents only when their plans collide~\cite{standley2010}.
 
 \section{Limitations and open problems}
 \begin{itemize}
+\item \emph{Lattice versus continuous dynamics.} Every bound and certificate here is
+  exact for the lattice model, not for the continuous double integrator it
+  imitates. On one axis the lattice update (the new velocity moves the state at
+  once) gives minimum times that differ from the continuous bang-bang optimum
+  ($|u| \le 1$) by between $4$ steps less and $1.4$ steps more, for offsets up to
+  $60$ and speeds up to $8$ (\texttt{lattice\_vs\_continuous.jl}). So the lattice is
+  not a conservative discretization. Transferring certificates to the continuous
+  system needs an abstraction with a feedback refinement
+  relation~\cite{reissig2017}, or a discretization error bound.
+\item \emph{Wall-clock time.} The abstraction-based heuristics win in expansions but
+  not yet in time at the sizes of \cref{sec:baselines}, because each query solves
+  a coarse problem.
+
 \item The theorem is for deterministic, finite problems. Stochastic aggregation
   belongs to the real semiring.
 \item The space--time abstractions of our studies (coarse arcs that are $k$-step

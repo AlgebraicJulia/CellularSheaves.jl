@@ -1,0 +1,29 @@
+grid 32², wall with two 1-cell corridors: 844 free cells, 712336 joint states; horizon 4.0; 2000 sampled arcs per kind
+  position blocks 4×4 + near 2                     lift  55.1%   zero-delay arcs that leak  53.8%
+  progress levels + near 2                         lift  84.5%   zero-delay arcs that leak   9.7%
+  progress levels + near 2 + corridors             lift  86.4%   zero-delay arcs that leak  11.9%
+  progress (Reeb arcs)                             lift  95.0%   zero-delay arcs that leak   3.5%
+  progress (Reeb arcs) + near 2                    lift  90.8%   zero-delay arcs that leak   6.8%
+  position blocks 4×4 + near 2                     lift  55.4%   zero-delay arcs that leak  56.4%
+  progress levels + near 2                         lift  87.4%   zero-delay arcs that leak   9.2%
+  progress levels + near 2 + corridors             lift  87.3%   zero-delay arcs that leak  12.8%
+  progress (Reeb arcs)                             lift  93.9%   zero-delay arcs that leak   2.5%
+  progress (Reeb arcs) + near 2                    lift  90.3%   zero-delay arcs that leak   7.5%
+  position blocks 4×4 + near 2                     lift  55.2%   zero-delay arcs that leak  56.1%
+  progress levels + near 2                         lift  84.8%   zero-delay arcs that leak  11.2%
+  progress levels + near 2 + corridors             lift  87.2%   zero-delay arcs that leak  12.2%
+  progress (Reeb arcs)                             lift  94.0%   zero-delay arcs that leak   3.5%
+  progress (Reeb arcs) + near 2                    lift  90.7%   zero-delay arcs that leak   7.9%
+  position blocks 4×4 + near 2                     lift  55.2%   zero-delay arcs that leak  52.5%
+  progress levels + near 2                         lift  86.2%   zero-delay arcs that leak  12.4%
+  progress levels + near 2 + corridors             lift  85.5%   zero-delay arcs that leak  13.8%
+  progress (Reeb arcs)                             lift  93.7%   zero-delay arcs that leak   2.2%
+  progress (Reeb arcs) + near 2                    lift  89.8%   zero-delay arcs that leak   8.9%
+
+means over swap queries
+summary of the other agent                         arcs that lift   zero-delay arcs that leak   mean leak (capped at horizon+1)
+position blocks 4×4 + near 2                           55.2%             54.7%               3.64
+progress levels + near 2                               85.7%             10.6%               4.88
+progress levels + near 2 + corridors                   86.6%             12.7%               4.93
+progress (Reeb arcs)                                   94.2%              2.9%               4.91
+progress (Reeb arcs) + near 2                          90.4%              7.8%               4.89
