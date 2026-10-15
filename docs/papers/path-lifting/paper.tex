@@ -1039,6 +1039,57 @@ forget velocity (1 mode) & 16{,}384 & 0.59 & 142{,}415 & 0.052 s \\
 \end{tabular}
 \end{center}
 
+\paragraph{Defects, bounds and certificates.}
+\Cref{thm:sandwich,thm:twosided,thm:lyap-abstraction} make predictions that we can
+now check. We measure, for each abstraction:
+\begin{itemize}[nosep]
+\item the defects of all coarse arcs (\texttt{lifting\_defect}, global scope, horizon
+  30; defects beyond the horizon count as $\infty$, which keeps every bound sound);
+\item the lower bound $L = V_\psi \circ \psi$;
+\item the defect-inflated upper bound $U = V^{+\eps}_\psi \circ \psi$;
+\item the pessimistic upper bound $\Vm \circ \psi$.
+\end{itemize}
+The computations run on the viable subgraph, the states from which the goal can
+be reached at all. Dead states, such as a cell whose fast velocities are bound to
+hit a wall, would otherwise give every arc out of their block an infinite defect,
+which measures dead ends rather than lifting (\texttt{tropical\_defect\_study.jl},
+$32^2$ positions and $13^2$ velocities, 81{,}529 viable states):
+
+\begin{center}
+\small
+\begin{tabular}{lcccccc}
+\toprule
+abstraction & arcs that lift & mean finite $\eps$ & $L/V$ & certified: $U$ / must & $U/V$ & loop checks \\
+\midrule
+forget velocity & 0\% & 16.4 & 0.36 & 100\% / 0\% & 6.82 & 200/200 \\
+8 headings $\times$ 3 speeds & 27\% & 6.2 & 0.64 & 94\% / 0\% & 2.60 & 200/200 \\
+16 headings $\times$ 3 speeds & 50\% & 3.8 & 0.71 & 95\% / 0\% & 1.49 & 200/200 \\
+8 headings $\times$ 6 speeds & 49\% & 4.0 & 0.74 & 87\% / 73\% & 1.70 & 200/200 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{itemize}
+\item \emph{Lower bounds.} As the defects fall, the lower bound tightens: $L/V$ rises
+  from 0.36 to 0.74. Per state, the gap $U - L$, which the defects determine, is
+  correlated with the true loss $V - L$ (correlation 0.49--0.58 for the mode
+  abstractions; 0.11 for the velocity-blind one, whose upper bound is loose
+  everywhere).
+\item \emph{Certificates.} The defect-inflated certificate covers 87--100\% of the
+  viable states. The pessimistic certificate covers none, except with 6 speed bins,
+  where it covers 73\%. Where both certify, $U \le \Vm \circ \psi$, as
+  \cref{thm:sandwich} requires; the program asserts it at every state. A state is
+  left uncovered when every coarse walk from its block uses an arc whose defect
+  exceeds the horizon or is infinite (some state of the block cannot reach the
+  arc's head at all).
+\item \emph{Closed loops.} From 200 sampled certified states per abstraction we
+  ran the macro-step closed loop of \cref{thm:lyap-abstraction}(b). The upper
+  layer picks the next block from the inflated quotient, and the lower layer
+  follows it by a cheapest fine path. In every run, each macro-step cost at most
+  the inflated arc cost, the inflated value decreased by at least the cost paid,
+  and the loop reached the goal within its certified cost.
+\end{itemize}
+
 \paragraph{Corridors (the inclusion as a restriction map).}
 A layered controller, in the sense of the layered architectures of Matni, Ames and
 Doyle~\cite{matni2024}, plans a route on the abstraction. It then searches the
