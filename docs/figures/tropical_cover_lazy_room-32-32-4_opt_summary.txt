@@ -1,0 +1,19 @@
+room-32-32-4: 25 scenario files, 685 instances
+
+time limit 300 s
+  largest N with a plan, per scenario: mean 28.1, median 30, range 14–30
+  largest N certified optimal throughout: mean 8.2, median 8, range 0–15
+  N bin      instances  certified  gap closed: edges / +triangles   triangles: evaluated / obstructed   packed
+     1–5           100        92%            50% /  57%                      0 / 0.0       0%
+     6–10          125        55%            47% /  53%                      4 / 0.3       0%
+    11–15          124        15%            33% /  39%                     16 / 1.0       0%
+    16–20          118         0%            29% /  35%                     45 / 2.3      36%
+    21–25          110         0%            26% /  33%                     89 / 4.4      89%
+    26–30          100         0%            26% /  32%                    170 / 9.0     100%
+  with the optimum known:  instances  plan optimal  coordination cost recovered: edges / +triangles
+     1–5                      100           93%                       83% /  94%
+     6–10                     108           67%                       85% /  91%
+    11–15                      62           26%                       85% /  97%
+    16–20                      20            0%                       92% / 100%
+    21–25                       4            0%                      100% / 100%
+  capped pair searches: 0; capped triangle searches: 0; skipped triangles: 0; packed components: 241 (instances)

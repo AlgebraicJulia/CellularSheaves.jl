@@ -1,0 +1,15 @@
+tranquilpaths: 25 scenario files, 32 instances
+
+time limit 30 s
+  largest N with a plan, per scenario: mean 4.0, median 0, range 0–50
+  largest N certified optimal throughout: mean 0.0, median 0, range 0–0
+  N bin      instances  certified  gap closed: edges / +triangles   triangles: evaluated / obstructed   packed
+     1–50            2         0%            14% /  14%                      7 / 0.0       0%
+  capped pair searches: 0; capped triangle searches: 0; skipped triangles: 0; packed components: 0 (instances)
+
+time limit 300 s
+  largest N with a plan, per scenario: mean 14.0, median 0, range 0–50
+  largest N certified optimal throughout: mean 0.0, median 0, range 0–0
+  N bin      instances  certified  gap closed: edges / +triangles   triangles: evaluated / obstructed   packed
+     1–50            7         0%            20% /  20%                     14 / 0.0      43%
+  capped pair searches: 0; capped triangle searches: 0; skipped triangles: 0; packed components: 3 (instances)

@@ -53,6 +53,38 @@ const SLACK = 4.0
 const DEADLINE = Ref(Inf)                                        # time() at which a step runs out of the time limit
 past_deadline() = time() > DEADLINE[]
 
+# A grid agent as the lazy cover needs it: its goal and cost-to-go d (breadth-first, the
+# map's moves are symmetric unit steps). The full AgentStalk of tropical_pair_sheaf.jl
+# also builds Reeb arcs and the delay graph, which only tabulated stalks use.
+struct GridAgent
+    goal::Int
+    d::Vector{Float64}
+end
+
+function bfs(source)
+    d = fill(Inf, NF)
+    d[source] = 0.0
+    queue = [source]
+    head = 1
+    while head <= length(queue)
+        u = queue[head]
+        head += 1
+        for v in NBRS[u]
+            isinf(d[v]) && (d[v] = d[u] + 1; push!(queue, v))
+        end
+    end
+    return d
+end
+
+grid_light(goal) = GridAgent(goal, bfs(goal))
+
+# The tube of InteractionSheaf: the cells reachable from `start` with delay at most
+# `slack`. On a unit grid the least delay to c is dist(start, c) + d(c) − d(start).
+function light_tube(A::GridAgent, start, slack)
+    ds = bfs(start)
+    return [c for c in 1:NF if ds[c] + A.d[c] - A.d[start] <= slack + 1e-9]
+end
+
 # The least total delay of `agents` from `starts`, ignoring all others: (value, expanded, exact).
 function joint_delay(agents, starts; cap)
     m = length(agents)
@@ -91,7 +123,7 @@ function tube_masks(agents, starts)
     tubes = [falses(NF) for _ in agents]
     near = [falses(NF) for _ in agents]
     Threads.@threads for i in eachindex(agents)
-        for c in tube(agents[i], starts[i], SLACK)
+        for c in light_tube(agents[i], starts[i], SLACK)
             tubes[i][c] = true
             for dy in -1:1, dx in -1:1
                 c2 = cell_at(MAP, c, (dx, dy))
@@ -221,7 +253,7 @@ rows = NamedTuple[]
 for k in SCENARIOS
     starts_all, goals_all = scenario_agents(k, MAX_N)
     nmax = length(starts_all)
-    agents = AgentStalk[]
+    agents = GridAgent[]
     tubes, near = BitVector[], BitVector[]
     R = Reservations(4 * (W_MAP + H_MAP) + 2 * nmax)
     plans = Vector{Int}[]
@@ -237,9 +269,9 @@ for k in SCENARIOS
         step_time = @elapsed begin
             new = (n + 1):N
             # single agents: cost-to-go, tube
-            built = Vector{AgentStalk}(undef, length(new))
+            built = Vector{GridAgent}(undef, length(new))
             Threads.@threads for q in eachindex(new)
-                built[q] = grid_agent(goals_all[new[q]])
+                built[q] = grid_light(goals_all[new[q]])
             end
             append!(agents, built)
             tb, nb = tube_masks(built, starts_all[new])
