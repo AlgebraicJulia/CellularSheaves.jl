@@ -16,7 +16,8 @@
 #   - the cover: the simplicial cover of the positive values, solved exactly on each
 #     connected component (the integer program separates over them). A component with
 #     more than 16 agents falls back to a greedy packing of disjoint simplices, still a
-#     lower bound. A capped search contributes 0, also still a lower bound.
+#     lower bound; the bound with triangles is taken as at least the cover of the edges.
+#     A capped search contributes 0, also still a lower bound.
 #   - the upper bound: prioritized planning in space-time, in the scenario's order.
 #     Where it meets the cover bound, the plan is certified optimal.
 #
@@ -279,6 +280,9 @@ for k in SCENARIOS
             tri_cons = [(σ, v[1]) for (σ, v) in trival]
             cover_e, _, _ = component_cover(N, edge_cons)
             cover_t, comp_t, packed_t = component_cover(N, [edge_cons; tri_cons])
+            # Triangles can merge components past 16 agents, where the packing fallback is
+            # weaker than the exact cover of the edges alone. Both are lower bounds: keep the larger.
+            cover_t = max(cover_t, cover_e)
         end
         elapsed += step_time
         n = N
@@ -288,7 +292,7 @@ for k in SCENARIOS
             e(a, b) = edgeval[(σ[a], σ[b])][1]
             v[1] - simplicial_cover(3, [([1, 2], e(1, 2)), ([1, 3], e(1, 3)), ([2, 3], e(2, 3))]) > 1e-9
         end
-        @assert cover_e <= cover_t + 1e-9
+        @assert cover_e <= cover_t + 1e-9                                 # by construction
         @assert decoupled + cover_t <= upper + 1e-9 "the cover bound must not exceed a feasible plan"
         opt = NaN
         if WITH_OPT
