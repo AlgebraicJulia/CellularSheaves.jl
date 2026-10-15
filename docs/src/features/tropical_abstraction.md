@@ -139,6 +139,32 @@ The proofs are one line each.
 Neither square commutes strictly unless the moves are constant on blocks. The gap
 between the two quotients measures how much the aggregation hides.
 
+### The lifting defect: when the optimistic bound is exact
+
+[`lifting_defect`](@ref) makes that gap precise, arc by arc. For an arc ``B → C`` of
+the optimistic quotient, the defect is the worst excess, over the states ``x`` of
+``B``, of the cost of reaching ``C`` from ``x`` over the coarse arc's cost:
+
+```math
+ε(B, C) = \max_{x ∈ B} \big( d(x, C) − W_c(B, C) \big)^+ .
+```
+
+The arc *lifts* when its defect is zero: every state of ``B`` can follow it at no
+extra cost. The path-lifting theorem (`docs/papers/path-lifting`, issue 019) says:
+
+- **Exactness.** ``E V_c = V`` for every target that is a union of blocks if and only
+  if every arc lifts.
+- **Sandwich.** Adding the defects to the coarse arc costs gives an upper bound,
+  ``E V_c ≤ V ≤ E V_c^{+ε} ≤ E V_c^{∀∃}``, never worse than the pessimistic quotient.
+- **Two-sided error.** The worst error of the lower bound at a block is at least
+  its largest defect.
+- **Optimality.** The least sound upper weighting is the one-sided Hausdorff
+  distance ``\max_{x ∈ B} d(x, C)`` between blocks; the defect-inflated costs
+  approximate it locally.
+
+Every value [`lifting_defect`](@ref) returns is an upper bound on the true defect
+(a local scope or a search horizon only enlarges it), so these bounds stay sound.
+
 ### Truncated pushforwards: keeping modes of the stalk
 
 Forgetting the velocity entirely (one value per stalk) gives a weak bound, because

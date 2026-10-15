@@ -35,9 +35,35 @@ const MAXGROUP = 4                                    # joint searches move all 
 const ITERS = 60                                      # supergradient steps of the cover gauge
 const OUT = joinpath(@__DIR__, "..", "figures")
 
+# The map: by default a wall with two one-cell corridors; with MAPF_MAP set, a map of
+# the MovingAI MAPF benchmark (Stern et al. 2019), its largest connected component,
+# with instances drawn from the benchmark's random scenario files (MAPF_SCEN_DIR).
+const MAPF_MAP = get(ENV, "MAPF_MAP", "")
 const WALL = (n ÷ 2):(n ÷ 2 + 1)
 wall(x, y) = x in WALL && !(y in (n ÷ 4, 3n ÷ 4))
-const MAP = GridMap([(x, y) for y in 1:n for x in 1:n if !wall(x, y)])
+function movingai_cells(path)
+    lines = readlines(path)
+    h, w = parse(Int, split(lines[2])[2]), parse(Int, split(lines[3])[2])
+    free = Set((x, y) for y in 1:h for x in 1:w if lines[4 + y][x] in ('.', 'G', 'S'))
+    best = Tuple{Int,Int}[]
+    seen = Set{Tuple{Int,Int}}()
+    for c in free                                                    # largest 4-connected component
+        c in seen && continue
+        comp, stack = Tuple{Int,Int}[], [c]
+        push!(seen, c)
+        while !isempty(stack)
+            (x, y) = pop!(stack)
+            push!(comp, (x, y))
+            for o in ((1, 0), (-1, 0), (0, 1), (0, -1))
+                c2 = (x + o[1], y + o[2])
+                (c2 in free && !(c2 in seen)) && (push!(seen, c2); push!(stack, c2))
+            end
+        end
+        length(comp) > length(best) && (best = comp)
+    end
+    return sort(best; by = c -> (c[2], c[1]))
+end
+const MAP = MAPF_MAP == "" ? GridMap([(x, y) for y in 1:n for x in 1:n if !wall(x, y)]) : GridMap(movingai_cells(MAPF_MAP))
 const NF = length(MAP.cells)
 const NBRS = [[k; [MAP.index[(x + dx, y + dy)] for (dx, dy) in ((1, 0), (-1, 0), (0, 1), (0, -1))
                    if haskey(MAP.index, (x + dx, y + dy))]] for (k, (x, y)) in enumerate(MAP.cells)]
@@ -221,6 +247,7 @@ function subset_delay(agents, starts, m)
 end
 
 function instance(rng, N)
+    MAPF_MAP == "" || return scenario_instance(rng, N)
     left = [k for (k, (x, y)) in enumerate(MAP.cells) if x < first(WALL) - 2]
     right = [k for (k, (x, y)) in enumerate(MAP.cells) if x > last(WALL) + 2]
     sl, gl = left[randperm(rng, length(left))[1:N]], left[randperm(rng, length(left))[1:N]]
@@ -228,6 +255,24 @@ function instance(rng, N)
     half = N ÷ 2
     starts = [sl[1:half]; sr[1:(N - half)]]                         # half cross each way
     goals = [gr[1:half]; gl[1:(N - half)]]
+    return starts, goals
+end
+
+# N agents from a random MovingAI scenario file of the map (cells are 0-based there),
+# skipping entries outside the map's largest component.
+function scenario_instance(rng, N)
+    base = splitext(basename(MAPF_MAP))[1]
+    dir = get(ENV, "MAPF_SCEN_DIR", joinpath(dirname(MAPF_MAP), "scen-random"))
+    lines = readlines(joinpath(dir, "$(base)-random-$(rand(rng, 1:25)).scen"))[2:end]
+    starts, goals = Int[], Int[]
+    for l in lines
+        f = split(l)
+        s, g = (parse(Int, f[5]) + 1, parse(Int, f[6]) + 1), (parse(Int, f[7]) + 1, parse(Int, f[8]) + 1)
+        (haskey(MAP.index, s) && haskey(MAP.index, g)) || continue
+        (MAP.index[s] in starts || MAP.index[g] in goals) && continue
+        push!(starts, MAP.index[s]); push!(goals, MAP.index[g])
+        length(starts) == N && break
+    end
     return starts, goals
 end
 

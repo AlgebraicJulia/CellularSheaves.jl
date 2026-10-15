@@ -1,9 +1,12 @@
 # 019 — Path lifting: the lifting defect of an abstraction and the bound it gives
 
-**Status:** theorem stated and proved in `docs/papers/path-lifting/paper.tex`
-(Section 4), checked numerically by `docs/scripts/path_lifting_check.jl`. This issue
-requests the one function that makes the theorem usable in the package:
-`lifting_defect`.
+**Status:** implemented. `lifting_defect(W, ψ; scope, horizon)` is in
+`TropicalAbstraction`, with tests in `test/network_sheaves/TropicalAbstraction.jl`.
+The global scope runs over threads and accepts a `horizon` beyond which defects are
+reported as ∞ (still upper bounds), which the double-integrator studies need,
+because lifts pass through neighbouring blocks. The theorem is stated and proved in
+`docs/papers/path-lifting/paper.tex` (Section 4) and checked by
+`docs/scripts/path_lifting_check.jl`.
 
 ## Mathematical Background
 
@@ -204,15 +207,15 @@ dependencies.
 
 ## Verification Checklist
 
-- [ ] `lifting_defect` exported from `TropicalAbstraction`; docstring renders and cross-references resolve.
-- [ ] The `:global` defect matches the dense reference on random graphs; `:pair` is never below it.
-- [ ] Zero defect ⇔ `lower_bound` exact on every single-block target (both directions tested).
-- [ ] The sandwich `lower_bound ≤ cost_to_go ≤ inflated ≤ robust` holds on random graphs.
-- [ ] Line example: defect 1 in the plain gauge, 0 in the gauge of ``V``.
-- [ ] `stable_refinement` on a unit-cost graph gives zero defect.
-- [ ] `docs/scripts/path_lifting_check.jl` still passes (`julia docs/scripts/path_lifting_check.jl`).
-- [ ] Full test suite passes on a compute node.
-- [ ] A short paragraph and the theorem statement added to `docs/src/features/tropical_abstraction.md`.
+- [ ] `lifting_defect` exported from `TropicalAbstraction` (done); docstring renders and cross-references resolve (docs not yet built).
+- [x] The `:global` defect matches the dense reference on random graphs; `:pair` is never below it.
+- [x] Zero defect ⇔ `lower_bound` exact on every single-block target (both directions tested).
+- [x] The sandwich `lower_bound ≤ cost_to_go ≤ inflated ≤ robust` holds on random graphs.
+- [x] Line example: defect 1 in the plain gauge, 0 in the gauge of ``V``.
+- [x] `stable_refinement` on a unit-cost graph gives zero defect.
+- [x] `docs/scripts/path_lifting_check.jl` still passes (`julia docs/scripts/path_lifting_check.jl`).
+- [ ] Full test suite passes on a compute node. (The `TropicalAbstraction` tests pass, 837 of 837, with 1 and with 4 threads; the full suite has not been run.)
+- [x] A short paragraph and the theorem statement added to `docs/src/features/tropical_abstraction.md`.
 
 ## Out of Scope
 

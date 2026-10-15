@@ -92,7 +92,7 @@ function check_edge(C, agents, e)
         "pair graph $(count(isfinite, Ai.d) * count(isfinite, Aj.d)))")
 end
 
-println("grid $(n)², wall with two 1-cell corridors: $(NF) free cells; block $BLOCK; triangle contact radius $TRI_RADIUS blocks, edge $EDGE_RADIUS; summary $SUMMARY")
+println((MAPF_MAP == "" ? "grid $(n)², wall with two 1-cell corridors" : "MovingAI map $(basename(MAPF_MAP))") * ": $(NF) free cells; block $BLOCK; triangle contact radius $TRI_RADIUS blocks, edge $EDGE_RADIUS; summary $SUMMARY")
 rows = NamedTuple[]
 rng = MersenneTwister(11)                             # the instances of tropical_multiagent_cover.jl
 for N in (4, 6, 8), inst in 1:NI
@@ -173,7 +173,8 @@ for N in (4, 6, 8)
 end
 
 mkpath(OUT)
-open(joinpath(OUT, "tropical_cover_triangles_r$(TRI_RADIUS)_e$(EDGE_RADIUS)$(SUMMARY == "reeb" ? "" : "_" * SUMMARY).csv"), "w") do io
+open(joinpath(OUT, "tropical_cover_triangles_" * (MAPF_MAP == "" ? "" : splitext(basename(MAPF_MAP))[1] * "_") *
+          "r$(TRI_RADIUS)_e$(EDGE_RADIUS)$(SUMMARY == "reeb" ? "" : "_" * SUMMARY).csv"), "w") do io
     println(io, join(keys(first(rows)), ","))
     for r in rows
         println(io, join(values(r), ","))
