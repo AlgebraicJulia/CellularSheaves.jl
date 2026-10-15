@@ -1327,6 +1327,13 @@ four instances per $N$, future-refined summaries, and \texttt{MAPF\_MAP} set in
 On this map almost all of the coupling lives on the 1-skeleton of the nerve:
 three-agent obstructions are rare.
 
+We also ran random-32-32-10 (922 free cells, scattered obstacles), which does not
+test the cover. On all twelve of its instances the decoupled bound already equals
+the cost of the prioritized plan, so the agents need no coordination. Every edge
+stalk is still exact there (144 of 144), and no triangle changes the bound. With
+random scenario agents, coordination cost depends on the map: room-like maps with
+narrow doors produce it, and open maps with scattered obstacles mostly do not.
+
 \paragraph{Joint defects of the summaries.}
 Do the summaries that fail have larger defects? The answer depends on which map is
 measured.
