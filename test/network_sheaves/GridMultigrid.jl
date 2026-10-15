@@ -22,7 +22,7 @@ function dense_operator(op, layout)
 end
 
 # The constant sheaf ℝ on the grid graph of `points` (wrapping periodic dimensions).
-function constant_sheaf(points, periodic)
+function grid_constant_sheaf(points, periodic)
     D = length(points)
     L = LinearIndices(points)
     s = EuclideanSheaf{Float64}(ones(Int, prod(points)))
@@ -98,7 +98,7 @@ end
         # its transfer map is T, and the fibre bases are E, up to a scaling cᵥ
         # of each basis vector.
         if all(n .> 2) || !any(periodic)
-            F = constant_sheaf(n, periodic)
+            F = grid_constant_sheaf(n, periodic)
             pushed = pushforward_sheaf(ψ, F)
             @test vertex_stalks(pushed) == ones(Int, Nc)
             bases = all_fiber_bases(ψ, F)

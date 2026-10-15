@@ -294,13 +294,13 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     for _ in 1:5
         A, B = sprand(rngt, 7, 7, 0.4) .* 3, sprand(rngt, 6, 6, 0.4) .* 2
         ψA, ψB = GraphHomomorphism(rand(rngt, 1:3, 7), 3), GraphHomomorphism(rand(rngt, 1:2, 6), 2)
-        AB = tensor_product(A, B)
+        AB = CellularSheaves.tensor_product(A, B)
         @test nnz(AB) == nnz(A) * nnz(B) && AB[2 + 7 * (3 - 1), 4 + 7 * (5 - 1)] == (A[2, 4] == 0 || B[3, 5] == 0 ? 0 : A[2, 4] + B[3, 5])
         prodmap = GraphHomomorphism([ψA.vertex_map[a] + 3 * (ψB.vertex_map[b] - 1) for b in 1:6 for a in 1:7], 6)
         @test edgeset(quotient_graph(AB, prodmap; loops = true)) ==
-              edgeset(tensor_product(quotient_graph(A, ψA; loops = true), quotient_graph(B, ψB; loops = true)))
+              edgeset(CellularSheaves.tensor_product(quotient_graph(A, ψA; loops = true), quotient_graph(B, ψB; loops = true)))
     end
-    @test nnz(tensor_product(sparse([1.0;;]), sparse([2.0;;]); keep = (x, y) -> false)) == 0
+    @test nnz(CellularSheaves.tensor_product(sparse([1.0;;]), sparse([2.0;;]); keep = (x, y) -> false)) == 0
     @test_throws ArgumentError quotient_graph(W, ψp; steps = 2, loops = true)
 
     # Reeb arcs: on a path with the goal in the middle, equidistant states on the two sides

@@ -1,0 +1,45 @@
+MovingAI map room-32-32-4.map: 682 free cells; block 2; triangle contact radius 1 blocks, edge 1; summary future
+check: the symmetric edge stalk [1, 2] is the pushforward of the pair graph (396306 coarse states, pair graph 465124)
+N=4 #1  edges  6 (symmetric stalk exact on  6, asymmetric on  6; 397842 states each, built in 6 s)
+        triangles  4: 1 beyond their edges, 1 of them seen by the stalk; stalk exact on 4; expansions mean 516 max 1071 (1 s; exact triples 34 s)
+          [1, 2, 4]: exact 6.0 (edges [4.0, 0.0, 2.0]), stalk 6.0 (edges [4.0, 0.0, 2.0])
+        bound: decoupled 134.0  cover of edges 138.0  cover of edges + triangle stalks 140.0  with exact triangles 140.0  optimum 140.0  prioritized 140.0
+N=4 #2  edges  2 (symmetric stalk exact on  2, asymmetric on  2; 400282 states each, built in 1 s)
+        triangles  0: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 0; expansions mean 0 max 0 (0 s; exact triples 0 s)
+        bound: decoupled  71.0  cover of edges  71.0  cover of edges + triangle stalks  71.0  with exact triangles  71.0  optimum  71.0  prioritized  71.0
+N=4 #3  edges  4 (symmetric stalk exact on  4, asymmetric on  4; 395236 states each, built in 1 s)
+        triangles  1: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 1; expansions mean 88 max 88 (0 s; exact triples 9 s)
+        bound: decoupled 100.0  cover of edges 102.0  cover of edges + triangle stalks 102.0  with exact triangles 102.0  optimum 102.0  prioritized 102.0
+N=4 #4  edges  2 (symmetric stalk exact on  2, asymmetric on  2; 396608 states each, built in 1 s)
+        triangles  0: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 0; expansions mean 0 max 0 (0 s; exact triples 0 s)
+        bound: decoupled  92.0  cover of edges  92.0  cover of edges + triangle stalks  92.0  with exact triangles  92.0  optimum  92.0  prioritized  92.0
+N=6 #1  edges  6 (symmetric stalk exact on  6, asymmetric on  6; 400079 states each, built in 2 s)
+        triangles  2: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 2; expansions mean 174 max 211 (0 s; exact triples 17 s)
+        bound: decoupled 128.0  cover of edges 128.0  cover of edges + triangle stalks 128.0  with exact triangles 128.0  optimum 128.0  prioritized 128.0
+N=6 #2  edges  7 (symmetric stalk exact on  7, asymmetric on  7; 395610 states each, built in 2 s)
+        triangles  4: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 4; expansions mean 108 max 136 (0 s; exact triples 33 s)
+        bound: decoupled 128.0  cover of edges 130.0  cover of edges + triangle stalks 130.0  with exact triangles 130.0  optimum 130.0  prioritized 130.0
+N=6 #3  edges  4 (symmetric stalk exact on  4, asymmetric on  4; 398303 states each, built in 1 s)
+        triangles  0: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 0; expansions mean 0 max 0 (0 s; exact triples 0 s)
+        bound: decoupled  68.0  cover of edges  70.0  cover of edges + triangle stalks  70.0  with exact triangles  70.0  optimum  70.0  prioritized  70.0
+N=6 #4  edges  8 (symmetric stalk exact on  8, asymmetric on  8; 399147 states each, built in 2 s)
+        triangles  3: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 3; expansions mean 78 max 95 (0 s; exact triples 26 s)
+        bound: decoupled 110.0  cover of edges 110.0  cover of edges + triangle stalks 110.0  with exact triangles 110.0  optimum 110.0  prioritized 110.0
+N=8 #1  edges 18 (symmetric stalk exact on 18, asymmetric on 18; 395668 states each, built in 5 s)
+        triangles 18: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 18; expansions mean 103 max 148 (0 s; exact triples 152 s)
+        bound: decoupled 224.0  cover of edges 225.0  cover of edges + triangle stalks 225.0  with exact triangles 225.0  optimum   NaN  prioritized 225.0
+N=8 #2  edges 14 (symmetric stalk exact on 14, asymmetric on 14; 396787 states each, built in 3 s)
+        triangles  8: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 8; expansions mean 64 max 93 (0 s; exact triples 64 s)
+        bound: decoupled 169.0  cover of edges 171.0  cover of edges + triangle stalks 171.0  with exact triangles 171.0  optimum   NaN  prioritized 171.0
+N=8 #3  edges 15 (symmetric stalk exact on 15, asymmetric on 15; 396426 states each, built in 4 s)
+        triangles 13: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 13; expansions mean 117 max 267 (0 s; exact triples 105 s)
+        bound: decoupled 203.0  cover of edges 205.0  cover of edges + triangle stalks 205.0  with exact triangles 205.0  optimum   NaN  prioritized 205.0
+N=8 #4  edges 15 (symmetric stalk exact on 15, asymmetric on 15; 399413 states each, built in 3 s)
+        triangles  9: 0 beyond their edges, 0 of them seen by the stalk; stalk exact on 9; expansions mean 78 max 95 (0 s; exact triples 72 s)
+        bound: decoupled 152.0  cover of edges 152.0  cover of edges + triangle stalks 152.0  with exact triangles 152.0  optimum   NaN  prioritized 152.0
+
+summary (means over instances)
+  N  edges exact: sym/asym  triangles beyond/seen  triangle expansions (max)  gap closed: edges/sheaf ratio prioritized/bound: sheaf
+  4            14/14 of 14               1/1 of 5                 151 (1071)              0.83 / 1.00                          1.000
+  6            25/25 of 25               0/0 of 9                   90 (211)              1.00 / 1.00                          1.000
+  8            62/62 of 62              0/0 of 48                   90 (267)                    – / –                          1.000

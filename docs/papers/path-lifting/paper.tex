@@ -1064,42 +1064,53 @@ now check. We measure, for each abstraction:
 The computations run on the viable subgraph, the states from which the goal can
 be reached at all. Dead states, such as a cell whose fast velocities are bound to
 hit a wall, would otherwise give every arc out of their block an infinite defect,
-which measures dead ends rather than lifting (\texttt{tropical\_defect\_study.jl},
-$32^2$ positions and $13^2$ velocities, 81{,}529 viable states):
+which measures dead ends rather than lifting (\texttt{tropical\_defect\_study.jl}).
+The lattices are $32^2$ and $64^2$ positions with $13^2$ velocities, with 81{,}529
+and 515{,}108 viable states:
 
 \begin{center}
 \small
-\begin{tabular}{lcccccc}
+\begin{tabular}{l@{\hspace{6pt}}cccc@{\hspace{10pt}}cccc}
 \toprule
-abstraction & arcs that lift & mean finite $\eps$ & $L/V$ & certified: $U$ / must & $U/V$ & loop checks \\
+& \multicolumn{4}{c}{$32^2$} & \multicolumn{4}{c}{$64^2$} \\
+\cmidrule(r){2-5}\cmidrule(l){6-9}
+abstraction & lift & $L/V$ & cert.\ $U$ / must & $U/V$ & lift & $L/V$ & cert.\ $U$ / must & $U/V$ \\
 \midrule
-forget velocity & 0\% & 16.4 & 0.36 & 100\% / 0\% & 6.82 & 200/200 \\
-8 headings $\times$ 3 speeds & 27\% & 6.2 & 0.64 & 94\% / 0\% & 2.60 & 200/200 \\
-16 headings $\times$ 3 speeds & 50\% & 3.8 & 0.71 & 95\% / 0\% & 1.49 & 200/200 \\
-8 headings $\times$ 6 speeds & 49\% & 4.0 & 0.74 & 87\% / 73\% & 1.70 & 200/200 \\
+forget velocity & 0\% & 0.36 & 100 / 0\% & 6.82 & 0\% & 0.54 & 100 / 0\% & 8.77 \\
+8 head.\ $\times$ 3 speeds & 27\% & 0.64 & 94 / 0\% & 2.60 & 18\% & 0.73 & 99.9 / 0\% & 3.23 \\
+16 head.\ $\times$ 3 speeds & 50\% & 0.71 & 95 / 0\% & 1.49 & 38\% & 0.77 & 98.8 / 0\% & 1.91 \\
+8 head.\ $\times$ 6 speeds & 49\% & 0.74 & 87 / 73\% & 1.70 & 33\% & 0.81 & 97.8 / 62\% & 2.33 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
+The columns are: the share of coarse arcs that lift; the mean lower bound over
+the optimum; the share of viable states certified by the defect-inflated bound $U$
+and by the pessimistic bound; and the mean $U$ over the optimum where certified.
+
 \begin{itemize}
-\item \emph{Lower bounds.} As the defects fall, the lower bound tightens: $L/V$ rises
-  from 0.36 to 0.74. Per state, the gap $U - L$, which the defects determine, is
-  correlated with the true loss $V - L$ (correlation 0.49--0.58 for the mode
-  abstractions; 0.11 for the velocity-blind one, whose upper bound is loose
-  everywhere).
+\item \emph{Lower bounds.} Refining the abstraction lowers the defects and tightens
+  the lower bound. The share of lifting arcs alone does not rank every pair,
+  however. At $64^2$, 8 headings with 6 speed bins lift fewer arcs than 16 headings
+  with 3, yet bound better. Bins aligned with speed matter for braking, and the
+  share of lifting arcs does not see by how much the others fail. Per state, the
+  gap $U - L$, which the defects determine, is correlated with the true loss
+  $V - L$ for the mode abstractions (0.43--0.58). For the velocity-blind
+  abstraction it is not (0.11 and $-0.16$): its upper bound is loose everywhere.
 \item \emph{Certificates.} The defect-inflated certificate covers 87--100\% of the
-  viable states. The pessimistic certificate covers none, except with 6 speed bins,
-  where it covers 73\%. Where both certify, $U \le \Vm \circ \psi$, as
-  \cref{thm:sandwich} requires; the program asserts it at every state. A state is
-  left uncovered when every coarse walk from its block uses an arc whose defect
-  exceeds the horizon or is infinite (some state of the block cannot reach the
-  arc's head at all).
-\item \emph{Closed loops.} From 200 sampled certified states per abstraction we
-  ran the macro-step closed loop of \cref{thm:lyap-abstraction}(b). The upper
-  layer picks the next block from the inflated quotient, and the lower layer
-  follows it by a cheapest fine path. In every run, each macro-step cost at most
-  the inflated arc cost, the inflated value decreased by at least the cost paid,
-  and the loop reached the goal within its certified cost.
+  viable states. The pessimistic certificate covers none, except with 6 speed
+  bins, where it covers 62--73\%. Wherever the pessimistic certificate holds,
+  $U \le \Vm \circ \psi$, as \cref{thm:sandwich} requires; the program asserts it
+  at every state. A state is left uncovered when every coarse walk from its block
+  uses an arc whose defect exceeds the horizon or is infinite (some state of the
+  block cannot reach the arc's head at all).
+\item \emph{Closed loops.} From 200 ($32^2$) and 300 ($64^2$) sampled certified
+  states per abstraction we ran the macro-step closed loop of
+  \cref{thm:lyap-abstraction}(b). The upper layer picks the next block from the
+  inflated quotient, and the lower layer follows it by a cheapest fine path. In
+  every run, each macro-step cost at most the inflated arc cost, the inflated value
+  decreased by at least the cost paid, and the loop reached the goal within its
+  certified cost.
 \end{itemize}
 
 \paragraph{Corridors (the inclusion as a restriction map).}
@@ -1295,6 +1306,25 @@ coordination cost recovered, $N = 4$ / $N = 6$ & 60\% / 89\% & 100\% / 100\% \\
 
 At $N = 8$ no joint search finishes. The sandwich of the cover bound and a
 prioritized plan still certifies the plan within a few percent of optimal.
+
+\paragraph{The cover on a benchmark map.}
+We ran the same study on the MovingAI map room-32-32-4: 682 free cells in rooms
+joined by one-cell doors. Agents come from the map's random scenario files, with
+four instances per $N$, future-refined summaries, and \texttt{MAPF\_MAP} set in
+\texttt{tropical\_cover\_triangles.jl}.
+\begin{itemize}[nosep]
+\item All 101 edge stalks equal the exact pair delay.
+\item Interactions are sparse: there are 62 triangles over the twelve instances.
+  Adding exact triangles changes the cover bound on one instance only, and there the
+  triangle stalk recovers the change.
+\item At $N=4$ the edges alone close 83\% of the coordination gap, and the
+  triangle stalks close the rest. At $N=6$ the edges close all of it.
+\item At $N=8$ no joint search finishes. Still, on all four instances the cover
+  bound equals the cost of the prioritized plan. The sandwich therefore certifies
+  that plan as optimal with no joint search.
+\end{itemize}
+On this map almost all of the coupling lives on the 1-skeleton of the nerve:
+three-agent obstructions are rare.
 
 \paragraph{Joint defects of the summaries.}
 Do the summaries that fail have larger defects? The answer depends on which map is
