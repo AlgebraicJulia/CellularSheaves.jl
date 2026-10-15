@@ -49,6 +49,7 @@ const PAIR_CAP = parse(Int, get(ENV, "LAZY_PAIR_CAP", "2000000"))
 const TRI_CAP = parse(Int, get(ENV, "LAZY_TRI_CAP", "2000000"))
 const MAX_TRIANGLES = parse(Int, get(ENV, "LAZY_MAX_TRIANGLES", "20000"))
 const WITH_OPT = get(ENV, "LAZY_OPT", "0") == "1"
+const OPT_MAX_N = parse(Int, get(ENV, "LAZY_OPT_MAX_N", "1000000"))   # independence detection only up to this N
 const SLACK = 4.0
 const DEADLINE = Ref(Inf)                                        # time() at which a step runs out of the time limit
 past_deadline() = time() > DEADLINE[]
@@ -339,7 +340,7 @@ for k in SCENARIOS
         @assert cover_e <= cover_t + 1e-9                                 # by construction
         @assert decoupled + cover_t <= upper + 1e-9 "the cover bound must not exceed a feasible plan"
         opt = NaN
-        if WITH_OPT
+        if WITH_OPT && N <= OPT_MAX_N
             @assert failed || first_conflict(plans, collect(1:N)) === nothing "prioritized plans must be collision-free"
             pd, _, _ = independence_detection(agents, starts_all[1:N], m -> (c -> sum(agents[m[q]].d[c[q]] for q in eachindex(m))))
             opt = pd === nothing ? NaN : sum(plan_cost(agents[i], pd[i]) for i in 1:N)
