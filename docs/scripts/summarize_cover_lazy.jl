@@ -22,7 +22,8 @@ mapname = ARGS[1]
 limits = length(ARGS) >= 2 ? parse.(Float64, ARGS[2:end]) : [30.0, 300.0]
 const BIN_STARTS = parse.(Int, filter(!isempty, split(get(ENV, "SUMMARY_BINS", ""), ",")))   # e.g. 1,11,21,31,51
 dir = joinpath(@__DIR__, "..", "figures")
-files = filter(f -> startswith(f, "tropical_cover_lazy_$(mapname)_s") && endswith(f, ".csv"), readdir(dir))
+const TAG = get(ENV, "SUMMARY_TAG", "")                            # e.g. "_opt" for the runs with optima
+files = filter(f -> occursin(Regex("^tropical_cover_lazy_\\Q$(mapname)\\E_s\\d+-\\d+\\Q$(TAG)\\E\\.csv\$"), f), readdir(dir))
 rows = NamedTuple[]
 for f in files
     lines = readlines(joinpath(dir, f))
@@ -36,7 +37,7 @@ end
 scenarios = sort(unique(r.scenario for r in rows))
 @printf("%s: %d scenarios, %d instances\n", mapname, length(scenarios), length(rows))
 
-out = joinpath(dir, "tropical_cover_lazy_$(mapname)_summary.txt")
+out = joinpath(dir, "tropical_cover_lazy_$(mapname)$(TAG)_summary.txt")
 open(out, "w") do io
     for io2 in (stdout, io)
         @printf(io2, "%s: %d scenario files, %d instances\n", mapname, length(scenarios), length(rows))
@@ -74,6 +75,21 @@ open(out, "w") do io
                 100 * count(r -> r.certified, rs) / length(rs), cov(r -> r.bound_edges), cov(r -> r.bound_sheaf),
                 mean(r.triangles_evaluated for r in rs), mean(r.triangles_obstructed for r in rs),
                 100 * count(r -> r.packed_components > 0, rs) / length(rs)))
+        end
+        # Where the optimum is known (LAZY_OPT runs): the share of the true coordination
+        # cost, optimum − decoupled, that the covers recover, and how often the plan is optimal.
+        known = filter(r -> r.optimal isa Real && isfinite(r.optimal), within)
+        if !isempty(known)
+            push!(lines, "  with the optimum known:  instances  plan optimal  coordination cost recovered: edges / +triangles")
+            for (b, lo) in enumerate(starts)
+                hi = b < length(starts) ? starts[b + 1] - 1 : max(Nmax, lo)
+                rs = filter(r -> lo <= r.N <= hi, known)
+                isempty(rs) && continue
+                cost = sum(r.optimal - r.decoupled for r in rs)
+                rec(f) = cost == 0 ? "   –" : @sprintf("%3.0f%%", 100 * sum(f(r) - r.decoupled for r in rs) / cost)
+                push!(lines, @sprintf("  %4d–%-4d  %20d  %11.0f%%  %24s / %s", lo, hi, length(rs),
+                    100 * count(r -> r.upper == r.optimal, rs) / length(rs), rec(r -> r.bound_edges), rec(r -> r.bound_sheaf)))
+            end
         end
         push!(lines, @sprintf("  capped pair searches: %d; capped triangle searches: %d; skipped triangles: %d; packed components: %d (instances)",
             sum(r.pairs_capped for r in within), sum(r.triangles_capped for r in within),

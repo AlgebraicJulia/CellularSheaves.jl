@@ -34,7 +34,8 @@
 #   LAZY_SCENARIOS=1:25 LAZY_STEP=50 LAZY_MAX_N=1000 LAZY_TIME_LIMIT=300 \
 #   julia -t 16 --project=docs docs/scripts/tropical_cover_lazy.jl
 # With LAZY_OPT=1 (small maps), the optimum is also found by independence detection,
-# where it finishes, and the plans are checked collision-free.
+# where it finishes, and the plans are checked collision-free. LAZY_TAG is appended to
+# the output name (e.g. "_opt" for such a run).
 
 isempty(get(ENV, "MAPF_MAP", "")) && error("set MAPF_MAP to a MovingAI map")
 include(joinpath(@__DIR__, "tropical_multiagent_cover.jl"))
@@ -213,7 +214,7 @@ const H_MAP = maximum(c[2] for c in MAP.cells)
 println("MovingAI map $(basename(MAPF_MAP)): $(NF) free cells; scenarios $(SCENARIOS); N = $(FIRST):$(STEP):$(MAX_N) until $(TIME_LIMIT) s; $(Threads.nthreads()) threads")
 mkpath(OUT)
 const CSV = joinpath(OUT, "tropical_cover_lazy_" * splitext(basename(MAPF_MAP))[1] *
-    (length(SCENARIOS) == 25 ? "" : "_s$(first(SCENARIOS))-$(last(SCENARIOS))") * ".csv")
+    (length(SCENARIOS) == 25 ? "" : "_s$(first(SCENARIOS))-$(last(SCENARIOS))") * get(ENV, "LAZY_TAG", "") * ".csv")
 const HEADER = "map,scenario,N,seconds,pairs,pairs_positive,pairs_capped,pair_expanded_max,triangles,triangles_evaluated,triangles_skipped,triangles_positive,triangles_obstructed,triangles_capped,largest_component,packed_components,decoupled,bound_edges,bound_sheaf,upper,optimal,certified"
 write(CSV, HEADER * "\n")
 rows = NamedTuple[]
