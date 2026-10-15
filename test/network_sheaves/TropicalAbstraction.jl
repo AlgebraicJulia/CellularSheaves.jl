@@ -467,4 +467,108 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
     @test_throws ArgumentError Abstraction(W, space[1][1]; steps = 0)
     @test_throws ArgumentError Abstraction(W, GraphHomomorphism([1, 2], 2))         # ψ must map the states of W
     @test_throws ArgumentError shortest_path(W, sources[1], goal; heuristic = zeros(3))
+
+    @testset "lifting_defect" begin
+        # Dense references: all-pairs distances and the defect of every quotient arc.
+        function floyd(W)
+            n = size(W, 1)
+            d = fill(Inf, n, n)
+            for (x, y, c) in zip(findnz(W)...)
+                d[x, y] = min(d[x, y], c)
+            end
+            for i in 1:n
+                d[i, i] = 0.0
+            end
+            for k in 1:n, i in 1:n, j in 1:n
+                d[i, j] = min(d[i, j], d[i, k] + d[k, j])
+            end
+            return d
+        end
+        function dense_defect(W, ψ)
+            d = floyd(W)
+            Wq = quotient_graph(W, ψ)
+            I, J, V = findnz(Wq)
+            ε = [maximum(minimum(d[x, y] for y in findall(==(C), ψ.vertex_map)) for x in findall(==(B), ψ.vertex_map)) - c
+                 for (B, C, c) in zip(I, J, V)]
+            return I, J, max.(ε, 0.0)
+        end
+        function random_cost_graph(rng; zero_cycles = false)
+            n = rand(rng, 6:20)
+            m = rand(rng, 2:max(2, n ÷ 2))
+            labels = [rand(rng, 1:m) for _ in 1:n]
+            labels[1:m] .= 1:m
+            r, c, v = Int[], Int[], Float64[]
+            for x in 1:n, y in 1:n
+                x != y && rand(rng) < 0.3 && (push!(r, x); push!(c, y); push!(v, rand(rng, 1:4)))
+            end
+            if zero_cycles                                    # each block a zero-cost cycle
+                for B in 1:m
+                    s = findall(==(B), labels)
+                    length(s) > 1 || continue
+                    for (i, x) in enumerate(s)
+                        push!(r, x); push!(c, s[mod1(i + 1, length(s))]); push!(v, 0.0)
+                    end
+                end
+            end
+            return sparse(r, c, v, n, n, min), GraphHomomorphism(labels, m)
+        end
+
+        # The line 1 → 2 → 3 → 4 with blocks {1,2}, {3,4}: state 1 needs 2 to reach the arc's head
+        W = sparse([1, 2, 3], [2, 3, 4], [1.0, 1.0, 1.0], 4, 4)
+        ψ = GraphHomomorphism([1, 1, 2, 2], 2)
+        @test lifting_defect(W, ψ)[1, 2] == 1.0
+        @test lifting_defect(W, ψ; scope = :global)[1, 2] == 1.0
+        # In the gauge of the cost-to-go every arc toward the goal costs 0, and the arc lifts
+        V = cost_to_go(W, [4])
+        Wg = sparse([1, 2, 3], [2, 3, 4], [1.0 + V[2] - V[1], 1.0 + V[3] - V[2], 1.0 + V[4] - V[3]], 4, 4)
+        @test nnz(lifting_defect(Wg, ψ)) == 1 && all(iszero, nonzeros(lifting_defect(Wg, ψ)))
+        @test_throws ArgumentError lifting_defect(W, ψ; scope = :nowhere)
+
+        rng = MersenneTwister(19)
+        for trial in 1:60
+            W, ψ = random_cost_graph(rng; zero_cycles = isodd(trial))
+            εg, εp = lifting_defect(W, ψ; scope = :global), lifting_defect(W, ψ)
+            I, J, εref = dense_defect(W, ψ)
+            @test findnz(εg)[1:2] == (I, J) == findnz(εp)[1:2]
+            @test nonzeros(εg) ≈ εref
+            @test all(nonzeros(εp) .>= nonzeros(εg) .- 1e-12)
+            # a horizon keeps the defects up to it and reports the others as ∞
+            εh = lifting_defect(W, ψ; scope = :global, horizon = 1.0)
+            @test all(isinf(h) ? g > 1.0 : h == g for (h, g) in zip(nonzeros(εh), nonzeros(εg)))
+            # zero defect on every arc ⇔ the coarse bound is exact for every one-block target
+            exact = all(1:ψ.n_target) do C
+                targets = findall(==(C), ψ.vertex_map)
+                isequal(lower_bound(Abstraction(W, ψ), targets), cost_to_go(W, targets))
+            end
+            @test exact == all(iszero, nonzeros(εg))
+            # the sandwich: lower bound ≤ cost-to-go ≤ defect-inflated quotient ≤ pessimistic quotient
+            C = rand(rng, 1:ψ.n_target)
+            targets = findall(==(C), ψ.vertex_map)
+            Vf = cost_to_go(W, targets)
+            Wq = quotient_graph(W, ψ)
+            Iq, Jq, Vq = findnz(Wq)                               # rebuild: sparse + would drop zero-cost arcs
+            up = cost_to_go(sparse(Iq, Jq, Vq .+ nonzeros(εp), size(Wq)...), [C])[ψ.vertex_map]
+            must = cost_to_go(robust_quotient(W, ψ), [C])[ψ.vertex_map]
+            @test all(lower_bound(Abstraction(W, ψ), targets) .<= Vf .+ 1e-9)
+            @test all(Vf .<= up .+ 1e-9)
+            @test all(up .<= must .+ 1e-9)
+        end
+
+        # Unit costs: a stable partition has zero defect
+        n = 6
+        L = LinearIndices((n, n))
+        r, c = Int[], Int[]
+        for x in 1:n, y in 1:n, (dx, dy) in ((1, 0), (-1, 0), (0, 1), (0, -1))
+            (1 <= x + dx <= n && 1 <= y + dy <= n) && (push!(r, L[x, y]); push!(c, L[x + dx, y + dy]))
+        end
+        Wgrid = sparse(r, c, ones(length(r)), n^2, n^2)
+        blocks = GraphHomomorphism([(x - 1) ÷ 2 + 3 * ((y - 1) ÷ 2) + 1 for y in 1:n for x in 1:n], 9)   # 2×2 blocks
+        ψs = stable_refinement(Wgrid, blocks)
+        @test all(iszero, nonzeros(lifting_defect(Wgrid, ψs)))
+
+        # Forgetting velocity on a small double-integrator lattice: some arcs do not lift
+        Wdi, points = double_integrator_lattice(5, 2, (qx, qy) -> false)
+        εdi = lifting_defect(Wdi, projection_homomorphism(points, (1, 2)))
+        @test maximum(nonzeros(εdi)) > 0
+    end
 end

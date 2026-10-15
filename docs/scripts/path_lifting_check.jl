@@ -9,6 +9,11 @@
 #   (4) ε = 0 on every arc between distinct blocks ⇔ V_ψ ∘ ψ = V for every target
 #       that is one block (and then for every terminal cost constant on blocks)
 #   (5) the local defect, from paths inside B ∪ C only, bounds ε and keeps (2)
+#   (6) two-sided: the worst loss over one-block targets at a block B is at least
+#       max_C ε(B, C) and at most max_C (V^{+ε}_C(B) − V_ψ,C(B))
+#   (7) optimality: h(B, C) = max_{x ∈ B} d(x, C) (all pairs) is a sound upper
+#       weighting (V ≤ V_h ∘ ψ for one-block targets), h ≤ W_ψ + ε on the arcs of
+#       W_ψ, and lowering any finite entry of h makes it unsound
 #
 # Run: julia docs/scripts/path_lifting_check.jl
 using Random
@@ -86,7 +91,8 @@ function random_case(rng; zero_internal::Bool)
 end
 
 function check(rng, trials)
-    counts = Dict(:lower => 0, :lift => 0, :must => 0, :exact_iff => 0, :local => 0, :zero_defect_cases => 0)
+    counts = Dict(:lower => 0, :lift => 0, :must => 0, :exact_iff => 0, :local => 0, :zero_defect_cases => 0,
+                  :two_sided => 0, :optimal => 0)
     tol = 1e-9
     for t in 1:trials
         W, ψ, m = random_case(rng; zero_internal = t % 3 == 0)
@@ -144,12 +150,51 @@ function check(rng, trials)
         end
         Vloc = ctg(floyd(Wq .+ εloc), bq .+ εterm)
         counts[:local] += all(εloc .+ tol .>= ε) && all(V[x] <= Vloc[ψ[x]] + tol for x in 1:n)
+
+        # (6) two-sided bound on the worst loss over one-block targets
+        dq = floyd(Wq)
+        dqε = floyd(Wq .+ ε)
+        ok6 = true
+        for B in 1:m
+            loss = -INF
+            upper = -INF
+            for C in 1:m
+                C == B && continue
+                for x in bl[B]
+                    dxC = minimum(d[x, y] for y in bl[C])
+                    (isinf(dxC) && isinf(dq[B, C])) && continue
+                    loss = max(loss, dxC - dq[B, C])
+                end
+                isinf(dq[B, C]) || (upper = max(upper, dqε[B, C] - dq[B, C]))
+            end
+            lower = maximum((ε[B, C] for C in 1:m if C != B && isfinite(Wq[B, C])); init = -INF)
+            ok6 &= (loss >= lower - tol) && (loss <= upper + tol || isinf(upper) || loss == -INF)
+        end
+        counts[:two_sided] += ok6
+
+        # (7) the Hausdorff weighting h is the least sound upper weighting
+        h = fill(INF, m, m)
+        for B in 1:m, C in 1:m
+            B == C && continue
+            h[B, C] = maximum(minimum(d[x, y] for y in bl[C]) for x in bl[B])
+        end
+        dh = floyd(h)
+        ok7 = all(all(minimum(d[x, y] for y in bl[C]) <= dh[ψ[x], C] + tol for x in 1:n) for C in 1:m)
+        ok7 &= all(h[B, C] <= Wq[B, C] + ε[B, C] + tol for B in 1:m, C in 1:m if B != C && isfinite(Wq[B, C]))
+        finite = [(B, C) for B in 1:m, C in 1:m if B != C && isfinite(h[B, C])]
+        if !isempty(finite)
+            (B, C) = rand(rng, finite)
+            h2 = copy(h); h2[B, C] -= 0.5
+            dh2 = floyd(h2)
+            ok7 &= any(minimum(d[x, y] for y in bl[C]) > dh2[B, C] + tol for x in bl[B])
+        end
+        counts[:optimal] += ok7
     end
     return counts
 end
 
 counts = check(MersenneTwister(2026), 3000)
-for k in (:lower, :lift, :must, :exact_iff, :local)
+for k in (:lower, :lift, :must, :exact_iff, :local, :two_sided, :optimal)
     println(rpad(string(k), 12), counts[k], " / 3000")
 end
 println("cases with zero defect on every arc: ", counts[:zero_defect_cases])

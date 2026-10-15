@@ -71,7 +71,7 @@ export tropical_pullback, tropical_pushforward, quotient_graph, minplus_closure,
 tensor_product, reeb_arcs, schur_complement, Overlay, overlay_path, maxmin_closure, reach_avoid,
     projection_homomorphism, LayeredPlanner, plan_route, corridor, layered_path,
     intertwines, TruncatedPushforward, coarsen, refine, coarsening_matrix, refinement_matrix,
-    robust_quotient, upper_bound, is_control_lyapunov, greedy_policy, is_lyapunov, corridor_certificate, certified_path
+    robust_quotient, lifting_defect, upper_bound, is_control_lyapunov, greedy_policy, is_lyapunov, corridor_certificate, certified_path
 
 using ArgCheck: @argcheck
 using SparseArrays
@@ -1121,6 +1121,134 @@ function robust_quotient(W::SparseMatrixCSC{T}, μ::GraphHomomorphism) where {T<
     end
     keys_ = [k for (k, n) in count if n == blocksize[k[1]]]
     return sparse(first.(keys_), last.(keys_), [worst[k] for k in keys_], nc, nc)
+end
+
+"""
+    lifting_defect(W, ψ; scope = :pair, horizon = Inf) -> SparseMatrixCSC{Float64,Int}
+
+The *lifting defect* of the abstraction `ψ` of the cost graph `W` (`W[x, y]` the
+cost of the arc ``x → y``). For every arc ``B → C`` of the optimistic quotient
+[`quotient_graph`](@ref)`(W, ψ)` (between distinct blocks) it records how much
+more than the coarse arc's cost the worst state of ``B`` must pay to reach ``C``:
+
+```math
+ε(B, C) = \\max_{x ∈ B} \\big( d(x, C) − W_ψ(B, C) \\big)^+ ,
+```
+
+with ``d(x, C)`` the cheapest fine path from ``x`` into ``C``.
+
+A coarse arc *lifts* when its defect is zero: every state of its source block can
+follow it at no extra cost. If every arc lifts, the pulled-back coarse cost-to-go
+([`lower_bound`](@ref)) is exact for every target that is a union of blocks. In
+general the defect is a lower bound on the worst error of that bound, and adding
+the defects to the quotient's arc costs gives an *upper* bound on the fine
+cost-to-go that is never worse than the pessimistic bound of
+[`robust_quotient`](@ref) (the path-lifting theorem of `docs/papers/path-lifting`).
+The defect quantifies the classical lifting conditions: on unit-cost arcs a
+partition that is stable in the sense of Paige & Tarjan (1987)
+([`stable_refinement`](@ref)) has zero defect.
+
+Every value returned is an *upper* bound on the defect, so the upper bound above
+stays sound whatever the scope:
+
+- `scope = :pair` searches only paths inside the blocks ``B ∪ C``: local and cheap
+  (one search of two blocks per coarse arc), but too local for dynamics whose
+  lifts pass through neighbouring blocks (a double integrator braking first).
+- `scope = :global` searches paths through the whole graph, one reverse search per
+  head block ``C``, run in parallel over Julia's threads. With a finite `horizon`
+  each search stops at cost ``\\max_B W_ψ(B, C) + `` `horizon`: defects up to the
+  horizon are exact, larger ones are reported as ``∞``. With `horizon = Inf` the
+  defect is exact.
+
+An infinite entry means some state of ``B`` cannot reach ``C`` within the scope.
+The result has the sparsity pattern of the quotient's arcs; stored zeros are arcs
+that lift.
+"""
+function lifting_defect(W::SparseMatrixCSC, ψ::GraphHomomorphism; scope::Symbol = :pair, horizon::Real = Inf)
+    _check_costs(W)
+    @argcheck size(W, 1) == length(ψ.vertex_map) "ψ must map the states of W"
+    @argcheck scope in (:pair, :global) "scope must be :pair or :global"
+    @argcheck horizon >= 0 "the horizon must be nonnegative"
+    Wq = quotient_graph(W, ψ)
+    label = ψ.vertex_map
+    members = [Int[] for _ in 1:ψ.n_target]
+    for (x, b) in enumerate(label)
+        push!(members[b], x)
+    end
+    I, J, Vals = findnz(Wq)
+    out = zeros(Float64, length(I))
+    N = size(W, 1)
+    if scope === :pair
+        S = _DefectSearch(N)
+        for k in eachindex(I)
+            B, C = I[k], J[k]
+            _defect_search!(S, W, members[C], x -> (label[x] == B || label[x] == C), Inf)
+            out[k] = max(0.0, maximum(S.dist[x] for x in members[B]) - Vals[k])
+        end
+    else
+        byhead = Dict{Int,Vector{Int}}()
+        for (k, C) in enumerate(J)
+            push!(get!(byhead, C, Int[]), k)
+        end
+        heads = collect(keys(byhead))
+        chunks = collect(Iterators.partition(heads, max(1, cld(length(heads), 4 * Threads.nthreads()))))
+        Threads.@threads for chunk in chunks
+            S = _DefectSearch(N)
+            for C in chunk
+                ks = byhead[C]
+                limit = maximum(Vals[k] for k in ks) + horizon
+                _defect_search!(S, W, members[C], x -> true, limit)
+                for k in ks
+                    out[k] = max(0.0, maximum(S.dist[x] for x in members[I[k]]) - Vals[k])
+                end
+            end
+        end
+    end
+    return SparseMatrixCSC{Float64,Int}(sparse(I, J, out, ψ.n_target, ψ.n_target, max))
+end
+
+# Buffers for the reverse searches of `lifting_defect`, reset through `touched`.
+struct _DefectSearch
+    dist::Vector{Float64}
+    settled::BitVector
+    touched::Vector{Int}
+    heap::Vector{Tuple{Float64,Int}}
+end
+_DefectSearch(N) = _DefectSearch(fill(Inf, N), falses(N), Int[], Tuple{Float64,Int}[])
+
+# Reverse multi-source Dijkstra from `sources` along in-arcs (columns of W), entering
+# only states with `allowed(x)` and settling no state beyond `limit`; states beyond
+# the limit keep the distance ∞, so every distance it leaves is an upper bound.
+function _defect_search!(S::_DefectSearch, W::SparseMatrixCSC, sources, allowed, limit)
+    for x in S.touched
+        S.dist[x] = Inf
+        S.settled[x] = false
+    end
+    empty!(S.touched)
+    empty!(S.heap)
+    for y in sources
+        S.dist[y] = 0.0
+        push!(S.touched, y)
+        _push!(S.heap, (0.0, y))
+    end
+    rows, vals = rowvals(W), nonzeros(W)
+    while !isempty(S.heap)
+        dy, y = _pop!(S.heap)
+        S.settled[y] && continue
+        S.settled[y] = true
+        for k in nzrange(W, y)
+            x = rows[k]
+            allowed(x) || continue
+            d = dy + vals[k]
+            d <= limit || continue
+            if d < S.dist[x]
+                isinf(S.dist[x]) && push!(S.touched, x)
+                S.dist[x] = d
+                _push!(S.heap, (d, x))
+            end
+        end
+    end
+    return S
 end
 
 """
