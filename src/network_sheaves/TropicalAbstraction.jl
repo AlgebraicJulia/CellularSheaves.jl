@@ -1146,7 +1146,7 @@ cost-to-go that is never worse than the pessimistic bound of
 [`robust_quotient`](@ref) (the path-lifting theorem of `docs/papers/path-lifting`).
 The defect quantifies the classical lifting conditions: on unit-cost arcs a
 partition that is stable in the sense of Paige & Tarjan (1987)
-([`stable_refinement`](@ref)) has zero defect.
+([`stable_refinement`](@ref CellularSheaves.NetworkSheaves.TropicalCovers.stable_refinement)) has zero defect.
 
 Every value returned is an *upper* bound on the defect, so the upper bound above
 stays sound whatever the scope:

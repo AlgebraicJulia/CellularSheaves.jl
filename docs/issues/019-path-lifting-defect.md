@@ -207,7 +207,7 @@ dependencies.
 
 ## Verification Checklist
 
-- [ ] `lifting_defect` exported from `TropicalAbstraction` (done); docstring renders and cross-references resolve (docs not yet built).
+- [x] `lifting_defect` exported from `TropicalAbstraction`; the docstring renders on the TropicalAbstraction API page (`docs/src/api/grid_schwarz.md`) and its four cross-references resolve (full docs build, all literate examples executed). `stable_refinement` lives in `TropicalCovers`, so its reference is module-qualified.
 - [x] The `:global` defect matches the dense reference on random graphs; `:pair` is never below it.
 - [x] Zero defect ⇔ `lower_bound` exact on every single-block target (both directions tested).
 - [x] The sandwich `lower_bound ≤ cost_to_go ≤ inflated ≤ robust` holds on random graphs.
