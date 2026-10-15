@@ -1308,31 +1308,64 @@ coordination cost recovered, $N = 4$ / $N = 6$ & 60\% / 89\% & 100\% / 100\% \\
 At $N = 8$ no joint search finishes. The sandwich of the cover bound and a
 prioritized plan still certifies the plan within a few percent of optimal.
 
-\paragraph{The cover on a benchmark map.}
-We ran the same study on the MovingAI map room-32-32-4: 682 free cells in rooms
-joined by one-cell doors. Agents come from the map's random scenario files, with
-four instances per $N$, future-refined summaries, and \texttt{MAPF\_MAP} set in
-\texttt{tropical\_cover\_triangles.jl}.
-\begin{itemize}[nosep]
-\item All 101 edge stalks equal the exact pair delay.
-\item Interactions are sparse: there are 62 triangles over the twelve instances.
-  Adding exact triangles changes the cover bound on one instance only, and there the
-  triangle stalk recovers the change.
-\item At $N=4$ the edges alone close 83\% of the coordination gap, and the
-  triangle stalks close the rest. At $N=6$ the edges close all of it.
-\item At $N=8$ no joint search finishes. Still, on all four instances the cover
-  bound equals the cost of the prioritized plan. The sandwich therefore certifies
-  that plan as optimal with no joint search.
-\end{itemize}
-On this map almost all of the coupling lives on the 1-skeleton of the nerve:
-three-agent obstructions are rare.
+\paragraph{The cover on a benchmark map, under the benchmark protocol.}
+We follow the protocol of the MAPF benchmark~\cite{stern2019}. Each of the 25
+official random scenario files of a map lists start--goal pairs, and the instance
+with $N$ agents uses the first $N$ of them. $N$ grows one agent at a time until the
+method stops within a time limit. Stern et al.\ used 30~s. We also report 300~s, and
+the time of an instance is the time to solve it from scratch. At these sizes no
+stalk is tabulated. Each edge and triangle value is the stalk's value at the
+instance's start, computed exactly when needed by a joint A$^*$ search
+(\texttt{tropical\_cover\_lazy.jl}). On twelve earlier room-32-32-4 instances whose
+stalks were tabulated, it reproduces the tabulated exact cover. The upper bound is prioritized
+planning in the scenario's order, and an instance is \emph{certified} when the cover
+bound meets the plan. A group of more than 16 interacting agents is outside the
+exact cover search. There the bound falls back to a packing of disjoint simplices,
+which is weaker but still sound.
 
-We also ran random-32-32-10 (922 free cells, scattered obstacles), which does not
-test the cover. On all twelve of its instances the decoupled bound already equals
-the cost of the prioritized plan, so the agents need no coordination. Every edge
-stalk is still exact there (144 of 144), and no triangle changes the bound. With
-random scenario agents, coordination cost depends on the map: room-like maps with
-narrow doors produce it, and open maps with scattered obstacles mostly do not.
+On room-32-32-4 (682 cells, 25 scenarios, 1199 instances), the outcomes, binned by
+$N$ within 300~s, are:
+
+\begin{center}
+\small
+\begin{tabular}{lccccc}
+\toprule
+$N$ & instances & certified & gap closed: edges / + triangles & obstructed triangles & packed \\
+\midrule
+1--10  & 225 & 72\% & 48\% / 54\% & 0.2 & 0\% \\
+11--20 & 242 & 8\%  & 30\% / 36\% & 1.6 & 18\% \\
+21--30 & 210 & 0\%  & 26\% / 32\% & 6.6 & 94\% \\
+31--50 & 283 & 0\%  & 20\% / 26\% & 35 & 100\% \\
+51--87 & 214 & 0\%  & 14\% / 19\% & 144 & 100\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent The \emph{gap} is the plan's cost minus the decoupled bound, which
+overstates the coordination cost by the plan's suboptimality. ``Obstructed'' is the
+mean number of triangles per instance with $o(\sigma) > 0$, and ``packed'' the share of
+instances with a component beyond the exact cover search (summarized by
+\texttt{summarize\_cover\_lazy.jl}).
+\begin{itemize}[nosep]
+\item Prioritized planning finds plans up to $N = 43$ in the median scenario
+  within 30~s (14--62), and up to $N = 47$ within 300~s (14--87).
+\item Certification stops early: in the median scenario every instance is certified
+  optimal up to $N = 8$ (0--15). The same limit holds at 30~s and at 300~s, so it
+  comes from the bound, not from time.
+\item Triangles add a consistent 5--6 points of the gap at every size. The number
+  of obstructed triangles grows quickly with $N$. Three-agent obstructions are rare
+  for a few agents and common in crowded instances.
+\item From $N \approx 20$ almost every instance has a component beyond the exact cover
+  search, and the packing fallback is a large part of the decline. An exact cover
+  solver for large components is the first thing to improve.
+\end{itemize}
+The earlier picture, from four instances of one scenario at $N = 4, 6, 8$, was too
+favourable: under the protocol, the cover certifies small instances and only part
+of the gap of crowded ones.
+
+\textbf{[Pending: the same protocol on random-32-32-10, and on two $512^2$ Warcraft~III
+maps (losttemple, tranquilpaths) with scenarios generated by the benchmark's
+procedure (\texttt{make\_mapf\_scenarios.jl}), N in steps of 50.]}
 
 \paragraph{Joint defects of the summaries.}
 Do the summaries that fail have larger defects? The answer depends on which map is
