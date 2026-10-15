@@ -33,8 +33,8 @@
 \newcommand{\Vm}{V^{\mathrm{must}}}
 \newcommand{\tgt}{\star}
 
-\title{Path Lifting for Hierarchical Planning:\\
-Cost-Enriched Path Categories, Abstractions, and Sheaves on Covers}
+\title{Path Lifting:\\ Exact Abstractions, Error Bounds and Lyapunov Certificates\\
+for Hierarchical Control, through Cost-Enriched Categories}
 \author{Draft --- CellularSheaves.jl working paper}
 \date{\today}
 
@@ -42,131 +42,182 @@ Cost-Enriched Path Categories, Abstractions, and Sheaves on Covers}
 \maketitle
 
 \begin{abstract}
-We give a categorical account of hierarchical planning for deterministic, finite
-control models such as the double integrator on a lattice. Three layers fit
-together.
+Hierarchical controllers plan on an abstraction and act on the full system:
 \begin{itemize}[nosep]
-\item \emph{Dynamics.} The state graph generates a category of paths. Optimal
-  costs enrich it in Lawvere's quantale of nonnegative reals, so the cost-to-go is
-  a hom-object into a target and its subsolutions are exactly the presheaves.
-\item \emph{Abstractions.} An abstraction is a map of cost graphs. Pulling back
-  along it is sound for every abstraction: the coarse cost-to-go is always a lower
-  bound.
-\item \emph{Decompositions.} Covers of the state space, and covers of a set of
-  agents, carry cellular sheaves of lattices on their nerves. The restriction maps
-  are pullbacks along maps of cost graphs.
+\item a planner routes over coarse cells;
+\item a low-level controller follows the route;
+\item a certificate should say how good the result is.
 \end{itemize}
-Our main result is a \emph{path-lifting theorem}. It measures how tight an
-abstraction is by its \emph{lifting defect}: how much more than a coarse arc's
-cost a state of the arc's source block must pay to follow it.
+For deterministic finite control models, such as a double integrator on a lattice
+or several agents that must not collide, we answer three questions about such
+abstractions.
 \begin{itemize}[nosep]
-\item Zero defect on every coarse arc is equivalent to exactness of the coarse
-  bound, for every target that is a union of blocks.
-\item In general, the quotient with defect-inflated arc costs gives an upper bound
-  that is never worse than the classical pessimistic (``must'') abstraction.
+\item \emph{When is an abstraction exact?} Exactly when every coarse move can be
+  followed, at no more than its cost, from every state it summarizes. We call the
+  shortfall the \emph{lifting defect}.
+\item \emph{How much does it lose?} The defect bounds the worst-case error of the
+  abstraction's lower bound from both sides. Adding the defects to the coarse costs
+  gives an upper bound. That bound is never worse than the classical pessimistic
+  (``must'') abstraction, and it is the best upper bound computable from one
+  number per coarse arc up to a local approximation.
+\item \emph{What can be certified?} The upper bound is a Lyapunov function for a
+  layered closed loop, and the lower bound certifies its gain, without computing
+  the optimum.
 \end{itemize}
-Within the categorical Lyapunov theory of Ames, Moeller and Tabuada, the same
-bounds are Lyapunov certificates. The path category is a setting for stability
-whose norm is the optimal cost-to-go. The two sides of the sandwich are the two
-class-$\mathcal K$ bounds of a Lyapunov morphism, and the defect-inflated
-quotient certifies a layered controller.
-Experiments on a double integrator with $2.8$ million lattice states and on
-cooperative multi-agent planning show the theorem's message in practice. The
-natural maps are loose exactly where dynamics and constraints obstruct path
-lifting: inclusions, forgetting velocity, position blocks, level sets. The maps
-that work are the ones that lift better: velocity modes, Reeb arcs of the other
-agents' value functions, and summaries refined by their reachable futures.
+The proofs are short because the right language makes them so. The state graph
+generates a category enriched in Lawvere's quantale of costs. Cost-to-go
+functions are presheaves, abstractions are enriched functors, and exactness is a
+Beck--Chevalley-type condition: the abstraction maps forward balls onto forward
+balls. The best upper abstraction is a Hausdorff quotient, and decompositions are
+sheaves of lattices on nerves of covers. The Lyapunov statements are instances of
+the categorical Lyapunov theory of Ames, Moeller and Tabuada, with the cost-to-go
+as the norm.
+
+Experiments use a double integrator with up to $2.8$ million lattice states,
+benchmark maps from the MovingAI suite, and cooperative multi-agent planning.
+\begin{itemize}[nosep]
+\item As the defect falls, the lower bound tightens and searches shrink.
+\item The defect-inflated certificate covers most states where the pessimistic one
+  covers none.
+\item The natural abstractions (forgetting velocity, position blocks, level sets
+  of another agent's value) fail exactly where dynamics or collisions prevent path
+  lifting.
+\end{itemize}
 \end{abstract}
 
 \section{Introduction}
 
-Hierarchical planners solve a small problem to guide a large one. Hierarchical
-A$^*$ searches the abstract space for an admissible heuristic~\cite{holte1996}.
-Symbolic control synthesizes a controller on an abstraction and refines
-it~\cite{tabuada2009,reissig2017}. Multi-agent planners bound the joint cost from
-pairs~\cite{li2019}. In each case two questions arise.
+Hierarchical planning and abstraction-based control share one pattern. A large
+system is replaced by a small one, the small one is solved, and the solution is
+carried back. The pattern appears throughout the literature:
 \begin{itemize}[nosep]
-\item Is the abstraction \emph{sound}, giving a valid bound or a valid refinement?
-\item Is it \emph{tight}?
+\item Hierarchical A$^*$ uses distances in an abstract space as an admissible
+  heuristic~\cite{holte1996}, and pattern databases tabulate
+  them~\cite{culberson1998}.
+\item Symbolic control synthesizes a controller on an abstraction and refines it
+  to the concrete system~\cite{tabuada2009,reissig2017}.
+\item Layered control architectures plan on a coarse model and track the plan with
+  a fast low-level controller~\cite{matni2024}.
+\item Multi-agent planners bound the joint cost from pairs of
+  agents~\cite{felner2018,li2019}.
 \end{itemize}
-Soundness has many proofs, one per construction. Tightness is usually measured
-only empirically.
+Two questions recur. Is the abstraction \emph{sound}, giving a valid bound,
+heuristic or refinement? And is it \emph{tight}? Soundness usually has a proof
+per construction. Tightness is usually measured only after the fact.
 
-This paper organizes both questions around one categorical picture and one
-theorem.
-
-\paragraph{Dynamics are enrichment.}
-A finite state graph generates its free category, whose morphisms are paths.
-Attaching nonnegative costs to arcs and keeping, for each pair of states, the
-cheapest path turns the hom-sets into hom-objects in Lawvere's quantale
-$([0,\infty], \ge, +, 0)$~\cite{lawvere1973}. The result is a generalized
-(asymmetric) metric space: the shortest-path quasi-metric. Adding a sink $\tgt$
-for the target, the cost-to-go is the hom-object $V(x) = \dd(x,\tgt)$. Its
-subsolutions are exactly the presheaves on this space (\cref{sec:enriched}).
-Solving for $V$ is computing a closure. This can be done by iteration, which is
-the harmonic flow of a Lawvere Laplacian~\cite{ghrist2025diffusion}, by label
-setting (Dijkstra, A$^*$), or by sparse elimination.
-
-\paragraph{Abstractions are maps.}
-A surjection $\psi$ of states onto blocks induces a quotient cost graph. It is the
-largest one for which $\psi$ does not increase any arc's cost. Pulling the
-quotient's cost-to-go back along $\psi$ is a lower bound for every $\psi$
-(\cref{sec:abstraction}). Soundness is therefore functorial and comes for free.
-
-\paragraph{Decompositions are sheaves.}
-A cover of the state space, or of a set of agents, has a nerve. Value functions on
-the pieces, with restriction maps given by pullback, form a cellular sheaf of
-complete lattices in the sense of Ghrist and Riess~\cite{ghrist2022}
-(\cref{sec:sheaves}). The canonical choice of restriction map is the inclusion of
-a piece into a larger one. Any other map of cost graphs is also allowed, and
-remains sound.
-
-\paragraph{Tightness is path lifting.}
-Our main result (\cref{sec:lifting}) characterizes when an abstraction is exact.
-It is exact exactly when every coarse arc can be followed, at no more than its
-cost, from \emph{every} state of its source block. The \emph{lifting defect}
-measures the failure, and it bounds the loss: inflating the coarse arc costs by
-their defects gives an upper bound on the true cost-to-go. This is the
-cost-enriched counterpart of path-lifting properties familiar from concurrency
-(open maps~\cite{joyal1996}) and from partition refinement (stable
-partitions~\cite{paige1987}). Here costs are kept, and a lift may take any number
-of steps.
-
-\paragraph{The finding.}
-Effective hierarchical planning for double integrators with obstacles, and for
-several agents that must avoid collisions, requires restriction and abstraction
-maps other than the obvious ones (\cref{sec:experiments}). The theorem says why.
-\begin{itemize}[nosep]
-\item Forgetting velocity cannot lift a coarse move from a state that is moving
-  the other way.
-\item Position blocks and level sets of another agent's value function cannot lift
-  across walls or through corridors.
+\paragraph{What we prove, in control terms.}
+Consider a deterministic system on a finite state set with nonnegative move
+costs, an optimal cost-to-go $V$ to a target, and an abstraction $\psi$ that maps
+states to coarse cells (blocks). The optimistic coarse problem gives a lower bound
+$V_\psi \circ \psi \le V$ (the classical admissible heuristic). Define the
+\emph{lifting defect} of a coarse move $B \to C$ as the worst excess, over the
+states of $B$, of the cost of reaching $C$ over the coarse move's cost.
+\begin{itemize}
+\item \emph{Exactness} (\cref{thm:exact}). The lower bound is exact for every
+  target made of whole blocks if and only if every defect is zero.
+\item \emph{Two-sided error bound} (\cref{thm:sandwich,thm:twosided}). The worst
+  error of the lower bound at a block is at least its largest defect. Adding the
+  defects to the coarse costs gives an upper bound $V \le V^{+\eps}_\psi \circ \psi$,
+  which is never worse than the pessimistic abstraction.
+\item \emph{Optimality} (\cref{thm:hausdorff}). The least upper bound obtainable
+  from one number per coarse move is the one-sided Hausdorff distance between
+  blocks. The defect-inflated costs are its local approximation, the pessimistic
+  costs its one-step approximation.
+\item \emph{Certificates} (\cref{prop:clf,thm:lyap-abstraction}). Any supersolution
+  with its greedy feedback is a Lyapunov function, and any lower bound certifies
+  its class-$\mathcal K$ gain. The defect-inflated bound certifies a layered
+  closed loop that follows coarse moves by local searches.
 \end{itemize}
-The maps that work, velocity modes, Reeb arcs and future-refined summaries, are
-those with smaller defects.
+All of this is computable. The library function \texttt{lifting\_defect} measures
+defects exactly or within a search horizon, and every value it reports is an upper
+bound on the defect, so every certificate built from it is sound.
+
+\paragraph{Why category theory.}
+The statements above are elementary once the right structure is named. That
+structure also predicts which abstractions will work.
+\begin{itemize}
+\item \emph{Dynamics are enrichment.} A finite state graph generates its free
+  category, whose morphisms are paths. Keeping the cheapest cost of each hom-set
+  enriches it in Lawvere's quantale $([0,\infty], \ge, +, 0)$~\cite{lawvere1973}.
+  The cost-to-go is a hom-object, and admissible heuristics are exactly presheaves
+  (\cref{sec:enriched}).
+\item \emph{Abstractions are maps.} An abstraction is an enriched functor, and
+  soundness is functoriality: pulling a presheaf back along any enriched functor
+  gives a presheaf (\cref{sec:abstraction}).
+\item \emph{Exactness is a commuting square.} Pulling back along $\psi$ and taking
+  distance-to-a-set commute exactly when $\psi$ maps forward balls onto forward
+  balls, a cost-enriched submetry~\cite{berestovskii2000}. The defect measures the
+  failure of the square (\cref{rem:bc}).
+\item \emph{The best upper abstraction is a Hausdorff quotient.} It comes from the
+  Hausdorff monad on Lawvere spaces~\cite{akhvlediani2010}.
+\item \emph{Certificates are Lyapunov morphisms.} The path category is a setting
+  for stability in the categorical Lyapunov theory of Ames, Moeller and
+  Tabuada~\cite{ames2025clt1}, with the cost-to-go as the norm
+  (\cref{sec:lyapunov}).
+\item \emph{Decompositions are sheaves.} Covers of the state space, or of a set of
+  agents, carry cellular sheaves of lattices~\cite{curry2014,ghrist2022} on their
+  nerves. Pullbacks along arbitrary maps of cost graphs are allowed as restriction
+  maps (\cref{sec:sheaves}).
+\end{itemize}
+
+\paragraph{What we find.}
+On a double integrator, forgetting velocity cannot lift a coarse move from a state
+moving the other way. Its defects are large and its bounds are poor. Velocity
+modes cut the defects, and the bounds and searches improve with them
+(\cref{sec:experiments}).
+
+For several agents, the summaries of another agent that fail are the ones whose
+\emph{joint} defects are large near the other agent. The defect has to be measured
+on the joint map, not on one agent's graph: on its own graph a level-set summary
+lifts almost perfectly.
+
+\paragraph{Reading guide.}
+\Cref{tab:dictionary} pairs each control notion with its categorical counterpart.
+A reader from control can follow the paper through the left column and the
+theorems, which are stated and proved in elementary terms. A reader from category
+theory will find the structural statements in the remarks.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{p{0.43\linewidth}p{0.49\linewidth}}
+\toprule
+control and planning & category theory \\
+\midrule
+state graph with move costs & free category on a graph, enriched by cheapest path: a Lawvere metric space $(X,\dd)$ \\
+cost-to-go to a target & representable presheaf $\dd(-,\tgt)$ \\
+subsolution, admissible heuristic & presheaf (an $\Lq$-functor $X^{\mathrm{op}} \to \Lq$) below the representable \\
+supersolution with greedy feedback & Lyapunov morphism~\cite{ames2025clt1} \\
+abstraction, aggregation & enriched functor $\psi$ (non-expansive map) \\
+optimistic (may) quotient & inf--inf quotient; pullback $E \dashv$ block minimum $P$ \\
+pessimistic (must) quotient & one-step sup--inf quotient \\
+best upper abstraction & Hausdorff quotient of the path category \\
+exact abstraction & forward submetry; a strictly commuting square \\
+lifting defect & failure of that square to commute \\
+elimination onto a separator, Kron reduction & full subcategory on the separator \\
+decomposition, cover & cellular sheaf of lattices on the nerve \\
+\bottomrule
+\end{tabular}
+\caption{A dictionary between the two languages of the paper.}
+\label{tab:dictionary}
+\end{table}
 
 \paragraph{Contributions.}
 \begin{enumerate}[nosep]
-\item A dictionary between finite deterministic optimal control and Lawvere-enriched
-  path categories. It covers presheaves as subsolutions, quotients as maps,
-  elimination as restriction to full subcategories, and fibres as distributors
-  (\cref{sec:enriched,sec:abstraction}).
-\item The path-lifting theorem: a sandwich bound and an exactness criterion
-  (\cref{thm:sandwich,thm:exact}), with locality and may/must corollaries.
-\item Lyapunov certificates in the categorical Lyapunov theory of Ames, Moeller
-  and Tabuada~\cite{ames2025clt1}. Supersolutions with greedy feedback are
-  Lyapunov morphisms whose class-$\mathcal K$ gains are certified by lower bounds,
-  and both quotients yield certificates (\cref{sec:lyapunov}).
-\item Sheaves of lattices on nerves of covers, with pullbacks along arbitrary maps
-  of cost graphs as restriction maps, and their use for multi-agent planning
-  (\cref{sec:sheaves}).
-\item An empirical study connecting the theorem to measured tightness on a
-  double-integrator lattice and on multi-agent problems (\cref{sec:experiments}).
+\item For control: a computable two-sided measure of an abstraction's quality, an
+  optimal upper abstraction, and certificates for layered closed loops
+  (\cref{sec:lifting,sec:lyapunov}).
+\item For category theory: an application of Lawvere metric spaces and the
+  Hausdorff monad to abstraction in control. In it, exactness is a submetry
+  condition, and decompositions are sheaves of lattices with pullbacks as
+  restrictions (\cref{sec:enriched,sec:abstraction,sec:sheaves}).
+\item Experiments measuring defects, bounds and certificates on a double integrator
+  and on multi-agent planning, including benchmark maps from the MovingAI
+  suite~\cite{sturtevant2012,stern2019} (\cref{sec:experiments}).
 \end{enumerate}
-All constructions are implemented in the Julia package
-\texttt{CellularSheaves.jl} (modules \texttt{TropicalAbstraction} and
-\texttt{TropicalCovers}). Every number we report is regenerated by a script in its
-\texttt{docs/scripts} directory.
+Everything is implemented in the Julia package \texttt{CellularSheaves.jl}
+(modules \texttt{TropicalAbstraction} and \texttt{TropicalCovers}). Every number
+we report is regenerated by a script in its \texttt{docs/scripts} directory.
 
 \section{Cost-enriched path categories}\label{sec:enriched}
 
@@ -909,6 +960,38 @@ edges alone it is the weighted dependency-graph heuristic of conflict-based
 search~\cite{li2019}, whose pair costs are solved exactly there and are
 pushforwards here.
 
+The 2-cells of the cover are needed exactly where the pairs disagree with the
+triple.
+
+\begin{definition}
+For a triangle $\sigma = \{a,b,c\}$ of the cover, let $c_E(\sigma)$ be the least total
+$x_a + x_b + x_c$ over nonnegative integers with $x_u + x_v \ge \Delta_{uv}$ on the
+three edges. The \emph{triangle obstruction} is $o(\sigma) = \Delta_\sigma - c_E(\sigma)$.
+\end{definition}
+
+\begin{proposition}\label{prop:obstruction}
+$o(\sigma) \ge 0$. If $o(\sigma) > 0$, the edge stalks admit a delay assignment
+on $\sigma$ with total $c_E(\sigma) < \Delta_\sigma$. So no bound that uses only
+the edges, whether by matching, vertex cover or any splitting of costs among
+edges, can certify the triple's optimum. The triangle's stalk can.
+\end{proposition}
+\begin{proof}
+The per-agent delays of an optimal triple plan satisfy every edge constraint, and
+they sum to $\Delta_\sigma$, so $\Delta_\sigma \ge c_E(\sigma)$. A minimizer of
+$c_E(\sigma)$ satisfies every edge constraint while summing to less than
+$\Delta_\sigma$. Any bound computed from the edge data alone must therefore stay
+at or below $c_E(\sigma)$ on $\sigma$.
+\end{proof}
+
+In the experiments, 14 triangles over the twelve instances have a triple delay
+above every one of their edges. All 14 have positive obstruction, with
+$o(\sigma)$ between 1 and 4, computed from the exact triple and pair delays that
+the study prints. The future-refined triangle stalks recover the triple optimum on
+13 of them. On every instance whose optimum is known, adding exact triangles closes
+the gap the edges leave (\cref{sec:experiments}). A cohomological reading, with $o$ as a 2-cochain whose
+nonvanishing obstructs gluing pair data into a global bound, is suggestive, but we
+have not developed it.
+
 \section{Experiments}\label{sec:experiments}
 
 All results come from scripts in \texttt{CellularSheaves.jl/docs/scripts}. The data
@@ -997,6 +1080,55 @@ certifies:
 \end{itemize}
 The lifted certificate of \cref{thm:lyap-abstraction}(b) relaxes exactly the
 one-step requirement. It has not yet been measured.
+
+\subsection{Benchmark maps and a standard baseline}\label{sec:baselines}
+To test against external maps and the standard heuristic, we place the lattice
+double integrator ($|v| \le 3$, 49 velocities per cell) on six maps of the MovingAI
+MAPF benchmark~\cite{stern2019,sturtevant2012}. Each map has 20 random queries
+between rest states (\texttt{tropical\_baselines.jl}).
+
+The baseline is the usual double-integrator heuristic: the larger of the two
+one-axis minimum times on an obstacle-free line. It is itself a pushforward, along
+the projection onto one axis, of a relaxed graph. Every planner is exact, and all
+return the same optimal costs.
+
+\begin{center}
+\small
+\begin{tabular}{lrrrrrr}
+\toprule
+map (viable states) & Dijkstra & kinematic & blind (0\%) & 8$\times$2 & 8$\times$3 & kin.\ $\vee$ 8$\times$3 \\
+\midrule
+random-32-32-20 (35k) & 8414 & 64 & 958 & 100 & 50 & 42 \\
+maze-32-32-4 (30k) & 8494 & 409 & 1478 & 288 & 164 & 161 \\
+room-32-32-4 (23k) & 4036 & 223 & 599 & 113 & 58 & 59 \\
+room-64-64-8 (130k) & 42816 & 1873 & 5366 & 1515 & 808 & 776 \\
+den312d (102k) & 32549 & 4396 & 3548 & 1017 & 592 & 574 \\
+warehouse-10-20-10-2-1 (204k) & 66799 & 2384 & 3978 & 636 & 406 & 345 \\
+\midrule
+arcs that lift & -- & -- & 0\% & 55--65\% & 69--79\% & -- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The table reports mean A$^*$ expansions per query. ``8$\times$2'' and ``8$\times$3''
+are 8 headings times 2 or 3 speed bins.
+\begin{itemize}[nosep]
+\item On every map the share of coarse arcs that lift orders the three abstractions
+  the same way as their search effort.
+\item The 25-mode abstraction expands 2.3--7.4 times fewer states than the
+  kinematic heuristic on five maps. On the map with scattered obstacles the two
+  are close (50 against 64).
+\item Taking the larger of the two heuristics helps a little more.
+\end{itemize}
+
+Wall-clock time is a different matter. At these sizes the abstraction is
+\emph{slower} per query: 14--24\,ms against 4--5\,ms on the larger maps. Each
+query solves the coarse problem for its goal, and that costs more than the
+expansions it saves. A stored all-pairs table (a pattern database) would remove
+this cost but needs memory quadratic in the number of coarse states.
+
+The point here is not speed. The defect predicts which abstraction gives the better
+bound, on maps we did not design.
 
 \subsection{Cooperative multi-agent planning}
 One planner controls all agents, and each agent pays for its steps until it rests
