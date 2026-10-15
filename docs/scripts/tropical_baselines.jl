@@ -15,7 +15,8 @@
 #
 #   julia -t 16 --project=docs docs/scripts/tropical_baselines.jl [vmax] [queries] [maps...]
 # Maps are read from $MOVINGAI_DIR (default ~/data/movingai), downloaded from
-# https://movingai.com/benchmarks/mapf/mapf-map.zip.
+# https://movingai.com/benchmarks/mapf/mapf-map.zip. Set $BASELINE_SCEN_DIR to take the
+# queries from the maps' MAPF scenarios, and $BASELINE_TAG to name the output.
 
 using CellularSheaves
 using SparseArrays
@@ -156,9 +157,22 @@ for name in maps
         push!(built, (aname, A, tb, count(iszero, e) / length(e)))
     end
 
-    # queries: start and goal at rest on free cells, goal reachable
+    # queries: start and goal at rest on free cells, goal reachable; from the map's
+    # first MAPF scenario when $BASELINE_SCEN_DIR is set (make_mapf_scenarios.jl)
     restv = filter(!iszero, newindex[rest])
     queries = Tuple{Int,Int,Int,Int}[]                             # (source, goal state, gx, gy)
+    scen = joinpath(get(ENV, "BASELINE_SCEN_DIR", ""), "$(name)-random-1.scen")
+    if haskey(ENV, "BASELINE_SCEN_DIR") && isfile(scen)
+        for l in readlines(scen)[2:end]
+            length(queries) == nq && break
+            f = split(l)
+            sx, sy, gx, gy = parse.(Int, f[5:8]) .+ 1
+            s, g = newindex[L[sx, sy, stop, stop]], newindex[L[gx, gy, stop, stop]]
+            (s != 0 && g != 0 && s != g && isfinite(cost_to_go(W, [g])[s])) || continue
+            push!(queries, (s, g, gx, gy))
+        end
+        println("queries: the first $(length(queries)) usable agents of $(basename(scen))")
+    end
     while length(queries) < nq
         s, g = rand(rng, restv), rand(rng, restv)
         s == g && continue
@@ -204,7 +218,7 @@ for name in maps
     end
 end
 
-open(joinpath(@__DIR__, "..", "figures", "tropical_baselines_v$(vmax).csv"), "w") do io
+open(joinpath(@__DIR__, "..", "figures", "tropical_baselines$(get(ENV, "BASELINE_TAG", ""))_v$(vmax).csv"), "w") do io
     println(io, "map,viable_states,method,lift_fraction,build_seconds,mean_expansions,mean_seconds_per_query")
     for r in results
         println(io, join(r, ","))
