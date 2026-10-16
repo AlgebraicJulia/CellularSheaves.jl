@@ -4,7 +4,7 @@
 The Hamilton–Jacobi–Bellman equation of a double integrator steering to a
 target, solved on a grid by policy iteration, with each policy evaluation
 solved by overlapping Schwarz domain decomposition on the overlap sheaf of the
-grid (see [`SchwarzMethods`](@ref CellularSheaves.NetworkSheaves.SchwarzMethods)).
+grid (see [`SchwarzMethods`](@ref "Schwarz Methods")).
 
 **The control problem.** One agent with position ``q \\in \\mathbb R^d`` and
 velocity ``v \\in \\mathbb R^d`` (``d = 1`` for one axis, ``d = 2`` for the

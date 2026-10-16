@@ -332,7 +332,7 @@ The coboundary ``\\delta : C^0 \\to C^1``, ``(\\delta x)_e = F_{u \\triangleleft
 for ``e = (u, v)`` in the edge order of the underlying graph, as a matrix-free
 `LinearOperator`. Its adjoint applies ``\\delta^\\mathsf{T}``. Only products with the
 restriction maps and their adjoints are used, so this works for maps given as
-[`FunctionRestriction`](@ref)s.
+[`FunctionRestriction`](@ref CellularSheaves.NetworkSheaves.RestrictionMaps.FunctionRestriction)s.
 """
 function coboundary_operator(s::EuclideanSheaf{T}) where T
     edge_list = collect(edges(s.underlying_graph))

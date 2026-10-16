@@ -2,7 +2,7 @@
     GridMultigrid
 
 Hierarchies of structured grids for multigrid solvers of the implicit stencil
-operators of [`GridSchwarz`](@ref CellularSheaves.NetworkSheaves.GridSchwarz),
+operators of [`GridSchwarz`](@ref "Grid Schwarz and Multigrid"),
 with the maps between levels written as a pushforward–pullback pair.
 
 **Coarsening.** Each dimension ``k`` of a grid is coarsened by a factor

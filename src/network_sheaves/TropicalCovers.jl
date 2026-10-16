@@ -30,7 +30,7 @@ When the contact relation is conservative (agents out of contact cannot collide 
 one move), the joint moves out of a fibre are independent for the agents out of
 contact, and the pushforward can be enumerated move by move without the joint graph
 ([`stalk_successors`](@ref)). Where every agent is out of contact this is the base
-change of [`tensor_product`](@ref) and [`quotient_graph`](@ref) to the product of
+change of [`tensor_product`](@ref CellularSheaves.NetworkSheaves.TropicalAbstraction.tensor_product) and [`quotient_graph`](@ref CellularSheaves.NetworkSheaves.TropicalAbstraction.quotient_graph) to the product of
 the agents' quotients.
 
 **Summaries should lift moves.** A pushforward lets each coarse step start from
