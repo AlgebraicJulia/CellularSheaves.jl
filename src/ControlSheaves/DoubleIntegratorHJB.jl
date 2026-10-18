@@ -90,10 +90,7 @@ export StateGrid, AbstractHJBProblem, HJBProblem, riccati_value_matrix, riccati_
     PolicyIteration, DirectPolicyEvaluation, KrylovPolicyEvaluation, SchwarzPolicyEvaluation, HJBSolution,
     KrylovMethod, GMRES, BiCGStab,
     Smoother, JacobiSmoother, GaussSeidelSmoother, SymmetricGaussSeidelSmoother,
-    BlockSymmetricGaussSeidelSmoother, RestrictedAdditiveSchwarzSmoother,
-    CoarseCorrection, AggregateCoarseCorrection, Multigrid, CoarseOperator, Rediscretization, GalerkinOperator,
-    CoarsestSolver, PathPackCoarsest, DenseCoarsest,
-    grid_partition, grid_subdomains, value_at, control_at, GridPolicyIteration
+    BlockSymmetricGaussSeidelSmoother, grid_partition, grid_subdomains, value_at, control_at
 
 # ===========================================================================
 # grid

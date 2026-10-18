@@ -29,6 +29,8 @@
 # A problem type subtypes AbstractHJBProblem; the methods below on the abstract
 # type say which of these it is missing.
 
+export RestrictedAdditiveSchwarzSmoother, GridPolicyIteration
+
 for hook in (:_state_grid, :_periodic, :_control_count, :_discount, :_kernel_model)
     @eval $hook(prob::AbstractHJBProblem) = throw(ArgumentError(
         string(typeof(prob), " does not implement ", $(QuoteNode(hook)), "; see AbstractHJBProblem")))

@@ -4,6 +4,9 @@
 # which is solved directly (dense LU, or PathPack's semiring LU with the
 # PATHPACK package extension). Included in DoubleIntegratorHJB.
 
+export CoarseCorrection, AggregateCoarseCorrection, Multigrid, CoarseOperator, Rediscretization, GalerkinOperator,
+    CoarsestSolver, PathPackCoarsest, DenseCoarsest
+
 """
     CoarseCorrection
 
