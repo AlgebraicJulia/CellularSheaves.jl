@@ -52,7 +52,7 @@
 ######################################################################
 
 using CellularSheaves.IPM
-using CellularSheaves.BlockSparseArrays: colrange, rowrange, blocksparse, block, nvtxs
+using CellularSheaves.Mumblebee.BlockSparseArrays: colrange, rowrange, blocksparse, block, nvtxs
 using LinearAlgebra
 using Printf
 
