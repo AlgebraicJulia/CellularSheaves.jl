@@ -702,6 +702,16 @@ end
     # ===== Inexact local solves, Krylov acceleration and sheaf ADMM =====
 
     @testset "sheaf ADMM" begin
+        # The shared Poisson fixture again: the testsets above reassign A, n and dd.
+        m = 12
+        A = poisson2d(m)
+        n = m * m
+        f = [sin(3x) * cos(2y) + 1 for y in range(0, 1; length=m) for x in range(0, 1; length=m)]
+        u_exact = A \ f
+        parts = index_boxes(m, 3)
+        doms = overlapping_subdomains(A, parts; overlap=2)
+        dd = SchwarzDecomposition(A, doms; owner=parts)
+        prob = SchwarzProblem(dd, f)
         objectives = local_objectives(prob)
         K = spzeros(n, n)
         b = zeros(n)
