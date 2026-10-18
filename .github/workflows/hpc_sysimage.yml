@@ -41,7 +41,9 @@ jobs:
         id: paths
         run: |
           set -x
-          MANIFEST_HASH=$(sha256sum Manifest.toml | awk '{print $1}')
+          # The key covers the build script too, so a change to what goes into the
+          # image rebuilds it.
+          MANIFEST_HASH=$(cat Manifest.toml "$HPC_SCRIPT_DIR/compile_sysimage.jl" | sha256sum | awk '{print $1}')
           SYSIMAGE_PATH="$HPC_SYSIMAGE_DIR/sysimage-${MANIFEST_HASH}.so"
           DEPOT_PATH="$HPC_SYSIMAGE_DIR/depots/$MANIFEST_HASH"
           echo "sysimage_path=$SYSIMAGE_PATH" >> $GITHUB_OUTPUT
