@@ -698,4 +698,178 @@ end
         end
         @test err isa ArgumentError && occursin("_local_factor", err.msg)
     end
+
+    # ===== Inexact local solves, Krylov acceleration and sheaf ADMM =====
+
+    @testset "sheaf ADMM" begin
+        # The shared Poisson fixture again: the testsets above reassign A, n and dd.
+        m = 12
+        A = poisson2d(m)
+        n = m * m
+        f = [sin(3x) * cos(2y) + 1 for y in range(0, 1; length=m) for x in range(0, 1; length=m)]
+        u_exact = A \ f
+        parts = index_boxes(m, 3)
+        doms = overlapping_subdomains(A, parts; overlap=2)
+        dd = SchwarzDecomposition(A, doms; owner=parts)
+        prob = SchwarzProblem(dd, f)
+        objectives = local_objectives(prob)
+        K = spzeros(n, n)
+        b = zeros(n)
+        for (obj, s) in zip(objectives, dd.cover.stalks)
+            K[s, s] += obj.matrix
+            b[s] += obj.rhs
+            @test isposdef(Matrix(obj.matrix) + 1e-12I)      # every local objective is convex
+        end
+        @test K ≈ A                                          # the energy splits exactly
+        @test b ≈ f
+
+        h = 1 / (m + 1)
+        ρ = optimized_robin_parameter(5h) / h
+        for penalty in (StalkPenalty(), SharedPenalty())
+            r = solve(prob, SheafADMM(rho=ρ, penalty=penalty, tol=1e-9, maxiter=5000))
+            @test r.converged
+            @test r.u ≈ u_exact rtol = 1e-7
+        end
+        @test_throws ArgumentError solve(prob, SheafADMM(rho=0.0))
+        @test_throws MethodError SheafADMM(rho=1.0, penalty=:edges)
+
+        # On strips, sheaf diffusion can replace the exact projection; ADMM
+        # converges but optimized Schwarz needs far fewer iterations.
+        ms = 24
+        As = poisson2d(ms)
+        strips = [cld(jx * 4, ms) for jy in 1:ms for jx in 1:ms]
+        sdoms = overlapping_subdomains(As, strips; overlap=1)
+        fs = ones(ms * ms)
+        hs = 1 / (ms + 1)
+        ps = optimized_robin_parameter(3hs) / hs
+        dds = SchwarzDecomposition(As, sdoms; owner=strips)
+        admm = solve(SchwarzProblem(dds, fs), SheafADMM(rho=ps, maxiter=5000))
+        diffused = solve(SchwarzProblem(dds, fs), SheafADMM(rho=ps, penalty=SharedPenalty(), projection_steps=1, maxiter=5000))
+        robin = stationary(SchwarzDecomposition(As, sdoms; owner=strips, transmission=RobinTransmission(ps)), fs;
+            sweep=ParallelSweep())
+        @test admm.converged && diffused.converged && robin.converged
+        @test admm.u ≈ As \ fs rtol = 1e-6
+        @test 5 * robin.iterations < admm.iterations
+    end
+
+    @testset "symmetric Gauss–Seidel and Krylov acceleration (upwind transport)" begin
+        m = 24
+        A = upwind_transport(m)
+        f = ones(m * m)
+        parts = index_boxes(m, 3)
+        doms = overlapping_subdomains(A, parts; overlap=1)
+        dd = SchwarzDecomposition(A, doms; owner=parts)
+        u = A \ f
+        A2 = A + 0.25I
+        wide = A + sparse(transpose(A)) + I
+        g = solve(SchwarzProblem(dd, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=200))
+        @test g.converged
+        @test g.u ≈ u rtol = 1e-8
+        @test_throws ArgumentError solve(SchwarzProblem(dd, f), SheafADMM(rho=1.0))
+        ddi = SchwarzDecomposition(embed(A, wide), doms; owner=parts, dropzeros=false)
+        Z = embed(sparse(transpose(A)), wide)
+        refactor!(ddi, Z; At=copy(transpose(Z)))
+        @test solve(SchwarzProblem(ddi, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=200)).u ≈
+            sparse(transpose(A)) \ f rtol = 1e-8
+
+        # Inexact local solves: symmetric Gauss–Seidel inside each subdomain.
+        M = SymmetricGaussSeidel(A; ordering=NaturalOrdering())
+        D, Lo, Up = Diagonal(A), tril(A, -1), triu(A, 1)
+        r = collect(range(-1.0, 1.0; length=m * m))
+        @test ldiv!(similar(r), M, r) ≈ (Matrix(D + Up) \ (D * (Matrix(D + Lo) \ r))) rtol = 1e-12
+        # Multicolor (red–black on this grid): the same formula in the color-by-color ordering.
+        Mc = SymmetricGaussSeidel(A)
+        @test length(Mc.colors) == 2
+        q = reduce(vcat, Mc.colors)
+        Aq = A[q, q]
+        Dq, Lq, Uq = Diagonal(Aq), tril(Aq, -1), triu(Aq, 1)
+        @test ldiv!(similar(r), Mc, r)[q] ≈ Matrix(Dq + Uq) \ (Dq * (Matrix(Dq + Lq) \ r[q])) rtol = 1e-12
+        @test ldiv!(similar(r), SymmetricGaussSeidel(A; threaded=true), r) ≈ ldiv!(similar(r), Mc, r) rtol = 1e-14
+        @test ldiv!(similar(r), SymmetricGaussSeidel(A; ordering=MulticolorOrdering(Mc.colors)), r) ≈ ldiv!(similar(r), Mc, r)
+        @test_throws ArgumentError SymmetricGaussSeidel(A; ordering=MulticolorOrdering([collect(1:m * m)]))         # coupled, same color
+        @test_throws ArgumentError SymmetricGaussSeidel(A; ordering=MulticolorOrdering([collect(2:m * m)]))         # not a partition
+        @test_throws TypeError SymmetricGaussSeidel(A; ordering=:random)
+        for MM in (M, Mc)
+            M3 = SymmetricGaussSeidel(A; sweeps=3, ordering=isempty(MM.colors) ? NaturalOrdering() : MulticolorOrdering())
+            y = zeros(m * m)
+            for _ in 1:3
+                y += ldiv!(similar(r), MM, r - A * y)
+            end
+            @test ldiv!(similar(r), M3, r) ≈ y rtol = 1e-12
+        end
+        @test_throws ArgumentError SymmetricGaussSeidel(A - Diagonal(A))
+        @test_throws ArgumentError SymmetricGaussSeidelLocalSolve(sweeps=0)
+        for (sweeps, ordering) in ((1, MulticolorOrdering()), (2, MulticolorOrdering()), (1, NaturalOrdering()))
+            dds = SchwarzDecomposition(A, doms; owner=parts,
+                local_solver=SymmetricGaussSeidelLocalSolve(; sweeps, ordering))
+            @test all(lp -> lp.factor isa SymmetricGaussSeidel, dds.locals)
+            for sweep in (MultiplicativeSweep(), MulticolorSweep(), ParallelSweep())
+                rs = solve(SchwarzProblem(dds, f), SchwarzIteration(sweep=sweep, tol=1e-10, maxiter=20_000))
+                @test rs.converged
+                @test rs.u ≈ u rtol = 1e-8
+            end
+            gs = solve(SchwarzProblem(dds, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=500))
+            @test gs.converged
+            @test gs.u ≈ u rtol = 1e-8
+        end
+        # Inexact local solves take more iterations than exact ones.
+        exact = solve(SchwarzProblem(dd, f), SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000))
+        inexact = solve(SchwarzProblem(SchwarzDecomposition(A, doms; owner=parts,
+                local_solver=SymmetricGaussSeidelLocalSolve()), f),
+            SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=20_000))
+        @test inexact.iterations > exact.iterations
+        # refactor! only gathers the new values into the smoothers.
+        ddg = SchwarzDecomposition(embed(A, wide), doms; owner=parts, dropzeros=false,
+            local_solver=SymmetricGaussSeidelLocalSolve())
+        for M in (A2, sparse(transpose(A)), A2)
+            refactor!(ddg, embed(M, wide))
+            @test all(lp -> lp.factor isa SymmetricGaussSeidel, ddg.locals)
+            @test solve(SchwarzProblem(ddg, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=500)).u ≈
+                M \ f rtol = 1e-8
+        end
+        @test refactor(ddg, A2).locals[1].factor isa SymmetricGaussSeidel
+        # Threaded BiCGStab, with exact and inexact local solves.
+        for d in (dd, ddg)
+            bs = solve(SchwarzProblem(d, f), SchwarzBiCGStab(tol=1e-10, maxiter=500))
+            @test bs.converged
+            @test bs.u ≈ d.A \ f rtol = 1e-8
+            @test last(bs.residuals) <= 1e-10
+        end
+        # The direct RAS application equals one parallel sweep from the zero cochain.
+        for d in (dd, ddg)
+            P = CellularSheaves.NetworkSheaves.SchwarzMethods.SchwarzSweepPreconditioner(d, ParallelSweep())
+            sweep_prob = SchwarzProblem(d, r)
+            xz = localize(d, zeros(m * m))
+            schwarz_step!(xz, sweep_prob, ParallelSweep())
+            @test P * r ≈ glue(d, xz) rtol = 1e-13
+        end
+    end
+
+    @testset "coloring sees explicitly stored zeros" begin
+        # Symmetric in value, but (5, 1) stores an explicit zero and (1, 5) does not:
+        # the coloring must still separate 1 and 5.
+        n = 6
+        rows = [1:n; 1:(n - 1); 2:n; 5]
+        cols = [1:n; 2:n; 1:(n - 1); 1]
+        vals = [fill(4.0, n); fill(-1.0, 2(n - 1)); 0.0]
+        A = sparse(rows, cols, vals, n, n)
+        @test issymmetric(A) && nnz(A) == 3n - 1
+        M = SymmetricGaussSeidel(A)
+        @test !any(c -> 1 in c && 5 in c, M.colors)
+        b = collect(1.0:n)
+        @test ldiv!(zeros(n), M, b) ≈ ldiv!(zeros(n), SymmetricGaussSeidel(A; ordering = MulticolorOrdering(M.colors)), b)
+    end
+
+    @testset "symmetric Gauss–Seidel ldiv!" begin
+        # The preconditioner's ldiv! family: out of place, in place, and no aliasing.
+        n = 8
+        A = sparse(SymTridiagonal(fill(4.0, n), fill(-1.0, n - 1)))
+        M = SymmetricGaussSeidel(A; sweeps = 2)
+        b = collect(1.0:n)
+        y = ldiv!(zeros(n), M, b)
+        @test M \ b == y
+        @test ldiv!(M, copy(b)) == y
+        @test_throws ArgumentError ldiv!(b, M, b)
+        @test_throws ArgumentError ldiv!(zeros(n - 1), M, b)
+    end
 end

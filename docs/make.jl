@@ -100,6 +100,7 @@ makedocs(
       "generated/nearest_global_section_iterative.md",
       "generated/pushforward.md",
       "generated/trajectory_sheaf.md",
+      "generated/schwarz_domain_decomposition.md",
       "Control Examples"=>Any[
         "generated/control/simple_integrator.md",
         "generated/control/controlled_double_integrator.md",

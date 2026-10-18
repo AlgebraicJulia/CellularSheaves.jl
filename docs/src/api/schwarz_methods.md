@@ -15,6 +15,8 @@ through the restriction maps, then solves a local problem on every subdomain
 ([`schwarz_step!`](@ref)). The coboundary of the iterate measures how much the
 copies disagree on overlaps ([`overlap_disagreement`](@ref)). At convergence
 the iterate is a global section, which glues into the solution ([`glue`](@ref)).
+[`SheafADMM`](@ref) solves the same problem as a homological program with the
+sheaf ADMM of Hanks, Riess et al.
 
 The data is bundled into a few structs:
 
@@ -41,7 +43,8 @@ The data is bundled into a few structs:
   and initial guess. [`solve`](@ref) runs it with a stationary
   [`SchwarzIteration`](@ref) or with conjugate gradients preconditioned by the
   additive two-level operator ([`SchwarzCG`](@ref),
-  [`SchwarzPreconditioner`](@ref)).
+  [`SchwarzPreconditioner`](@ref)), or with [`SheafADMM`](@ref) on the
+  [`local_objectives`](@ref) of the problem.
 
 ```julia
 dd = SchwarzDecomposition(A, overlapping_subdomains(A, parts; overlap=2); owner=parts)
@@ -49,6 +52,9 @@ prob = SchwarzProblem(dd, f)
 solve(prob, SchwarzIteration(sweep=MulticolorSweep(), coarse=TruncatedPushforwardCoarseSpace(dd)))
 solve(prob, SchwarzCG(coarse=TruncatedPushforwardCoarseSpace(dd)))
 ```
+
+See the [Schwarz domain decomposition](../generated/schwarz_domain_decomposition.md)
+example for a worked Poisson problem.
 
 ```@autodocs
 Modules = [CellularSheaves.NetworkSheaves.SchwarzMethods]
