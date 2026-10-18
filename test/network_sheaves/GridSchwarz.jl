@@ -3,7 +3,6 @@ using CellularSheaves
 using LinearAlgebra
 using SparseArrays
 using Random
-using MPI: mpiexec
 
 # The sparse matrix of a stored-coefficient stencil on a box (no neighbours
 # outside it), for checking the implicit kernels.
@@ -191,15 +190,6 @@ end
     @test 1 in M1.colors[1]
     @test vec(interior(z1, op1)) ≈ ldiv!(zeros(23), M1, vec(interior(r1, op1))) rtol = 1e-12
 
-    # The same tests under MPI on several ranks.
-
-    script = joinpath(@__DIR__, "..", "mpi", "grid_boxes.jl")
-    project = Base.active_project()
-    for n in (1, 3, 4)
-        ok = mpiexec() do exe                                        # the launcher environment applies inside the block
-            cmd = `$exe -n $n $(Base.julia_cmd()) --project=$project --startup-file=no $script`
-            success(pipeline(cmd; stdout, stderr))
-        end
-        @test ok
-    end
+    # The same tests on several MPI ranks are in test/mpi/runtests.jl, run apart
+    # from Pkg.test (see CLAUDE.md).
 end

@@ -1,4 +1,4 @@
-# Run under MPI (see test/network_sheaves/GridSchwarz.jl):
+# Run under MPI by test/mpi/runtests.jl, or by hand:
 #   mpiexec -n <ranks> julia --project=<test env> test/mpi/grid_boxes.jl
 using MPI
 using Test
