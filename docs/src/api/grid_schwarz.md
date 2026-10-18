@@ -30,3 +30,13 @@ pushforward hierarchy". A dense reference implementation of both orders:
 ```@autodocs
 Modules = [CellularSheaves.NetworkSheaves.MultilevelSchwarz]
 ```
+
+## Coarse grids in the min-plus semiring
+
+Deterministic optimal control on a state graph is linear in min-plus. The
+pushforward along an aggregation is the quotient graph; its solution is a lower
+bound on the cost-to-go and an exact A* heuristic, instead of a correction.
+
+```@autodocs
+Modules = [CellularSheaves.NetworkSheaves.TropicalAbstraction]
+```
