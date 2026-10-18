@@ -109,6 +109,82 @@ fixes the communication pattern to the clique tree. Schwarz sits between them.
 Each team solves exactly inside its subdomain, and the overlap width and a
 coarse space control the iteration count.
 
+## Sheaf ADMM and Robin transmission
+
+Hanks, Riess, Cohen, Gross, Hale and Fairbanks (arXiv:2504.02049, Algorithm 1;
+code in AlgebraicOptimization.jl) solve homological programs
+
+```math
+\min_{x \in C^0} \sum_i f_i(x_i) \quad\text{subject to}\quad x \in H^0
+```
+
+by ADMM in consensus form. All of ``x``, the copies ``z`` and the scaled
+multipliers ``y`` live on vertex stalks:
+
+```math
+x_i \leftarrow \operatorname{argmin}_{x_i} f_i(x_i) + \tfrac{\rho}{2}\lVert x_i - z_i + y_i\rVert^2,
+\qquad z \leftarrow \Pi_{H^0}(x + y),
+\qquad y_i \leftarrow y_i + x_i - z_i .
+```
+
+In the paper the projection is computed by sheaf diffusion run to convergence
+(their Theorem 2). The AlgebraicOptimization.jl code computes it with CG.
+
+[`SheafADMM`](@ref) runs this iteration on the ghost-layer overlap sheaf.
+[`local_objectives`](@ref) splits the PDE energy exactly into convex quadratics
+``f_i(x_i) = \tfrac12 x_i^\mathsf{T} K_i x_i - b_i^\mathsf{T} x_i`` on the
+closed subdomains: each matrix edge term is shared equally by the stalks that
+contain it. For this sheaf ``\Pi_{H^0}`` averages the copies of each dof, which
+is a single exchange with the neighbours.
+
+**The two local solves have the same shape.**
+
+| | Robin (optimized Schwarz) | Sheaf ADMM |
+|---|---|---|
+| local operator | ``A_{\Omega_i\Omega_i} - N_i``: full operator, Dirichlet coupling removed on interface rows | ``K_i``: the subdomain's share of the energy on its closed stalk |
+| penalty | ``p_{ij}`` on each interface face | ``\rho`` on the whole stalk (`penalty = StalkPenalty()`) or on shared dofs (`SharedPenalty()`) |
+| data | neighbour's current values on ``\Gamma_i`` and at the interface | ``z_i - y_i``: average of copies minus multiplier |
+| needs overlap | yes (one layer at least) | no |
+| convergence | not proven for every ``p``; fast at ``p^*`` | proven for every ``\rho > 0`` with an exact projection |
+
+Both are "Neumann-type local operator plus penalty", and in our runs the best
+``\rho`` was the optimized Robin parameter ``p^*`` (in the units of `A`). That
+matches the classical picture in which the multiplier plays the role of the
+interface flux, and ADMM on a consensus splitting is a Douglas–Rachford method
+(Gabay 1983), like Lions' Robin method (Lions–Mercier 1979).
+
+**Optimized Schwarz converges much faster.** Iterations to a relative residual of
+``10^{-8}`` for Poisson problems with overlap 1 (unit square on a ``32 \times 32``
+grid; notched rectangle on a ``31 \times 15`` grid with ``4 \times 2`` boxes):
+
+| decomposition | Dirichlet (parallel) | Robin, ``p^*`` | ADMM, best ``\rho \approx p^*`` |
+|---|---|---|---|
+| 4 strips | 95 | 19 | 248 |
+| ``4\times 4`` boxes | 189 | 21 | 400 |
+| notched rectangle | 51 | 25 | 254 |
+
+The difference is in what a local solve knows. A Robin subdomain has the true
+operator on its whole interior and reads its neighbours' values *and fluxes*
+directly. An ADMM subdomain holds only part of the stiffness on shared dofs
+and sees its neighbours only through averages. The flux has to be learned
+iteratively in ``y``. Penalizing only shared dofs (`penalty = SharedPenalty()`) changes
+little.
+
+Replacing the exact projection by a single diffusion step
+(`projection_steps = 1`), as a communication-light variant of Algorithm 1,
+converged on strips but diverged on box grids, where dofs carry different
+numbers of copies. The convergence proof assumes the exact projection.
+
+**What each side can borrow.**
+
+- ADMM could take Robin-type local problems: keep the full operator on the
+  interior and penalize only the interface faces. That would be optimized
+  Schwarz with ADMM's multiplier update, i.e. an augmented-Lagrangian
+  formulation of optimized Schwarz.
+- Schwarz could use ADMM's guarantee. ADMM converges with zero overlap and for
+  every ``\rho``, which makes it a safe fallback where the Robin iteration is
+  delicate.
+
 ## Corners
 
 Two kinds of corners matter.
