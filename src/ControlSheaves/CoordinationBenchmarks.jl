@@ -38,7 +38,7 @@ module CoordinationBenchmarks
 using ..ControlSheaves: Tikhonov
 using CellularSheaves.NetworkSheaves.DistributedSolve
 using CellularSheaves.NetworkSheaves.EuclideanSheaves:
-    EuclideanSheaf, add_sheaf_edge!, restricted_laplacian_blocks, harmonic_extension
+    EuclideanSheaf, DenseEuclideanSheaf, add_sheaf_edge!, restricted_laplacian_blocks, harmonic_extension
 using CliqueTrees.Multifrontal
 using Graphs
 using LinearAlgebra
@@ -119,7 +119,7 @@ struct CoordinationScenario
     sensing::Vector{Vector{Int}}
     agent_nbrs::Vector{Vector{Int}}
     target_nbrs::Vector{Vector{Int}}
-    sheaf::EuclideanSheaf{Float64}
+    sheaf::DenseEuclideanSheaf{Float64}
     agent_vertices::Vector{Int}
     target_vertices::Vector{Int}
     H::SparseMatrixCSC{Float64, Int}
