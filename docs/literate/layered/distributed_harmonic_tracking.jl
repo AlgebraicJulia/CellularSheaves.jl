@@ -140,9 +140,16 @@ hline!([central_bytes / 1024]; linestyle = :dash, color = :black, linewidth = 2,
 #   exchanging only boundary corrections across cut edges over `RemoteChannel`s.
 #
 # Nothing else differs. The control law each agent applies is the same sheaf feedback.
+#
+# Workers start with stderr detached: a worker inherits the parent's stderr, which
+# while these docs are built is the pipe capturing the page's output, and holding it
+# open stalls the build. Each worker still reports through its stdout, which the
+# parent relays.
 
-workers_pids = addprocs(nchunk; exeflags = ["--project=$(Base.active_project())",
+workers_pids = redirect_stderr(devnull) do
+    addprocs(nchunk; exeflags = ["--project=$(Base.active_project())",
         "--sysimage=$(unsafe_string(Base.JLOptions().image_file))"])
+end
 @everywhere workers_pids using CellularSheaves
 
 # The chordal factorisation applies an internal fill-reducing permutation, so the tree solve

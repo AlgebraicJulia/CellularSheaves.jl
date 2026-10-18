@@ -83,12 +83,17 @@ add_sheaf_edge!(sheaf, 2, 4, R_yz, R_yz)
 
 # ## Simulation Framework
 
-# Ensure we have enough worker processes
+# Ensure we have enough worker processes. Workers start with stderr detached: a worker
+# inherits the parent's stderr, which while these docs are built is the pipe capturing
+# the page's output, and holding it open stalls the build. Each worker still reports
+# through its stdout, which the parent relays.
 workers_pids = workers()
 if length(workers_pids) < NA
-    addprocs(NA - length(workers_pids);
-        exeflags = ["--project=$(Base.active_project())",
-            "--sysimage=$(unsafe_string(Base.JLOptions().image_file))"])
+    redirect_stderr(devnull) do
+        addprocs(NA - length(workers_pids);
+            exeflags = ["--project=$(Base.active_project())",
+                "--sysimage=$(unsafe_string(Base.JLOptions().image_file))"])
+    end
     workers_pids = workers()
     @eval @everywhere using CellularSheaves
     @eval @everywhere using CellularSheaves.ControlSheaves.AgentControllers
