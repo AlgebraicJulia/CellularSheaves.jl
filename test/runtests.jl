@@ -55,5 +55,6 @@ end
   include("ControlSheaves/NestedSystems.jl")
   include("ControlSheaves/NestedDSL.jl")
   include("ControlSheaves/CoordinationBenchmarks.jl")
+  include("ControlSheaves/DoubleIntegratorHJB.jl")
   include("ControlSheaves/PredictiveConsensus.jl")
 end
