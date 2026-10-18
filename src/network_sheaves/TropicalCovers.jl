@@ -1,0 +1,859 @@
+"""
+    TropicalCovers
+
+Min-plus sheaves of joint state graphs over a simplicial complex: the setting of
+cooperative planning for several agents that share a space.
+
+**The complex.** The vertices are agents and a simplex is a set of agents that may
+interact: an edge is a pair, a triangle a triple. Built from an *interaction graph*
+(which pairs can meet), the natural complex is its clique complex
+([`clique_complex`](@ref)): a set of agents is a simplex when every pair in it
+interacts.
+
+**The stalk of a simplex.** Each agent ``a`` has its own state graph ``W_a`` (arc
+``s → s'`` costs ``W_a[s, s'] ≥ 0``). The agents of a simplex ``σ`` move at once,
+and a *collision* rule removes the joint moves they cannot make together. The
+joint state graph of ``σ`` is far too large to build, so the stalk is its
+pushforward along a summary map ``μ_σ``, defined *symmetrically* in the agents:
+
+- each agent has its own summary ``π_a`` (a [`GraphHomomorphism`](@ref) of its
+  states, for instance its progress and its region of the map);
+- a *contact* relation on summaries says when two agents could be close enough to
+  collide;
+- ``μ_σ`` keeps an agent's exact state when its summary is in contact with that of
+  another agent of ``σ``, and replaces it by its summary otherwise.
+
+No agent is privileged: permuting identical agents permutes the coarse states.
+Whether an agent is kept exact depends only on summaries, so each coarse state is a
+union of fibres, and each fibre is a product of single states and summary fibres.
+When the contact relation is conservative (agents out of contact cannot collide in
+one move), the joint moves out of a fibre are independent for the agents out of
+contact, and the pushforward can be enumerated move by move without the joint graph
+([`stalk_successors`](@ref)). Where every agent is out of contact this is the base
+change of [`tensor_product`](@ref CellularSheaves.NetworkSheaves.TropicalAbstraction.tensor_product) and [`quotient_graph`](@ref CellularSheaves.NetworkSheaves.TropicalAbstraction.quotient_graph) to the product of
+the agents' quotients.
+
+**Summaries should lift moves.** A pushforward lets each coarse step start from
+any state of the current fibre, so a summarized agent can switch between states
+with different futures for free. When each summary is *stable* for the agent's
+zero-cost moves ([`stable_refinement`](@ref), [`is_stable`](@ref)), every
+zero-cost walk of its quotient lifts to a real path from every state of its fibre,
+and so does every zero-cost joint walk of agents out of contact (a product of
+locally surjective maps is locally surjective). This is a condition on the vertex
+data alone; every stalk inherits it.
+
+**Restriction maps.** For a face ``τ ⊂ σ``, forgetting the agents outside ``τ`` maps
+the joint states of ``σ`` to those of ``τ``, and on coarse states it is again
+determined: an agent kept exact in ``σ`` only because of a contact outside ``τ``
+falls back to its summary ([`restrict`](@ref)). The square
+``\\mathrm{restrict} ∘ μ_σ = μ_τ ∘ \\mathrm{forget}`` commutes, and the restriction
+sends every arc of the stalk of ``σ`` to an arc of the stalk of ``τ`` that costs no
+more (the agents of ``τ`` pay part of the cost). So the cost-to-go of a face,
+pulled back along the restriction, is a subsolution on ``σ``: a lower bound. The
+cost-to-go functions with these pullbacks form a cellular sheaf of min-plus
+modules on the complex; its sections are the consistent bounds.
+
+**Gluing over the cover.** A joint plan of all agents restricts to a plan of every
+simplex, and its per-agent costs ``x_a`` then satisfy ``∑_{a ∈ σ} x_a ≥ Δ_σ`` for the
+cost-to-go ``Δ_σ`` of every stalk. The least such integer 0-cochain is a lower bound
+on the joint cost ([`simplicial_cover`](@ref), [`cover_bound`](@ref)). With edges
+alone it is the weighted vertex cover of conflict-based search (Li, Felner,
+Boyarski, Ma & Koenig 2019); the triangles see three-agent interactions that no
+pair sees. Its linear relaxation is dual to splitting each agent's cost among the
+simplices at it, a gauge transformation on the cover.
+
+Stalks of low dimension are built explicitly and solved once
+([`stalk_graph`](@ref)); higher ones are searched on demand from the coarse state
+of a query, with the pulled-back face values as an admissible heuristic
+([`stalk_value`](@ref)).
+"""
+module TropicalCovers
+
+export SimplicialComplex, clique_complex, simplices, faces, ProductStalk, coarse_state, restrict,
+    stalk_successors, StalkGraph, stalk_graph, stalk_value, CoverSheaf, section_value, cover_bound,
+    simplicial_cover, stable_refinement, is_stable, future_refinement, ArcScratch, stalk_cost_to_go, cover_stalks
+
+using ArgCheck: @argcheck
+using Graphs
+using SparseArrays
+using ..GraphHomomorphisms: GraphHomomorphism
+using ..TropicalAbstraction: minplus_closure
+import ..TropicalAbstraction: _push!, _pop!
+
+# ---------------------------------------------------------------------------
+# Simplicial complexes
+# ---------------------------------------------------------------------------
+
+"""
+    SimplicialComplex(n, simplices)
+
+An abstract simplicial complex on the vertices `1:n`: the given simplices (vectors
+of vertices) and all their faces. `simplices(K, k)` lists the `k`-simplices, each a
+sorted vector of `k + 1` vertices.
+"""
+struct SimplicialComplex
+    nvertices::Int
+    cells::Vector{Vector{Vector{Int}}}          # cells[k + 1]: the k-simplices, sorted
+end
+
+function SimplicialComplex(n::Integer, generators)
+    @argcheck n >= 0
+    sets = [Set{Vector{Int}}() for _ in 1:1]
+    push!(sets[1], Int[])                        # placeholder, removed below
+    function add!(σ)
+        k = length(σ) - 1
+        while length(sets) < k + 2
+            push!(sets, Set{Vector{Int}}())
+        end
+        σ in sets[k + 2] && return
+        push!(sets[k + 2], σ)
+        k > 0 && foreach(add!, faces(σ))
+    end
+    for v in 1:n
+        add!([v])
+    end
+    for σ in generators
+        s = sort!(unique(collect(Int, σ)))
+        @argcheck !isempty(s) && all(v -> 1 <= v <= n, s) "simplices must be nonempty sets of vertices in 1:$n"
+        add!(s)
+    end
+    return SimplicialComplex(n, [sort!(collect(c)) for c in sets[2:end]])
+end
+
+"""
+    clique_complex(g::AbstractGraph; dim = 2)
+
+The clique complex of `g` up to dimension `dim`: a set of vertices is a simplex
+when every two of them are adjacent in `g`.
+"""
+function clique_complex(g::AbstractGraph; dim::Integer = 2)
+    @argcheck dim >= 0
+    n = nv(g)
+    level = [[v] for v in 1:n]
+    all_cells = [level]
+    for _ in 1:dim
+        next = Vector{Int}[]
+        for σ in level, w in (last(σ) + 1):n
+            all(v -> has_edge(g, v, w), σ) && push!(next, [σ; w])
+        end
+        isempty(next) && break
+        push!(all_cells, next)
+        level = next
+    end
+    return SimplicialComplex(n, all_cells)
+end
+
+"""
+    simplices(K, k)
+
+The `k`-simplices of `K`, each a sorted vector of `k + 1` vertices (empty beyond its
+dimension).
+"""
+simplices(K::SimplicialComplex, k::Integer) = k + 1 <= length(K.cells) ? K.cells[k + 1] : Vector{Int}[]
+
+"""
+    faces(σ)
+
+The codimension-one faces of the simplex `σ` (a vector of vertices).
+"""
+faces(σ::AbstractVector{<:Integer}) = [deleteat!(collect(Int, σ), k) for k in eachindex(σ)]
+
+Graphs.nv(K::SimplicialComplex) = K.nvertices
+dimension(K::SimplicialComplex) = length(K.cells) - 1
+
+function Base.show(io::IO, K::SimplicialComplex)
+    print(io, "SimplicialComplex(", join((length(c) for c in K.cells), ", "), " simplices by dimension)")
+end
+
+# ---------------------------------------------------------------------------
+# Summaries that lift moves
+# ---------------------------------------------------------------------------
+
+# The fibres reached from s by the selected arcs, as a sorted vector.
+function _successor_fibres(out, label, arcs, s)
+    return sort!(unique!([label[rowvals(out)[k]] for k in nzrange(out, s) if arcs(s, rowvals(out)[k], nonzeros(out)[k])]))
+end
+
+"""
+    is_stable(W, ψ; arcs = (s, s2, c) -> true)
+
+Whether every state of a fibre of `ψ` reaches the same fibres by the selected arcs
+of `W` (`arcs(s, s2, W[s, s2])`). Then `ψ` is *locally surjective* on those arcs:
+every arc of the quotient out of a fibre lifts to an arc out of each of its states,
+so every walk of the quotient lifts to a path from any state of its first fibre.
+"""
+function is_stable(W::SparseMatrixCSC, ψ::GraphHomomorphism; arcs = (s, s2, c) -> true)
+    @argcheck size(W, 1) == size(W, 2) == length(ψ.vertex_map)
+    out = sparse(transpose(W))
+    seen = Dict{Int,Vector{Int}}()
+    for s in eachindex(ψ.vertex_map)
+        succ = _successor_fibres(out, ψ.vertex_map, arcs, s)
+        get!(seen, ψ.vertex_map[s], succ) == succ || return false
+    end
+    return true
+end
+
+"""
+    stable_refinement(W, ψ; arcs = (s, s2, c) -> true) -> GraphHomomorphism
+
+The coarsest refinement of the summary `ψ` that is [`is_stable`](@ref) for the
+selected arcs of `W`: two states share a fibre when they share one in `ψ` and, at
+every round, reach the same fibres. This is the relational coarsest partition
+(Paige & Tarjan 1987), or *regular equivalence* of social networks (Everett &
+Borgatti 1994); the quotient map it gives is locally surjective, a relative of the
+graph fibrations of Boldi & Vigna (2002), which ask for unique lifts.
+
+**Why summaries need it.** A pushforward along `ψ` lets each step of a coarse walk
+start from whichever state of the current fibre suits it. If two states of a fibre
+have different futures, the coarse walk can switch between them for free; in the
+multi-agent stalks, a summarized agent at a level of its cost-to-go can slide
+along the level set onto another route. With `arcs` the zero-cost moves (the
+moves along shortest paths, in the gauge of the cost-to-go), the refined summary
+lifts every zero-cost coarse walk to a real one from each state of its fibre, and
+the product of such summaries over the agents of a simplex lifts them too.
+"""
+function stable_refinement(W::SparseMatrixCSC, ψ::GraphHomomorphism; arcs = (s, s2, c) -> true)
+    @argcheck size(W, 1) == size(W, 2) == length(ψ.vertex_map)
+    out = sparse(transpose(W))
+    label = ψ.vertex_map
+    count = length(unique(label))
+    while true
+        ids = Dict{Tuple{Int,Vector{Int}},Int}()
+        next = [get!(ids, (label[s], _successor_fibres(out, label, arcs, s)), length(ids) + 1) for s in eachindex(label)]
+        length(ids) == count && return GraphHomomorphism(next, length(ids))
+        label, count = next, length(ids)
+    end
+end
+
+"""
+    future_refinement(W, ψ, φ; arcs = (s, s2, c) -> true) -> GraphHomomorphism
+
+Refine the summary `ψ` so that the states of a fibre share their *future seen
+through `φ`*: the set of fibres of `φ` they can reach along the selected arcs of `W`
+(any number of them, none included).
+
+A weaker condition than [`is_stable`](@ref), which asks for the same next fibres
+at every step and on a grid splits a summary down to single states. Here the
+states of a fibre need only agree on which fibres of the coarser `φ` lie ahead. So
+along any walk of the quotient by the selected arcs, every fibre of `φ` it visits
+can be reached from every state of its first fibre: a summarized agent cannot
+reach, for free, a part of its future (a route through another bottleneck, say,
+with `φ` the Reeb arcs of its cost-to-go) that its actual state could not.
+"""
+function future_refinement(W::SparseMatrixCSC, ψ::GraphHomomorphism, φ::GraphHomomorphism; arcs = (s, s2, c) -> true)
+    n = size(W, 1)
+    @argcheck size(W, 2) == n && length(ψ.vertex_map) == n && length(φ.vertex_map) == n
+    out = sparse(transpose(W))
+    ahead = [BitSet(φ.vertex_map[s]) for s in 1:n]
+    changed = true
+    while changed                                 # least fixed point of ahead(s) = {φ(s)} ∪ ⋃ ahead(s2)
+        changed = false
+        for s in 1:n, k in nzrange(out, s)
+            s2 = rowvals(out)[k]
+            arcs(s, s2, nonzeros(out)[k]) || continue
+            if !issubset(ahead[s2], ahead[s])
+                union!(ahead[s], ahead[s2])
+                changed = true
+            end
+        end
+    end
+    ids = Dict{Tuple{Int,Vector{Int}},Int}()
+    return GraphHomomorphism([get!(ids, (ψ.vertex_map[s], collect(ahead[s])), length(ids) + 1) for s in 1:n], length(ids))
+end
+
+# ---------------------------------------------------------------------------
+# Product stalks
+# ---------------------------------------------------------------------------
+
+"""
+    ProductStalk(members, graphs, summaries, goals; contact, collides)
+
+The stalk of the simplex with agents `members` (vertex labels, passed to `contact`
+and `collides`): the pushforward of their joint state graph along the symmetric
+summary map described in [`TropicalCovers`](@ref).
+
+- `graphs[a]`: agent `a`'s state graph, `graphs[a][s, s2]` the cost of the move
+  `s → s2` (stored entries, zeros included, are the moves; costs ``≥ 0``).
+- `summaries[a]`: a [`GraphHomomorphism`](@ref) from agent `a`'s states to its
+  summaries.
+- `goals[a]`: agent `a`'s goal state. The stalk's target is the coarse state of the
+  joint goal.
+- `contact(u, k, v, l)`: whether agents `u` and `v` could collide in one move from
+  states with summaries `k` and `l`. It must be symmetric and *conservative*: out of
+  contact, no move of the two can collide.
+- `collides(u, s, s2, v, t, t2)`: whether the moves `s → s2` of `u` and `t → t2` of
+  `v`, made at once, collide. `collides(u, s, s, v, t, t)` must say whether the
+  states `s` and `t` conflict outright.
+
+A coarse state is a tuple of *modes*, one per agent: a state `s` of agent `a`
+(kept exact) or `n_a + k` for its summary `k`, where `n_a` is its number of states.
+"""
+struct ProductStalk{K,C,F}
+    members::NTuple{K,Int}
+    graphs::Vector{SparseMatrixCSC{Float64,Int}}
+    exact_moves::Vector{Vector{Vector{Tuple{Int,Float64}}}}  # [a][s]: (s2, cost) for the moves out of state s
+    summaries::Vector{GraphHomomorphism}
+    nstates::NTuple{K,Int}
+    fibre_moves::Vector{Vector{Vector{Tuple{Int,Float64}}}}   # [a][k]: (s2, least cost from the fibre of k)
+    fibres::Vector{Vector{Vector{Int}}}                   # [a][k]: the states with summary k
+    singletons::Vector{Vector{Vector{Int}}}               # [a][k]: the one mode [n_a + k] of summary k
+    goal::NTuple{K,Int}
+    contact::C
+    collides::F
+end
+
+function ProductStalk(members, graphs, summaries, goals; contact, collides)
+    K = length(members)
+    @argcheck K >= 1 && length(graphs) == K && length(summaries) == K && length(goals) == K
+    Ws = [SparseMatrixCSC{Float64,Int}(W) for W in graphs]
+    for (W, π, g) in zip(Ws, summaries, goals)
+        @argcheck size(W, 1) == size(W, 2) == length(π.vertex_map) "each graph must be square and match its summary"
+        @argcheck all(>=(0), nonzeros(W)) "move costs must be nonnegative"
+        @argcheck 1 <= g <= size(W, 1)
+    end
+    fibre_moves = map(Ws, summaries) do W, π
+        best = [Dict{Int,Float64}() for _ in 1:π.n_target]
+        for (s, s2, c) in zip(findnz(W)...)
+            d = best[π.vertex_map[s]]
+            d[s2] = min(get(d, s2, Inf), c)
+        end
+        [sort!(collect(pairs(d))) for d in best]
+    end
+    fibres = map(summaries) do π
+        f = [Int[] for _ in 1:π.n_target]
+        for (s, k) in enumerate(π.vertex_map)
+            push!(f[k], s)
+        end
+        f
+    end
+    exact_moves = map(Ws) do W
+        Wt = sparse(transpose(W))
+        [[(Int(rowvals(Wt)[k]), Float64(nonzeros(Wt)[k])) for k in nzrange(Wt, s)] for s in 1:size(W, 1)]
+    end
+    singletons = [[[size(W, 1) + k] for k in 1:π.n_target] for (W, π) in zip(Ws, summaries)]
+    m = NTuple{K,Int}(members)
+    P = ProductStalk{K,typeof(contact),typeof(collides)}(m, Ws, exact_moves,
+        collect(GraphHomomorphism, summaries), ntuple(a -> size(Ws[a], 1), K),
+        [[[(Int(s), Float64(c)) for (s, c) in v] for v in fm] for fm in fibre_moves], fibres, singletons,
+        NTuple{K,Int}(goals), contact, collides)
+    return P
+end
+
+Base.length(::ProductStalk{K}) where {K} = K
+Base.show(io::IO, P::ProductStalk{K}) where {K} = print(io, "ProductStalk(agents ", P.members, ")")
+
+_summary(P::ProductStalk, a, m) = m <= P.nstates[a] ? P.summaries[a].vertex_map[m] : m - P.nstates[a]
+_exact(P::ProductStalk, a, m) = m <= P.nstates[a]
+
+# Whether agent a is in contact with another agent, given every agent's summary.
+_in_contact(P::ProductStalk{K}, ks, a) where {K} =
+    any(b != a && P.contact(P.members[a], ks[a], P.members[b], ks[b]) for b in 1:K)
+
+"""
+    coarse_state(P::ProductStalk, states)
+
+The coarse state ``μ(states)`` of the joint state `states` (one state per agent,
+in the order of `P.members`).
+"""
+function coarse_state(P::ProductStalk{K}, states) where {K}
+    ks = ntuple(a -> P.summaries[a].vertex_map[states[a]], K)
+    return ntuple(a -> _in_contact(P, ks, a) ? Int(states[a]) : P.nstates[a] + ks[a], K)
+end
+
+"""
+    restrict(Pσ::ProductStalk, Pτ::ProductStalk, x)
+
+The restriction of the coarse state `x` of `Pσ` to the face `Pτ` (whose agents are
+among those of `Pσ`): forget the other agents, and replace by its summary every
+agent that is no longer in contact. The contact relation of `Pτ` must imply that of
+`Pσ` (a face may resolve agents later, never earlier).
+"""
+function restrict(Pσ::ProductStalk{K}, Pτ::ProductStalk{L}, x) where {K,L}
+    idx = ntuple(b -> findfirst(==(Pτ.members[b]), Pσ.members), L)
+    @argcheck all(!isnothing, idx) "the agents of the face must be agents of the simplex"
+    return _restrict(Pσ, Pτ, NTuple{L,Int}(idx), x)
+end
+
+# The restriction, given the positions `idx` of the face's agents among the simplex's.
+function _restrict(Pσ::ProductStalk{K}, Pτ::ProductStalk{L}, idx::NTuple{L,Int}, x) where {K,L}
+    ks = ntuple(b -> _summary(Pσ, idx[b], x[idx[b]]), L)
+    return ntuple(L) do b
+        m = x[idx[b]]
+        touching = _in_contact(Pτ, ks, b)
+        @argcheck _exact(Pσ, idx[b], m) || !touching "the face's contact relation must imply the simplex's"
+        touching ? m : Pτ.nstates[b] + ks[b]
+    end
+end
+
+_moves(P::ProductStalk, a, m) = _exact(P, a, m) ? P.exact_moves[a][m] : P.fibre_moves[a][m - P.nstates[a]]
+
+"""
+    stalk_successors(f, P::ProductStalk, x)
+
+Call `f(y, cost)` for every arc `x → y` of the stalk: every joint move out of the
+fibre of `x` that does not collide, with its cost, pushed forward. An arc may be
+reported more than once; its cost is the least reported.
+"""
+function stalk_successors(f, P::ProductStalk{K}, x::NTuple{K,Int}) where {K}
+    opts = ntuple(a -> _moves(P, a, x[a]), K)
+    exact = ntuple(a -> _exact(P, a, x[a]), K)
+    for combo in Iterators.product(opts...)
+        ok = true
+        for a in 1:K, b in (a + 1):K
+            if exact[a] && exact[b] &&
+               P.collides(P.members[a], x[a], combo[a][1], P.members[b], x[b], combo[b][1])
+                ok = false
+                break
+            end
+        end
+        ok || continue
+        f(coarse_state(P, ntuple(a -> combo[a][1], K)), sum(c[2] for c in combo))
+    end
+    return nothing
+end
+
+"""
+    StalkGraph
+
+An explicitly built stalk: `states[i]` is the `i`-th coarse state, `index` its
+inverse (`index[x]`, `get(index, x, default)`, `haskey(index, x)`), `W` the stalk's
+arcs and `Δ` its cost-to-go to the goal.
+"""
+struct StalkGraph{K,I}
+    states::Vector{NTuple{K,Int}}
+    index::I
+    W::SparseMatrixCSC{Float64,Int32}           # 32-bit indices: stalks can be large
+    Δ::Vector{Float64}
+end
+
+# The index of a stalk's states as a dense table over the box of modes: a coarse state
+# is a tuple of mode numbers, mode a in 1:dims[a], so its position is plain arithmetic.
+# Cheaper than hashing and smaller than a Dict when the states fill a good part of the
+# box (as on edges); 0 marks a tuple that is not a state.
+struct DenseIndex{K}
+    dims::NTuple{K,Int}
+    table::Vector{Int32}
+end
+
+function _linear(d::DenseIndex{K}, x::NTuple{K,Int}) where {K}
+    i, stride = 0, 1
+    for a in 1:K
+        1 <= x[a] <= d.dims[a] || return 0
+        i += (x[a] - 1) * stride
+        stride *= d.dims[a]
+    end
+    return i + 1
+end
+
+Base.get(d::DenseIndex{K}, x::NTuple{K,Int}, default) where {K} =
+    (l = _linear(d, x); l == 0 || d.table[l] == 0 ? default : Int(d.table[l]))
+Base.getindex(d::DenseIndex{K}, x::NTuple{K,Int}) where {K} =
+    (v = get(d, x, 0); v == 0 ? throw(KeyError(x)) : v)
+Base.haskey(d::DenseIndex{K}, x::NTuple{K,Int}) where {K} = get(d, x, 0) != 0
+
+# The largest box of modes indexed densely (4 bytes per tuple).
+const _DENSE_LIMIT = 2^27
+
+function _state_index(P::ProductStalk{K}, states) where {K}
+    dims = ntuple(a -> P.nstates[a] + P.summaries[a].n_target, K)
+    if prod(big, dims) <= _DENSE_LIMIT && length(states) < typemax(Int32)
+        d = DenseIndex{K}(dims, zeros(Int32, prod(dims)))
+        for (i, x) in enumerate(states)
+            d.table[_linear(d, x)] = i
+        end
+        return d
+    end
+    index = Dict{NTuple{K,Int},Int}()
+    sizehint!(index, length(states))
+    for (i, x) in enumerate(states)
+        index[x] = i
+    end
+    return index
+end
+
+# Every coarse state of the stalk: each tuple of summaries, with the agents in
+# contact expanded to the states of their fibres (no two of them conflicting).
+function _all_states(P::ProductStalk{K}) where {K}
+    out = NTuple{K,Int}[]
+    for ks in Iterators.product((1:P.summaries[a].n_target for a in 1:K)...)
+        touching = ntuple(a -> _in_contact(P, ks, a), K)
+        opts = ntuple(a -> touching[a] ? P.fibres[a][ks[a]] : P.singletons[a][ks[a]], K)
+        any(isempty, opts) && continue
+        for x in Iterators.product(opts...)
+            ok = true
+            for a in 1:K, b in (a + 1):K
+                if touching[a] && touching[b] &&
+                   P.collides(P.members[a], x[a], x[a], P.members[b], x[b], x[b])
+                    ok = false
+                    break
+                end
+            end
+            ok && push!(out, x)
+        end
+    end
+    return out
+end
+
+"""
+    stalk_graph(P::ProductStalk) -> StalkGraph
+
+Build the stalk explicitly: every coarse state, every arc, and the cost-to-go to
+the goal. The number of coarse states is about the product of the agents' summary
+counts, so this is meant for edges, and for higher simplices only on small maps.
+"""
+function stalk_graph(P::ProductStalk{K}) where {K}
+    states = _all_states(P)
+    return _stalk_graph(P, states, _state_index(P, states), nothing)   # a barrier: the index's type is known inside
+end
+
+"""
+    ArcScratch()
+
+Arc arrays reused from one explicit stalk to the next when the arcs are not kept
+(see [`stalk_cost_to_go`](@ref)): the stalk's out-arcs by state, their transpose
+(the in-arcs the closure reads), a cursor for the transpose and a per-state buffer.
+One per thread; never shared between concurrent builds.
+"""
+struct ArcScratch
+    colptr::Vector{Int32}
+    rowval::Vector{Int32}
+    nzval::Vector{Float64}
+    tcolptr::Vector{Int32}
+    trowval::Vector{Int32}
+    tnzval::Vector{Float64}
+    cursor::Vector{Int32}
+    buf::Vector{Tuple{Int,Float64}}
+end
+ArcScratch() = ArcScratch(Int32[], Int32[], Float64[], Int32[], Int32[], Float64[], Int32[], Tuple{Int,Float64}[])
+
+# The cost-to-go of the stalk, with its arcs built in `scratch` and dropped.
+function _stalk_values(P::ProductStalk{K}, scratch::ArcScratch) where {K}
+    states = _all_states(P)
+    return _stalk_graph(P, states, _state_index(P, states), scratch)
+end
+
+"""
+    stalk_cost_to_go(P::ProductStalk; scratch = ArcScratch()) -> Vector{Float64}
+
+The cost-to-go of the explicit stalk of `P` at each of its coarse states, in the
+order in which [`StalkGraph`](@ref)`(P, Δ)` enumerates them; the arcs are built in
+`scratch` and dropped. This is the only expensive part of an explicit stalk, and
+all that needs to travel: the states and their index are cheap to enumerate again
+wherever the stalk is used. So stalks can be computed on other threads, processes
+or nodes and assembled with [`CoverSheaf`](@ref)`(complex, stalks, explicit)`.
+"""
+stalk_cost_to_go(P::ProductStalk; scratch::ArcScratch = ArcScratch()) = _stalk_values(P, scratch).Δ
+
+"""
+    StalkGraph(P::ProductStalk, Δ)
+
+The explicit stalk of `P` from its cost-to-go `Δ` (as returned by
+[`stalk_cost_to_go`](@ref)), without arcs: the states and their index are
+enumerated again.
+"""
+function StalkGraph(P::ProductStalk{K}, Δ::AbstractVector{<:Real}) where {K}
+    states = _all_states(P)
+    @argcheck length(Δ) == length(states) "one cost-to-go per coarse state of the stalk"
+    n = length(states)
+    return StalkGraph(states, _state_index(P, states), spzeros(Float64, Int32, n, n), Vector{Float64}(Δ))
+end
+
+"""
+    cover_stalks(complex, graphs, summaries, goals; contact, collides) -> Dict
+
+The [`ProductStalk`](@ref) of every simplex of `complex` (arguments as in
+[`CoverSheaf`](@ref)). Cheap: no arcs are built. Together with
+[`stalk_cost_to_go`](@ref) and [`StalkGraph`](@ref)`(P, Δ)`, this lets the
+explicit stalks be computed anywhere, for instance one share per MPI rank, and
+assembled with `CoverSheaf(complex, stalks, explicit)`.
+"""
+function cover_stalks(K::SimplicialComplex, graphs, summaries, goals; contact, collides)
+    @argcheck length(graphs) == length(summaries) == length(goals) == nv(K)
+    # A relation takes four arguments; a function of the dimension takes one.
+    contact_at(k) = hasmethod(contact, Tuple{Int}) && !hasmethod(contact, NTuple{4,Int}) ? contact(k) : contact
+    return Dict{Vector{Int},ProductStalk}(σ => ProductStalk(Tuple(σ), graphs[σ], summaries[σ], goals[σ];
+        contact = contact_at(k), collides) for k in 0:dimension(K) for σ in simplices(K, k))
+end
+
+function _stalk_graph(P::ProductStalk{K}, states, index, scratch) where {K}
+    n = length(states)
+    keep = isnothing(scratch)
+    # The arcs out of each state, each target once at its least cost: the transpose of
+    # the stalk's matrix, column by column.
+    colptr = keep ? Vector{Int32}(undef, n + 1) : resize!(scratch.colptr, n + 1)
+    rowval = keep ? sizehint!(Int32[], 4n) : empty!(scratch.rowval)
+    nzval = keep ? sizehint!(Float64[], 4n) : empty!(scratch.nzval)
+    buf = keep ? Tuple{Int,Float64}[] : scratch.buf
+    colptr[1] = 1
+    for (i, x) in enumerate(states)
+        empty!(buf)
+        stalk_successors(P, x) do y, c
+            push!(buf, (index[y], c))
+        end
+        sort!(buf; alg = InsertionSort)           # by target, then cost (short, sorted in place)
+        previous = 0
+        for (j, c) in buf
+            j == previous && continue
+            push!(rowval, j)
+            push!(nzval, c)
+            previous = j
+        end
+        colptr[i + 1] = length(rowval) + 1
+    end
+    if keep
+        W = copy(transpose(SparseMatrixCSC(n, n, colptr, rowval, nzval)))
+    else
+        _transpose!(scratch, n)
+        W = SparseMatrixCSC(n, n, scratch.tcolptr, scratch.trowval, scratch.tnzval)
+    end
+    b = fill(Inf, n)
+    b[index[coarse_state(P, P.goal)]] = 0.0
+    Δ = minplus_closure(W, b)
+    return StalkGraph(states, index, keep ? W : spzeros(Float64, Int32, n, n), Δ)
+end
+
+# The transpose of the arcs in scratch (colptr, rowval, nzval) into (tcolptr, trowval,
+# tnzval), by counting sort; rows come out sorted because columns are read in order.
+function _transpose!(s::ArcScratch, n)
+    nz = s.colptr[n + 1] - 1
+    resize!(s.tcolptr, n + 1)
+    fill!(s.tcolptr, 0)
+    for k in 1:nz
+        s.tcolptr[s.rowval[k] + 1] += 1
+    end
+    s.tcolptr[1] = 1
+    for i in 1:n
+        s.tcolptr[i + 1] += s.tcolptr[i]
+    end
+    resize!(s.trowval, nz)
+    resize!(s.tnzval, nz)
+    resize!(s.cursor, n)
+    copyto!(s.cursor, 1, s.tcolptr, 1, n)
+    for col in 1:n, k in s.colptr[col]:(s.colptr[col + 1] - 1)
+        r = s.rowval[k]
+        p = s.cursor[r]
+        s.trowval[p] = col
+        s.tnzval[p] = s.nzval[k]
+        s.cursor[r] = p + 1
+    end
+    return s
+end
+
+"""
+    stalk_value(P::ProductStalk, x; heuristic = y -> 0.0, max_expanded = 10^6) -> (value, expanded, exact)
+
+The cost-to-go of the stalk from the coarse state `x` to the goal, by A* on the
+stalk built on the fly. `heuristic` must be a consistent lower bound (for instance
+the pulled-back values of the faces, see [`section_value`](@ref)). If the search
+stops at `max_expanded` expansions, `value` is the least key left in the queue, still
+a lower bound, and `exact` is `false`.
+"""
+function stalk_value(P::ProductStalk{K}, x::NTuple{K,Int}; heuristic = y -> 0.0,
+    max_expanded::Integer = 10^6) where {K}
+    goal = coarse_state(P, P.goal)
+    ids = Dict(x => 1)
+    keys_ = [x]
+    g = [0.0]
+    h = [Float64(heuristic(x))]
+    closed = falses(1)
+    heap = Tuple{Float64,Int}[]
+    isfinite(h[1]) || return Inf, 0, true
+    _push!(heap, (h[1], 1))
+    expanded = 0
+    while !isempty(heap)
+        f, i = _pop!(heap)
+        closed[i] && continue
+        f > g[i] + h[i] + 1e-9 && continue
+        keys_[i] == goal && return g[i], expanded, true
+        if expanded >= max_expanded
+            return f, expanded, false
+        end
+        closed[i] = true
+        expanded += 1
+        stalk_successors(P, keys_[i]) do y, c
+            j = get(ids, y, 0)
+            if j == 0
+                push!(keys_, y); push!(g, Inf); push!(h, Float64(heuristic(y))); push!(closed, false)
+                j = ids[y] = length(keys_)
+            end
+            v = g[i] + c
+            if v < g[j] && isfinite(h[j])
+                g[j] = v
+                closed[j] = false
+                _push!(heap, (v + h[j], j))
+            end
+        end
+    end
+    return Inf, expanded, true
+end
+
+# ---------------------------------------------------------------------------
+# The sheaf over the complex, and gluing
+# ---------------------------------------------------------------------------
+
+"""
+    CoverSheaf(complex, graphs, summaries, goals; contact, collides, explicit_dim = 1)
+
+The stalks of every simplex of `complex` (agents are its vertices: `graphs[v]`,
+`summaries[v]`, `goals[v]` describe agent `v`; see [`ProductStalk`](@ref) for
+`contact` and `collides`). Stalks of dimension up to `explicit_dim` are built
+explicitly ([`stalk_graph`](@ref)); higher ones are searched on demand
+([`section_value`](@ref)). With `keep_arcs = false` an explicit stalk keeps only its
+states and cost-to-go, which is all the queries need.
+
+The stalks are built in parallel over Julia's threads: each depends only on the
+graphs and summaries of its own agents, so the work is a set of independent tasks,
+one per simplex.
+
+`contact` is either one contact relation for every simplex or a function `k ->
+relation` of the dimension `k`. The relations must grow with the dimension (contact
+on a face implies contact on the simplex), so that a simplex resolves its agents at
+least as finely as its faces and the restriction maps are defined: triangles may
+keep agents exact over a wider range than edges do, which lets them see
+three-agent interactions while the edge stalks stay small.
+"""
+struct CoverSheaf
+    complex::SimplicialComplex
+    stalks::Dict{Vector{Int},ProductStalk}
+    explicit::Dict{Vector{Int},StalkGraph}
+    explicit_dim::Int
+end
+
+# Assembly from stalks computed elsewhere (see `cover_stalks` and `stalk_cost_to_go`):
+# every simplex needs its stalk, and the explicit ones their tables.
+function CoverSheaf(K::SimplicialComplex, stalks::AbstractDict, explicit::AbstractDict)
+    @argcheck all(σ -> haskey(stalks, σ), (σ for k in 0:dimension(K) for σ in simplices(K, k))) "a stalk for every simplex"
+    @argcheck all(σ -> haskey(stalks, σ), keys(explicit)) "explicit stalks of simplices of the complex"
+    return CoverSheaf(K, Dict{Vector{Int},ProductStalk}(stalks), Dict{Vector{Int},StalkGraph}(explicit),
+        maximum(length, keys(explicit); init = 1) - 1)
+end
+
+function CoverSheaf(K::SimplicialComplex, graphs, summaries, goals; contact, collides, explicit_dim::Integer = 1,
+    keep_arcs::Bool = true)
+    @argcheck length(graphs) == length(summaries) == length(goals) == nv(K)
+    # A relation takes four arguments; a function of the dimension takes one.
+    contact_at(k) = hasmethod(contact, Tuple{Int}) && !hasmethod(contact, NTuple{4,Int}) ? contact(k) : contact
+    cells = [(k, σ) for k in 0:dimension(K) for σ in simplices(K, k)]
+    built = Vector{Tuple{ProductStalk,Union{Nothing,StalkGraph}}}(undef, length(cells))
+    pool = Channel{ArcScratch}(Threads.nthreads())
+    foreach(_ -> put!(pool, ArcScratch()), 1:Threads.nthreads())
+    # Each stalk depends only on its own agents: build them in parallel.
+    Threads.@threads :dynamic for i in eachindex(cells)
+        k, σ = cells[i]
+        P = ProductStalk(Tuple(σ), graphs[σ], summaries[σ], goals[σ]; contact = contact_at(k), collides)
+        G = nothing
+        if k <= explicit_dim
+            if keep_arcs
+                G = stalk_graph(P)
+            else                                  # arcs dropped: reuse a free set of arc arrays
+                scratch = take!(pool)
+                try
+                    G = _stalk_values(P, scratch)
+                finally
+                    put!(pool, scratch)
+                end
+            end
+        end
+        built[i] = (P, G)
+    end
+    stalks = Dict{Vector{Int},ProductStalk}(σ => built[i][1] for (i, (_, σ)) in enumerate(cells))
+    explicit = Dict{Vector{Int},StalkGraph}(σ => built[i][2] for (i, (_, σ)) in enumerate(cells) if !isnothing(built[i][2]))
+    return CoverSheaf(K, stalks, explicit, explicit_dim)
+end
+
+# The value of the face τ of σ at the restriction of σ's coarse state x.
+function _face_value(C::CoverSheaf, Pσ, τ, x)
+    Pτ = C.stalks[τ]
+    y = restrict(Pσ, Pτ, x)
+    G = get(C.explicit, τ, nothing)
+    return isnothing(G) ? first(stalk_value(Pτ, y; heuristic = z -> _face_heuristic(C, Pτ, τ, z))) : G.Δ[G.index[y]]
+end
+
+# Pulled-back face values bound the cost of σ: each face pays for its own agents, and
+# each agent of a k-simplex lies in k of its k + 1 faces.
+function _face_heuristic(C::CoverSheaf, Pσ, σ, x)
+    length(σ) <= 1 && return 0.0
+    vals = [_face_value(C, Pσ, τ, x) for τ in faces(σ)]
+    return max(maximum(vals), sum(vals) / (length(σ) - 1))
+end
+
+"""
+    section_value(C::CoverSheaf, σ, states; max_expanded = 10^6) -> (value, expanded, exact)
+
+The cost-to-go ``Δ_σ`` of the stalk of the simplex `σ` at the joint state `states`
+(one state per vertex of the complex; only those of `σ` are read). Explicit stalks
+are looked up; others are searched with the pulled-back face values as heuristic.
+"""
+function section_value(C::CoverSheaf, σ::AbstractVector{<:Integer}, states; max_expanded::Integer = 10^6)
+    σ = sort!(collect(Int, σ))
+    P = C.stalks[σ]
+    x = coarse_state(P, Tuple(states[v] for v in σ))
+    G = get(C.explicit, σ, nothing)
+    isnothing(G) || return G.Δ[G.index[x]], 0, true
+    if all(τ -> haskey(C.explicit, τ), faces(σ))
+        # Every face explicit: gather the faces' stalks, tables and positions once, so the
+        # heuristic is compiled for their concrete types (no lookups per call).
+        fs = Tuple((C.stalks[τ], C.explicit[τ], NTuple{length(τ),Int}(map(v -> findfirst(==(v), σ), τ))) for τ in faces(σ))
+        return _search(P, fs, x, max_expanded)
+    end
+    return stalk_value(P, x; heuristic = y -> _face_heuristic(C, P, σ, y), max_expanded)
+end
+
+_search(P::ProductStalk, fs::Tuple, x, max_expanded) = stalk_value(P, x; heuristic = y -> _faces_bound(P, fs, y), max_expanded)
+
+function _faces_bound(P::ProductStalk{K}, fs::Tuple, x) where {K}
+    vals = map(f -> f[2].Δ[f[2].index[_restrict(P, f[1], f[3], x)]], fs)
+    return max(maximum(vals), sum(vals) / (K - 1))
+end
+
+"""
+    simplicial_cover(n, constraints) -> Float64
+
+The least ``∑_v x_v`` over integers ``x_v ≥ 0`` (``v ∈ 1:n``) with
+``∑_{v ∈ σ} x_v ≥ Δ_σ`` for every `(σ, Δ_σ)` in `constraints`. Exhaustive search
+with pruning, meant for a few dozen constraints on up to about a dozen vertices.
+"""
+function simplicial_cover(n::Integer, constraints)
+    @argcheck n <= 16 "exhaustive search: at most 16 vertices"
+    cons = [(sort!(collect(Int, σ)), ceil(Int, Δ - 1e-9)) for (σ, Δ) in constraints if isfinite(Δ) && Δ > 0]
+    @argcheck all(c -> all(v -> 1 <= v <= n, c[1]), cons)
+    x = zeros(Int, n)
+    best = Ref(sum(c[2] for c in cons; init = 0))
+    closing = [[c for c in cons if last(c[1]) == v] for v in 1:n]
+    function go(v, total)
+        total >= best[] && return
+        if v > n
+            best[] = total
+            return
+        end
+        for t in 0:maximum((c[2] for c in cons if v in c[1]); init = 0)
+            x[v] = t
+            all(sum(x[c[1]]) >= c[2] for c in closing[v]) && go(v + 1, total + t)
+        end
+        x[v] = 0
+    end
+    go(1, 0)
+    return float(best[])
+end
+
+"""
+    cover_bound(C::CoverSheaf, states; max_expanded = 10^6) -> (bound, values)
+
+The [`simplicial_cover`](@ref) of the stalk values of every simplex of positive
+dimension at the joint state `states`: a lower bound on the total cost of the
+agents from `states`. `values` maps each simplex to `(value, expanded, exact)`.
+The simplices are evaluated in parallel over Julia's threads; only the cover itself,
+a small integer program on the agents, is sequential.
+"""
+function cover_bound(C::CoverSheaf, states; max_expanded::Integer = 10^6)
+    cells = [σ for k in 1:dimension(C.complex) for σ in simplices(C.complex, k)]
+    vals = Vector{Tuple{Float64,Int,Bool}}(undef, length(cells))
+    # The simplices only read the stalks (and the explicit faces): evaluate them in parallel.
+    Threads.@threads :dynamic for i in eachindex(cells)
+        vals[i] = section_value(C, cells[i], states; max_expanded)
+    end
+    values = Dict(zip(cells, vals))
+    return simplicial_cover(nv(C.complex), [(σ, v[1]) for (σ, v) in values]), values
+end
+
+end

@@ -29,6 +29,7 @@ end
   include("network_sheaves/GridMultigrid.jl")
   include("network_sheaves/MultilevelSchwarz.jl")
   include("network_sheaves/TropicalAbstraction.jl")
+  include("network_sheaves/TropicalCovers.jl")
   include("network_sheaves/Morphisms.jl")
   include("network_sheaves/GraphHomomorphisms.jl")
   include("network_sheaves/Morphisms.jl")
