@@ -334,6 +334,164 @@ We also tried transporting a Lyapunov function from a *pessimistic* coarse sheaf
 every state in a mode to make the move, and wide speed bins rarely satisfy that.
 The per-query corridor certificate is the practical form of the lax side.
 
+## Cooperative multi-agent planning
+
+Several agents share a map, one planner controls them all, and each pays for its
+own steps, waiting included, until it rests at its goal. The joint state graph is
+the product of the agents' graphs with the collisions removed (vertex and swap
+conflicts), so it grows exponentially with the number of agents. The question is
+how much of the *coordination cost*, the waiting and detours that the agents
+impose on one another, a polynomial-size abstraction can see.
+
+**Work in the decoupled gauge.** Let ``d_i`` be agent ``i``'s single-agent
+cost-to-go and ``\varphi = \sum_i d_i``. In the gauge of ``\varphi``:
+
+- an agent moving along a shortest path costs 0;
+- waiting costs 1;
+- stepping away from its goal costs 2.
+
+So the joint cost-to-go is ``\varphi`` plus the total **delay**, and a heuristic
+only has to bound the delay. Without the gauge, coarsening the other agent by
+position throws away its travel cost, as in the line example above, and the bound
+cannot beat the plain sum of solo distances. The summary below keeps the other
+agent's remaining distance anyway, and with it the gauge turns out to be
+redundant: it matters exactly for summaries that discard ``d_j``.
+
+**Summarize the other agent by the Reeb graph of its value function.** In agent
+``i``'s coarse problem, ``i`` keeps its exact state and agent ``j`` is replaced by
+a mode, and the joint graph is pushed forward along that map. Which mode decides
+everything:
+
+- **Position blocks** of agent ``j`` leak *timing*. A block forgets where in it
+  ``j`` is, so consecutive coarse steps can put ``j`` anywhere in the block. ``j``
+  can then reach a corridor early and slip through before ``i`` arrives.
+- **Level sets** of ``d_j`` (agent ``j``'s remaining distance) fix the timing,
+  because ``j``'s delay-free moves go from level ``k`` to ``k - 1``. But a level
+  set contains equidistant cells on opposite sides of an obstacle, so ``j`` can
+  hop across a wall for free.
+- **Arcs of the Reeb graph of ``d_j``** fix both. A level-``k`` state's arc is its
+  component of the band ``k \le d_j \le k + 1``, the discrete level set
+  ``d_j = k + \tfrac12``, so cells on opposite sides of an obstacle fall in
+  different arcs. Reeb graphs are themselves cosheaves (de Silva, Munch & Patel
+  2016), so the summary is a pushforward along a map with topological content,
+  not a hand-made partition. The merge tree, which uses components of the
+  superlevel sets ``\{d_j \ge k\}``, does *not* work: those sets reconnect through
+  distant routes.
+
+**The interaction sheaf.** For ``N`` agents, the coarse problems become edge
+stalks on the interaction graph:
+
+- **Vertex stalk:** an agent's own state graph in the gauge of its ``d_i``.
+- **Edge stalk of a pair ``(i, j)``:** the pushforward of the *pair graph* (both
+  agents moving at once, collisions removed) along a map that keeps ``i``'s state
+  and summarizes ``j`` relative to it. Cover the map with blocks:
+  - **Near** (``j``'s block next to ``i``'s): ``j``'s cell and velocity mode are
+    kept. Every collision happens here.
+  - **Far:** ``j`` becomes the pair (Reeb arc of ``d_j``, block). That records its
+    progress, and where it is relative to ``i`` at the resolution of the blocks.
+
+  The cost-to-go ``\Delta_{ij}`` of the edge stalk bounds the pair's delay.
+- **Gluing:** an ``N``-agent plan restricts to a feasible plan of every pair, and
+  delays are nonnegative. So for any matching of the interaction graph,
+  ``\varphi + \sum_{(i,j)} \Delta_{ij}`` is admissible, and the heuristic takes
+  the best matching. This is the pairwise heuristic of conflict-based search (Li,
+  Felner et al. 2019), with the pair bounds coming from pushforwards instead of
+  pair solves. The interaction graph keeps only pairs whose *tubes* meet: the
+  cells each agent can use within a small delay. Dropping a pair never breaks
+  admissibility, only tightness.
+
+**Base change makes the edge stalk exact without the pair graph.** The far summary
+depends on ``j``'s state alone, and the near/far split depends only on blocks. So
+the far region is a union of fibres of a *product* map ``\mathrm{id} \times \pi_j``.
+On a product, pushforward commutes with the tensor product (simultaneous moves),
+[`tensor_product`](@ref). Over the far region the edge stalk is therefore
+``W_i \boxtimes Q_{\pi_j}(W_j)``: agent ``i``'s graph times the quotient of
+``j``'s own graph, with its loops ([`quotient_graph`](@ref) with
+`loops = true`). Only the near region and its boundary are enumerated, and their
+size does not grow with the map. The result *equals* the pushforward of the pair
+graph, which the studies assert state by state; it is not an over-approximation.
+[`reeb_arcs`](@ref) computes the arcs as a `GraphHomomorphism`, using bands between
+consecutive distinct levels, so costs need not be unit.
+
+An earlier version kept only ``j``'s Reeb arc when far, with no relative
+coordinate. It had to be patched with an occupancy check and still lost a third of
+the coordination cost on double integrators. The missing piece was the relation,
+which is what an edge stalk is supposed to carry.
+
+**Changing the gauge on the cover.** The matching uses each agent in at most one
+edge. A gauge transformation on the cover uses every edge instead.
+
+- **The split.** Each agent's delay is split, state by state, among the edges at
+  it: weights ``w_{ie}(s) \ge 0`` with ``\sum_e w_{ie}(s) \le 1``. Edge
+  ``e = \{i, j\}`` then carries the pair problem with arc costs
+  ``w_{ie}\,\mathrm{delay}_i + w_{je}\,\mathrm{delay}_j``.
+- **Why it is a gauge.** The split moves cost between the cells of the cover
+  without changing the cost of any global section. This mirrors how ``\varphi``
+  adds a coboundary on one agent's graph without changing the cost of any path.
+- **The two gauges compose.** In the delay gauge every arc cost is nonnegative and
+  an agent alone costs 0. So the split is well posed, and the whole bound comes
+  from the edges.
+- **Validity.** For every split, the sum over edges of the weighted pair optima is
+  an admissible and consistent heuristic, because a joint move restricts to a move
+  of every pair. A matching is the split with ``w \equiv 1`` on matched edges.
+- **Optimization.** The split can be maximized at the start by projected
+  supergradient ascent from the matching. Its weighted edge
+  stalk is the same pushforward as before: agent ``j``'s arc cost on a far coarse
+  arc is the least weighted delay over the fibre.
+
+**Edges are not enough: the cover needs 2-cells.** Weights are at most 1, so every
+edge factor is at most its pair's own optimum. No split, however clever, can see
+an interaction that no pair sees, and three agents meeting at a corridor is
+exactly that. In one four-agent instance:
+- every pair except ``(1, 4)`` has optimal delay 0, and ``(1, 4)`` has delay 3;
+- the triple ``\{1, 3, 4\}`` has delay 5, which is also the optimum for all four.
+
+The pairwise data is exhausted at 3. The gap is an obstruction that lives on a
+triangle of the interaction graph, not on any edge.
+
+So extend the cover to the clique complex of the interaction graph, with a stalk
+on every triangle: the triple problem.
+- **Bound.** The delays ``x_i`` of a joint plan restrict to a plan of every simplex
+  ``\sigma``, so they satisfy ``\sum_{i \in \sigma} x_i \ge \Delta_\sigma`` for
+  every edge and triangle. The smallest such integer 0-cochain, the *simplicial
+  cover*, bounds the total delay. With edges alone it is the weighted vertex cover
+  of Li, Felner et al. (2019).
+- **Its relation to the gauge.** Its linear relaxation is the linear-programming
+  dual of the scalar split over simplices,
+  ``\max \sum_\sigma y_\sigma \Delta_\sigma`` with ``\sum_{\sigma \ni i} y_\sigma \le 1``.
+  So the gauge on the cover and the cover by 0-cochains are two sides of one
+  duality, and integrality strengthens the cover side.
+
+**The cover as a sheaf on a 2-complex.** `TropicalCovers` builds this structure in
+the package, using these pieces:
+
+- **The complex** is the clique complex of the interaction graph
+  ([`clique_complex`](@ref)): agents are vertices, interacting pairs are edges,
+  and mutually interacting triples are triangles.
+- **Stalks** ([`ProductStalk`](@ref)). Every simplex carries the pushforward of
+  its agents' joint graph along a summary map that is *symmetric* in the agents.
+  Each agent is replaced by its own summary (Reeb arc of its cost-to-go, block)
+  unless its summary is in contact with that of another agent of the simplex, and
+  then it keeps its exact state. No agent of a simplex is privileged, on edges or
+  on triangles.
+- **Exactness.** Contact is decided on summaries, so the coarse states are unions
+  of fibres, and the fibres are products. As long as agents out of contact cannot
+  collide, the stalk is enumerated move by move and *equals* the pushforward of
+  the joint graph. The tests and the study check this against the pair graph.
+- **Restriction maps** ([`restrict`](@ref)) forget agents. An agent kept exact
+  only because of a contact outside the face falls back to its summary. The square
+  with the summary maps commutes, and every arc restricts to an arc that costs no
+  more. So a face's cost-to-go, pulled back, is a subsolution on the simplex: a
+  cellular sheaf of min-plus modules with pullbacks as restrictions.
+- **Contact may grow with the dimension.** A simplex must resolve its agents at
+  least as finely as its faces, or the restriction is undefined. So triangles may
+  keep agents exact over a wider range than edges.
+- **Building and gluing.** Edge stalks are built and solved once
+  ([`stalk_graph`](@ref)). Triangle stalks are searched on demand from the query
+  state, with the pulled-back edge values as the A* heuristic
+  ([`section_value`](@ref)). [`cover_bound`](@ref) glues the values by the
+  simplicial cover.
+
 ## Relation to the literature
 
 The ingredients are classical. What the sheaf view adds is a single vocabulary in
@@ -391,6 +549,27 @@ Tabuada 2025; Ames, Mattenet & Moeller 2025). There a Lyapunov function is a lax
 morphism into a stability object, and the lax/oplax sandwich above is its
 two-sided form for optimal control.
 
+**Multi-agent path finding.** Planning in the joint graph with a decoupled
+heuristic, and coupling agents only where they conflict, is the core of
+independence detection (Standley 2010), subdimensional expansion and M\* (Wagner &
+Choset 2015), and conflict-based search (Sharon, Stern, Felner & Sturtevant 2015).
+Pairwise bounds combined over a matching or vertex cover of the conflict graph are
+the weighted dependency-graph heuristics of Li, Felner, Boyarski, Ma & Koenig
+(2019). The interaction sheaf replaces their exact pair solves by pushforwards along
+a summary of the other agent. The gauge is potential-based shaping (Ng, Harada &
+Russell 1999) and Johnson's reweighting (1977). The summary is the Reeb graph of the
+other agent's value function (Reeb 1946); contour trees (Carr, Snoeyink & Axen
+2003) and Reeb graphs as cosheaves (de Silva, Munch & Patel 2016) are the
+computational and categorical forms of it.
+
+Splitting cost among the factors of a decomposition without changing the total is
+*reparametrization* in MAP inference. Maximizing the sum of local minima over
+reparametrizations is the dual of the local-polytope relaxation (Wainwright &
+Jordan 2008), and it is what tree-reweighted message passing optimizes (Kolmogorov
+2006). When pairwise factors leave a gap, that literature adds triplet clusters,
+found where the gap concentrates (Sontag, Meltzer, Globerson, Jaakkola & Weiss
+2008). That is the same move as the 2-cells of the interaction sheaf above.
+
 **Sheaves.** The real side of the package follows Curry (2014) and Hansen & Ghrist
 (2019): global sections, Laplacians, harmonic extension. Sheaves valued in
 lattices and their fixed-point "Laplacian" (Ghrist & Riess 2022) are the natural
@@ -412,3 +591,30 @@ supersolutions and Tarski's theorem replaces linear algebra.
   merge-and-shrink and counterexample-guided abstraction refinement automate it.
   The lax/oplax gap is a natural refinement signal: refine where the two quotients
   disagree.
+- **Joint search beyond four agents.** Searching a group of ``m`` agents moves
+  all of them at once: ``5^m`` successors per step on a grid. Operator
+  decomposition (one agent moves per step) is the standard fix, but the pair
+  bounds are only proved admissible at synchronized states. A half-moved
+  configuration needs its own argument. Until then, large groups get the
+  certificate but not the optimum.
+- **Summaries between "future" and "stable".** Refining by future Reeb arcs leaves
+  a small leak (one edge, one triangle at radius 1); full stability on zero-delay
+  moves removes it but keeps almost nothing summarized on a grid. Intermediate
+  refinements, futures seen at a few steps' horizon or through a finer partition
+  than the Reeb arcs, are untested.
+- **Compression needs larger blocks.** With blocks of a few cells an edge stalk is
+  a large fraction of the pair graph. Larger blocks widen the contact region, so
+  how block size, contact radius and tightness trade off on larger maps is open.
+- **Scaling stops at the longest stalk.** The edge stalks are independent tasks,
+  over threads and over MPI ranks, so the build cannot finish before its longest
+  single edge stalk. Splitting one stalk's states across threads would lower that
+  floor.
+- **Bounds at the start only.** The triangle values are searched from one joint
+  state. A heuristic at every state of a joint search needs them cached or built
+  across queries.
+- **Dense interaction graphs.** On maps that funnel every agent through the same
+  corridors nearly all pairs interact, and the gluing gains little from sparsity.
+- **Scale of the edge stalks.** The near field is fixed in size but large (a
+  ``3 \times 3`` block window times the velocity modes). The edge stalks pay off
+  only where pair graphs are too large to solve, which is also where they can no
+  longer be checked against them.
