@@ -17,6 +17,7 @@ include("SchwarzMethods.jl")
 include("GridSchwarz.jl")
 include("GridMultigrid.jl")
 include("MultilevelSchwarz.jl")
+include("TropicalAbstraction.jl")
 include("SchwarzModelProblems.jl")
 include("Pushouts.jl")
 include("TrajectorySheaf.jl")
@@ -38,6 +39,7 @@ include("Formations.jl")
 @reexport using .GridSchwarz
 @reexport using .GridMultigrid
 @reexport using .MultilevelSchwarz
+@reexport using .TropicalAbstraction
 @reexport using .SchwarzModelProblems
 @reexport using .Pushouts
 @reexport using .TrajectorySheaves

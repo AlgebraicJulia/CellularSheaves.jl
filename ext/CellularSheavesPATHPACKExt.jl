@@ -11,10 +11,11 @@ using CellularSheaves
 using LinearAlgebra
 using SparseArrays
 using PATHPACK
-using PATHPACK.CPU: PlusProd, ChordalSLU, TDWorkspace, sgetrs!
+using PATHPACK.CPU: PlusProd, MinPlus, ChordalSLU, TDWorkspace, sgetrs!
 import CliqueTrees
 
 const DIH = CellularSheaves.ControlSheaves.DoubleIntegratorHJB
+const TA = CellularSheaves.NetworkSheaves.TropicalAbstraction
 
 struct _PathPackCoarsestFactor{F,T,W}
     factor::F
@@ -39,5 +40,20 @@ function DIH._solve!(s::_PathPackCoarsestFactor, x::Vector{Float64}, c::Vector{F
     sgetrs!(s.factor, Val(:L), s.trans, x, s.workspace)             # x = P* c
     return x
 end
+
+# The coarse min-plus closure of a TropicalAbstraction (Abstraction(...; closure =
+# PathPackClosure())): Wc* = U* L* factorized once by the chordal semiring LU, so that each
+# target set's coarse cost-to-go V = Wc* bc (the least solution of V = Wc V ⊕ bc)
+# is two triangular solves.
+struct PathPackMinPlusClosure{F} <: TA.MinPlusClosure
+    factor::F
+end
+
+TA._closure(::TA.PathPackClosure, Wc::SparseMatrixCSC) = PathPackMinPlusClosure(PATHPACK.CPU.mlu(MinPlus(), Wc))
+
+TA._apply_closure(s::PathPackMinPlusClosure, Wc, bc) = lmul!(s.factor, Vector{Float64}(bc))
+
+# All pairs (Abstraction(...; table = true)): the closure Wc* itself, U* L* multiplied out.
+TA._full_closure(s::PathPackMinPlusClosure, Wc) = Matrix(s.factor)
 
 end # module
