@@ -60,4 +60,5 @@ end
   include("ControlSheaves/DoubleIntegratorHJB.jl")
   include("ControlSheaves/MechanicalHJB.jl")
   include("ControlSheaves/HJBMultigrid.jl")
+  include("ControlSheaves/PredictiveConsensus.jl")
 end

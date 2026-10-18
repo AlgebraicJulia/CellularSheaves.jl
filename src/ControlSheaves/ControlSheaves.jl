@@ -75,4 +75,8 @@ include("MechanicalHJB.jl")
 import .MechanicalHJB
 export MechanicalHJB
 
+include("PredictiveConsensus.jl")
+import .PredictiveConsensus
+export PredictiveConsensus
+
 end # module ControlSheaves
