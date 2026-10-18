@@ -554,18 +554,6 @@ minplus(A, B) =[minimum(A[i, k] + B[k, j] for k in axes(A, 2)) for i in axes(A, 
             @test all(up .<= must .+ 1e-9)
         end
 
-        # Unit costs: a stable partition has zero defect
-        n = 6
-        L = LinearIndices((n, n))
-        r, c = Int[], Int[]
-        for x in 1:n, y in 1:n, (dx, dy) in ((1, 0), (-1, 0), (0, 1), (0, -1))
-            (1 <= x + dx <= n && 1 <= y + dy <= n) && (push!(r, L[x, y]); push!(c, L[x + dx, y + dy]))
-        end
-        Wgrid = sparse(r, c, ones(length(r)), n^2, n^2)
-        blocks = GraphHomomorphism([(x - 1) ÷ 2 + 3 * ((y - 1) ÷ 2) + 1 for y in 1:n for x in 1:n], 9)   # 2×2 blocks
-        ψs = stable_refinement(Wgrid, blocks)
-        @test all(iszero, nonzeros(lifting_defect(Wgrid, ψs)))
-
         # Forgetting velocity on a small double-integrator lattice: some arcs do not lift
         Wdi, points = double_integrator_lattice(5, 2, (qx, qy) -> false)
         εdi = lifting_defect(Wdi, projection_homomorphism(points, (1, 2)))

@@ -1,7 +1,7 @@
 # 018 — Assume–guarantee certificates over relative-mode summaries
 
 **Status:** parked. We are doing cooperative multi-agent planning first
-(optimistic relative-mode bounds, `docs/scripts/tropical_multiagent_study.jl`).
+(optimistic relative-mode bounds, studied with the path-lifting paper).
 This issue records the non-cooperative extension so it is not lost. Revisit if
 the agents must be certified separately, or if some of them are not controlled
 by the planner.
@@ -57,7 +57,7 @@ does not.
 |---|---|
 | `src/network_sheaves/TropicalAbstraction.jl` | `robust_quotient` (the ∀∃ quotient when the universal quantifier ranges over the states of a block), `is_control_lyapunov`, `greedy_policy`, `is_lyapunov` (the certificate checks to reuse), `_astar` and the heap helpers (the priority-queue code to extend). |
 | `src/network_sheaves/GraphHomomorphisms.jl` | `GraphHomomorphism` for the mode map ``\mu_i``. |
-| `docs/scripts/tropical_multiagent_study.jl` | the cooperative experiment, with the relative-mode maps this issue would reuse. |
+| `scripts/tropical_multiagent_study.jl` of the path-lifting paper | the cooperative experiment, with the relative-mode maps this issue would reuse. |
 | `docs/src/features/tropical_abstraction.md` | the lax/oplax framework; add a section if implemented. |
 | `test/network_sheaves/TropicalAbstraction.jl` | tests go here (one test file per module). |
 

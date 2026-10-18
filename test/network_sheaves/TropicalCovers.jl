@@ -272,6 +272,20 @@ end
         end
     end
 
+    @testset "stable partitions have zero lifting defect" begin
+        # Unit costs on a grid, coarsened by 2×2 blocks and refined until stable.
+        n = 6
+        L = LinearIndices((n, n))
+        r, c = Int[], Int[]
+        for x in 1:n, y in 1:n, (dx, dy) in ((1, 0), (-1, 0), (0, 1), (0, -1))
+            (1 <= x + dx <= n && 1 <= y + dy <= n) && (push!(r, L[x, y]); push!(c, L[x + dx, y + dy]))
+        end
+        Wgrid = sparse(r, c, ones(length(r)), n^2, n^2)
+        blocks = GraphHomomorphism([(x - 1) ÷ 2 + 3 * ((y - 1) ÷ 2) + 1 for y in 1:n for x in 1:n], 9)   # 2×2 blocks
+        ψs = stable_refinement(Wgrid, blocks)
+        @test all(iszero, nonzeros(lifting_defect(Wgrid, ψs)))
+    end
+
     @testset "simplicial cover" begin
         tri = [([1, 2], 1.0), ([1, 3], 1.0), ([2, 3], 1.0)]
         @test simplicial_cover(3, tri) == 2.0
