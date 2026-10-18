@@ -91,6 +91,39 @@ function box_aggregation(p)
     return GraphHomomorphism([(cld(by, 2) - 1) * q + cld(bx, 2) for by in 1:p for bx in 1:p])
 end
 
+# ρu + b·∇u = 1 on an m×m grid with a rotating velocity field, upwinded:
+# a nonsingular, nonsymmetric M-matrix.
+function upwind_transport(m)
+    h = 1 / (m + 1)
+    idx(i, j) = (j - 1) * m + i
+    I_, J_, V_ = Int[], Int[], Float64[]
+    for j in 1:m, i in 1:m
+        x, y = i * h - 0.5, j * h - 0.5
+        b = (-y, x)
+        diag = 0.5
+        for (k, (di, dj)) in enumerate(((1, 0), (0, 1)))
+            a = abs(b[k]) / h
+            s = b[k] > 0 ? 1 : -1
+            diag += a
+            ii, jj = i + s * di, j + s * dj
+            (1 <= ii <= m && 1 <= jj <= m) && (push!(I_, idx(i, j)); push!(J_, idx(ii, jj)); push!(V_, -a))
+        end
+        push!(I_, idx(i, j)); push!(J_, idx(i, j)); push!(V_, diag)
+    end
+    return sparse(I_, J_, V_, m * m, m * m)
+end
+
+# The upwind matrix with explicit zeros on the pattern of A + Aᵀ + I, so that
+# every matrix of a policy-iteration-like family has the same stored pattern.
+function embed(M, wide)
+    Z = copy(wide)
+    nonzeros(Z) .= 0
+    for (i, j, v) in zip(findnz(M)...)
+        Z[i, j] = v
+    end
+    return Z
+end
+
 @testset "SchwarzMethods" begin
     @testset "overlap_sheaf of a cover" begin
         doms = [[1, 2, 3], [3, 4, 5], [5, 6, 1], [7]]
@@ -582,6 +615,92 @@ end
         end
     end
 
+    @testset "nonsymmetric M-matrices (upwind transport)" begin
+        m = 24
+        A = upwind_transport(m)
+        f = ones(m * m)
+        @test !issymmetric(A)
+        parts = index_boxes(m, 3)
+        doms = overlapping_subdomains(A, parts; overlap=1)
+        dd = SchwarzDecomposition(A, doms; owner=parts)
+        u = A \ f
+        for sweep in (MultiplicativeSweep(), MulticolorSweep(), ParallelSweep())
+            r = solve(SchwarzProblem(dd, f), SchwarzIteration(sweep=sweep, tol=1e-10, maxiter=5000))
+            @test r.converged
+            @test r.u ≈ u rtol = 1e-8
+        end
+        @test_throws ArgumentError solve(SchwarzProblem(dd, f), SchwarzCG())
+        @test_throws ArgumentError TruncatedPushforwardCoarseSpace(dd)
+        @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, transmission=RobinTransmission(10.0))
+
+        # refactor: a new matrix on the same cover.
+        A2 = A + 0.25I
+        dd2 = refactor(dd, A2)
+        @test dd2.cover === dd.cover && dd2.colors === dd.colors
+        r2 = solve(SchwarzProblem(dd2, f), SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000))
+        @test r2.u ≈ A2 \ f rtol = 1e-8
+        far = copy(A2); far[1, m * m] = -1e-3                          # outside the pattern
+        @test_throws ArgumentError refactor(dd, far)
+        # A cover built from a wider structure accepts any matrix inside it.
+        wide = A + sparse(transpose(A)) + I
+        ddw = SchwarzDecomposition(A, doms; owner=parts, structure=wide)
+        @test solve(SchwarzProblem(refactor(ddw, sparse(transpose(A))), f),
+            SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000)).u ≈ sparse(transpose(A)) \ f rtol = 1e-8
+        @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, structure=sparse(1.0I, m * m, m * m))
+
+        # refactor!: in place, on a fixed stored pattern with explicit zeros.
+        ddi = SchwarzDecomposition(embed(A, wide), doms; owner=parts, dropzeros=false)
+        @test nnz(ddi.A) == nnz(wide)
+        for M in (A2, sparse(transpose(A)), A, A2)
+            Z = embed(M, wide)
+            @test refactor!(ddi, Z) === ddi
+            @test ddi.At == sparse(transpose(Z))
+            for sweep in (MulticolorSweep(), ParallelSweep())
+                @test solve(SchwarzProblem(ddi, f), SchwarzIteration(sweep=sweep, tol=1e-10, maxiter=5000)).u ≈
+                    M \ f rtol = 1e-8
+            end
+        end
+        Z = embed(sparse(transpose(A)), wide)
+        refactor!(ddi, Z; At=copy(transpose(Z)))
+        @test solve(SchwarzProblem(ddi, f), SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000)).u ≈
+            sparse(transpose(A)) \ f rtol = 1e-8
+        @test_throws ArgumentError refactor!(ddi, A2)                   # pattern differs
+        @test_throws ArgumentError refactor!(ddi, Z; At=A)
+    end
+
+    @testset "refactor! with ChordalLDLt local factors" begin
+        m = 12
+        L = poisson2d(m)
+        parts = index_boxes(m, 3)
+        doms = overlapping_subdomains(L, parts; overlap=1)
+        dd = SchwarzDecomposition(L, doms; owner=parts)
+        f = ones(m * m)
+        refactor!(dd, 2L)
+        refactor!(dd, L + 3I)
+        @test solve(SchwarzProblem(dd, f), SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000)).u ≈
+            (L + 3I) \ f rtol = 1e-8
+        robin = SchwarzDecomposition(L, doms; owner=parts, transmission=RobinTransmission(10.0))
+        @test_throws ArgumentError refactor!(robin, 2L)
+    end
+
+    @testset "Interfaces" begin
+        # Concrete fields, and a clear error for an incomplete extension.
+        n = 8
+        A = sparse(SymTridiagonal(fill(4.0, n), fill(-1.0, n - 1)))
+        b = collect(1.0:n)
+        dd = SchwarzDecomposition(A, [1:5, 4:8])
+        @test all(isconcretetype, fieldtypes(typeof(dd)))
+        @test isconcretetype(typeof(solve(SchwarzProblem(dd, b), SchwarzIteration(sweep = MultiplicativeSweep()))))
+        err = try
+            SchwarzDecomposition(A, [1:5, 4:8]; local_solver = _IncompleteLocalSolver())
+        catch e
+            e
+        end
+        @test err isa ArgumentError && occursin("_local_factor", err.msg)
+    end
+
+    # ===== Inexact local solves, Krylov acceleration and sheaf ADMM =====
+
     @testset "sheaf ADMM" begin
         objectives = local_objectives(prob)
         K = spzeros(n, n)
@@ -623,87 +742,25 @@ end
         @test 5 * robin.iterations < admm.iterations
     end
 
-    @testset "nonsymmetric M-matrices (upwind transport)" begin
-        # ρu + b·∇u = 1 on an m×m grid with a rotating velocity field, upwinded:
-        # a nonsingular, nonsymmetric M-matrix.
+    @testset "symmetric Gauss–Seidel and Krylov acceleration (upwind transport)" begin
         m = 24
-        h = 1 / (m + 1)
-        idx(i, j) = (j - 1) * m + i
-        I_, J_, V_ = Int[], Int[], Float64[]
-        for j in 1:m, i in 1:m
-            x, y = i * h - 0.5, j * h - 0.5
-            b = (-y, x)
-            diag = 0.5
-            for (k, (di, dj)) in enumerate(((1, 0), (0, 1)))
-                a = abs(b[k]) / h
-                s = b[k] > 0 ? 1 : -1
-                diag += a
-                ii, jj = i + s * di, j + s * dj
-                (1 <= ii <= m && 1 <= jj <= m) && (push!(I_, idx(i, j)); push!(J_, idx(ii, jj)); push!(V_, -a))
-            end
-            push!(I_, idx(i, j)); push!(J_, idx(i, j)); push!(V_, diag)
-        end
-        A = sparse(I_, J_, V_, m * m, m * m)
+        A = upwind_transport(m)
         f = ones(m * m)
-        @test !issymmetric(A)
         parts = index_boxes(m, 3)
         doms = overlapping_subdomains(A, parts; overlap=1)
         dd = SchwarzDecomposition(A, doms; owner=parts)
         u = A \ f
-        for sweep in (MultiplicativeSweep(), MulticolorSweep(), ParallelSweep())
-            r = solve(SchwarzProblem(dd, f), SchwarzIteration(sweep=sweep, tol=1e-10, maxiter=5000))
-            @test r.converged
-            @test r.u ≈ u rtol = 1e-8
-        end
+        A2 = A + 0.25I
+        wide = A + sparse(transpose(A)) + I
         g = solve(SchwarzProblem(dd, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=200))
         @test g.converged
         @test g.u ≈ u rtol = 1e-8
-        @test_throws ArgumentError solve(SchwarzProblem(dd, f), SchwarzCG())
         @test_throws ArgumentError solve(SchwarzProblem(dd, f), SheafADMM(rho=1.0))
-        @test_throws ArgumentError TruncatedPushforwardCoarseSpace(dd)
-        @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, transmission=RobinTransmission(10.0))
-
-        # refactor: a new matrix on the same cover.
-        A2 = A + 0.25I
-        dd2 = refactor(dd, A2)
-        @test dd2.cover === dd.cover && dd2.colors === dd.colors
-        r2 = solve(SchwarzProblem(dd2, f), SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000))
-        @test r2.u ≈ A2 \ f rtol = 1e-8
-        far = copy(A2); far[1, m * m] = -1e-3                          # outside the pattern
-        @test_throws ArgumentError refactor(dd, far)
-        # A cover built from a wider structure accepts any matrix inside it.
-        wide = A + sparse(transpose(A)) + I
-        ddw = SchwarzDecomposition(A, doms; owner=parts, structure=wide)
-        @test solve(SchwarzProblem(refactor(ddw, sparse(transpose(A))), f),
-            SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000)).u ≈ sparse(transpose(A)) \ f rtol = 1e-8
-        @test_throws ArgumentError SchwarzDecomposition(A, doms; owner=parts, structure=sparse(1.0I, m * m, m * m))
-
-        # refactor!: in place, on a fixed stored pattern with explicit zeros.
-        function embed(M)
-            Z = copy(wide)
-            nonzeros(Z) .= 0
-            for (i, j, v) in zip(findnz(M)...)
-                Z[i, j] = v
-            end
-            return Z
-        end
-        ddi = SchwarzDecomposition(embed(A), doms; owner=parts, dropzeros=false)
-        @test nnz(ddi.A) == nnz(wide)
-        for M in (A2, sparse(transpose(A)), A, A2)
-            Z = embed(M)
-            @test refactor!(ddi, Z) === ddi
-            @test ddi.At == sparse(transpose(Z))
-            for sweep in (MulticolorSweep(), ParallelSweep())
-                @test solve(SchwarzProblem(ddi, f), SchwarzIteration(sweep=sweep, tol=1e-10, maxiter=5000)).u ≈
-                    M \ f rtol = 1e-8
-            end
-        end
-        Z = embed(sparse(transpose(A)))
+        ddi = SchwarzDecomposition(embed(A, wide), doms; owner=parts, dropzeros=false)
+        Z = embed(sparse(transpose(A)), wide)
         refactor!(ddi, Z; At=copy(transpose(Z)))
         @test solve(SchwarzProblem(ddi, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=200)).u ≈
             sparse(transpose(A)) \ f rtol = 1e-8
-        @test_throws ArgumentError refactor!(ddi, A2)                   # pattern differs
-        @test_throws ArgumentError refactor!(ddi, Z; At=A)
 
         # Inexact local solves: symmetric Gauss–Seidel inside each subdomain.
         M = SymmetricGaussSeidel(A; ordering=NaturalOrdering())
@@ -752,10 +809,10 @@ end
             SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=20_000))
         @test inexact.iterations > exact.iterations
         # refactor! only gathers the new values into the smoothers.
-        ddg = SchwarzDecomposition(embed(A), doms; owner=parts, dropzeros=false,
+        ddg = SchwarzDecomposition(embed(A, wide), doms; owner=parts, dropzeros=false,
             local_solver=SymmetricGaussSeidelLocalSolve())
         for M in (A2, sparse(transpose(A)), A2)
-            refactor!(ddg, embed(M))
+            refactor!(ddg, embed(M, wide))
             @test all(lp -> lp.factor isa SymmetricGaussSeidel, ddg.locals)
             @test solve(SchwarzProblem(ddg, f), SchwarzGMRES(sweep=ParallelSweep(), tol=1e-10, maxiter=500)).u ≈
                 M \ f rtol = 1e-8
@@ -778,21 +835,6 @@ end
         end
     end
 
-    @testset "refactor! with ChordalLDLt local factors" begin
-        m = 12
-        L = poisson2d(m)
-        parts = index_boxes(m, 3)
-        doms = overlapping_subdomains(L, parts; overlap=1)
-        dd = SchwarzDecomposition(L, doms; owner=parts)
-        f = ones(m * m)
-        refactor!(dd, 2L)
-        refactor!(dd, L + 3I)
-        @test solve(SchwarzProblem(dd, f), SchwarzIteration(sweep=MulticolorSweep(), tol=1e-10, maxiter=5000)).u ≈
-            (L + 3I) \ f rtol = 1e-8
-        robin = SchwarzDecomposition(L, doms; owner=parts, transmission=RobinTransmission(10.0))
-        @test_throws ArgumentError refactor!(robin, 2L)
-    end
-
     @testset "coloring sees explicitly stored zeros" begin
         # Symmetric in value, but (5, 1) stores an explicit zero and (1, 5) does not:
         # the coloring must still separate 1 and 5.
@@ -808,7 +850,7 @@ end
         @test ldiv!(zeros(n), M, b) ≈ ldiv!(zeros(n), SymmetricGaussSeidel(A; ordering = MulticolorOrdering(M.colors)), b)
     end
 
-    @testset "Interfaces" begin
+    @testset "symmetric Gauss–Seidel ldiv!" begin
         # The preconditioner's ldiv! family: out of place, in place, and no aliasing.
         n = 8
         A = sparse(SymTridiagonal(fill(4.0, n), fill(-1.0, n - 1)))
@@ -819,15 +861,5 @@ end
         @test ldiv!(M, copy(b)) == y
         @test_throws ArgumentError ldiv!(b, M, b)
         @test_throws ArgumentError ldiv!(zeros(n - 1), M, b)
-        # Concrete fields, and a clear error for an incomplete extension.
-        dd = SchwarzDecomposition(A, [1:5, 4:8])
-        @test all(isconcretetype, fieldtypes(typeof(dd)))
-        @test isconcretetype(typeof(solve(SchwarzProblem(dd, b), SchwarzIteration(sweep = MultiplicativeSweep()))))
-        err = try
-            SchwarzDecomposition(A, [1:5, 4:8]; local_solver = _IncompleteLocalSolver())
-        catch e
-            e
-        end
-        @test err isa ArgumentError && occursin("_local_factor", err.msg)
     end
 end

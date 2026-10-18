@@ -603,17 +603,6 @@ end
 BlockSymmetricGaussSeidelSmoother(blocks::AbstractVector{<:Integer}) = BlockSymmetricGaussSeidelSmoother(Vector{Int}(blocks))
 
 """
-    RestrictedAdditiveSchwarzSmoother()
-
-Restricted additive Schwarz on the boxes of a [`GridPolicyIteration`](@ref)
-extended by its `overlap`, with one local red–black sweep per box: one halo
-exchange per application; the boxes are the vertices of the overlap sheaf and
-the exchanges run along its edges. Equal to
-[`SymmetricGaussSeidelSmoother`](@ref) on one box.
-"""
-struct RestrictedAdditiveSchwarzSmoother <: Smoother end
-
-"""
     KrylovPolicyEvaluation(; method = GMRES(), preconditioner = SymmetricGaussSeidelSmoother(),
                            tol = 1e-10, maxiter = 5000)
 

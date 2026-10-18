@@ -169,9 +169,6 @@ end
                 preconditioner = BlockSymmetricGaussSeidelSmoother(blocks))))
             @test blocked.values ≈ direct.values rtol = 1e-6
         end
-        # The grid-only smoother needs the grid operator.
-        @test_throws ArgumentError solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(
-            preconditioner = RestrictedAdditiveSchwarzSmoother())))
         # The parallel assembly into the fixed stencil matches a direct construction.
         U = DIH._lqr_controls(small)
         A, At, b = DIH._assemble(small, U, DIH._stencil(small.grid))
@@ -187,6 +184,24 @@ end
         @test_throws MethodError KrylovPolicyEvaluation(preconditioner = :ilu)
         @test_throws ArgumentError HJBProblem(StateGrid([-1.0, -1.0], [1.0, 1.0], [5, 5]); constraint = DiscConstraint())
         @test all(>=(0), values(stationary.seconds)) && stationary.seconds.setup > 0
+    end
+
+    @testset "planar problem" begin
+        g4 = StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(9, 4))
+        box = solve(HJBProblem(g4; control_bound = 1.0), PolicyIteration())
+        disc = solve(HJBProblem(g4; control_bound = 1.0, constraint = DiscConstraint()), PolicyIteration())
+        @test box.converged && disc.converged
+        @test maximum(norm, eachcol(disc.controls)) <= 1.0 + 1e-12
+        # The disc is inside the box: the disc problem costs more.
+        @test all(disc.values .>= box.values .- 1e-8)
+        # Point symmetry x ↦ −x of the problem and the grid.
+        @test disc.values ≈ reverse(disc.values) rtol = 1e-8
+        # With a box bound the planar value is the sum of two one-axis values
+        # (up to the boundary data, so compare near the origin).
+        one = solve(HJBProblem(StateGrid([-2.0, -2.0], [2.0, 2.0], [9, 9]); control_bound = 1.0), PolicyIteration())
+        for x in ([0.5, 0.0, -0.5, 0.0], [0.0, 0.5, 0.0, -0.5])
+            @test value_at(box, x) ≈ value_at(one, x[[1, 3]]) + value_at(one, x[[2, 4]]) rtol = 0.1
+        end
     end
 
     @testset "implicit grid policy iteration" begin
@@ -237,25 +252,11 @@ end
         @test snapshots[1].values ≈ vec([riccati_value(cbprob, x) for x in xs])
         @test size(snapshots[1].controls) == (1, length(cbprob.grid))
         @test_throws ArgumentError solve(HJBProblem(grid1(11)), GridPolicyIteration(smoother = JacobiSmoother()))
+        # The grid-only smoother needs the grid operator.
+        small = HJBProblem(grid1(41); control_bound = 1.0)
+        @test_throws ArgumentError solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(
+            preconditioner = RestrictedAdditiveSchwarzSmoother())))
         unpreconditioned = solve(HJBProblem(grid1(21)), GridPolicyIteration(smoother = nothing))
         @test unpreconditioned.converged
-    end
-
-    @testset "planar problem" begin
-        g4 = StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(9, 4))
-        box = solve(HJBProblem(g4; control_bound = 1.0), PolicyIteration())
-        disc = solve(HJBProblem(g4; control_bound = 1.0, constraint = DiscConstraint()), PolicyIteration())
-        @test box.converged && disc.converged
-        @test maximum(norm, eachcol(disc.controls)) <= 1.0 + 1e-12
-        # The disc is inside the box: the disc problem costs more.
-        @test all(disc.values .>= box.values .- 1e-8)
-        # Point symmetry x ↦ −x of the problem and the grid.
-        @test disc.values ≈ reverse(disc.values) rtol = 1e-8
-        # With a box bound the planar value is the sum of two one-axis values
-        # (up to the boundary data, so compare near the origin).
-        one = solve(HJBProblem(StateGrid([-2.0, -2.0], [2.0, 2.0], [9, 9]); control_bound = 1.0), PolicyIteration())
-        for x in ([0.5, 0.0, -0.5, 0.0], [0.0, 0.5, 0.0, -0.5])
-            @test value_at(box, x) ≈ value_at(one, x[[1, 3]]) + value_at(one, x[[2, 4]]) rtol = 0.1
-        end
     end
 end
