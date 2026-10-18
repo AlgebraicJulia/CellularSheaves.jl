@@ -71,6 +71,10 @@ include("DoubleIntegratorHJB.jl")
 import .DoubleIntegratorHJB
 export DoubleIntegratorHJB
 
+include("MechanicalHJB.jl")
+import .MechanicalHJB
+export MechanicalHJB
+
 include("PredictiveConsensus.jl")
 import .PredictiveConsensus
 export PredictiveConsensus
