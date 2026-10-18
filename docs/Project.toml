@@ -16,4 +16,4 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [sources]
-CellularSheaves = {path = "/blue/fairbanksj/rc-svc-privweb-fairbanksj/claude/sessions/6362540d-9609-5186-9857-55618a170312/workspace/AlgebraicJulia/CellularSheaves.jl"}
+CellularSheaves = {path = ".."}
