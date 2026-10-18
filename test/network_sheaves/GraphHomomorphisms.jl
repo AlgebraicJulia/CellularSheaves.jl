@@ -80,3 +80,16 @@ end
     @test compose(f, id).vertex_map == f.vertex_map
     @test compose(id, f).vertex_map == f.vertex_map
 end
+
+@testset "GraphHomomorphism value semantics" begin
+    f = GraphHomomorphism([1, 1, 2], 2)
+    @test f == GraphHomomorphism(Int8[1, 1, 2], 2) && hash(f) == hash(GraphHomomorphism([1, 1, 2], 2))
+    @test f != GraphHomomorphism([1, 1, 2], 3)
+    @test length(Set([f, GraphHomomorphism([1, 1, 2], 2)])) == 1
+    @test GraphHomomorphism([2, 3, 1]) == GraphHomomorphism([2, 3, 1], 3)
+    @test_throws ArgumentError GraphHomomorphism([0, 1], 2)
+    @test_throws ArgumentError GraphHomomorphism([1, 3], 2)
+    @test_throws ArgumentError GraphHomomorphism(Int[], -1)
+    @test sprint(show, f) == "GraphHomomorphism(3 → 2 vertices)"
+    @test occursin("fiber sizes", sprint(show, MIME"text/plain"(), f))
+end

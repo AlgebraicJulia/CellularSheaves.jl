@@ -48,7 +48,7 @@ using BlockArrays
 using SparseArrays
 using CliqueTrees.Multifrontal
 
-using ..EuclideanSheaves: EuclideanSheaf, add_sheaf_edge!, harmonic_extension,
+using ..EuclideanSheaves: EuclideanSheaf, DenseEuclideanSheaf, add_sheaf_edge!, harmonic_extension,
     ldlt_pseudoinverse_and_null
 using ..SheafInterface: vertex_stalks, coboundary_map
 import ..SheafInterface: nullspace_trajectory_family
@@ -72,7 +72,7 @@ Fields:
 struct TrajectorySheaf{T}
     k::Int
     A::AbstractMatrix{T}
-    sheaf::EuclideanSheaf{T}
+    sheaf::DenseEuclideanSheaf{T}
 end
 
 # ---------------------------------------------------------------------------
@@ -285,7 +285,7 @@ struct ControlledTrajectorySheaf{T}
     Bc::AbstractMatrix{T}
     Ad::Matrix{T}
     Bd::Matrix{T}
-    sheaf::EuclideanSheaf{T}
+    sheaf::DenseEuclideanSheaf{T}
     state_dim::Int
     control_dim::Int
 end

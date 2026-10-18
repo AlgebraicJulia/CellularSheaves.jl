@@ -4,6 +4,7 @@ using Reexport
 using ..BlockSparseArrays
 
 include("SheafInterface.jl")
+include("RestrictionMaps.jl")
 include("EuclideanSheaves.jl")
 include("DistributedSolve.jl")
 include("PotentialSheaves.jl")
@@ -19,6 +20,7 @@ include("Formations.jl")
 
 @reexport using ..BlockSparseArrays
 @reexport using .SheafInterface
+@reexport using .RestrictionMaps
 @reexport using .EuclideanSheaves
 @reexport using .DistributedSolve
 @reexport using .PotentialSheaves
