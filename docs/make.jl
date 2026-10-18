@@ -96,6 +96,7 @@ makedocs(
       "generated/literate_example.md",
       "generated/sheaf_morphisms.md",
       "generated/nullspace.md",
+      "generated/equilateral_triangle.md",
       "generated/nearest_global_section_iterative.md",
       "generated/pushforward.md",
       "generated/trajectory_sheaf.md",
