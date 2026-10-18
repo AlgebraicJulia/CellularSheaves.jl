@@ -1,10 +1,34 @@
 module SheafInterface
 
 export AbstractNetworkSheaf, vertex_stalks, edge_stalks, edge_stalk_dimensions, coboundary_map, add_vertex_stalk!, add_sheaf_edge!, underlying_graph,
-    get_vertex_stalk, get_edge_stalk, get_restriction_map, sheaf_laplacian
+    get_vertex_stalk, get_edge_stalk, get_restriction_map, sheaf_laplacian,
+    AbstractRestrictionMap, coboundary_operator
 
 import Base: show
 using DocStringExtensions
+
+"""
+    AbstractRestrictionMap{T}
+
+A restriction map ``\\mathcal F_{v \\trianglelefteq e} : \\mathcal F(v) \\to \\mathcal F(e)``
+given as a linear map rather than as a stored matrix, in the spirit of
+LinearMaps.jl. A map only has to say how to act on vectors, so it can be
+dense, sparse, a coordinate selection, or available only as a
+matrix-vector product.
+
+An implementation `R <: AbstractRestrictionMap{T}` provides
+
+- `size(R)`: `(dim F(e), dim F(v))`;
+- `LinearAlgebra.mul!(y, R, x)`: ``y = R x``;
+- `LinearAlgebra.mul!(y, R', x)`: ``y = R^\\mathsf{T} x``, the adjoint, used by
+  the coboundary's adjoint and the sheaf Laplacian.
+
+Products with vectors and matrices, `Matrix(R)` and `sparse(R)` follow from
+these. The concrete maps are in `RestrictionMaps`: `DenseRestriction`,
+`SparseRestriction`, `SelectionRestriction` and `FunctionRestriction`.
+"""
+abstract type AbstractRestrictionMap{T} end
+
 
 """     AbstractNetworkSheaf
 
@@ -201,6 +225,17 @@ Compute the coboundary map of a network sheaf.
 """
 function coboundary_map(s::AbstractNetworkSheaf)
     error("coboundary_map not implemented")
+end
+
+"""
+    coboundary_operator(s::AbstractNetworkSheaf)
+
+The coboundary ``\\delta : C^0 \\to C^1`` as a matrix-free linear operator. It
+only applies the restriction maps and their adjoints, so it works for sheaves
+whose restriction maps are known only through matrix-vector products.
+"""
+function coboundary_operator(s::AbstractNetworkSheaf)
+    error("coboundary_operator not implemented")
 end
 
 """

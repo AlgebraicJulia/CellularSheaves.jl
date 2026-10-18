@@ -4,7 +4,7 @@ using Distributed
 using LinearAlgebra
 using SparseArrays
 using CliqueTrees.Multifrontal
-using ...NetworkSheaves: EuclideanSheaf
+using ...NetworkSheaves: EuclideanSheaf, DenseEuclideanSheaf
 using ...NetworkSheaves.EuclideanSheaves: _harmonic_extension_restricted_laplacian
 using ...NetworkSheaves.DistributedSolve: partition_tree, distributed_tree_solve
 using ..Tikhonov: tikhonov_step!
@@ -34,7 +34,7 @@ Euclidean sheaf (e.g. D=2 spatial positions) set `pos_dim = D` to pass all coord
 Defaults to `D-1` for backward compatibility with the escort mission.
 """
 struct LayeredControlProblem
-    sheaf::EuclideanSheaf{Float64}
+    sheaf::DenseEuclideanSheaf{Float64}
     target_nodes::Vector{Int}
     target_trajectory_func::Any
     target_velocity_func::Any

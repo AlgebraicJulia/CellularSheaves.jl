@@ -15,7 +15,7 @@ export RingSpec, SupportSpec, LayeredEscortSpec, LayeredFiberBases,
 using LinearAlgebra
 using Graphs
 using ArgCheck
-using ...NetworkSheaves: vertex_stalks, get_restriction_map, EuclideanSheaf
+using ...NetworkSheaves: vertex_stalks, get_restriction_map, EuclideanSheaf, DenseEuclideanSheaf
 using ...NetworkSheaves.EuclideanSheaves: add_sheaf_edge!, _harmonic_extension_restricted_laplacian
 using ...NetworkSheaves.Formations: build_escort_ring, se3_translation_matrix
 using ...NetworkSheaves.GraphHomomorphisms: GraphHomomorphism, fiber_vertices
@@ -461,9 +461,9 @@ end
 
 struct LayeredEscortProblem
     spec::LayeredEscortSpec
-    sheaf::EuclideanSheaf{Float64}
+    sheaf::DenseEuclideanSheaf{Float64}
     hom::GraphHomomorphism
-    pf_sheaf::EuclideanSheaf{Float64}
+    pf_sheaf::DenseEuclideanSheaf{Float64}
     bases::LayeredFiberBases
     bindings::SystemBinding
     target_trajectories::Vector{Any} # functions t -> [x,y,z,1.0]

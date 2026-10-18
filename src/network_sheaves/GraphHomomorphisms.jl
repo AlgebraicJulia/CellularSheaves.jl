@@ -40,13 +40,16 @@ struct GraphHomomorphism
     vertex_map::Vector{Int}
     n_target::Int
 
-    function GraphHomomorphism(vertex_map::Vector{Int}, n_target::Int)
+    function GraphHomomorphism(vertex_map::AbstractVector{<:Integer}, n_target::Integer)
         n_target < 0 && throw(ArgumentError("n_target must be nonnegative, got $n_target"))
         any(<(1), vertex_map) && throw(ArgumentError("vertex_map entries must be positive target vertex indices"))
         any(>(n_target), vertex_map) && throw(ArgumentError("vertex_map entries must lie in 1:n_target"))
-        new(vertex_map, n_target)
+        new(convert(Vector{Int}, vertex_map), Int(n_target))
     end
 end
+
+Base.:(==)(f::GraphHomomorphism, g::GraphHomomorphism) = f.n_target == g.n_target && f.vertex_map == g.vertex_map
+Base.hash(f::GraphHomomorphism, h::UInt) = hash(f.vertex_map, hash(f.n_target, hash(:GraphHomomorphism, h)))
 
 """
     GraphHomomorphism(vertex_map)
@@ -54,21 +57,29 @@ end
 Construct a [`GraphHomomorphism`](@ref) from a vertex map vector, inferring the
 number of target vertices from the maximum entry.
 """
-GraphHomomorphism(vertex_map::Vector{Int}) =
+GraphHomomorphism(vertex_map::AbstractVector{<:Integer}) =
     GraphHomomorphism(vertex_map, maximum(vertex_map))
 
 # ---------------------------------------------------------------------------
 # Printing
 # ---------------------------------------------------------------------------
 
-function Base.show(io::IO, hom::GraphHomomorphism)
+# Compact (inside other objects and collections): one line.
+Base.show(io::IO, hom::GraphHomomorphism) =
+    print(io, "GraphHomomorphism(", length(hom.vertex_map), " → ", hom.n_target, " vertices)")
+
+# Detailed (the REPL): the map and the fibre sizes, abbreviated for large maps.
+function Base.show(io::IO, ::MIME"text/plain", hom::GraphHomomorphism)
     n_src = length(hom.vertex_map)
     n_tgt = hom.n_target
     println(io, "GraphHomomorphism: $n_src source vertices → $n_tgt target vertices")
-    println(io, "  vertex_map: ", hom.vertex_map)
-    # Pre-compute fiber sizes for display (no graph needed — just the vertex map).
-    fiber_sizes = [count(==(tv), hom.vertex_map) for tv in 1:n_tgt]
-    println(io, "  fiber sizes: ", fiber_sizes)
+    fiber_sizes = zeros(Int, n_tgt)
+    for tv in hom.vertex_map
+        fiber_sizes[tv] += 1
+    end
+    lim = IOContext(io, :limit => true, :compact => true)
+    print(lim, "  vertex_map: "); show(lim, hom.vertex_map); println(io)
+    print(lim, "  fiber sizes: "); show(lim, fiber_sizes)
 end
 
 # ---------------------------------------------------------------------------
