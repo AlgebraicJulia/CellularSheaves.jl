@@ -67,6 +67,10 @@ include("CoordinationProfiling.jl")
 import .CoordinationProfiling
 export CoordinationProfiling
 
+include("DoubleIntegratorHJB.jl")
+import .DoubleIntegratorHJB
+export DoubleIntegratorHJB
+
 include("PredictiveConsensus.jl")
 import .PredictiveConsensus
 export PredictiveConsensus
