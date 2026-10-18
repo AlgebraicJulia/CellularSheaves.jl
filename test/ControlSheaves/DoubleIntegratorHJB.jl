@@ -203,4 +203,60 @@ end
             @test value_at(box, x) ≈ value_at(one, x[[1, 3]]) + value_at(one, x[[2, 4]]) rtol = 0.1
         end
     end
+
+    @testset "implicit grid policy iteration" begin
+        for (prob, rtol) in ((HJBProblem(grid1(41); control_bound = 1.0), 1e-7),
+                             (HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(9, 4)); control_bound = 1.0,
+                                 constraint = DiscConstraint()), 1e-7))
+            g = prob.grid
+            n, d = Tuple(g.points), prob.axes
+            # The implicit upwind stencil and right-hand side reproduce the assembled system.
+            U = DIH._lqr_controls(prob)
+            A, b = DIH._assemble(prob, U)
+            Ug = reshape(permutedims(U), n..., d)
+            kp = DIH._KernelProblem(prob, ntuple(_ -> 0, length(n)))
+            op = CellularSheaves.NetworkSheaves.GridSchwarz.GridOperator(DIH._UpwindStencil(Ug, kp), n; ghost = 1)
+            x = grid_zeros(op)
+            interior(x, op) .= reshape(collect(range(-1.0, 2.0; length = length(g))), n)
+            y = grid_zeros(op)
+            apply!(y, op, x)
+            @test vec(interior(y, op)) ≈ A * vec(interior(x, op)) rtol = 1e-13
+            bg = grid_zeros(op)
+            DIH._launch!(DIH._grid_rhs_kernel!, op, bg, Ug, kp, op.origin, ntuple(_ -> 0, length(n)))
+            @test vec(interior(bg, op)) ≈ b rtol = 1e-13
+            # Same red–black preconditioner as the assembled path.
+            z = grid_zeros(op)
+            red_black_sgs!(z, op, x)
+            @test vec(interior(z, op)) ≈ ldiv!(similar(b), SymmetricGaussSeidel(A), vec(interior(x, op))) rtol = 1e-12
+            # Same discrete solution as the sparse policy iteration.
+            sparse_sol = solve(prob, PolicyIteration(evaluation = KrylovPolicyEvaluation(method = BiCGStab())))
+            grid_sol = solve(prob, GridPolicyIteration())
+            @test grid_sol.converged
+            @test grid_sol.values ≈ sparse_sol.values rtol = rtol
+            @test size(grid_sol.controls) == size(sparse_sol.controls)
+            @test count(abs.(grid_sol.controls - sparse_sol.controls) .> 1e-6) <= length(g) ÷ 100
+            @test abs(grid_sol.iterations - sparse_sol.iterations) <= 1
+            @test value_at(grid_sol, zeros(ndims(g))) ≈ value_at(sparse_sol, zeros(ndims(g))) rtol = 1e-7
+        end
+        # The callback sees the initial guess and every iteration; its last
+        # snapshot is the solution.
+        cbprob = HJBProblem(grid1(21); control_bound = 1.0)
+        snapshots = []
+        recorded = solve(cbprob, GridPolicyIteration(callback = s -> push!(snapshots, s)))
+        @test length(snapshots) == recorded.iterations + 1
+        @test [s.iteration for s in snapshots] == 0:recorded.iterations
+        @test isnan(snapshots[1].change) && snapshots[end].change == recorded.value_changes[end]
+        @test snapshots[end].values == recorded.values && snapshots[end].controls == recorded.controls
+        xs = [[cbprob.grid.lower[j] + (I[j] - 1) * cbprob.grid.spacing[j] for j in 1:2]
+              for I in CartesianIndices(Tuple(cbprob.grid.points))]
+        @test snapshots[1].values ≈ vec([riccati_value(cbprob, x) for x in xs])
+        @test size(snapshots[1].controls) == (1, length(cbprob.grid))
+        @test_throws ArgumentError solve(HJBProblem(grid1(11)), GridPolicyIteration(smoother = JacobiSmoother()))
+        # The grid-only smoother needs the grid operator.
+        small = HJBProblem(grid1(41); control_bound = 1.0)
+        @test_throws ArgumentError solve(small, PolicyIteration(evaluation = KrylovPolicyEvaluation(
+            preconditioner = RestrictedAdditiveSchwarzSmoother())))
+        unpreconditioned = solve(HJBProblem(grid1(21)), GridPolicyIteration(smoother = nothing))
+        @test unpreconditioned.converged
+    end
 end
