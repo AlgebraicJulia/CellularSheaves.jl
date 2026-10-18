@@ -29,7 +29,13 @@ jobs:
         run: |
           source /etc/profile.d/modules.sh
           module load julia/1.12.6
-          julia --project=. -e 'using Pkg; Pkg.resolve()'
+          # A depot owned by this workflow, not the runner's home depot: Pkg.resolve
+          # never installs a registry, so it fails when the home depot has none.
+          export JULIA_DEPOT_PATH="$HPC_SYSIMAGE_DIR/resolve-depot"
+          mkdir -p "$JULIA_DEPOT_PATH"
+          julia --project=. -e 'using Pkg
+              isempty(Pkg.Registry.reachable_registries()) && Pkg.Registry.add("General")
+              Pkg.resolve()'
 
       - name: "🔑 Compute Cache Keys and Paths"
         id: paths
