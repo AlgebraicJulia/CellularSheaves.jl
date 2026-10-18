@@ -14,6 +14,12 @@ julia --project=. -e 'using Pkg; Pkg.test()'
 julia --project=. -e 'include("test/network_sheaves/SheafLaplacian.jl")'
 ```
 
+**Run the MPI tests** (not part of `Pkg.test`; GitHub CI has no MPI):
+```
+julia --project=<env> test/mpi/runtests.jl
+```
+`<env>` needs `CellularSheaves` (developed from this repository), `MPI` and `Test`. The runner launches each script in `test/mpi/` on 1, 3 and 4 ranks (`CELLULARSHEAVES_MPI_RANKS`) and skips with a message when MPI is unavailable. Set `CELLULARSHEAVES_MPI_PREFIX=in-sandbox` when each rank must be wrapped, as on HiPerGator.
+
 **Setup benchmark environment (first time only):**
 ```julia
 julia --project=bench -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
@@ -96,7 +102,7 @@ The primary concrete type is `EuclideanSheaf{T}`, a struct with `vertex_stalks::
 
 **Adding a new operation:** declare it in `SheafInterface.jl`, implement on `EuclideanSheaf` in the appropriate module, add the export to `NetworkSheaves.jl`.
 
-**Test layout:** one test file per source module in `test/network_sheaves/`, included from `test/runtests.jl`. Do not add `CellularSheaves` to `test/Project.toml` — this breaks CI.
+**Test layout:** one test file per source module in `test/network_sheaves/`, included from `test/runtests.jl`. Do not add `CellularSheaves` to `test/Project.toml` — this breaks CI. Tests that need MPI go in `test/mpi/` and are run by `test/mpi/runtests.jl`, never from `test/runtests.jl`.
 
 ## Benchmark architecture
 
