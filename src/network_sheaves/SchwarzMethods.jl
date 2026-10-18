@@ -1573,4 +1573,8 @@ end
 Base.:*(P::SchwarzPreconditioner{T}, r::AbstractVector) where {T} =
     mul!(similar(r, promote_type(T, eltype(r))), P, r)
 
+include("schwarz/gauss_seidel.jl")
+include("schwarz/krylov.jl")
+include("schwarz/admm.jl")
+
 end
