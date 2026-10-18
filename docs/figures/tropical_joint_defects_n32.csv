@@ -1,6 +1,0 @@
-summary,lift_fraction,zero_delay_leak_fraction,mean_leak_capped
-position blocks 4×4 + near 2,0.5523750000000001,0.54725,3.64487887122798
-progress levels + near 2,0.857375,0.106,4.876394428494252
-progress levels + near 2 + corridors,0.865875,0.12675,4.931786360843036
-progress (Reeb arcs),0.9416249999999999,0.028999999999999998,4.9053140096618355
-progress (Reeb arcs) + near 2,0.904,0.07800000000000001,4.889790580307183

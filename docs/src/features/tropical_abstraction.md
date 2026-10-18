@@ -8,8 +8,8 @@ This page explains the min-plus ("tropical") side of the package
 - the certificates that come with that controller.
 
 It covers three things: the idea, how it reads as sheaf theory, and how it relates
-to the literature it borrows from. The last section reports what the studies in
-`docs/scripts/tropical_*.jl` measured, including where the approach does not pay off.
+to the literature it borrows from. The studies that measured these constructions,
+including where they do not pay off, accompany the paper on path lifting.
 
 In one sentence: the multigrid ingredients we use for the HJB equation, the
 pushforward along an aggregation and its Galerkin coarse operator, still make sense
@@ -150,7 +150,7 @@ the optimistic quotient, the defect is the worst excess, over the states ``x`` o
 ```
 
 The arc *lifts* when its defect is zero: every state of ``B`` can follow it at no
-extra cost. The path-lifting theorem (`docs/papers/path-lifting`, issue 019) says:
+extra cost. The path-lifting theorem says:
 
 - **Exactness.** ``E V_c = V`` for every target that is a union of blocks if and only
   if every arc lifts.
@@ -434,8 +434,8 @@ edge. A gauge transformation on the cover uses every edge instead.
 - **Validity.** For every split, the sum over edges of the weighted pair optima is
   an admissible and consistent heuristic, because a joint move restricts to a move
   of every pair. A matching is the split with ``w \equiv 1`` on matched edges.
-- **Optimization.** `docs/scripts/tropical_cover_gauge.jl` maximizes the split at
-  the start by projected supergradient ascent from the matching. Its weighted edge
+- **Optimization.** The split can be maximized at the start by projected
+  supergradient ascent from the matching. Its weighted edge
   stalk is the same pushforward as before: agent ``j``'s arc cost on a far coarse
   arc is the least weighted delay over the fibre.
 
@@ -491,295 +491,6 @@ the package, using these pieces:
   state, with the pulled-back edge values as the A* heuristic
   ([`section_value`](@ref)). [`cover_bound`](@ref) glues the values by the
   simplicial cover.
-
-## What the studies found
-
-All timings are on one HiPerGator CPU node, averaged over 30 random
-queries on the ``128^2 \times 13^2`` lattice. They come from
-`docs/scripts/tropical_*.jl`, and the data are in `docs/figures/tropical_*`.
-
-**Coarsen time with space.** Aggregating positions alone degrades the bound
-quickly: each coarse step can cross a whole block. Using the ``k``-step graph
-``W^{\otimes k}`` (`steps = k`) restores it, with an admissible but inconsistent
-heuristic, so A* reopens states. With 1024 coarse states, the space–time
-abstraction gives a better bound than the position-only one with 43k.
-
-| abstraction | coarse states | bound / cost | A* expansions | time / query |
-|---|---|---|---|---|
-| exact Dijkstra | – | – | 1.73M | 0.333 s |
-| positions 2×2 | 692k | 0.95 | 11k | 0.042 s |
-| positions 8×8 | 43k | 0.57 | 248k | 0.073 s |
-| positions 32×32 | 2.7k | 0.16 | 992k | 0.283 s |
-| space–time 4×4, ``k = 2`` | 50k | 0.87 | 23k | 0.055 s |
-| space–time 16×16, ``k = 4`` | 1024 | 0.66 | 185k | 0.059 s |
-
-**Velocity modes make the planner useful.** Exact 4D A* with the truncated
-pushforward's bound expands 27–30 times fewer states than Dijkstra:
-
-| bound | expansions | time / query |
-|---|---|---|
-| none (Dijkstra) | 1.19M | 0.245 s |
-| velocity-blind (1 mode) | 142k | 0.052 s |
-| 8 headings × 3 speeds (25 modes) | 44k | 0.021 s |
-| 16 headings × 3 speeds (49 modes) | 39k | 0.021 s |
-
-Restricting the search to a corridor trades optimality for commitment. The
-velocity-blind corridor of width 4 finds a path on the first try 57% of the time,
-at 1.06 times the optimum on average and 1.55 in the worst case. With 49 modes and
-a mode width of 1 the same width gives 1.006 on average and 1.087 in the worst
-case. Widened to 16 it is optimal on every query.
-
-**Certificates.** Every query was certified stable. The guaranteed suboptimality
-bound is looser than the true ratio but tightens with the modes, because the lower
-bound does:
-
-| planner | true cost / optimum | guaranteed bound (mean, worst) |
-|---|---|---|
-| velocity-blind | 1.062 | 2.18, 7.50 |
-| 8 headings × 3 speeds | 1.013 | 1.47, 2.50 |
-| 16 headings × 3 speeds | 1.006 | 1.30, 1.79 |
-
-The pessimistic quotient certifies 0% of the reachable states with one mode, 9
-states with 25 or 49 heading-major modes, and 59% with 8 headings × 6 speeds. At
-that resolution its upper bound averages 2.7 times the optimum. Only the
-isomorphism (169 modes) certifies everything exactly.
-
-**Elimination and tables.**
-- **Overlay.** On ``64^2 \times 5^2`` it cuts expansions from 86k (Dijkstra) to
-  6.7k (overlay with A*) but not time: 0.005 s against 0.0025 s for plain A*. The
-  velocity fibres make portals numerous and the shortcuts dense (7M of them).
-- **All-pairs tables.** Building a full coarse table, a pattern database and in
-  control terms the min-plus fundamental solution of the coarse Bellman equation,
-  takes 0.15–2 s. After that the bound for any goal is a column lookup.
-- **Many goals at once.** PathPack's semiring LU factorizes the coarse closure once
-  for every goal. On these sparse, nearly planar quotients, one Dijkstra per goal
-  was faster in most configurations. PathPack won only narrowly in a few, such as
-  1024 goals on the 16×16 quotient (0.28 s against 0.31 s). Fill-in costs about as
-  much as repeated near-linear searches.
-
-**Bottleneck semiring.** In the max-min semiring, [`reach_avoid`](@ref) finds the
-route with the most clearance from the walls. The fastest routes take 23–29 steps
-with 0.5 cells of clearance, while the safest take 63–72 steps with up to 9.7 cells.
-
-**Multiple agents.** The coordination cost is the gap between the exact joint cost
-and the sum of solo distances. "Recovered" is the share of that gap a heuristic's
-bound closes at the start state, averaged over queries where the agents must
-cross. All heuristics are admissible and every search returns the optimum, so the
-expansions measure heuristic quality alone.
-
-*Two grid agents, 32² map with a wall and two one-cell corridors (712k joint
-states):*
-
-| other agent summarized by | coarse states (both agents) | recovered | joint A* expansions |
-|---|---|---|---|
-| nothing (sum of solo distances) | – | 0% | 1243 |
-| position blocks 4×4 + near field | 62k | 0% | 1237 |
-| level sets of ``d_j`` + near field (+ exact corridor cells) | 105k (125k) | 0% | 1237 (1174) |
-| **Reeb arcs of ``d_j``** | 173k | **89%** | **398** |
-| exact joint cost-to-go | 712k | 100% | 380 |
-
-With Reeb arcs, adding the near field or dropping the gauge changes nothing.
-
-*Three grid agents, 10² map (593k joint states), pair bounds glued over the
-interaction graph:*
-
-| pair bound | coarse states | recovered | joint A* expansions |
-|---|---|---|---|
-| none | – | 0% | 306 |
-| edge stalks (block 2), glued | 34k | 100% | 110 |
-| exact pair delays, glued | 21k (pair graphs) | 100% | 109 |
-| exact joint cost-to-go | 593k | 100% | 103 |
-
-*Two double integrators, 16² map, velocities in ``\{-1, 0, 1\}^2`` (2052 states
-each, 4.2M pair states). The near field keeps the other agent's velocity exactly
-or as a mode; each row is the exact pushforward along its own map:*
-
-| near field keeps | coarse states (both directions) | recovered | pair A* expansions | build |
-|---|---|---|---|---|
-| nothing (decoupled) | – | 0% | 1289 | – |
-| exact velocity (9) | 1.97M | 100% | 571 | 7 s |
-| rest + 4 headings (5) | 1.54M | 67% | 720 | 7 s |
-| rest / moving (2) | 1.22M | 33% | 994 | 6 s |
-| (exact pair delay) | 4.2M | 100% | 571 | 8 s |
-
-*Four to eight grid agents, 20² map with two corridors, half crossing each way
-(4 instances each).* Here the joint graph cannot be built. The **sandwich**
-compares:
-- the sum of solo distances;
-- the sheaf bound at the start;
-- the optimum, found by independence detection (agents merge into jointly searched
-  groups only when their plans collide);
-- a feasible plan from prioritized planning (each agent plans around the
-  reservations of those before it).
-
-| N | interacting pairs | recovered: matching / vertex cover / cover gauge / edges + triangles | certified ratio (feasible / bound): matching → edges + triangles | joint expansions, decoupled → sheaf heuristic |
-|---|---|---|---|---|
-| 4 | 5.5 of 6 | 60% / 60% / 60% / **100%** | 1.007 → **1.000** | 6444 → 888 |
-| 6 | 12 of 15 | 85% / 85% / 85% / **100%** | 1.012 → **1.000** | 5265 → 1946 |
-| 8 | 26 of 28 | – | 1.046 → 1.034 | groups of 5–7: out of reach |
-
-Observations:
-
-- **The gauge on the edges finds nothing the matching misses.** The ascent
-  reproduces the matching on every instance, and so does the vertex cover (one
-  N = 8 instance aside, by 1). Their ceiling is the sum of the pair optima, and
-  the pairs had already given what they had.
-- **Triangles close the gap.** On every solved instance with a gap, the
-  remaining coordination cost came from triangles whose triple delay exceeds every
-  one of their edges: 1 of 4 triangles at N = 4, 2 of 2 at N = 6, and 1–4 per
-  instance at N = 8. With the triangles, the bound equals the optimum on all 8
-  solved instances. At N = 8 it raises the bound on every instance, and certifies
-  the prioritized plans within 1–8% of optimal (previously 2–9%), still without
-  the optimum. Solving the 36–56 triangles exactly takes 1–2 minutes per
-  instance.
-
-**The 2-complex with symmetric stalks** (`docs/scripts/tropical_cover_triangles.jl`,
-same instances, block 2). Edges keep agents exact within one block. The table
-varies the agents' summary and the triangles' contact radius:
-
-| summary | triangle contact radius | edges exact (of 175) | three-agent interactions seen (of 14) | recovered, N = 4 / 6 | bound at N = 8 vs. exact triangles | edge stalk states |
-|---|---|---|---|---|---|---|
-| (Reeb arc, block) | 1 block (same as edges) | 171 | 9 | 60% / 89% | below on 2 of 4 | 84k |
-| (Reeb arc, block) | 5 blocks | 171 | 13 | 100% / 100% | equal on 4 of 4 | 84k |
-| refined by future arcs | **1 block** | **174** | **13** | **100% / 100%** | below on 1 of 4 | 86k |
-| refined by future arcs | 5 blocks | **174** | **14** | **100% / 100%** | **equal on 4 of 4** | 86k |
-| (exact triple search) | – | – | 14 | 100% / 100% | – | (pair graph 132k) |
-
-Each triangle takes on average 750–1900 expansions (at most about 12k) and at
-most 7 s per instance for all of them, against up to 109 s for exact triple
-searches.
-
-Findings:
-
-- **Symmetric edges are exact pushforwards and nearly as tight.** The edge stalk
-  has 84–86k coarse states, against 132k for the pair graph. With refined
-  summaries its value equals the exact pair delay on 174 of 175 edges (171 with
-  the plain summary), against 175 for the asymmetric stalks. Each asymmetric edge
-  takes the larger of two directions, in each of which one agent is never
-  summarized.
-- **The fix belongs to the vertices, not to the triangles.** With the plain
-  summary, the triangles needed a contact radius of 5 blocks, half the map. With
-  summaries refined by their future, radius 1, the same as the edges, already
-  sees 13 of 14 interactions and closes every solved gap. Radius 5 sees all 14,
-  and the bound then equals the one from exactly solved triangles on every
-  instance. That includes all four N = 8 instances, where it certifies the
-  prioritized plans within 1–8% of optimal.
-- **Search on demand is cheap because of the restriction maps.** Pulled back, the
-  edge values guide each triangle's search to a few thousand expansions. That is
-  about 15× faster than the exact triple searches.
-- **What leaks: sliding along a level set.** A summarized agent is known by its
-  (Reeb arc, block). Each step may start from any cell of that fibre, so it can
-  slide sideways along its level set by one cell per step at no cost. In open
-  space a level set can touch two routes, and sliding switches routes for free.
-  In one example, two agents meet head-on in a corridor, but in the stalk one of
-  them slides onto the other corridor's route and avoids the conflict entirely.
-  Widening the edges' contact to 2 blocks did not help: the slide happens while
-  the agents are still far apart.
-- **The cure: summaries whose moves lift.** The summary map should let every coarse
-  zero-cost walk lift to a real one from each state of its fibre. Asking for that
-  exactly ([`stable_refinement`](@ref), the coarsest partition stable for
-  zero-delay moves; Paige & Tarjan 1987, regular equivalence in Everett & Borgatti
-  1994) removes the leak but, on a grid, splits the summary down to single cells:
-  131k states per edge stalk, the pair graph again. What the stalks need is
-  weaker: the states of a fibre must agree on which *Reeb arcs* lie ahead along
-  zero-delay moves ([`future_refinement`](@ref)). Then a summarized agent can only
-  reach, for free, parts of its future its actual state could also reach. It
-  cannot slide onto another corridor's route. The refinement costs about 2k
-  coarse states per edge stalk.
-- **What still leaks.** With refined summaries, one edge in 175 and, at radius 1,
-  one triangle in 14 are still below the exact value. Sharing a set of reachable
-  arcs does not fix *when* they are reached, so some lateral freedom remains.
-
-**Parallel construction and larger maps** (`docs/scripts/tropical_cover_scaling.jl`:
-eight agents, two instances per map, future-refined summaries, triangle radius 1).
-The cover's work is a set of independent tasks:
-- one summary per agent, which is vertex data;
-- one explicit stalk per edge, built from its two agents alone;
-- one search per triangle, which only reads finished edge stalks.
-
-`CoverSheaf` and [`cover_bound`](@ref) run these tasks over Julia's threads. Only the
-gluing, a small integer program on the agents, is sequential.
-
-| map (block) | edge stalk vs. pair graph | certified ratio (prioritized / bound) | build, 1 thread | build, 16 threads | triangles, 1 → 16 threads |
-|---|---|---|---|---|---|
-| 40² (2) | 1.39M vs. 2.32M states (60%) | 1.017, 1.000 | 45–54 s | 13–21 s | 3.5–6.3 s → 0.6–1.2 s |
-| 64² (4) | 3.5M vs. 15.8M states (22–23%) | 1.000, 1.009 | 177–241 s | 53–71 s | 3.3–10.2 s → 0.7–2.3 s |
-
-- **Compression grows with the map, if the blocks do.** With blocks of 2 cells,
-  (Reeb arc, block) has nearly one summary per cell, and the edge stalk is 60% of
-  the pair graph. On 64² with blocks of 4 cells it is 22%. The certificate stays
-  within 2%, and on one 64² instance it proves the prioritized plan optimal.
-- **Triangles stay cheap.** At every size, the triangle searches guided by the
-  pulled-back edge values take a few thousand expansions each, and seconds for
-  all of them together.
-- **Threads give 3–4× on 16 cores, limited by memory traffic.** The compute
-  itself scales: a pure-arithmetic loop scales perfectly on these nodes, and the
-  tasks share nothing. But one 40² edge stalk streams through about 32 million
-  arcs. With 16 built at once, each takes about twice as long as alone (6.6 s
-  against 3.1 s), so 16 concurrent edges finish 6.3× faster than in sequence. A
-  full cover runs its 20–28 edges in two waves on 16 threads, hence 3–4×.
-- **Allocation.** Allocation was the first bottleneck and is now small. Each
-  explicit stalk used to allocate 1.7 GB of short-lived arc arrays, and garbage
-  collection paused every thread.
-
-  Four changes removed it:
-  - precomputed move lists;
-  - building the arcs in compressed form, one state at a time;
-  - a dense index over the box of coarse states, in place of hashing;
-  - reusing arc buffers across stalks when the arcs are not kept.
-
-  An edge stalk now allocates 272 MB, mostly its own states, index and
-  cost-to-go, and a 40² instance builds on one thread in 54 s instead of 117 s. Faster thread
-  scaling would have to cut memory traffic, not allocation.
-- **Across nodes, over MPI** (`docs/scripts/tropical_cover_mpi.jl`, `hpg-milan`,
-  AMD EPYC 75F3, two instances per map). The decomposition follows the sheaf:
-  - every rank builds the shared structure itself (summaries, complex, product
-    stalks), deterministically;
-  - edges are dealt to ranks, longest first, and built over each rank's threads;
-  - each edge's cost-to-go is broadcast, and every rank enumerates its states and
-    index again (`StalkGraph(P, Δ)`);
-  - triangles are dealt to ranks, and only their values are reduced;
-  - rank 0 glues the cover.
-
-  Every configuration gives exactly the same bound as one process.
-
-  | layout | 40² total (edges) | 64² total (edges) |
-  |---|---|---|
-  | 1 node, 1 rank × 16 threads | 10–12 s (9.1–9.4) | 43–49 s (41–44) |
-  | 1 node, 4 ranks × 4 threads | 9.5–13 s (7.4–8.9) | 33–37 s (28–32) |
-  | 2 nodes, 1 rank × 16 threads each | 6.4–9.0 s (4.9–7.0) | 25–29 s (22–23) |
-  | 4 nodes, 1 rank × 16 threads each | 6.6–10 s (4.9–6.6) | 23–24 s (19) |
-  | 4 nodes, 4 ranks × 4 threads each | 10–12 s (4.9–5.1) | 27–31 s (15) |
-
-  - **More nodes do help.** On 64², two nodes halve the edge phase, because each
-    node brings its own memory bandwidth.
-  - **Four nodes reach the floor set by the longest edge.** Its stalk takes about
-    12 s alone, and 20–25 edges over 64 threads leave little for a fifth node to
-    do. Going further means splitting a single stalk's states across threads.
-  - **NUMA matters within a node.** These nodes have 8 NUMA domains. Four ranks of
-    four threads build the edges 1.3–1.5× faster than one rank of 16, since each
-    process keeps its memory near its cores.
-  - **The exchange is the cost of many ranks.** Broadcasting every table to every
-    rank, one edge at a time, takes 4–11 s with 16 ranks, against under 1 s with
-    four. Only the ranks that search a triangle need the tables of its edges, so
-    targeted sends (or one all-gather) would remove most of that.
-  - **Each 4-node job waited 31–78 minutes for nodes** on a nearly full
-    partition, under the group's investment QOS and with a 15-minute limit.
-- **The edge stalk is exact and tight.** It equals the pushforward of the pair
-  graph, and that pushforward along (Reeb arc, block) loses nothing against the
-  exact pair delay on these maps. With exact pair bounds the gluing reproduced the
-  three-agent optimum on every query.
-- **The certificate scales; the search does not yet.** At eight agents no joint
-  search finishes, but with triangles the sandwich certifies the prioritized plans
-  within 1–8% of optimal without knowing the optimum. That is the lax/oplax
-  sandwich of the single-agent controller, now over the interaction sheaf.
-- **The heuristic cuts joint expansions 3–7×,** but each evaluation costs more, so
-  on these small groups wall time is similar.
-- **Size.** At these map sizes the pair graph is still solvable and comparable in
-  cost. Each direction of the double-integrator edge stalk uses about a quarter
-  of the pair graph's states (0.98M against 4.2M). Its near field is the part that
-  does not shrink with the map, and velocity modes trade its size for tightness
-  gradually.
 
 ## Relation to the literature
 
@@ -891,16 +602,13 @@ supersolutions and Tarski's theorem replaces linear algebra.
   moves removes it but keeps almost nothing summarized on a grid. Intermediate
   refinements, futures seen at a few steps' horizon or through a finer partition
   than the Reeb arcs, are untested.
-- **Compression needs larger blocks.** The edge stalks are 60–65% of the pair
-  graph with blocks of 2 cells, and 22% on a 64² map with blocks of 4 cells.
-  Larger blocks widen the contact region, so how block size, contact radius and
-  tightness trade off on larger maps is open. The 64² certificates stayed
-  within 1%.
-- **Scaling stops at the longest stalk.** On one node 16 threads give 3–4×, limited
-  by memory bandwidth. Over MPI, two nodes halve the 64² edge phase, and four
-  reach the floor of the longest single edge stalk. Splitting one stalk's states
-  across threads would lower that floor. Targeted exchange, sending each table
-  only to the ranks that use it, would let more ranks per node pay off.
+- **Compression needs larger blocks.** With blocks of a few cells an edge stalk is
+  a large fraction of the pair graph. Larger blocks widen the contact region, so
+  how block size, contact radius and tightness trade off on larger maps is open.
+- **Scaling stops at the longest stalk.** The edge stalks are independent tasks,
+  over threads and over MPI ranks, so the build cannot finish before its longest
+  single edge stalk. Splitting one stalk's states across threads would lower that
+  floor.
 - **Bounds at the start only.** The triangle values are searched from one joint
   state. A heuristic at every state of a joint search needs them cached or built
   across queries.
@@ -910,37 +618,3 @@ supersolutions and Tarski's theorem replaces linear algebra.
   ``3 \times 3`` block window times the velocity modes). The edge stalks pay off
   only where pair graphs are too large to solve, which is also where they can no
   longer be checked against them.
-
-## Reproducing the results
-
-- **Abstractions:** `docs/scripts/tropical_abstraction_study.jl`, plus
-  `tropical_multi_rhs.jl` for many goals at once.
-- **Tables and overlay:** `docs/scripts/tropical_overlay_study.jl`, which also
-  checks the commutation of aggregation and elimination.
-- **Layered planner and certificates:** `docs/scripts/tropical_layered_study.jl`.
-- **Pessimistic quotient:** `docs/scripts/tropical_lyapunov_study.jl`.
-- **Multiple agents:**
-  - `docs/scripts/tropical_multiagent_study.jl`: two agents, the ablation of
-    gauge, summary and near field;
-  - `docs/scripts/tropical_pair_sheaf.jl`: the interaction sheaf (edge stalks by
-    base change, tubes, matching), shared by the next three;
-  - `docs/scripts/tropical_multiagent_sheaf.jl`: three grid agents;
-  - `docs/scripts/tropical_multiagent_cover.jl`: four to eight agents, the
-    sandwich, independence detection, the gauge on the cover
-    (`tropical_cover_gauge.jl`) and the simplicial cover with exact triangles;
-  - `docs/scripts/tropical_cover_mpi.jl`: the same study over MPI, run with
-    `srun --mpi=pmix` (one or more ranks per node, each with threads);
-  - `docs/scripts/tropical_cover_scaling.jl`: 20² to 64² maps, eight agents,
-    the cover built and evaluated over threads (arguments: map size, agents,
-    instances, `profile`; `COVER_BLOCK` sets the block size), run with
-    `julia -t T`;
-  - `docs/scripts/tropical_cover_triangles.jl`: the same instances on the
-    2-complex of `TropicalCovers`, with symmetric edge and triangle stalks
-    (arguments: map size, instances, triangle and edge contact radius, and the
-    summary: `reeb`, `future` or `stable`);
-  - `docs/scripts/tropical_multiagent_double_integrator.jl`: double-integrator
-    pairs.
-
-An interactive visualization is in `docs/viz/tropical_demo.html`, built from
-`docs/scripts/tropical_viz_export.jl`. It shows the value function, the coarse
-route and corridor, the closed-loop phase plot and the Lyapunov sandwich.

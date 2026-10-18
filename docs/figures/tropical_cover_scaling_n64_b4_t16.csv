@@ -1,3 +1,0 @@
-n,block,agents,instance,threads,edges,triangles,summaries_mean,cells,edge_states_mean,pair_states_mean,seconds_summaries,seconds_build,seconds_bound,work_edges,max_edge,work_triangles,max_triangle,triangles_capped,triangle_expansions_mean,decoupled,bound,upper
-64,4,8,1,16,20,24,1782.375,3972,3.58588105e6,1.5776784e7,0.070285578,52.836672714,0.676697115,NaN,NaN,NaN,NaN,0,5134.625,409.0,411.0,411.0
-64,4,8,2,16,25,41,1769.0,3972,3.5295562e6,1.5776784e7,0.012146785,71.147479315,2.259223232,NaN,NaN,NaN,NaN,0,8648.975609756097,450.0,454.0,458.0

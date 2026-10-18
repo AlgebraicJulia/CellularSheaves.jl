@@ -1,9 +1,0 @@
-*.aux
-*.bbl
-*.blg
-*.log
-*.out
-*.pdf
-preview-*.png
-figures/reeb_cells.tex
-build-*.out

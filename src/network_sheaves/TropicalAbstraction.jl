@@ -1143,7 +1143,7 @@ follow it at no extra cost. If every arc lifts, the pulled-back coarse cost-to-g
 general the defect is a lower bound on the worst error of that bound, and adding
 the defects to the quotient's arc costs gives an *upper* bound on the fine
 cost-to-go that is never worse than the pessimistic bound of
-[`robust_quotient`](@ref) (the path-lifting theorem of `docs/papers/path-lifting`).
+[`robust_quotient`](@ref) (the path-lifting theorem).
 The defect quantifies the classical lifting conditions: on unit-cost arcs a
 partition that is stable in the sense of Paige & Tarjan (1987)
 ([`stable_refinement`](@ref CellularSheaves.NetworkSheaves.TropicalCovers.stable_refinement)) has zero defect.

@@ -1,7 +1,0 @@
-lattice 32² × 13², 173056 states, 81529 viable (reach the goal); horizon 30; 8 threads
-
-truncation                    modes   arcs   lift  ε>h(∞)  mean ε   L/V    certified: inflated / must   U/V: inflated / must   corr(U−L, V−L)  loop ok   build
-1 mode (velocity-blind)          1   48889   0.0%    3.0%  16.43  0.365      100.0% /   0.0%         6.817 /    NaN         0.105       200/200      1.8 s
-8 headings × 3 speeds           25  176763  27.0%   18.1%   6.20  0.635       94.5% /   0.0%         2.603 /    NaN         0.580       200/200     10.8 s
-16 headings × 3 speeds          49  257536  49.7%   16.6%   3.79  0.706       95.3% /   0.0%         1.486 /    NaN         0.488       200/200     17.3 s
-8 headings × 6 speeds           49  267986  49.4%   19.8%   3.99  0.743       87.4% /  73.1%         1.703 /  1.411         0.519       200/200     17.9 s
