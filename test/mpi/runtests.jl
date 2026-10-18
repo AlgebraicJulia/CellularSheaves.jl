@@ -29,7 +29,7 @@ end
 const RANKS = parse.(Int, split(get(ENV, "CELLULARSHEAVES_MPI_RANKS", "1,3,4"), ','))
 const PREFIX = split(get(ENV, "CELLULARSHEAVES_MPI_PREFIX", ""))
 const PROJECT = Base.active_project()
-const SCRIPTS = ["grid_boxes.jl"]
+const SCRIPTS = ["grid_boxes.jl", "hjb_boxes.jl"]
 
 # Whether the launcher starts a rank at all, before reporting test failures.
 launches = try

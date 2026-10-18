@@ -74,6 +74,16 @@ using CellularSheaves.NetworkSheaves.SchwarzMethods: SchwarzDecomposition, Schwa
     LocalSolver, ExactLocalSolve, SymmetricGaussSeidel, _bicgstab!, _submatrix,
     LevelComposition, AdditiveComposition, MultiplicativeComposition
 using Krylov: gmres
+using KernelAbstractions
+using KernelAbstractions: @kernel, @index, @Const, get_backend
+using Adapt: Adapt
+using CellularSheaves.NetworkSheaves: GridSchwarz
+using CellularSheaves.NetworkSheaves.GridSchwarz: AbstractStencil, GridOperator, gridsize, grid_zeros, interior, red_black_sgs!,
+    GridWorkspace, grid_bicgstab!, grid_reduce, apply!, _unit, _shift, BoxCommunicator, SerialBoxes, BoxLayout,
+    balanced_ranks, box_operator, box_count, box_rank, box_allreduce, exchange!, gather_boxes, AggregateCoarseSpace,
+    coarse_matrix, coarse_restrict, coarse_prolong_add!, _lincomb!, CoefficientStencil
+using CellularSheaves.NetworkSheaves.GridMultigrid: coarse_layout, restrict_average!, prolong_add!, stencil_coefficients!,
+    galerkin_coefficients!, coarsening_factors, coarse_points, _children
 
 export StateGrid, AbstractHJBProblem, HJBProblem, riccati_value_matrix, riccati_value,
     ControlConstraint, BoxConstraint, DiscConstraint,
@@ -198,8 +208,11 @@ end
     AbstractHJBProblem
 
 A discounted infinite-horizon HJB problem on a [`StateGrid`](@ref), solved by
-`solve(problem, PolicyIteration(...))`. Subtypes: [`HJBProblem`](@ref) (the double
-integrator).
+`solve(problem, GridPolicyIteration(...))`. A subtype plugs into the grid solver
+by implementing the interface listed at the top of `DoubleIntegratorHJBGrid.jl`
+(the state grid, periodicity, control count, discount, a plain-bits kernel model
+and, for [`Multigrid`](@ref), `_with_grid`). Subtypes: [`HJBProblem`](@ref) (the
+double integrator) and `MechanicalHJBProblem` (the two-link arm).
 """
 abstract type AbstractHJBProblem end
 
@@ -544,7 +557,9 @@ A point or block smoother of ``A_u = D + L + U``, used as the right
 preconditioner of a policy evaluation (or `nothing`, no preconditioner).
 [`KrylovPolicyEvaluation`](@ref) takes [`JacobiSmoother`](@ref),
 [`GaussSeidelSmoother`](@ref), [`SymmetricGaussSeidelSmoother`](@ref) and
-[`BlockSymmetricGaussSeidelSmoother`](@ref) on the assembled matrix.
+[`BlockSymmetricGaussSeidelSmoother`](@ref) on the assembled matrix;
+[`GridPolicyIteration`](@ref) takes [`SymmetricGaussSeidelSmoother`](@ref) and
+[`RestrictedAdditiveSchwarzSmoother`](@ref) on the implicit grid operator.
 """
 abstract type Smoother end
 
@@ -567,7 +582,8 @@ struct GaussSeidelSmoother <: Smoother end
 
 One symmetric Gauss–Seidel sweep ``(D + U)^{-1} D (D + L)^{-1}`` in red–black
 order, each color updated concurrently (`SymmetricGaussSeidel` on an assembled
-matrix).
+matrix; `red_black_sgs!` on a grid operator, the same operator for any number of
+boxes, two halo exchanges per sweep).
 """
 struct SymmetricGaussSeidelSmoother <: Smoother end
 
@@ -656,7 +672,7 @@ _preconditioner(A::SparseMatrixCSC, ::SymmetricGaussSeidelSmoother, blocks) = _s
 _preconditioner(A::SparseMatrixCSC, ::BlockSymmetricGaussSeidelSmoother, blocks) =
     _block_symmetric_gauss_seidel(A, blocks)
 _preconditioner(A::SparseMatrixCSC, s::Smoother, blocks) =
-    throw(ArgumentError("$(typeof(s)) is not a smoother of an assembled matrix"))
+    throw(ArgumentError("$(typeof(s)) needs the grid operator: use it with GridPolicyIteration"))
 
 _smoother_data(grid, s) = nothing
 _smoother_data(grid, s::BlockSymmetricGaussSeidelSmoother) = _block_indices(grid_partition(grid, s.blocks))
@@ -757,7 +773,8 @@ end
 The result of `solve(problem, PolicyIteration(...))`.
 
 # Fields
-- `problem`: the problem solved (an [`HJBProblem`](@ref)).
+- `problem`: the problem solved (an [`HJBProblem`](@ref), or a
+  [`MechanicalHJBProblem`](@ref CellularSheaves.ControlSheaves.MechanicalHJB.MechanicalHJBProblem)).
 - `values`: the value function at the grid points.
 - `controls`: `d × N`, the optimal feedback at the grid points.
 - `iterations`: policy iterations used.
@@ -873,5 +890,8 @@ function control_at(sol::HJBSolution{<:HJBProblem}, x::AbstractVector)
     end
     return _project!(u, prob)
 end
+
+include("HJBMultigrid.jl")
+include("DoubleIntegratorHJBGrid.jl")
 
 end # module DoubleIntegratorHJB

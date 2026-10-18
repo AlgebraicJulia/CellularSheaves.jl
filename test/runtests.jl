@@ -56,5 +56,7 @@ end
   include("ControlSheaves/NestedDSL.jl")
   include("ControlSheaves/CoordinationBenchmarks.jl")
   include("ControlSheaves/DoubleIntegratorHJB.jl")
+  include("ControlSheaves/MechanicalHJB.jl")
+  include("ControlSheaves/HJBMultigrid.jl")
   include("ControlSheaves/PredictiveConsensus.jl")
 end
