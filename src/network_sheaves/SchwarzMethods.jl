@@ -1,0 +1,1576 @@
+# Overlapping Schwarz domain decomposition phrased on a cellular sheaf.
+#
+# A cover of the unknowns of a discretized PDE by overlapping subdomains
+# Ω₁, …, Ω_N determines a network sheaf (the "overlap sheaf" of the cover):
+# one vertex per subdomain with stalk ℝ^{Ω_i}, one edge per nonempty pairwise
+# overlap with stalk ℝ^{Ω_i ∩ Ω_j}, and coordinate projections as restriction
+# maps. A Schwarz iterate is a 0-cochain of this sheaf — every subdomain keeps
+# its own copy of the solution — and the method has converged exactly when
+# that cochain is a global section that glues to the solution of A u = f.
+module SchwarzMethods
+
+export OverlapCover, ghost_layer_cover, Ownership, LocalProblem, RobinFace, SchwarzDecomposition, refactor, refactor!,
+    overlap_sheaf, overlapping_subdomains, localize, glue, overlap_disagreement,
+    TransmissionCondition, DirichletTransmission, RobinTransmission, optimized_robin_parameter,
+    SchwarzSweep, MultiplicativeSweep, MulticolorSweep, ParallelSweep, schwarz_step!,
+    AbstractCoarseSpace, TruncatedPushforwardCoarseSpace, ExactPushforwardCoarseSpace,
+    coarse_dimension, coarse_correct!,
+    SchwarzProblem, SchwarzIteration, SchwarzCG, SchwarzResult, SchwarzPreconditioner, solve,
+    LocalSolver, ExactLocalSolve, LevelComposition, AdditiveComposition, MultiplicativeComposition
+
+using ArgCheck: @argcheck
+using BlockArrays: BlockVector, mortar, blocks
+using Graphs: SimpleGraph, add_edge!, has_edge, neighbors, ne, nv, vertices, degree
+using LinearAlgebra
+using LinearAlgebra: ldlt!, RowMaximum
+using SparseArrays
+using CliqueTrees.Multifrontal: ChordalLDLt
+using Krylov: cg, gmres
+import CommonSolve: solve
+
+using ..SheafInterface: add_sheaf_edge!
+using ..EuclideanSheaves: EuclideanSheaf
+using ..RestrictionMaps: SelectionRestriction
+using ..GraphHomomorphisms: GraphHomomorphism, fiber_vertices
+
+# ===== Sparse-matrix helpers =====
+
+# Structural neighbours of dof k in the (symmetric) matrix S.
+_adjacent(S::SparseMatrixCSC, k::Int) =
+    (rowvals(S)[p] for p in nzrange(S, k) if rowvals(S)[p] != k && !iszero(nonzeros(S)[p]))
+
+# S[rows, cols] for sorted `rows`, keeping every stored entry (explicit zeros
+# included), and the positions in nonzeros(S) its entries come from. A binary
+# search per entry: no work arrays of the size of S, so it is cheap to call
+# for many small subdomains concurrently.
+function _submatrix(S::SparseMatrixCSC, rows::Vector{Int}, cols::AbstractVector{<:Integer})
+    issorted(rows) || throw(ArgumentError("rows must be sorted"))
+    colptr = Vector{Int}(undef, length(cols) + 1)
+    colptr[1] = 1
+    rowval, src = Int[], Int[]
+    rv = rowvals(S)
+    for (c, j) in enumerate(cols)
+        for p in nzrange(S, j)
+            t = searchsortedfirst(rows, rv[p])
+            if t <= length(rows) && rows[t] == rv[p]
+                push!(rowval, t)
+                push!(src, p)
+            end
+        end
+        colptr[c + 1] = length(rowval) + 1
+    end
+    return SparseMatrixCSC(length(rows), length(cols), colptr, rowval, nonzeros(S)[src]), src
+end
+
+# Γ: dofs outside `dofs` that S couples to `dofs` (the discrete Dirichlet boundary).
+function _boundary(S::SparseMatrixCSC, dofs::Vector{Int})
+    inside = falses(size(S, 1))
+    inside[dofs] .= true
+    Γ = Int[]
+    for c in dofs, r in _adjacent(S, c)
+        inside[r] || push!(Γ, r)
+    end
+    return sort!(unique!(Γ))
+end
+
+# The sparsity pattern of S + Sᵀ. The ghost layers, overlaps and ownership of a
+# cover only depend on which dofs are coupled, so for a nonsymmetric matrix they
+# are computed from this symmetrized pattern.
+_pattern(S::SparseMatrixCSC) = SparseMatrixCSC(size(S)..., copy(S.colptr), copy(rowvals(S)), ones(nnz(S)))
+# The test is on the stored pattern, not the values: a value-symmetric matrix can
+# store an explicit zero at (a, b) but not at (b, a).
+function _structure(S::SparseMatrixCSC)
+    P = _pattern(S)
+    Pt = _pattern(sparse(transpose(S)))
+    return P == Pt ? S : P + Pt
+end
+
+# A as a SparseMatrixCSC{<:AbstractFloat,Int} with its stored pattern intact
+# (broadcasting `float.` over a sparse matrix drops explicit zeros).
+_float_sparse(A::SparseMatrixCSC) = SparseMatrixCSC(size(A)..., Vector{Int}(A.colptr), Vector{Int}(rowvals(A)),
+    float.(nonzeros(A)))
+_float_sparse(A::AbstractMatrix) = sparse(float.(A))
+
+# Sparse LU with partial pivoting (UMFPACK pivot tolerance 1). UMFPACK's
+# default threshold of 0.1 lets element growth compound on upwind M-matrices:
+# on a 121² HJB policy-evaluation matrix it produced |U| ≈ 6e19 and a relative
+# residual of 8.5 with no error raised, while partial pivoting gives growth 1,
+# a residual of 1e-15, and a sparser factor.
+function _stable_lu(A::SparseMatrixCSC{Float64,Int64})
+    control = SparseArrays.UMFPACK.get_umfpack_control(Float64, Int64)
+    control[SparseArrays.UMFPACK.JL_UMFPACK_PIVOT_TOLERANCE] = 1.0
+    return lu(A; control)
+end
+_stable_lu(A::SparseMatrixCSC) = lu(A)
+
+"""
+    LevelComposition
+
+How the corrections of several levels (or a one-level preconditioner and a
+coarse correction) combine: [`AdditiveComposition`](@ref) sums them,
+[`MultiplicativeComposition`](@ref) applies them in turn, each to the residual
+the previous ones leave (a V-cycle over levels).
+"""
+abstract type LevelComposition end
+
+"""
+    AdditiveComposition()
+
+Sum the corrections: ``B = \\sum_k C_k`` (BPX, additive Schwarz).
+"""
+struct AdditiveComposition <: LevelComposition end
+
+"""
+    MultiplicativeComposition()
+
+Apply the corrections in turn, each to the remaining residual:
+``B \\leftarrow B + C_k (I - A B)`` (V-cycles, multiplicative Schwarz).
+"""
+struct MultiplicativeComposition <: LevelComposition end
+
+"""
+    LocalSolver
+
+How each subdomain problem ``\\tilde A_i x_i = b_i`` is solved:
+[`ExactLocalSolve`](@ref) or [`SymmetricGaussSeidelLocalSolve`](@ref).
+
+A new local solver `S <: LocalSolver` implements
+
+- `_local_factor(s::S, Ai, symmetric, i)`: the setup for subdomain `i`'s local
+  matrix `Ai` (a "factor" `M`, of any type);
+
+and its factor type implements
+
+- `_factor_solve(M, b)` (default `M \\ b`) and optionally the in-place
+  `_factor_solve!(z, M, b)`;
+- `_local_update(M, b, x)`: the new local values from the current ones `x`
+  (default: an exact solve, ignoring `x`);
+- for [`refactor!`](@ref): `_refactored(M, s, Ai, i)`, a fresh factor of the same
+  kind, and `_refactor_values!(dd, i, M, values)`, new values on the same pattern.
+"""
+abstract type LocalSolver end
+
+_local_factor(s::LocalSolver, Ai, symmetric, i) =
+    throw(ArgumentError("$(typeof(s)) does not implement _local_factor; see the LocalSolver docstring"))
+
+"""
+    ExactLocalSolve()
+
+Solve each local problem exactly with a sparse factorization computed at setup:
+`ChordalLDLt` for a symmetric local matrix, LU with partial pivoting otherwise.
+"""
+struct ExactLocalSolve <: LocalSolver end
+
+# Local factorization: ChordalLDLt for symmetric matrices (with a positive
+# definiteness check), sparse LU with partial pivoting otherwise.
+function _local_factor(::ExactLocalSolve, Ai::SparseMatrixCSC, symmetric::Bool, i::Int)
+    symmetric || return _stable_lu(Ai)
+    factor = ldlt!(ChordalLDLt(Ai), RowMaximum(); check=false)
+    @argcheck all(>(0), factor.D.diag) "the local matrix of subdomain $i is not positive definite; increase the Robin parameter"
+    return factor
+end
+_factor_solve(M::ChordalLDLt, b::AbstractVector) = _ldlt_solve(M, b)
+_factor_solve(M, b::AbstractVector) = M \ b
+
+# In place where the factor allows it.
+_factor_solve!(z::AbstractVector, M, b::AbstractVector) = copyto!(z, _factor_solve(M, b))
+_factor_solve!(z::AbstractVector, M::SparseArrays.UMFPACK.UmfpackLU, b::AbstractVector) = ldiv!(z, M, b)
+
+# The new local values from the current ones x: an exact solve ignores x, an
+# inexact one corrects it.
+_local_update(M, b::AbstractVector, x::AbstractVector) = _factor_solve(M, b)
+
+# Solve M v = b for a ChordalLDLt factor with X = P' L D L' P.
+function _ldlt_solve(M, b::AbstractVector)
+    c = M.P' \ b
+    z = M.L \ c
+    w = M.D \ z
+    y = M.L' \ w
+    return M.P \ y
+end
+
+# ===== The cover and its overlap sheaf =====
+
+"""
+    OverlapCover(subdomains, ndofs=maximum dof index; ghosts=nothing)
+    ghost_layer_cover(A, subdomains) -> OverlapCover
+
+The combinatorics of a cover of the dofs `1:ndofs` by subdomains
+``\\Omega_i`` with optional *ghost layers* ``\\Gamma_i``, bundled together. The
+vertex stalk of subdomain ``i`` is the *closed* subdomain
+``\\overline\\Omega_i = \\Omega_i \\cup \\Gamma_i``. Its interior values are what
+the subdomain computes, and its ghost values are copies received from
+neighbours.
+
+- `subdomains[i]`: the sorted dofs of ``\\Omega_i`` (the interior);
+- `stalks[i]`: the sorted dofs of ``\\overline\\Omega_i``, the coordinates of
+  the vertex stalk;
+- `interior[i]`: a mask over `stalks[i]`, `true` on ``\\Omega_i``;
+- `members[k]`: the pairs `(i, ℓ)` with dof `k` at position `ℓ` of `stalks[i]`;
+- `graph`: the 1-skeleton of the nerve of the closed cover (an edge for every
+  nonempty ``\\overline\\Omega_i \\cap \\overline\\Omega_j``);
+- `overlaps[i => j]`: the positions in `stalks[i]` of
+  ``\\overline\\Omega_i \\cap \\overline\\Omega_j``, ordered so that
+  `overlaps[i => j]` and `overlaps[j => i]` address the same dofs entry by
+  entry. These are the restriction maps of [`overlap_sheaf`](@ref) in index form.
+
+[`ghost_layer_cover`](@ref) takes ``\\Gamma_i`` to be the discrete boundary of
+``\\Omega_i`` in the sparsity graph of `A`, the dofs a local solve on
+``\\Omega_i`` needs as boundary data. Every such value then lies in an edge stalk
+shared with the subdomain that computes it. As a result, each message of a
+Schwarz method is a restriction map applied to a vertex stalk.
+"""
+struct OverlapCover
+    subdomains::Vector{Vector{Int}}
+    stalks::Vector{Vector{Int}}
+    interior::Vector{BitVector}
+    members::Vector{Vector{Tuple{Int,Int}}}
+    graph::SimpleGraph{Int}
+    overlaps::Dict{Pair{Int,Int},Vector{Int}}
+end
+
+function OverlapCover(subdomains::AbstractVector{<:AbstractVector{<:Integer}},
+                      ndofs::Integer=maximum(d -> isempty(d) ? 0 : maximum(d), subdomains; init=0);
+                      ghosts::Union{Nothing,AbstractVector{<:AbstractVector{<:Integer}}}=nothing)
+    @argcheck !isempty(subdomains) "need at least one subdomain"
+    @argcheck ghosts === nothing || length(ghosts) == length(subdomains) "need one ghost layer per subdomain"
+    N = length(subdomains)
+    doms, stalks, interior = Vector{Vector{Int}}(undef, N), Vector{Vector{Int}}(undef, N), Vector{BitVector}(undef, N)
+    Threads.@threads for i in 1:N
+        d = sort!(unique(Vector{Int}(subdomains[i])))
+        g = ghosts === nothing ? Int[] : setdiff(Vector{Int}(ghosts[i]), d)
+        doms[i] = d
+        stalks[i] = sort!(union(d, g))
+        interior[i] = BitVector(insorted(k, d) for k in stalks[i])
+    end
+    for (i, s) in enumerate(stalks)
+        @argcheck isempty(s) || (1 <= first(s) && last(s) <= ndofs) "subdomain $i has dof indices outside 1:$ndofs"
+    end
+    members = [Tuple{Int,Int}[] for _ in 1:ndofs]
+    for (i, s) in enumerate(stalks), (ℓ, k) in enumerate(s)
+        push!(members[k], (i, ℓ))
+    end
+    # Each subdomain lists, per neighbour, its own positions of the shared dofs in
+    # increasing dof order, so the lists of i => j and j => i are aligned.
+    local_overlaps = Vector{Dict{Int,Vector{Int}}}(undef, N)
+    Threads.@threads for i in 1:N
+        mine = Dict{Int,Vector{Int}}()
+        for (ℓ, k) in enumerate(stalks[i]), (j, _) in members[k]
+            j == i || push!(get!(mine, j, Int[]), ℓ)
+        end
+        local_overlaps[i] = mine
+    end
+    graph = SimpleGraph(N)
+    overlaps = Dict{Pair{Int,Int},Vector{Int}}()
+    for i in 1:N, (j, positions) in local_overlaps[i]
+        i < j && add_edge!(graph, i, j)
+        overlaps[i => j] = positions
+    end
+    return OverlapCover(doms, stalks, interior, members, graph, overlaps)
+end
+
+"""
+    ghost_layer_cover(A, subdomains) -> OverlapCover
+
+The cover by closed subdomains ``\\overline\\Omega_i = \\Omega_i \\cup \\Gamma_i``,
+where the ghost layer ``\\Gamma_i`` is the set of dofs outside ``\\Omega_i``
+that `A` couples to ``\\Omega_i``. See [`OverlapCover`](@ref).
+"""
+function ghost_layer_cover(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}})
+    S = _structure(dropzeros(sparse(A)))
+    doms = [sort!(unique(Vector{Int}(d))) for d in subdomains]
+    layers = Vector{Vector{Int}}(undef, length(doms))
+    Threads.@threads for i in eachindex(doms)
+        layers[i] = _boundary(S, doms[i])
+    end
+    return OverlapCover(doms, size(S, 1); ghosts=layers)
+end
+
+# Position of dof k in the interior of subdomain i, or nothing.
+function _interior_position(cover::OverlapCover, i::Int, k::Int)
+    for (j, ℓ) in cover.members[k]
+        j == i && cover.interior[i][ℓ] && return ℓ
+    end
+    return nothing
+end
+
+_interior_members(cover::OverlapCover, k::Int) =
+    ((i, ℓ) for (i, ℓ) in cover.members[k] if cover.interior[i][ℓ])
+
+_contains(cover::OverlapCover, i::Int, k::Int) = _interior_position(cover, i, k) !== nothing
+
+"""
+    overlap_sheaf(cover::OverlapCover, T=Float64) -> EuclideanSheaf{T,SelectionRestriction{T}}
+    overlap_sheaf(subdomains, T=Float64) -> EuclideanSheaf{T,SelectionRestriction{T}}
+    overlap_sheaf(dd::SchwarzDecomposition) -> EuclideanSheaf
+
+The cellular sheaf of a cover of a set of degrees of freedom (dofs).
+
+- **Vertices** are subdomains, with stalk ``F(i) = \\mathbb{R}^{\\overline\\Omega_i}``
+  (one coordinate per dof of the closed subdomain, in increasing global order).
+- **Edges** are the nonempty pairwise overlaps
+  ``\\overline\\Omega_i \\cap \\overline\\Omega_j``, with stalk
+  ``F(ij) = \\mathbb{R}^{\\overline\\Omega_i \\cap \\overline\\Omega_j}``.
+- **Restriction maps** ``F(i) \\to F(ij)`` are coordinate selections
+  ([`SelectionRestriction`](@ref)): they read off the values a subdomain holds
+  on the overlap. They are stored as index lists, never as matrices.
+
+For a plain list of subdomains there are no ghost layers and
+``\\overline\\Omega_i = \\Omega_i``. The sheaf of a [`SchwarzDecomposition`](@ref)
+uses its ghost-layer cover, so its edge stalks also carry the boundary data
+the local solves exchange.
+
+The underlying graph is the 1-skeleton of the nerve of the cover. A 0-cochain
+``x = (x_i)`` assigns each subdomain its own local function; the coboundary
+``(\\delta x)_{ij} = x_i|_{\\overline\\Omega_i\\cap\\overline\\Omega_j} - x_j|_{\\overline\\Omega_i\\cap\\overline\\Omega_j}``
+measures how much neighbouring subdomains disagree. Because every nonempty
+overlap is an edge, the global sections ``H^0`` are exactly the cochains coming
+from a single function on ``\\bigcup_i \\overline\\Omega_i``.
+
+This is the sheaf on which the Schwarz methods of this module run: iterates are
+0-cochains, and convergence means they become a global section.
+"""
+function overlap_sheaf(cover::OverlapCover, ::Type{T}=Float64) where {T}
+    stalks = cover.stalks
+    s = EuclideanSheaf{T,SelectionRestriction{T}}(length.(stalks))
+    for i in eachindex(stalks), j in neighbors(cover.graph, i)
+        i < j || continue
+        add_sheaf_edge!(s, i, j,
+            SelectionRestriction{T}(cover.overlaps[i => j], length(stalks[i])),
+            SelectionRestriction{T}(cover.overlaps[j => i], length(stalks[j])))
+    end
+    return s
+end
+
+overlap_sheaf(subdomains::AbstractVector{<:AbstractVector{<:Integer}}, ::Type{T}=Float64) where {T} =
+    overlap_sheaf(OverlapCover(subdomains), T)
+
+"""
+    overlapping_subdomains(A, parts; overlap=1) -> Vector{Vector{Int}}
+
+Grow a non-overlapping partition of the dofs into an overlapping cover.
+
+`parts[k] ∈ 1:N` labels the part containing dof `k`. Each part is enlarged by
+`overlap` layers of neighbours in the adjacency graph of the sparse matrix `A`
+(dofs `k`, `m` are adjacent when `A[k, m] ≠ 0`), the usual algebraic way to
+build the subdomains ``\\Omega_i`` of an overlapping Schwarz method
+(Smith–Bjørstad–Gropp 1996, §1.3). `overlap = 0` returns the partition itself.
+
+Pass `owner = parts` to [`SchwarzDecomposition`](@ref) to make the original
+partition decide which subdomain supplies each dof's value.
+"""
+function overlapping_subdomains(A::AbstractMatrix, parts::AbstractVector{<:Integer}; overlap::Integer=1)
+    n = size(A, 1)
+    @argcheck size(A, 2) == n "A must be square"
+    @argcheck length(parts) == n "need one part label per dof"
+    @argcheck overlap >= 0
+    @argcheck all(>=(1), parts) "part labels must be positive"
+    S = _structure(dropzeros(sparse(A)))
+    subdomains = Vector{Vector{Int}}(undef, maximum(parts))
+    for i in eachindex(subdomains)
+        mark = parts .== i
+        @argcheck any(mark) "part $i is empty"
+        for _ in 1:overlap
+            grown = copy(mark)
+            for c in findall(mark), r in _adjacent(S, c)
+                grown[r] = true
+            end
+            mark = grown
+        end
+        subdomains[i] = findall(mark)
+    end
+    return subdomains
+end
+
+# ===== Ownership =====
+
+"""
+    Ownership(cover, owner)
+    Ownership(cover, S::SparseMatrixCSC)
+
+Which subdomain's copy supplies each dof: `owner[k]` is a subdomain whose interior contains
+dof `k`, and `local_index[k]` is the position of `k` in its stalk. The owner's copy is
+read whenever another subdomain needs `k` as boundary data, and when a cochain
+is glued into a global vector ([`glue`](@ref)).
+
+Given the matrix instead of an owner vector, each dof is owned by a subdomain
+that contains it together with all of its matrix neighbours, when one exists.
+In a ghost-layer cover a boundary dof of one subdomain lies in the ghost layer
+of that subdomain and in the interior of its owner, so it is always in a shared
+edge stalk.
+"""
+struct Ownership
+    owner::Vector{Int}
+    local_index::Vector{Int}
+end
+
+function Ownership(cover::OverlapCover, owner::AbstractVector{<:Integer})
+    n = length(cover.members)
+    @argcheck length(owner) == n "need one owner per dof"
+    local_index = Vector{Int}(undef, n)
+    for k in 1:n
+        ℓ = _interior_position(cover, Int(owner[k]), k)
+        @argcheck ℓ !== nothing "owner[$k] = $(owner[k]), but dof $k is not in the interior of subdomain $(owner[k])"
+        local_index[k] = ℓ
+    end
+    return Ownership(Vector{Int}(owner), local_index)
+end
+
+function Ownership(cover::OverlapCover, S::SparseMatrixCSC)
+    owner = map(eachindex(cover.members)) do k
+        candidates = [i for (i, _) in _interior_members(cover, k)]
+        @argcheck !isempty(candidates) "dof $k lies in no subdomain interior"
+        deep = findfirst(i -> all(r -> _contains(cover, i, r), _adjacent(S, k)), candidates)
+        candidates[something(deep, 1)]
+    end
+    return Ownership(cover, owner)
+end
+
+# ===== Transmission conditions =====
+
+"""
+    TransmissionCondition
+
+How neighbouring subdomains pass data to each other in a local solve:
+[`DirichletTransmission`](@ref) (classical Schwarz) or
+[`RobinTransmission`](@ref) (optimized Schwarz).
+
+A new condition `C <: TransmissionCondition` implements
+`_robin_faces(asm::_Assembly{T,C}, i, boundary)`, the [`RobinFace`](@ref)s that
+modify subdomain `i`'s local matrix (none for Dirichlet data), and
+`_publish!(xs, ::C, cover, i)`, what a sweep does with subdomain `i`'s new values.
+"""
+abstract type TransmissionCondition end
+
+_publish!(xs, t::TransmissionCondition, cover, i) =
+    throw(ArgumentError("$(typeof(t)) does not implement _publish!; see the TransmissionCondition docstring"))
+
+"""
+    DirichletTransmission()
+
+Each subdomain takes the values of its neighbours on its boundary
+``\\Gamma_i`` as Dirichlet data. The local matrix is
+``\\tilde A_i = A_{\\Omega_i\\Omega_i}``. This is classical Schwarz.
+"""
+struct DirichletTransmission <: TransmissionCondition end
+
+"""
+    RobinTransmission(p)
+
+Subdomains exchange Robin data ``(\\partial_n + p) u`` instead of values, which
+gives optimized Schwarz methods (Gander 2006). `p` is a positive number, or a
+function `(i, j) -> p_ij` giving one parameter per edge of the overlap graph.
+
+The algebraic form follows St-Cyr–Gander–Thomas (2007). The *interface* dofs of
+``\\Omega_i`` are those coupled to ``\\Gamma_i``, and the local matrix is
+
+```math
+\\tilde A_i = A_{\\Omega_i\\Omega_i} - N_i + P_i .
+```
+
+The modification is made face by face. A *face* is a coupling ``A_{mk} \\neq 0``
+between an interface dof ``m \\in \\Omega_i`` and a boundary dof
+``k \\in \\Gamma_i`` owned by the neighbour ``j`` (a [`RobinFace`](@ref)).
+``N_i = \\mathrm{diag}\\big(\\sum_{k} |A_{mk}|\\big)`` removes the Dirichlet
+coupling of every face and leaves an algebraic Neumann condition. ``P_i`` adds
+``p_{ij}`` once per face. The face's Robin data, the discrete
+``(\\partial_n + p_{ij})\\, u_j``, is read entirely from neighbour ``j``. The
+modification only touches interface rows, so the exact solution is still the
+fixed point.
+
+# Cross points
+
+At a subdomain corner an interface dof has several faces, often towards
+different neighbours. Discrete optimized Schwarz methods are known to be
+fragile there and can diverge (Gander–Kwok 2012/2013). Three choices make
+the corners consistent, and together they removed the divergence on box
+decompositions in our tests:
+
+1. a Robin term ``p_{ij}`` for *each* face whose Dirichlet coupling is removed,
+   so that a corner dof is not under-penalized;
+2. each face's Robin data taken from the neighbour across that face, never a
+   mix of copies from different subdomains;
+3. no pushes in the alternating sweeps: each subdomain keeps its own copy on
+   the overlaps, as optimized Schwarz requires (see [`MultiplicativeSweep`](@ref)).
+
+A large `p` approaches Dirichlet transmission. `p` is in the units of `A`: for a
+stencil scaled by ``h^{-2}``, a continuous Robin parameter ``p`` corresponds to
+``p/h`` (see [`optimized_robin_parameter`](@ref)). Every ``\\tilde A_i`` must be
+positive definite, which holds for diagonally dominant `A` (e.g. M-matrices)
+and `p > 0`. [`SchwarzDecomposition`](@ref) checks this.
+"""
+struct RobinTransmission{P} <: TransmissionCondition
+    parameter::P
+
+    function RobinTransmission(p::P) where {P<:Union{Real,Function}}
+        p isa Real && @argcheck p > 0 "the Robin parameter must be positive"
+        return new{P}(p)
+    end
+end
+
+_robin_parameter(t::RobinTransmission{<:Real}, i, j) = t.parameter
+_robin_parameter(t::RobinTransmission, i, j) = t.parameter(i, j)
+
+"""
+    optimized_robin_parameter(L; kmin=π, η=0) -> Real
+
+The optimized Robin parameter of zeroth order for overlapping Schwarz on
+``(\\eta - \\Delta) u = f``, to leading order in the overlap width ``L``:
+
+```math
+p^* = \\frac{(k_{\\min}^2 + \\eta)^{1/3}}{(2L)^{1/3}}
+```
+
+(Gander 2006, overlapping OO0). ``k_{\\min}`` is the lowest frequency along the
+interface, ``\\pi / \\ell`` for an interface of length ``\\ell`` with Dirichlet
+ends. With Robin transmission the contraction factor is ``1 - O(L^{1/3})``
+instead of ``1 - O(L)`` for Dirichlet transmission.
+
+This is a parameter of the continuous problem. For a finite-difference matrix
+scaled by ``h^{-2}``, use `RobinTransmission(p / h)`. The formula is asymptotic
+and for model problems, so treat it as a starting point. Where subdomain
+boundaries meet at cross points, larger values are safer (Gander–Kwok 2013).
+"""
+function optimized_robin_parameter(L::Real; kmin::Real=π, η::Real=0)
+    @argcheck L > 0 "the overlap width must be positive"
+    @argcheck kmin > 0 && η >= 0
+    return cbrt(kmin^2 + η) / cbrt(2L)
+end
+
+# ===== Local problems =====
+
+"""
+    RobinFace
+
+One face of a subdomain's interface under [`RobinTransmission`](@ref): the
+coupling between an interface dof ``m \\in \\Omega_i`` and a boundary dof
+``k \\in \\Gamma_i`` across it.
+
+- `dof`: the local index of ``m`` in ``\\Omega_i``;
+- `weight`: ``p_{ij} - |A_{mk}|``, the Robin term added for this face minus
+  the Dirichlet coupling it replaces;
+- `source`: the neighbour ``j`` across the face (the owner of ``k``);
+- `source_dof`: the position of ``m`` in the stalk of ``j``, where ``m`` is an
+  interior dof of ``j``.
+
+The face's Robin data is read entirely from the neighbour ``j``: its values
+at ``k`` (through the ghost layer) and at ``m`` (through `weight`). Together
+they form the discrete ``(\\partial_n + p_{ij})\\, u_j`` on that face. Both
+``m`` and ``k`` lie in ``\\overline\\Omega_i \\cap \\overline\\Omega_j``, so the
+data is in the edge stalk between ``i`` and ``j``. An interface dof at a
+subdomain corner has one face per outside neighbour, each with its own
+neighbour, parameter and data.
+"""
+struct RobinFace{T}
+    dof::Int
+    weight::T
+    source::Int
+    source_dof::Int
+end
+
+"""
+    LocalProblem
+
+Everything one subdomain needs for its local solve:
+
+- `dofs`: the global dofs of ``\\Omega_i``;
+- `boundary`: its ghost layer, the discrete boundary
+  ``\\Gamma_i = \\{k \\notin \\Omega_i : A_{km} \\neq 0 \\text{ for some } m \\in \\Omega_i\\}``;
+- `interior`, `ghosts`: the positions of ``\\Omega_i`` and ``\\Gamma_i`` in the
+  vertex stalk ``\\mathbb R^{\\overline\\Omega_i}``;
+- `coupling`: the block ``A_{\\Omega_i \\Gamma_i}``;
+- `faces`: the [`RobinFace`](@ref)s of the interface (empty for
+  [`DirichletTransmission`](@ref));
+- `factor`: how ``\\tilde A_i`` is solved, set by the [`LocalSolver`](@ref): a sparse
+  `ChordalLDLt` or LU factorization of the local matrix
+  ``\\tilde A_i``, computed once and reused by every local solve, or a
+  [`SymmetricGaussSeidel`](@ref) smoother of it.
+"""
+struct LocalProblem{T,F}
+    dofs::Vector{Int}
+    boundary::Vector{Int}
+    interior::Vector{Int}
+    ghosts::Vector{Int}
+    coupling::SparseMatrixCSC{T,Int}
+    faces::Vector{RobinFace{T}}
+    factor::F
+end
+
+# The global data every local problem is assembled from.
+struct _Assembly{T,C<:TransmissionCondition,L<:LocalSolver}
+    A::SparseMatrixCSC{T,Int}
+    cover::OverlapCover
+    ownership::Ownership
+    transmission::C
+    local_solver::L
+end
+
+function LocalProblem(asm::_Assembly, i::Int)
+    S = asm.A
+    dofs = asm.cover.subdomains[i]
+    interior = findall(asm.cover.interior[i])
+    ghosts = findall(!, asm.cover.interior[i])
+    boundary = asm.cover.stalks[i][ghosts]
+    faces = _robin_faces(asm, i, boundary)
+    Ai, _ = _submatrix(S, dofs, dofs)
+    if !isempty(faces)
+        local_dofs = [face.dof for face in faces]
+        Ai = Ai + sparse(local_dofs, local_dofs, [face.weight for face in faces], length(dofs), length(dofs))
+    end
+    factor = _local_factor(asm.local_solver, Ai, issymmetric(S), i)
+    return LocalProblem(dofs, boundary, interior, ghosts, first(_submatrix(S, dofs, boundary)), faces, factor)
+end
+
+_robin_faces(::_Assembly{T,DirichletTransmission}, i, boundary) where {T} = RobinFace{T}[]
+
+function _robin_faces(asm::_Assembly{T,<:RobinTransmission}, i, boundary) where {T}
+    S = asm.A
+    on_boundary = falses(size(S, 1))
+    on_boundary[boundary] .= true
+    faces = RobinFace{T}[]
+    for (ℓ, m) in enumerate(asm.cover.subdomains[i]), idx in nzrange(S, m)
+        k = rowvals(S)[idx]
+        (on_boundary[k] && !iszero(nonzeros(S)[idx])) || continue
+        j = asm.ownership.owner[k]
+        p = T(_robin_parameter(asm.transmission, i, j))
+        @argcheck p > 0 "Robin parameters must be positive (got $p on edge $(i)–$(j))"
+        position = _interior_position(asm.cover, j, m)
+        src, src_dof = position === nothing ?
+            (asm.ownership.owner[m], asm.ownership.local_index[m]) : (j, position)
+        @argcheck src != i "Robin transmission needs overlapping subdomains: the interface dof $m of subdomain $i is not in the interior of any neighbour (use overlap >= 1)"
+        push!(faces, RobinFace(ℓ, p - abs(nonzeros(S)[idx]), src, src_dof))
+    end
+    return faces
+end
+
+# ===== Decomposition =====
+
+# The index maps refactor! gathers new values through: the transposition of the
+# stored values and, per subdomain, the positions of its local matrix and coupling.
+const _GatherMaps = Tuple{Vector{Int},Vector{NTuple{2,Vector{Int}}}}
+
+"""
+    SchwarzDecomposition(A, subdomains; owner=nothing, transmission=DirichletTransmission(),
+                         structure=nothing, dropzeros=true, local_solver=ExactLocalSolve())
+
+A domain decomposition of the sparse system ``A u = f``, prepared for Schwarz
+iteration. `A` is typically symmetric positive definite (a finite-difference or
+finite-element discretization of an elliptic PDE). With
+[`DirichletTransmission`](@ref), `A` may also be nonsymmetric, for example the
+M-matrix of an upwind discretization of a transport or Hamilton–Jacobi–Bellman
+equation: the local problems are then factored with a sparse LU, and the ghost
+layers come from the symmetrized sparsity pattern of `A`. Multiplicative and
+additive Schwarz converge for nonsingular M-matrices (Frommer and Szyld,
+*Weighted max norm estimates for additive Schwarz methods*, 1999). Robin
+transmission, the coarse spaces, [`SchwarzCG`](@ref) and [`SheafADMM`](@ref)
+need a symmetric `A`. `subdomains[i]` lists the
+global dofs of ``\\Omega_i``; together they must cover `1:size(A, 1)`. They may
+overlap, or not: with `overlap = 0` in [`overlapping_subdomains`](@ref) the
+sweeps are block Gauss–Seidel and block Jacobi. The decomposition bundles
+
+- `A`, as a sparse matrix;
+- `cover`: the ghost-layer [`OverlapCover`](@ref)
+  (see [`ghost_layer_cover`](@ref)) with its overlap graph and restriction
+  maps (see [`overlap_sheaf`](@ref));
+- `ownership`: the [`Ownership`](@ref) of each dof, from the vector `owner`
+  if given and from the sparsity of `A` otherwise;
+- `locals`: one [`LocalProblem`](@ref) per subdomain, built with the given
+  [`TransmissionCondition`](@ref) and solved with the given
+  [`LocalSolver`](@ref) (exact factorizations by default; `structure` widens
+  the pattern the cover is built from, `dropzeros = false` keeps explicit
+  zeros of `A` stored, see [`refactor!`](@ref));
+- `colors`: a coloring of the subdomains for [`MulticolorSweep`](@ref);
+- `transmission`: the [`TransmissionCondition`](@ref) the local problems were built with.
+
+Each vertex stalk is the closed subdomain ``\\overline\\Omega_i``. A local
+solve receives its ghost values ``\\Gamma_i`` from their owners. Each of those
+values lies in the edge stalk ``\\overline\\Omega_i \\cap \\overline\\Omega_j``
+shared with its owner ``j``, so all communication is along edges of the overlap
+graph, through the restriction maps.
+
+Two subdomains get different colors when they *conflict*: they share a dof that
+is interior to at least one of them, i.e. their interiors overlap or one's
+ghost layer meets the other's interior. Subdomains of one color neither read
+nor write each other's data, so they can be solved concurrently. The coloring
+is greedy, largest conflict degree first.
+"""
+struct SchwarzDecomposition{T,F,C<:TransmissionCondition,L<:LocalSolver}
+    A::SparseMatrixCSC{T,Int}
+    At::SparseMatrixCSC{T,Int}              # Aᵀ, i.e. A by rows, for threaded residuals
+    structure::SparseMatrixCSC{Float64,Int} # symmetric pattern the cover was built from
+    cover::OverlapCover
+    ownership::Ownership
+    locals::Vector{LocalProblem{T,F}}
+    colors::Vector{Vector{Int}}
+    transmission::C
+    local_solver::L
+    gather::Base.RefValue{Union{Nothing,_GatherMaps}}   # built on the first refactor!
+end
+
+function SchwarzDecomposition(A::AbstractMatrix, subdomains::AbstractVector{<:AbstractVector{<:Integer}};
+                              owner::Union{Nothing,AbstractVector{<:Integer}}=nothing,
+                              transmission::TransmissionCondition=DirichletTransmission(),
+                              structure::Union{Nothing,AbstractMatrix}=nothing,
+                              dropzeros::Bool=true,
+                              local_solver::LocalSolver=ExactLocalSolve())
+    n = size(A, 1)
+    @argcheck size(A, 2) == n "A must be square"
+    S = _float_sparse(A)
+    dropzeros && (S = SparseArrays.dropzeros(S))
+    @argcheck issymmetric(S) || transmission isa DirichletTransmission "Robin transmission needs a symmetric A"
+    @argcheck !isempty(subdomains) "need at least one subdomain"
+    for (i, d) in enumerate(subdomains)
+        @argcheck !isempty(d) "subdomain $i is empty"
+        @argcheck all(k -> 1 <= k <= n, d) "subdomain $i has dof indices outside 1:$n"
+    end
+    P = if structure === nothing
+        _pattern(_structure(S))
+    else
+        @argcheck size(structure) == size(S) "the structure must have the size of A"
+        Q = _pattern(sparse(structure))
+        Q = _structure(Q)
+        @argcheck _within_pattern(S, Q) "A has entries outside the given structure"
+        Q
+    end
+
+    cover = ghost_layer_cover(P, subdomains)
+    uncovered = findfirst(k -> isempty(_interior_members(cover, k)), 1:n)
+    @argcheck uncovered === nothing "dof $uncovered lies in no subdomain; the subdomains must cover 1:$n"
+
+    ownership = owner === nothing ? Ownership(cover, P) : Ownership(cover, owner)
+    locals = _build_locals(_Assembly(S, cover, ownership, transmission, local_solver))
+    colors = _greedy_coloring(_conflict_graph(cover))
+    return SchwarzDecomposition(S, copy(transpose(S)), P, cover, ownership, locals, colors, transmission,
+        local_solver, Ref{Union{Nothing,_GatherMaps}}(nothing))
+end
+
+"""
+    refactor(dd::SchwarzDecomposition, A) -> SchwarzDecomposition
+
+The decomposition of a new matrix `A` on the same cover: the overlap sheaf,
+ownership and coloring of `dd` are reused and only the local problems are
+refactored, concurrently. `A` must have its nonzeros inside the pattern `dd`
+was built from (pass `structure` to [`SchwarzDecomposition`](@ref) to build a
+cover for a whole family of matrices, such as the policy-evaluation matrices
+of a policy iteration, whose upwind stencils change direction).
+"""
+function refactor(dd::SchwarzDecomposition, A::AbstractMatrix)
+    S = dropzeros(sparse(float.(A)))
+    @argcheck size(S) == size(dd.A) "A must have the size of the decomposed matrix"
+    @argcheck _within_pattern(S, dd.structure) "A has entries outside the structure of the decomposition"
+    @argcheck issymmetric(S) || dd.transmission isa DirichletTransmission "Robin transmission needs a symmetric A"
+    locals = _build_locals(_Assembly(S, dd.cover, dd.ownership, dd.transmission, dd.local_solver))
+    return SchwarzDecomposition(S, copy(transpose(S)), dd.structure, dd.cover, dd.ownership, locals,
+        dd.colors, dd.transmission, dd.local_solver, Ref{Union{Nothing,_GatherMaps}}(nothing))
+end
+
+"""
+    refactor!(dd::SchwarzDecomposition, A; At = nothing) -> dd
+
+In-place [`refactor`](@ref) for a matrix `A` with exactly the stored pattern of
+`dd.A` (build `dd` with `dropzeros = false` so that explicit zeros keep their
+slots). The values of `A` are gathered into the local problems through index
+maps computed on the first call, and each sparse LU is refactored numerically,
+reusing its symbolic analysis (column ordering and fill pattern); with
+[`SymmetricGaussSeidelLocalSolve`](@ref) the gather is all there is to do. `At`, if
+given, must be `transpose(A)` with the stored pattern of `dd.At`; otherwise it
+is gathered from `A`. Needs [`DirichletTransmission`](@ref). Local
+`ChordalLDLt` factors are recomputed from scratch.
+"""
+function refactor!(dd::SchwarzDecomposition, A::SparseMatrixCSC; At::Union{Nothing,SparseMatrixCSC}=nothing)
+    @argcheck dd.transmission isa DirichletTransmission "refactor! needs Dirichlet transmission"
+    @argcheck size(A) == size(dd.A) && A.colptr == dd.A.colptr && rowvals(A) == rowvals(dd.A) "A must have the stored pattern of the decomposed matrix"
+    @argcheck !(dd.locals[1].factor isa ChordalLDLt) || issymmetric(A) "a decomposition with ChordalLDLt factors needs a symmetric A"
+    copyto!(nonzeros(dd.A), nonzeros(A))
+    if dd.gather[] === nothing
+        index = SparseMatrixCSC(size(A)..., A.colptr, rowvals(A), collect(1:nnz(A)))
+        transposed = nonzeros(copy(transpose(index)))
+        maps = Vector{NTuple{2,Vector{Int}}}(undef, length(dd.locals))
+        Threads.@threads for i in eachindex(dd.locals)
+            loc = dd.locals[i]
+            (Ai, local_map), (Ci, coupling_map) = _submatrix(A, loc.dofs, loc.dofs), _submatrix(A, loc.dofs, loc.boundary)
+            maps[i] = (local_map, coupling_map)
+            factor = _refactored(loc.factor, dd.local_solver, Ai, i)
+            dd.locals[i] = LocalProblem(loc.dofs, loc.boundary, loc.interior, loc.ghosts, Ci, loc.faces, factor)
+        end
+        dd.gather[] = (transposed, maps)
+    else
+        transposed, maps = dd.gather[]
+        Threads.@threads for i in eachindex(dd.locals)
+            loc = dd.locals[i]
+            local_map, coupling_map = maps[i]
+            nonzeros(loc.coupling) .= view(nonzeros(A), coupling_map)
+            _refactor_values!(dd, i, loc.factor, view(nonzeros(A), local_map))
+        end
+    end
+    if At === nothing
+        nonzeros(dd.At) .= view(nonzeros(A), transposed)
+    else
+        @argcheck At.colptr == dd.At.colptr && rowvals(At) == rowvals(dd.At) "At must have the stored pattern of transpose(A)"
+        copyto!(nonzeros(dd.At), nonzeros(At))
+    end
+    return dd
+end
+
+# A fresh local factor of the same kind as `old`, for the local matrix Ai.
+_refactored(::SparseArrays.UMFPACK.UmfpackLU, solver, Ai, i) = _stable_lu(Ai)
+_refactored(::ChordalLDLt, solver, Ai, i) = _local_factor(solver, Ai, true, i)
+
+# New values (in the stored order of the local matrix) for local factor i.
+function _refactor_values!(dd, i, F::SparseArrays.UMFPACK.UmfpackLU, values)
+    F.nzval .= values
+    lu!(F)                                   # numeric refactorization, symbolic analysis reused
+end
+function _refactor_values!(dd, i, ::ChordalLDLt, values)
+    loc = dd.locals[i]
+    dd.locals[i] = LocalProblem(loc.dofs, loc.boundary, loc.interior, loc.ghosts, loc.coupling, loc.faces,
+        _local_factor(dd.local_solver, dd.A[loc.dofs, loc.dofs], true, i))
+end
+
+# The local factorizations are independent: build them concurrently.
+function _build_locals(asm::_Assembly)
+    first_local = LocalProblem(asm, 1)
+    locals = Vector{typeof(first_local)}(undef, length(asm.cover.subdomains))
+    locals[1] = first_local
+    Threads.@threads for i in 2:length(locals)
+        locals[i] = LocalProblem(asm, i)
+    end
+    return locals
+end
+
+# Whether every structural nonzero of S is a structural nonzero of P (same size).
+function _within_pattern(S::SparseMatrixCSC, P::SparseMatrixCSC)
+    for j in 1:size(S, 2)
+        rows = rowvals(P)
+        q, qend = first(nzrange(P, j)), last(nzrange(P, j))
+        for p in nzrange(S, j)
+            r = rowvals(S)[p]
+            while q <= qend && rows[q] < r
+                q += 1
+            end
+            (q <= qend && rows[q] == r) || return false
+        end
+    end
+    return true
+end
+
+# A as a linear operator applied by rows from At = Aᵀ, concurrently (for Krylov.jl).
+struct _RowOperator{T}
+    At::SparseMatrixCSC{T,Int}
+end
+Base.size(M::_RowOperator) = (size(M.At, 2), size(M.At, 1))
+Base.size(M::_RowOperator, d::Integer) = size(M)[d]
+Base.eltype(::_RowOperator{T}) where {T} = T
+LinearAlgebra.mul!(y::AbstractVector, M::_RowOperator, x::AbstractVector) = _threaded_mul!(y, M.At, x)
+
+# y = A x computed by rows from At = Aᵀ, concurrently.
+function _threaded_mul!(y::AbstractVector, At::SparseMatrixCSC, x::AbstractVector)
+    rows, vals = rowvals(At), nonzeros(At)
+    Threads.@threads for i in 1:size(At, 2)
+        acc = zero(eltype(y))
+        @inbounds for p in nzrange(At, i)
+            acc += vals[p] * x[rows[p]]
+        end
+        @inbounds y[i] = acc
+    end
+    return y
+end
+
+# Subdomains conflict when they share a dof that is interior to at least one of
+# them: a concurrent update of one could change data the other reads or writes.
+function _conflict_graph(cover::OverlapCover)
+    conflicts = SimpleGraph(length(cover.stalks))
+    for m in cover.members, a in eachindex(m), b in (a + 1):lastindex(m)
+        (i, ℓi), (j, ℓj) = m[a], m[b]
+        (cover.interior[i][ℓi] || cover.interior[j][ℓj]) && add_edge!(conflicts, i, j)
+    end
+    return conflicts
+end
+
+# Greedy coloring, largest degree first (ties by vertex id). Returns the color
+# classes, each in increasing vertex order.
+function _greedy_coloring(g::SimpleGraph{Int})
+    color = zeros(Int, nv(g))
+    for v in sort(collect(vertices(g)); by=v -> (-degree(g, v), v))
+        used = Set(color[u] for u in neighbors(g, v))
+        c = 1
+        while c in used
+            c += 1
+        end
+        color[v] = c
+    end
+    return [findall(==(c), color) for c in 1:maximum(color; init=0)]
+end
+
+overlap_sheaf(dd::SchwarzDecomposition{T}) where {T} = overlap_sheaf(dd.cover, T)
+
+function Base.show(io::IO, dd::SchwarzDecomposition)
+    print(io, "SchwarzDecomposition(", length(dd.locals), " subdomains, ",
+        size(dd.A, 1), " dofs, ", ne(dd.cover.graph), " overlaps)")
+end
+
+# ===== Cochains =====
+
+function _cochain_blocks(dd::SchwarzDecomposition, x::BlockVector)
+    xs = blocks(x)
+    @argcheck length(xs) == length(dd.locals) && all(length.(xs) .== length.(dd.cover.stalks)) "cochain blocks must match the stalk sizes"
+    return xs
+end
+
+function _cochain_blocks(dd::SchwarzDecomposition, x::AbstractVector)
+    sizes = length.(dd.cover.stalks)
+    @argcheck length(x) == sum(sizes) "cochain length must equal the total size of the stalks"
+    offsets = [0; cumsum(sizes)]
+    return [x[offsets[i]+1:offsets[i+1]] for i in eachindex(sizes)]
+end
+
+_owned_value(dd::SchwarzDecomposition, xs, k::Int) =
+    xs[dd.ownership.owner[k]][dd.ownership.local_index[k]]
+
+"""
+    localize(dd::SchwarzDecomposition, u) -> BlockVector
+
+Restrict a global vector `u` to every closed subdomain, giving the 0-cochain
+``(u|_{\\overline\\Omega_1}, \\dots, u|_{\\overline\\Omega_N})`` of the overlap sheaf (interior and ghost
+values). This is the
+isomorphism from functions on the domain onto the global sections ``H^0``.
+"""
+function localize(dd::SchwarzDecomposition, u::AbstractVector)
+    @argcheck length(u) == size(dd.A, 1)
+    pieces = Vector{Vector{eltype(u)}}(undef, length(dd.cover.stalks))
+    Threads.@threads for i in eachindex(pieces)
+        pieces[i] = u[dd.cover.stalks[i]]
+    end
+    return mortar(pieces)
+end
+
+"""
+    glue(dd::SchwarzDecomposition, x) -> Vector
+
+Glue a 0-cochain of the overlap sheaf into a single global vector, taking the
+value of each dof from the copy held by its owner subdomain. On a global
+section all copies agree, so this inverts [`localize`](@ref); on a general
+cochain it is the restricted (owner-weighted) partition of unity used by
+restricted additive Schwarz (Cai–Sarkis 1999).
+"""
+function glue(dd::SchwarzDecomposition, x::AbstractVector)
+    xs = _cochain_blocks(dd, x)
+    u = Vector{eltype(eltype(xs))}(undef, length(dd.ownership.owner))
+    Threads.@threads for k in eachindex(u)
+        @inbounds u[k] = _owned_value(dd, xs, k)
+    end
+    return u
+end
+
+"""
+    overlap_disagreement(dd::SchwarzDecomposition, x) -> Real
+
+The norm ``\\|\\delta x\\|_2`` of the coboundary of the 0-cochain `x` in the
+overlap sheaf: the root-sum-square of the differences between the values
+neighbouring subdomains hold on their overlaps. It vanishes exactly on global
+sections, so it measures how far a Schwarz iterate is from gluing.
+Equal to `norm(coboundary_map(overlap_sheaf(dd)) * x)`, without assembling the
+sheaf.
+"""
+function overlap_disagreement(dd::SchwarzDecomposition, x::AbstractVector)
+    xs = _cochain_blocks(dd, x)
+    pairs = [(i, j) for (i, j) in keys(dd.cover.overlaps) if i < j]
+    partial = zeros(real(eltype(eltype(xs))), length(pairs))
+    Threads.@threads for p in eachindex(pairs)
+        i, j = pairs[p]
+        a, b = dd.cover.overlaps[i => j], dd.cover.overlaps[j => i]
+        acc = zero(eltype(partial))
+        @inbounds for t in eachindex(a)
+            acc += abs2(xs[i][a[t]] - xs[j][b[t]])
+        end
+        partial[p] = acc
+    end
+    return sqrt(sum(partial))
+end
+
+# ===== Problems =====
+
+"""
+    SchwarzProblem(dd::SchwarzDecomposition, f; u0=zeros(n))
+
+The linear system ``A u = f`` together with the decomposition `dd` of its
+dofs and an initial guess `u0`. Solve it with
+[`solve`](@ref)`(problem, algorithm)`, where the algorithm is a
+[`SchwarzIteration`](@ref) or a [`SchwarzCG`](@ref).
+"""
+struct SchwarzProblem{T,D<:SchwarzDecomposition{T}}
+    decomposition::D
+    rhs::Vector{T}
+    u0::Vector{T}
+end
+
+function SchwarzProblem(dd::SchwarzDecomposition{T}, f::AbstractVector;
+                        u0::AbstractVector=zeros(T, size(dd.A, 1))) where {T}
+    @argcheck length(f) == size(dd.A, 1) "the right-hand side must have one entry per dof"
+    @argcheck length(u0) == size(dd.A, 1) "the initial guess must have one entry per dof"
+    return SchwarzProblem(dd, Vector{T}(f), Vector{T}(u0))
+end
+
+function _relative_residual(prob::SchwarzProblem, u)
+    Au = _threaded_mul!(similar(prob.rhs), prob.decomposition.At, u)
+    return norm(prob.rhs .- Au) / _rhs_scale(prob)
+end
+
+function _rhs_scale(prob::SchwarzProblem{T}) where {T}
+    scale = norm(prob.rhs)
+    return iszero(scale) ? one(T) : scale
+end
+
+# ===== Sweeps =====
+
+"""
+    SchwarzSweep
+
+One sweep of local solves over all subdomains, applied by
+[`schwarz_step!`](@ref): [`MultiplicativeSweep`](@ref),
+[`MulticolorSweep`](@ref) or [`ParallelSweep`](@ref). A new sweep implements
+`schwarz_step!(x, prob::SchwarzProblem, sweep)`.
+"""
+abstract type SchwarzSweep end
+
+"""
+    MultiplicativeSweep(order=nothing)
+
+Schwarz's *alternating* method (Schwarz 1870). It visits the subdomains in
+`order` (default `1:N`), each solve reading the newest data of its neighbours.
+
+- With [`DirichletTransmission`](@ref), each local solve is followed by a push
+  of the new values through the restriction maps onto every overlapping
+  neighbour, ``x_j|_{\\Omega_i\\cap\\Omega_j} \\leftarrow x_i|_{\\Omega_i\\cap\\Omega_j}``.
+  Starting from a global section the iterate stays a section, and its glued
+  vector is exactly the classical multiplicative Schwarz iterate
+  ``u \\leftarrow u + R_i^\\mathsf{T} A_i^{-1} R_i (f - A u)``. It converges for
+  every SPD `A`, since it is block Gauss–Seidel over overlapping blocks
+  (Toselli–Widlund 2005, ch. 2).
+- With [`RobinTransmission`](@ref) nothing is pushed: each subdomain keeps its
+  own copy on the overlaps, which is the alternating optimized Schwarz method.
+  Pushing would overwrite the neighbours' Robin solutions with values that do
+  not satisfy their transmission conditions; with cross points that made the
+  iteration diverge for small `p`.
+"""
+struct MultiplicativeSweep <: SchwarzSweep
+    order::Union{Nothing,Vector{Int}}
+end
+
+MultiplicativeSweep() = MultiplicativeSweep(nothing)
+
+"""
+    MulticolorSweep()
+
+The alternating method with the subdomains visited one color class of
+`dd.colors` at a time. The subdomains in a class do not conflict, so they are
+solved (and, for Dirichlet transmission, pushed) concurrently
+(`Threads.@threads`; start Julia with several threads to benefit). The result equals `MultiplicativeSweep(reduce(vcat,
+dd.colors))`. It keeps that method's convergence guarantee while the number of
+sequential steps per sweep drops from the number of subdomains to the number
+of colors (Smith–Bjørstad–Gropp 1996, §1.4).
+"""
+struct MulticolorSweep <: SchwarzSweep end
+
+"""
+    ParallelSweep()
+
+Lions' *parallel* Schwarz method (Lions 1988). All subdomains solve
+simultaneously from the previous cochain (concurrently, with `Threads.@threads`)
+and no values are pushed. Copies on
+overlaps disagree during the iteration (the cochain is not a section) and agree
+in the limit. With Dirichlet transmission the glued iterate coincides with
+restricted additive Schwarz (RAS) for the owner partition
+(Efstathiou–Gander 2003), and it converges when `A` is an M-matrix, such as
+standard discretizations of ``-\\Delta`` (Frommer–Szyld 2001), but not for
+every SPD matrix. With [`RobinTransmission`](@ref) it is the discrete parallel
+optimized Schwarz method. A step from a global section equals one step of
+optimized RAS (St-Cyr–Gander–Thomas 2007). Later steps differ, because each
+face reads the neighbour across it rather than the owner of each dof.
+"""
+struct ParallelSweep <: SchwarzSweep end
+
+# Receive: fill the ghost layer of subdomain i from the owners of its ghost
+# dofs. Each value lies in the edge stalk between i and its owner, so this is
+# the restriction map of the owner followed by the adjoint restriction of i.
+function _receive!(xs, dd::SchwarzDecomposition, i::Int)
+    lp = dd.locals[i]
+    for (g, k) in zip(lp.ghosts, lp.boundary)
+        xs[i][g] = _owned_value(dd, xs, k)
+    end
+    return nothing
+end
+
+# Subproblem on Ω_i: Ã_i x_i = f|Ω_i − A_{Ω_i Γ_i} g_i + Σ_faces w x_j(m), with
+# g_i the ghost values just received and each Robin face reading the interface
+# value from the neighbour across it. The face sum vanishes for Dirichlet
+# transmission. Returns the new interior values.
+function _local_solve(prob::SchwarzProblem, xs, i::Int)
+    lp = prob.decomposition.locals[i]
+    b = prob.rhs[lp.dofs] - lp.coupling * xs[i][lp.ghosts]
+    for face in lp.faces
+        b[face.dof] += face.weight * xs[face.source][face.source_dof]
+    end
+    return _local_update(lp.factor, b, xs[i][lp.interior])
+end
+
+# Receive, solve on Ω_i, then publish the result to the neighbours.
+function _solve_and_publish!(xs, prob::SchwarzProblem, i::Int)
+    dd = prob.decomposition
+    _receive!(xs, dd, i)
+    xs[i][dd.locals[i].interior] .= _local_solve(prob, xs, i)
+    _publish!(xs, dd.transmission, dd.cover, i)
+    return nothing
+end
+
+# Dirichlet transmission: push the new interior values along the restriction
+# maps onto every neighbour's copy, so a section stays a section.
+function _publish!(xs, ::DirichletTransmission, cover::OverlapCover, i::Int)
+    for j in neighbors(cover.graph, i)
+        mine, theirs = cover.overlaps[i => j], cover.overlaps[j => i]
+        for (a, b) in zip(mine, theirs)
+            cover.interior[i][a] && (xs[j][b] = xs[i][a])
+        end
+    end
+    return nothing
+end
+
+# Robin transmission: each subdomain keeps its own copy on the overlaps, as
+# optimized Schwarz requires; neighbours read the new values on their next solve.
+_publish!(xs, ::RobinTransmission, cover::OverlapCover, i::Int) = nothing
+
+"""
+    schwarz_step!(x::BlockVector, prob::SchwarzProblem, sweep::SchwarzSweep) -> x
+
+Apply one `sweep` to the 0-cochain `x` of the overlap sheaf, in place. On
+subdomain ``i`` the local solve is
+
+```math
+\\tilde A_i\\, x_i = f|_{\\Omega_i} - A_{\\Omega_i \\Gamma_i}\\, g_i
+    + \\sum_{\\text{faces } (m, k)} (p_{ij} - |A_{mk}|)\\, x_j(m),
+```
+
+where ``\\tilde A_i`` is the local matrix of the
+[`TransmissionCondition`](@ref). The boundary data ``g_i`` on ``\\Gamma_i`` is
+read from the copies of the owners, which are neighbours in the overlap graph.
+The face sum is the Robin data (see [`RobinFace`](@ref)) and is empty for
+Dirichlet transmission.
+
+With Robin transmission ``\\tilde A_i`` no longer dominates
+``A_{\\Omega_i\\Omega_i}``, so convergence of the stationary iteration is not
+proven for every parameter, although with the corner treatment of
+[`RobinTransmission`](@ref) it converged for every `p` we tried. Use
+[`SchwarzCG`](@ref) when a guarantee is needed.
+"""
+function schwarz_step!(x::BlockVector, prob::SchwarzProblem, sweep::MultiplicativeSweep)
+    xs = _cochain_blocks(prob.decomposition, x)
+    order = something(sweep.order, eachindex(xs))
+    for i in order
+        _solve_and_publish!(xs, prob, i)
+    end
+    return x
+end
+
+function schwarz_step!(x::BlockVector, prob::SchwarzProblem, ::MulticolorSweep)
+    xs = _cochain_blocks(prob.decomposition, x)
+    for class in prob.decomposition.colors
+        Threads.@threads for i in class
+            _solve_and_publish!(xs, prob, i)
+        end
+    end
+    return x
+end
+
+function schwarz_step!(x::BlockVector, prob::SchwarzProblem, ::ParallelSweep)
+    xs = _cochain_blocks(prob.decomposition, x)
+    dd = prob.decomposition
+    # Receiving writes only i's ghosts and reads only owners' interiors: no races.
+    Threads.@threads for i in eachindex(xs)
+        _receive!(xs, dd, i)
+    end
+    updates = Vector{Vector{eltype(prob.rhs)}}(undef, length(xs))
+    Threads.@threads for i in eachindex(xs)
+        updates[i] = _local_solve(prob, xs, i)
+    end
+    Threads.@threads for i in eachindex(xs)
+        xs[i][dd.locals[i].interior] .= updates[i]
+    end
+    return x
+end
+
+# ===== Coarse spaces =====
+
+"""
+    AbstractCoarseSpace
+
+A second level for Schwarz methods. In a [`SchwarzIteration`](@ref) every fine
+sweep is followed by a coarse correction ([`coarse_correct!`](@ref)); in
+[`SchwarzCG`](@ref) the coarse term is added to the preconditioner.
+
+Both implementations start from a graph homomorphism ``\\varphi : G \\to H``
+that groups the subdomains (vertices of the overlap graph ``G``) into
+aggregates, and from the pushforward ``\\varphi_* F`` of the overlap sheaf
+``F``. The stalk ``(\\varphi_* F)(h)`` is the space of global sections of ``F``
+over the fiber ``\\varphi^{-1}(h)``, i.e. functions on the aggregate
+``\\widehat\\Omega_h = \\bigcup_{i \\in \\varphi^{-1}(h)} \\Omega_i``.
+
+- [`TruncatedPushforwardCoarseSpace`](@ref) keeps a few modes of each stalk
+  and solves a small Galerkin problem. It is cheap and scalable but inexact.
+- [`ExactPushforwardCoarseSpace`](@ref) keeps the whole stalk, i.e. it solves
+  on the aggregates themselves. It is more accurate per sweep while there are
+  few aggregates, but its cost grows with the aggregate size.
+
+A new coarse space `c` implements [`coarse_dimension`](@ref)`(c)`,
+`_coarse_correction(c, prob, u)` (the correction added to the iterate `u` after
+the sweeps of [`SchwarzIteration`](@ref)) and `_add_coarse!(y, c, r)` (adds the
+coarse solve of the residual `r` to `y`, for the preconditioners).
+"""
+abstract type AbstractCoarseSpace end
+
+_coarse_correction(c::AbstractCoarseSpace, prob, u) =
+    throw(ArgumentError("$(typeof(c)) does not implement _coarse_correction; see the AbstractCoarseSpace docstring"))
+_add_coarse!(y, c::AbstractCoarseSpace, r) =
+    throw(ArgumentError("$(typeof(c)) does not implement _add_coarse!; see the AbstractCoarseSpace docstring"))
+
+function _check_hom(dd::SchwarzDecomposition, hom::GraphHomomorphism)
+    @argcheck length(hom.vertex_map) == length(dd.locals) "the graph homomorphism must have one source vertex per subdomain"
+    for h in 1:hom.n_target
+        @argcheck !isempty(fiber_vertices(hom, h)) "aggregate $h has an empty fiber; every target vertex must receive a subdomain"
+    end
+end
+
+"""
+    TruncatedPushforwardCoarseSpace(dd, hom=identity; modes=ones(n, 1))
+
+A low-dimensional coarse space built from the pushforward of the overlap sheaf
+along ``\\varphi`` = `hom` by keeping only a few modes of every stalk.
+
+Let ``\\mu_k`` be the number of subdomains containing dof ``k`` and
+``D_h = \\mathrm{diag}\\big(\\#\\{i \\in \\varphi^{-1}(h) : k \\in \\Omega_i\\} / \\mu_k\\big)``,
+so ``\\sum_h D_h = I`` is a partition of unity subordinate to the aggregates.
+For every aggregate ``h`` and every column ``z`` of `modes` (a near-nullspace of
+``A``, e.g. constants for the Laplacian, rigid body modes for elasticity), the
+coarse basis contains ``D_h z``. This vector lives in the stalk
+``(\\varphi_* F)(h)``, so the coarse space is a sub-cochain space
+``V_0 \\subset C^0(\\varphi_* F)`` with `size(modes, 2)` dimensions per vertex of
+``H``. Basis vectors that vanish are dropped.
+
+With ``\\Phi`` the matrix of basis vectors, the restriction is
+``R_0 = \\Phi^\\mathsf{T}``, the prolongation is ``\\Phi``, and the coarse matrix
+``A_0 = \\Phi^\\mathsf{T} A \\Phi`` is sparse on the graph ``H`` and factored
+once with `ChordalLDLt`. The correction is the ``A``-orthogonal projection
+``e = \\Phi A_0^{-1} \\Phi^\\mathsf{T}(f - A u)``, so adding it after
+multiplicative sweeps still converges for every SPD `A`.
+
+With the identity homomorphism and constant modes this is the Nicolaides coarse
+space (Nicolaides 1987), which makes the iteration count roughly independent of
+the number of subdomains (Toselli–Widlund 2005, §3.10).
+"""
+struct TruncatedPushforwardCoarseSpace{T,F} <: AbstractCoarseSpace
+    hom::GraphHomomorphism
+    basis::SparseMatrixCSC{T,Int}
+    stalks::Vector{Int}
+    matrix::SparseMatrixCSC{T,Int}
+    factor::F
+end
+
+function TruncatedPushforwardCoarseSpace(dd::SchwarzDecomposition{T},
+                                         hom::GraphHomomorphism=GraphHomomorphism(collect(eachindex(dd.locals)));
+                                         modes::AbstractVecOrMat=ones(T, size(dd.A, 1), 1)) where {T}
+    _check_hom(dd, hom)
+    @argcheck issymmetric(dd.A) "coarse spaces need a symmetric A"
+    n = size(dd.A, 1)
+    Z = reshape(modes, size(modes, 1), :)
+    @argcheck size(Z, 1) == n "modes must have one row per dof"
+    multiplicity = [count(Returns(true), _interior_members(dd.cover, k)) for k in 1:n]
+
+    I, J, V = Int[], Int[], T[]
+    stalks = zeros(Int, hom.n_target)
+    for h in 1:hom.n_target
+        weight = zeros(T, n)
+        for i in fiber_vertices(hom, h)
+            weight[dd.cover.subdomains[i]] .+= 1
+        end
+        support = findall(!iszero, weight)
+        weight[support] ./= multiplicity[support]
+        for c in axes(Z, 2)
+            vals = weight[support] .* Z[support, c]
+            nz = findall(!iszero, vals)
+            isempty(nz) && continue
+            stalks[h] += 1
+            append!(I, support[nz])
+            append!(J, fill(sum(stalks), length(nz)))
+            append!(V, vals[nz])
+        end
+    end
+    Φ = sparse(I, J, V, n, sum(stalks))
+    A0 = Φ' * dd.A * Φ
+    A0 = (A0 + A0') / 2
+    factor = ldlt!(ChordalLDLt(A0), RowMaximum())
+    return TruncatedPushforwardCoarseSpace(hom, Φ, stalks, A0, factor)
+end
+
+"""
+    ExactPushforwardCoarseSpace(dd, hom; sweep=MulticolorSweep(), transmission=DirichletTransmission())
+
+The coarse level given by the full pushforward ``\\varphi_* F`` of the overlap
+sheaf along ``\\varphi`` = `hom`. Its stalk at an aggregate ``h`` is all
+functions on ``\\widehat\\Omega_h = \\bigcup_{i \\in \\varphi^{-1}(h)} \\Omega_i``,
+so its vertex stalks have the same dimensions as those of
+`pushforward_sheaf(hom, overlap_sheaf(dd))`. Since no modes are discarded,
+``H^0(\\varphi_* F) \\cong H^0(F)``.
+
+Concretely this is a second [`SchwarzDecomposition`](@ref) whose subdomains
+are the aggregates ``\\widehat\\Omega_h``, with the given `transmission`
+between aggregates. A dof is owned by the aggregate containing its fine owner.
+The correction is one `sweep` on that decomposition, started from the current
+glued iterate. Each local solve is exact on a larger region, so while there are
+few aggregates a sweep reduces the error more than a truncated coarse solve.
+With ``\\varphi`` to a single vertex the coarse level is a direct solve of the
+whole problem (one iteration, no scalability). The level carries no global
+information beyond its aggregates, so with a fixed aggregation ratio it is a
+one-level method on larger subdomains: the iteration count grows with the
+number of aggregates and eventually exceeds that of
+[`TruncatedPushforwardCoarseSpace`](@ref), while its factorizations cost as
+much as the whole problem plus overlaps.
+"""
+struct ExactPushforwardCoarseSpace{D<:SchwarzDecomposition,S<:SchwarzSweep} <: AbstractCoarseSpace
+    hom::GraphHomomorphism
+    decomposition::D
+    sweep::S
+end
+
+function ExactPushforwardCoarseSpace(dd::SchwarzDecomposition, hom::GraphHomomorphism;
+                                     sweep::SchwarzSweep=MulticolorSweep(),
+                                     transmission::TransmissionCondition=DirichletTransmission())
+    _check_hom(dd, hom)
+    @argcheck issymmetric(dd.A) "coarse spaces need a symmetric A"
+    aggregates =[reduce(vcat, (dd.cover.subdomains[i] for i in fiber_vertices(hom, h)))
+                  for h in 1:hom.n_target]
+    owner = hom.vertex_map[dd.ownership.owner]
+    return ExactPushforwardCoarseSpace(hom, SchwarzDecomposition(dd.A, aggregates; owner, transmission), sweep)
+end
+
+"""
+    coarse_dimension(coarse::AbstractCoarseSpace) -> Int
+
+Number of unknowns the coarse level solves for in each correction: the
+dimension of the truncated coarse space, or for the exact pushforward the total
+size of the aggregates ``\\widehat\\Omega_h``, the unknowns of its local solves. The
+vertex stalks of the pushforward sheaf are larger by the ghost layers, which enter
+those solves as boundary data rather than unknowns.
+"""
+coarse_dimension(c::TruncatedPushforwardCoarseSpace) = size(c.basis, 2)
+coarse_dimension(c::ExactPushforwardCoarseSpace) = sum(length, c.decomposition.cover.subdomains)
+
+function Base.show(io::IO, c::Union{TruncatedPushforwardCoarseSpace,ExactPushforwardCoarseSpace})
+    print(io, nameof(typeof(c)), "(", c.hom.n_target, " aggregates, dimension ",
+        coarse_dimension(c), ")")
+end
+
+_coarse_correction(c::TruncatedPushforwardCoarseSpace, prob::SchwarzProblem, u) =
+    c.basis * _ldlt_solve(c.factor, c.basis' * (prob.rhs - prob.decomposition.A * u))
+
+function _coarse_correction(c::ExactPushforwardCoarseSpace, prob::SchwarzProblem, u)
+    coarse_prob = SchwarzProblem(c.decomposition, prob.rhs, u)
+    x = localize(c.decomposition, u)
+    schwarz_step!(x, coarse_prob, c.sweep)
+    return glue(c.decomposition, x) - u
+end
+
+"""
+    coarse_correct!(x::BlockVector, prob::SchwarzProblem, coarse::AbstractCoarseSpace) -> x
+
+Apply one coarse-level correction to the 0-cochain `x`, in place. The glued
+iterate ``u`` = `glue(dd, x)` gives the residual ``f - A u``. The coarse level
+turns it into a global correction ``e``, which is added to every subdomain's
+copy: ``x \\leftarrow x + \\mathrm{localize}(e)``. The glued iterate becomes
+``u + e``, and the disagreement ``\\|\\delta x\\|`` is unchanged.
+"""
+function coarse_correct!(x::BlockVector, prob::SchwarzProblem, coarse::AbstractCoarseSpace)
+    dd = prob.decomposition
+    xs = _cochain_blocks(dd, x)
+    e = _coarse_correction(coarse, prob, glue(dd, x))
+    for (xi, d) in zip(xs, dd.cover.stalks)
+        xi .+= view(e, d)
+    end
+    return x
+end
+
+# ===== Algorithms =====
+
+"""
+    SchwarzResult
+
+Output of [`solve`](@ref) for a [`SchwarzProblem`](@ref).
+
+- `u`: the glued global solution.
+- `x`: the final 0-cochain of the overlap sheaf (one local solution per
+  subdomain).
+- `residuals`: relative residual ``\\|f - A u_k\\| / \\|f\\|`` of each iterate
+  (entry 1 is the initial guess).
+- `disagreements`: [`overlap_disagreement`](@ref) of each iterate. Krylov
+  iterates are global vectors, i.e. sections, so for [`SchwarzCG`](@ref)
+  these are all zero.
+- `iterations`, `converged`.
+"""
+struct SchwarzResult{T,X<:BlockVector{T}}
+    u::Vector{T}
+    x::X
+    residuals::Vector{T}
+    disagreements::Vector{T}
+    iterations::Int
+    converged::Bool
+end
+
+"""
+    SchwarzIteration(; sweep=MultiplicativeSweep(), coarse=nothing, tol=1e-8, maxiter=1000)
+
+The stationary Schwarz iteration on the overlap sheaf. The iterate is a
+0-cochain ``x = (x_1, \\dots, x_N)``: each subdomain holds its own copy of the
+solution on ``\\Omega_i``. It starts from the global section `localize(dd,
+u0)`. Each iteration applies one `sweep` ([`schwarz_step!`](@ref)) followed,
+when a `coarse` space is given, by [`coarse_correct!`](@ref), which gives a
+two-level method. Iteration stops once the glued iterate satisfies
+``\\|f - A u\\| \\le \\mathrm{tol}\\,\\|f\\|``, or after `maxiter` iterations. At
+the fixed point every local solve is consistent with its neighbours, so ``x``
+is a global section and its gluing solves ``A u = f``.
+"""
+Base.@kwdef struct SchwarzIteration{S<:SchwarzSweep,C<:Union{Nothing,AbstractCoarseSpace}}
+    sweep::S = MultiplicativeSweep()
+    coarse::C = nothing
+    tol::Float64 = 1e-8
+    maxiter::Int = 1000
+end
+
+"""
+    SchwarzCG(; coarse=nothing, tol=1e-8, maxiter=1000)
+
+Conjugate gradients (Krylov.jl) preconditioned with the additive Schwarz
+operator [`SchwarzPreconditioner`](@ref), with an optional `coarse` space.
+Unlike [`SchwarzIteration`](@ref), this converges for every SPD `A`, with every
+coarse space and with Robin transmission. The two-level version needs a number
+of iterations bounded independently of the number of subdomains
+(Toselli–Widlund 2005, Thm. 3.13). It stops once the relative residual of the
+iterate drops below `tol`, the same criterion as [`SchwarzIteration`](@ref).
+"""
+Base.@kwdef struct SchwarzCG{C<:Union{Nothing,AbstractCoarseSpace}}
+    coarse::C = nothing
+    tol::Float64 = 1e-8
+    maxiter::Int = 1000
+end
+
+"""
+    solve(prob::SchwarzProblem, alg::SchwarzIteration) -> SchwarzResult
+    solve(prob::SchwarzProblem, alg::SchwarzCG) -> SchwarzResult
+
+Solve the [`SchwarzProblem`](@ref) with a stationary [`SchwarzIteration`](@ref)
+or with Schwarz-preconditioned conjugate gradients ([`SchwarzCG`](@ref)).
+"""
+function solve(prob::SchwarzProblem{T}, alg::SchwarzIteration) where {T}
+    @argcheck alg.maxiter >= 0
+    dd = prob.decomposition
+    x = localize(dd, prob.u0)
+    u = glue(dd, x)
+    residuals = T[_relative_residual(prob, u)]
+    disagreements = T[overlap_disagreement(dd, x)]
+    iterations = 0
+    while last(residuals) > alg.tol && iterations < alg.maxiter
+        schwarz_step!(x, prob, alg.sweep)
+        alg.coarse === nothing || coarse_correct!(x, prob, alg.coarse)
+        iterations += 1
+        u = glue(dd, x)
+        push!(residuals, _relative_residual(prob, u))
+        push!(disagreements, overlap_disagreement(dd, x))
+    end
+    return SchwarzResult(u, x, residuals, disagreements, iterations, last(residuals) <= alg.tol)
+end
+
+function solve(prob::SchwarzProblem{T}, alg::SchwarzCG) where {T}
+    @argcheck alg.maxiter >= 1
+    @argcheck issymmetric(prob.decomposition.A) "SchwarzCG needs a symmetric A; use SchwarzIteration or SchwarzGMRES"
+    dd = prob.decomposition
+    residuals = T[_relative_residual(prob, prob.u0)]
+    # CG solves for the correction e in A e = f − A u0 from e = 0, so the
+    # iterate is u0 + e.
+    function monitor(workspace)
+        push!(residuals, _relative_residual(prob, prob.u0 + workspace.x))
+        return last(residuals) <= alg.tol
+    end
+    u, iterations = if last(residuals) <= alg.tol
+        copy(prob.u0), 0
+    else
+        e, stats = cg(dd.A, prob.rhs - dd.A * prob.u0; M=SchwarzPreconditioner(dd, alg.coarse),
+            atol=zero(T), rtol=zero(T), itmax=alg.maxiter, callback=monitor)
+        prob.u0 + e, stats.niter
+    end
+    return SchwarzResult(u, localize(dd, u), residuals, zeros(T, length(residuals)),
+        iterations, last(residuals) <= alg.tol)
+end
+
+# ===== Krylov preconditioner =====
+
+"""
+    SchwarzPreconditioner(dd::SchwarzDecomposition, coarse=nothing)
+
+The additive Schwarz preconditioner on the overlap sheaf of `dd`,
+
+```math
+M^{-1} r = \\sum_i R_i^\\mathsf{T} \\tilde A_i^{-1} R_i\\, r + (\\text{coarse term}),
+```
+
+where ``R_i`` restricts to ``\\Omega_i`` and ``\\tilde A_i`` is the local matrix
+of `dd` (from its [`TransmissionCondition`](@ref)). All local solves are
+independent and run concurrently (`Threads.@threads`). The coarse term is
+
+- ``\\Phi A_0^{-1} \\Phi^\\mathsf{T} r`` for a
+  [`TruncatedPushforwardCoarseSpace`](@ref), the two-level additive Schwarz
+  method (Toselli–Widlund 2005, ch. 3);
+- ``\\sum_h \\widehat R_h^\\mathsf{T} \\widehat A_h^{-1} \\widehat R_h r`` over the
+  aggregates of an [`ExactPushforwardCoarseSpace`](@ref).
+
+The full restrictions ``R_i^\\mathsf{T}`` (not the owner-restricted ones of
+RAS) keep ``M^{-1}`` symmetric. It is positive definite because each
+``\\tilde A_i`` is, so it can precondition conjugate gradients
+([`SchwarzCG`](@ref)). Apply it with `P * r` or `mul!(z, P, r)`.
+"""
+struct SchwarzPreconditioner{T,D<:SchwarzDecomposition{T},C<:Union{Nothing,AbstractCoarseSpace}}
+    decomposition::D
+    coarse::C
+end
+
+SchwarzPreconditioner(dd::SchwarzDecomposition) = SchwarzPreconditioner(dd, nothing)
+
+Base.size(P::SchwarzPreconditioner) = size(P.decomposition.A)
+Base.size(P::SchwarzPreconditioner, d::Integer) = size(P.decomposition.A, d)
+Base.eltype(::SchwarzPreconditioner{T}) where {T} = T
+
+function _additive!(y::AbstractVector, dd::SchwarzDecomposition{T}, r::AbstractVector) where {T}
+    corrections = Vector{Vector{T}}(undef, length(dd.locals))
+    Threads.@threads for i in eachindex(dd.locals)
+        lp = dd.locals[i]
+        corrections[i] = _factor_solve(lp.factor, r[lp.dofs])
+    end
+    fill!(y, zero(eltype(y)))
+    for (lp, z) in zip(dd.locals, corrections)
+        view(y, lp.dofs) .+= z
+    end
+    return y
+end
+
+_add_coarse!(y, ::Nothing, r) = y
+_add_coarse!(y, c::TruncatedPushforwardCoarseSpace, r) =
+    (y .+= c.basis * _ldlt_solve(c.factor, c.basis' * r); y)
+_add_coarse!(y, c::ExactPushforwardCoarseSpace, r) =
+    (y .+= _additive!(similar(y), c.decomposition, r); y)
+
+function LinearAlgebra.mul!(y::AbstractVector, P::SchwarzPreconditioner, r::AbstractVector)
+    @argcheck length(y) == length(r) == size(P, 1)
+    _additive!(y, P.decomposition, r)
+    return _add_coarse!(y, P.coarse, r)
+end
+
+Base.:*(P::SchwarzPreconditioner{T}, r::AbstractVector) where {T} =
+    mul!(similar(r, promote_type(T, eltype(r))), P, r)
+
+end
