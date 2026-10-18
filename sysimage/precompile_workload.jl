@@ -13,10 +13,10 @@ using KernelAbstractions
 using MPI          # loaded, not initialized: no launcher at build time
 using CUDA         # loaded; no GPU on the build node
 
-prob = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(7, 4)); control_bound = 1.0, constraint = :disc)
+prob = HJBProblem(StateGrid(fill(-2.0, 4), fill(2.0, 4), fill(7, 4)); control_bound = 1.0, constraint = DiscConstraint())
 solve(prob, GridPolicyIteration())
-solve(prob, GridPolicyIteration(preconditioner = :ras))
-solve(prob, PolicyIteration(evaluation = KrylovPolicyEvaluation(method = :bicgstab)))
+solve(prob, GridPolicyIteration(smoother = RestrictedAdditiveSchwarzSmoother()))
+solve(prob, PolicyIteration(evaluation = KrylovPolicyEvaluation(method = BiCGStab())))
 solve(prob, PolicyIteration(evaluation = KrylovPolicyEvaluation()))
 solve(prob, PolicyIteration(evaluation = SchwarzPolicyEvaluation([2, 2, 2, 2];
     local_solver = SymmetricGaussSeidelLocalSolve())))
