@@ -1,7 +1,7 @@
 name = "CellularSheaves"
 uuid = "bbe41592-74b8-4681-9d9c-4481e725304d"
 license = "MIT"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["Tyler Hanks <teh.hanks@gmail.com>"]
 
 [deps]
