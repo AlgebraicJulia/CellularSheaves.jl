@@ -12,6 +12,10 @@ end
   include("ControlSheaves/Tikhonov.jl")
 end
 
+@testset "Safety Filters" begin
+  include("ControlSheaves/SafetyFilters.jl")
+end
+
 @testset "Block Sparse Arrays" begin
   include("block_sparse_arrays.jl")
 end

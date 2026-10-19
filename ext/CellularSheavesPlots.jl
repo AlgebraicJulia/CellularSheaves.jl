@@ -14,6 +14,39 @@ include("CellularSheavesPlots/src/Trajectory3D.jl")
 include("CellularSheavesPlots/src/SnapshotPlots.jl")
 include("CellularSheavesPlots/src/SpyPlots.jl")
 include("CellularSheavesPlots/src/CoordinationBenchmarkPlots.jl")
+include("CellularSheavesPlots/src/SafetyFilterPlots.jl")
+using .SafetyFilterPlots: comparison_frame, trace_panel
+using CellularSheaves.ControlSheaves.SafetyFilters: FilterRollout
+
+function CellularSheaves.ControlSheaves.SafetyFilters.animate_filter_rollout(
+        unfiltered::FilterRollout, filtered::FilterRollout;
+        filename::AbstractString = "filter_rollout.gif", fps::Int = 18,
+        frame_step::Int = 4, obstacle = nothing, mode::Symbol = :safety,
+        limits = nothing, size = (960, 730))
+    mode in (:safety, :actuator, :stability, :contended) ||
+        throw(ArgumentError("mode must be :safety, :actuator, :stability, or :contended"))
+    if limits === nothing
+        xs = vcat(vec(unfiltered.positions[:, :, 1]), vec(filtered.positions[:, :, 1]))
+        ys = vcat(vec(unfiltered.positions[:, :, 2]), vec(filtered.positions[:, :, 2]))
+        pad = 0.20 * max(maximum(xs) - minimum(xs), maximum(ys) - minimum(ys)) + 0.25
+        limits = ((minimum(xs) - pad, maximum(xs) + pad),
+                  (minimum(ys) - pad, maximum(ys) + pad))
+    end
+    # One arrow scale across both panels, or a command over the cap would be drawn the same
+    # length as one inside it.
+    reference = maximum(vcat(unfiltered.command, filtered.command))
+    steps = length(filtered.times)
+    anim = @animate for k in 1:frame_step:steps
+        left = comparison_frame(unfiltered, k, limits, obstacle; mode = mode,
+                                command_reference = reference)
+        right = comparison_frame(filtered, k, limits, obstacle; mode = mode,
+                                 command_reference = reference)
+        bottom = trace_panel(unfiltered, filtered, k, mode)
+        plot(left, right, bottom; layout = @layout([a b; c{0.32h}]), size = size)
+    end
+    return gif(anim, filename; fps = fps, show_msg = false)
+end
+
 
 function CellularSheaves.AsynchSheaves.empty_experiment_plot(; kwargs...)
     return plot(title="", thickness_scaling=2.0, yformatter=:plain, xformatter=:plain; kwargs...)
@@ -91,5 +124,6 @@ function CellularSheaves.ControlSheaves.Layered.animate_comprehensive_escort(
         frame_step=frame_step, fps=fps, title_prefix=title_prefix
     )
 end
+
 
 end # module CellularSheavesPlots
