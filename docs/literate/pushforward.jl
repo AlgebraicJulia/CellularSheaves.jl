@@ -120,9 +120,11 @@ println("Nullspace dimension of φ_*F: ", size(NS_PfF, 2))
 # explicit linear transfer map ``T : C^0(F) \to C^0(\varphi_* F)`` returned
 # by `pushforward_transfer_map`.
 #
-# ``T`` expresses each fiber cochain in the fiber-basis coordinates via a
-# pseudoinverse; the identity ``d_{\varphi_* F} \circ T \circ s = 0`` holds
-# for every global section ``s`` of `F`.
+# ``T`` expresses each fiber cochain in the fiber-basis coordinates.  The
+# fiber bases are orthonormal, so that projection is ``B^\mathsf{T}`` and ``T``
+# is a partial isometry; the identity ``d_{\varphi_* F} \circ T \circ s = 0``
+# holds for every global section ``s`` of `F`, and ``T`` leaves its norm
+# unchanged.
 
 T = pushforward_transfer_map(hom, F)
 

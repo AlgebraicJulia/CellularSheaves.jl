@@ -42,12 +42,23 @@ using ..GraphHomomorphisms: GraphHomomorphism, fiber_vertices, fiber_edges, cros
 Compute a basis for the space of global sections of the sub-sheaf of `F`
 restricted to the sub-graph induced by `verts` (with `fedges` as edge set).
 
-Returns an `(total_fiber_stalk_dim × k)` matrix whose `k` columns span the
-fiber's global-section space.  The basis is computed via
-[`nullspace_ldlt`](@ref) applied to the fiber coboundary operator.
+Returns an `(total_fiber_stalk_dim × k)` matrix whose `k` columns are an
+*orthonormal* basis of the fiber's global-section space, so `B' * B == I`.
+The span is computed via [`nullspace_ldlt`](@ref) applied to the fiber
+coboundary operator and then orthonormalised by a thin QR.
+
+Orthonormality is what makes the pushforward stalk a subspace of `C^0(F)`
+rather than merely an abstract isomorphic copy: `(\\varphi_* F)(v)` inherits
+the inner product of `C^0(F)`, `B * B'` is the orthogonal projector onto the
+fiber's section space, and the pushforward Laplacian is the compression
+`B' * L_F * B`.  Without it the coarse Laplacian is congruent to, but not
+orthogonally similar to, a compression of `L_F`, and spectral quantities
+(eigenvalues, condition numbers) computed on the pushforward are not
+comparable to those of `F`.
 
 The rows of the returned matrix are ordered to match the concatenation of
 the vertex stalks `F(v)` for `v ∈ verts`, in the order given by `verts`.
+QR does not permute rows, so this ordering is unchanged.
 """
 function fiber_section_basis(F, verts::Vector{Int}, fedges::Vector{Tuple{Int,Int}})
     # Precondition: `verts` must not contain duplicate entries.
@@ -72,7 +83,12 @@ function fiber_section_basis(F, verts::Vector{Int}, fedges::Vector{Tuple{Int,Int
                         get_restriction_map(F, b, a))
     end
     d_fib = coboundary_map(Fib)
-    return nullspace_ldlt(d_fib' * d_fib)
+    # `nullspace_ldlt` reads null directions off an LDLt factorisation, so its
+    # columns span the section space but are not orthonormal.  A thin QR keeps
+    # the span and the row ordering while giving `B' * B == I`.
+    N = nullspace_ldlt(d_fib' * d_fib)
+    size(N, 2) == 0 && return N
+    return Matrix(qr(N).Q)
 end
 
 """
@@ -108,8 +124,9 @@ along the graph homomorphism `hom : G → H`.
 
 **Vertex stalks.** The stalk ``(\\varphi_* F)(v)`` at a target vertex `v` is
 (isomorphic to) the space of global sections of `F` restricted to the fiber
-``\\varphi^{-1}(v)``; a basis for this space is computed via
-[`fiber_section_basis`](@ref) (which calls [`nullspace_ldlt`](@ref)).
+``\\varphi^{-1}(v)``; an orthonormal basis for this space is computed via
+[`fiber_section_basis`](@ref) (which calls [`nullspace_ldlt`](@ref)).  The
+isomorphism is therefore an isometry onto a subspace of ``C^0(F)``.
 
 **Edge stalks and restriction maps.** For each target edge ``(p, q)``, all
 source cross-edges mapping to ``(p, q)`` contribute to a single combined edge
@@ -202,16 +219,21 @@ pushforward sheaf ``\\varphi_* F``.
 
 The map is built fiber-by-fiber: for each target vertex `tv`, `T` restricts a
 0-cochain of `F` to the rows belonging to ``\\varphi^{-1}(\\text{tv})``, then
-expresses those rows in the fiber-basis coordinates via a pseudoinverse.
+expresses those rows in the fiber-basis coordinates.
 
 Concretely, if ``B_{\\text{tv}}`` is the fiber-basis matrix (columns = global
 sections of the restriction of `F` to fiber `tv`), then
 
 ```math
-T[\\text{rows of }tv, \\text{cols of fiber}(tv)] = B_{\\text{tv}}^+
+T[\\text{rows of }tv, \\text{cols of fiber}(tv)] = B_{\\text{tv}}^\\mathsf{T}
 ```
 
-where ``B^+`` denotes the Moore–Penrose pseudoinverse.
+[`fiber_section_basis`](@ref) returns an orthonormal basis, so the transpose is
+the Moore–Penrose pseudoinverse ``B^+`` and no `pinv` is needed.  As a
+consequence `T` is a partial isometry: ``T T^\\mathsf{T} = I`` and
+``T^\\mathsf{T} T`` is the orthogonal projector of ``C^0(F)`` onto the direct sum
+of the fibers' section spaces.  Every global section of `F` lies in that sum, so
+`T` preserves its norm.
 
 The identity ``d_{\\varphi_* F} \\circ T \\circ s = 0`` holds for every global
 section ``s`` of `F` (up to floating-point rounding).
@@ -239,8 +261,9 @@ function pushforward_transfer_map(hom::GraphHomomorphism, F)
         # Gather the column indices of F's 0-cochain that belong to this fiber.
         f_rows = vcat([collect(F_cum[v]+1 : F_cum[v+1]) for v in fverts]...)
         B = fiber_bases[tv]
-        # Project onto the fiber-basis coordinates via the pseudoinverse.
-        P = pinv(B)
+        # Project onto the fiber-basis coordinates.  `B` has orthonormal columns,
+        # so its pseudoinverse is its transpose.
+        P = Matrix(B')
         row_offset = pf_cum[tv]
 
         for local_j in axes(P, 2)
